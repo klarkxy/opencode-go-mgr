@@ -150,6 +150,59 @@ impl Database {
         Ok(())
     }
 
+    /// LWW-aware variant: only overwrite fields when the wire's `updated_at` is
+    /// strictly newer than the local row's. This is the merge used by
+    /// admin::upsert_key and sync::startup_pull — both treat the wire payload
+    /// as a snapshot from a peer machine and refuse to clobber a fresher local
+    /// edit. Pass `wire_updated_at = None` to fall back to the unconditional
+    /// update (legacy callers, e.g. local GUI mutations).
+    pub fn merge_account_from_remote(
+        &self,
+        id: &str,
+        wire: &crate::models::Account,
+        wire_updated_at: chrono::DateTime<Utc>,
+    ) -> Result<bool> {
+        let existing = match self.get_account(id)? {
+            Some(a) => a,
+            None => {
+                self.create_account(wire)?;
+                return Ok(true);
+            }
+        };
+        if existing.updated_at >= wire_updated_at {
+            // ponytail: local is at least as new — preserve it. The wire's
+            // payload is discarded wholesale. LWW-by-timestamp is enforced here
+            // for both the admin and the startup_pull paths.
+            return Ok(false);
+        }
+        // Wire is newer — apply its non-empty fields verbatim, but NEVER
+        // overwrite the local cipher (each machine has its own machine-bound
+        // key). The optional fields use the same Some("")=>None / None=>keep
+        // convention as update_account above.
+        let upd = crate::models::AccountUpdate {
+            name: Some(wire.name.clone()),
+            key: None,
+            enabled: Some(wire.enabled),
+            referral_code: wire.referral_code.clone(),
+            recharge_date: wire.recharge_date.clone(),
+        };
+        // ponytail: optional fields are Option<String> in the DB; unwrap with
+        // a fallback to the local value when the wire didn't send them.
+        self.conn.execute(
+            "UPDATE accounts SET name = ?1, enabled = ?2, referral_code = ?3, recharge_date = ?4, updated_at = ?5
+             WHERE id = ?6",
+            params![
+                upd.name.as_deref().unwrap_or(&existing.name),
+                upd.enabled.unwrap_or(existing.enabled) as i32,
+                upd.referral_code.unwrap_or_else(|| existing.referral_code.clone().unwrap_or_default()),
+                upd.recharge_date.unwrap_or_else(|| existing.recharge_date.clone().unwrap_or_default()),
+                wire_updated_at.to_rfc3339(),
+                id,
+            ],
+        )?;
+        Ok(true)
+    }
+
     pub fn delete_account(&mut self, id: &str) -> Result<()> {
         let tx = self.conn.transaction()?;
         tx.execute("DELETE FROM accounts WHERE id = ?1", [id])?;
@@ -230,7 +283,8 @@ impl Database {
         Ok(())
     }
 
-    pub fn log_forward(&self, log: &ForwardLog) -> Result<()> {
+    /// Insert a forward_logs row. Returns the auto-assigned row id.
+    pub fn log_forward(&self, log: &ForwardLog) -> Result<i64> {
         self.conn.execute(
             "INSERT INTO forward_logs
              (timestamp, model, account_id, account_name, status, http_status, prompt_tokens, completion_tokens, cached_tokens, cost, error_message)
@@ -248,6 +302,35 @@ impl Database {
                 log.cost,
                 log.error_message,
             ],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    /// Finalize a forward_logs row once the upstream response ends. `http_status` and
+    /// `error_message` may be `None` to leave them at their initial value. `id` is the
+    /// primary key returned from the original `log_forward` insert.
+    pub fn update_forward_log(
+        &self,
+        id: i64,
+        status: &str,
+        http_status: Option<i32>,
+        prompt_tokens: i64,
+        completion_tokens: i64,
+        cached_tokens: i64,
+        cost: f64,
+        error_message: Option<&str>,
+    ) -> Result<()> {
+        self.conn.execute(
+            "UPDATE forward_logs
+             SET status = ?2,
+                 http_status = COALESCE(?3, http_status),
+                 prompt_tokens = ?4,
+                 completion_tokens = ?5,
+                 cached_tokens = ?6,
+                 cost = ?7,
+                 error_message = COALESCE(?8, error_message)
+             WHERE id = ?1",
+            params![id, status, http_status, prompt_tokens, completion_tokens, cached_tokens, cost, error_message],
         )?;
         Ok(())
     }

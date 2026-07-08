@@ -51,12 +51,15 @@ import {
 import { tauriApi, AppConfig, SelectionStrategy, GatewayStatus } from "../api/tauri";
 
 const message = useMessage();
+// ponytail: keep in sync with AppConfig::default() in
+// crates/ocg-core/src/models.rs. This is only the pre-load fallback.
 const config = ref<AppConfig>({
   gateway_port: 9042,
   gateway_key: "",
   selection_strategy: "sequential",
-  upstream_base_url: "https://api.opencode.ai",
+  upstream_base_url: "https://opencode.ai/zen/go",
   auto_start: false,
+  remote: { url: "", token: "" },
 });
 const dataDir = ref("%USERPROFILE%\\.ocg-mgr");
 
@@ -75,9 +78,14 @@ async function loadSettings() {
 }
 
 async function saveSettings() {
+  const oldPort = config.value.gateway_port;
   try {
-    await tauriApi.updateSettings(config.value);
-    message.success("设置已保存");
+    const status: GatewayStatus = await tauriApi.updateSettings(config.value);
+    if (status.running && oldPort !== status.port) {
+      message.success(`设置已保存，Gateway 已切换到端口 ${status.port}`);
+    } else {
+      message.success("设置已保存");
+    }
   } catch (e) {
     message.error(`保存失败: ${e}`);
   }

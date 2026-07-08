@@ -1,6 +1,7 @@
 use crate::state::AppState;
 use ocg_core::gateway;
-use ocg_core::models::GatewayStatus;
+use ocg_core::models::{AppConfig, GatewayStatus};
+use ocg_core::state::CoreState;
 use tauri::State;
 
 #[tauri::command]
@@ -15,10 +16,11 @@ pub fn get_gateway_status(state: State<'_, AppState>) -> Result<GatewayStatus, S
     })
 }
 
-#[tauri::command]
-pub fn restart_gateway(state: State<'_, AppState>) -> Result<GatewayStatus, String> {
-    let config = state.core.config();
-    let mut gw_lock = state.core.gateway.lock();
+pub(super) fn restart_inner(
+    core: &CoreState,
+    config: &AppConfig,
+) -> Result<GatewayStatus, String> {
+    let mut gw_lock = core.gateway.lock();
 
     // Stop existing and wait for the old listener to actually release the port.
     if let Some(handle) = gw_lock.take() {
@@ -31,7 +33,7 @@ pub fn restart_gateway(state: State<'_, AppState>) -> Result<GatewayStatus, Stri
     }
 
     // Start new (hold the lock across start to prevent get_gateway_status from seeing None)
-    let new_state = std::sync::Arc::clone(&state.core);
+    let new_state = std::sync::Arc::clone(core);
     let handle = tauri::async_runtime::block_on(gateway::start_gateway(new_state, config.gateway_port))
         .map_err(|e| e.to_string())?;
 
@@ -39,16 +41,21 @@ pub fn restart_gateway(state: State<'_, AppState>) -> Result<GatewayStatus, Stri
     *gw_lock = Some(handle);
     let status = GatewayStatus {
         running: true,
-        port: gw_lock.as_ref().unwrap().port,
+        port: config.gateway_port,
         key: config.gateway_key.clone(),
         upstream_base_url: config.upstream_base_url.clone(),
     };
     drop(gw_lock);
 
-    let _ = state
-        .core
+    let _ = core
         .db
         .lock()
         .log_gateway("info", "gateway", &format!("gateway restarted on port {}", config.gateway_port));
     Ok(status)
+}
+
+#[tauri::command]
+pub fn restart_gateway(state: State<'_, AppState>) -> Result<GatewayStatus, String> {
+    let config = state.core.config();
+    restart_inner(&state.core, &config)
 }

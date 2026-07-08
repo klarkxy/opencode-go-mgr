@@ -150,7 +150,7 @@ OpenCode-Go 额度窗口供参考：**5h = $12**、**每周 = $30**、**每月 =
 
 **某账号卡在冷却里。** 在账号卡片上点 **重置冷却** 即可。冷却不是「本月熔断」这种状态——它就是上游 429 文案直接告诉我们的时长。
 
-**能在局域网或其他机器上用吗？** 出厂不支持——Gateway 绑定 `127.0.0.1`。如有必要可用本地隧道（如 `ngrok`、`cloudflared`），并自行评估安全风险。
+**能在局域网或其他机器上用吗？** 在 headless 机器上跑 `ocg-manager-cli serve --admin-port 9091`，GUI 就会把 key 推送到这个端点。admin API 本身只绑 `127.0.0.1`，HTTPS 与任何客户端鉴权请交给前方的 caddy/traefik 反代。本地 sqlite 永远是权威；远端是被动镜像，不是控制面。
 
 ### 已知限制
 
@@ -300,6 +300,8 @@ ocg-manager（Tauri GUI, Windows）         ocg-manager-cli（Linux/macOS/Win/Do
 | `selection_strategy` | `sequential` | `sequential` / `random` / `round_robin`。 |
 | `upstream_base_url` | `https://opencode.ai/zen/go` | OpenCode-Go API 基址。转发器会拼上 path，**不要**带 `/v1`。 |
 | `auto_start` | `false` | 仅保存——尚未接入 OS 开机自启。 |
+| `remote.url` | ``（空） | 留空=纯本地。设置后，GUI 每次本地改动都会把 key 推送到该远端 admin API。 |
+| `remote.token` | `` | `remote.url` 的 Bearer token。首次启动 `ocg-manager-cli serve --admin-port` 时自动生成。 |
 
 可在应用内（设置）编辑，或直接改 `settings` 表。改端口后需重启 Gateway。`tauri.conf.json` 的 `security.csp` 硬编码了 `connect-src http://localhost:9042`；若 webview 需要连其他端口请同步修改（正常情况下 Gateway 由外部客户端访问，webview 很少直连，故此条多数时候无影响）。
 
@@ -317,7 +319,7 @@ ocg-manager（Tauri GUI, Windows）         ocg-manager-cli（Linux/macOS/Win/Do
 
 ### 无头 CLI（`ocg-manager-cli`）
 
-GUI 用的同一套 Gateway 与账号管理代码也以跨平台 CLI 二进制的形式暴露。无界面、无托盘、无 WebView——只有一份 `data.sqlite` 加一个 Axum 服务，所以可以跑在 Linux、macOS、Windows 和 Docker 里。
+GUI 用的同一套 Gateway 与账号管理代码也以跨平台 CLI 二进制的形式暴露。无界面、无托盘、无 WebView——只有一份 `data.sqlite` 加一个 Axum 服务，所以可以跑在 Linux、macOS、Windows 和 Docker 里。加 `--admin-port <u16>` 会在 `127.0.0.1:<port>` 再暴露一个 Bearer 鉴权的远端同步 admin API；HTTPS 请交给前方的反代，二进制本身不做 TLS 终结。
 
 ```bash
 # 构建

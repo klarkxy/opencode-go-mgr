@@ -36,6 +36,12 @@
       </n-layout-content>
     </n-layout>
   </n-layout>
+  <RemoteWizard
+    v-if="showWizard"
+    :show="showWizard"
+    :config="wizardConfig"
+    @done="showWizard = false"
+  />
 </template>
 
 <script setup lang="ts">
@@ -61,11 +67,24 @@ import Dashboard from "./views/Dashboard.vue";
 import Accounts from "./views/Accounts.vue";
 import Logs from "./views/Logs.vue";
 import Settings from "./views/Settings.vue";
-import { tauriApi, GatewayStatus } from "./api/tauri";
+import RemoteWizard from "./components/RemoteWizard.vue";
+import { tauriApi, AppConfig, GatewayStatus } from "./api/tauri";
 
 const collapsed = ref(false);
 const activeKey = ref("dashboard");
 const gatewayRunning = ref(false);
+const showWizard = ref(false);
+// ponytail: wizardConfig is only the FALLBACK for when getSettings()
+// fails on boot. Keep it in sync with AppConfig::default() in
+// crates/ocg-core/src/models.rs. The Rust Default is the source of truth.
+const wizardConfig = ref<AppConfig>({
+  gateway_port: 9042,
+  gateway_key: "",
+  selection_strategy: "sequential",
+  upstream_base_url: "https://opencode.ai/zen/go",
+  auto_start: false,
+  remote: { url: "", token: "" },
+});
 
 function renderIcon(icon: Component) {
   return () => h(icon);
@@ -100,6 +119,22 @@ onMounted(async () => {
     gatewayRunning.value = status.running;
   } catch (e) {
     console.error("failed to get gateway status", e);
+  }
+  try {
+    const cfg = await tauriApi.getSettings();
+    wizardConfig.value = cfg;
+    const rs = await tauriApi.getRemoteStatus();
+    // ponytail: only show wizard when the user has never completed the
+    // bootstrap path. They can still clear remote.url in Settings later
+    // and re-run it; clearing the bootstrapped flag is a separate, future
+    // maintenance task.
+    // ponytail: show wizard whenever the remote URL is empty, regardless
+    // of the bootstrapped flag. The flag is a one-way switch from the old
+    // design; if the user clears the URL in Settings they should be able
+    // to re-run the wizard. The wizard itself is harmless on a no-op save.
+    showWizard.value = rs.url === "";
+  } catch (e) {
+    console.error("failed to load remote status", e);
   }
 });
 </script>

@@ -63,7 +63,10 @@ const pagination = { pageSize: 20 };
 
 const statusOptions = [
   { label: "成功", value: "success" },
-  { label: "失败", value: "error" },
+  { label: "成功(无用量)", value: "success_no_usage" },
+  { label: "进行中", value: "streaming" },
+  { label: "客户端错误", value: "client_error" },
+  { label: "错误", value: "error" },
 ];
 
 const accountOptions = computed(() =>

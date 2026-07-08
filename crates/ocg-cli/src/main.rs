@@ -33,6 +33,14 @@ enum Commands {
         /// Gateway port (overrides config)
         #[arg(short, long)]
         port: Option<u16>,
+        /// Bind the remote-sync admin API on this port (127.0.0.1 only).
+        /// Omit to disable. GUI clients use this to push account keys.
+        #[arg(long)]
+        admin_port: Option<u16>,
+        /// Bearer token for the admin API. If omitted with --admin-port,
+        /// a 32-byte token is generated and written to <data-dir>/admin_token (chmod 0600).
+        #[arg(long)]
+        admin_token: Option<String>,
     },
     /// Manage API keys
     Key {
@@ -92,7 +100,11 @@ async fn main() -> Result<()> {
     let cipher = resolve_cipher(&data_dir, cli.encryption_key)?;
 
     match cli.command {
-        Commands::Serve { port } => serve(data_dir, cipher, port).await,
+        Commands::Serve {
+            port,
+            admin_port,
+            admin_token,
+        } => serve(data_dir, cipher, port, admin_port, admin_token).await,
         Commands::Key { action } => key_command(data_dir, cipher, action).await,
         Commands::Status => status_command(data_dir, cipher).await,
     }
@@ -149,8 +161,10 @@ async fn serve(
     data_dir: PathBuf,
     cipher: Arc<dyn KeyCipher + Send + Sync>,
     port: Option<u16>,
+    admin_port: Option<u16>,
+    admin_token_flag: Option<String>,
 ) -> Result<()> {
-    let state = build_state(data_dir, cipher)?;
+    let state = build_state(data_dir.clone(), cipher)?;
 
     let mut config = state.config();
     if let Some(port) = port {
@@ -165,6 +179,21 @@ async fn serve(
     );
     println!("gateway key: {}", config.gateway_key);
     println!("upstream: {}", config.upstream_base_url);
+
+    // ponytail: admin port/token are independent from AppConfig — the gateway
+    // config and the admin token are different secrets with different lifecycles.
+    let admin_handle = match admin_port {
+        Some(p) => {
+            let token = resolve_admin_token(&data_dir, admin_token_flag)?;
+            let h = ocg_core::admin::start_admin(state.clone(), p, token.clone()).await?;
+            println!(
+                "admin api started on http://127.0.0.1:{} (bearer token: {})",
+                h.port, token
+            );
+            Some(h)
+        }
+        None => None,
+    };
     println!("press Ctrl+C to stop");
 
     // Hold the gateway handle so it stays alive
@@ -183,8 +212,40 @@ async fn serve(
     if let Some(handle) = state.gateway.lock().take() {
         gateway::stop_gateway(handle);
     }
+    if let Some(h) = admin_handle {
+        ocg_core::admin::stop_admin(h);
+    }
     let _ = state.db.lock().log_gateway("info", "gateway", "cli gateway stopped");
     Ok(())
+}
+
+/// Resolve the admin bearer token: explicit flag > persisted file > generate new.
+fn resolve_admin_token(data_dir: &PathBuf, flag: Option<String>) -> Result<String> {
+    if let Some(t) = flag {
+        return Ok(t);
+    }
+    let path = data_dir.join("admin_token");
+    if path.exists() {
+        return std::fs::read_to_string(&path)
+            .with_context(|| format!("failed to read admin token from {:?}", path))
+            .map(|s| s.trim().to_string());
+    }
+    std::fs::create_dir_all(data_dir)?;
+    let token = ocg_core::admin::generate_admin_token();
+    std::fs::write(&path, &token)
+        .with_context(|| format!("failed to write admin token to {:?}", path))?;
+    // ponytail: 0600 on unix; on Windows std::fs::set_permissions is a no-op for
+    // this bit but the file lives in the user's own data dir so ACL handles it.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+    }
+    eprintln!(
+        "info: generated admin token at {:?}. Pass it to the GUI's remote-sync settings.",
+        path
+    );
+    Ok(token)
 }
 
 async fn key_command(

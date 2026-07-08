@@ -66,6 +66,7 @@ function loadState(): MockState {
       selection_strategy: "round_robin",
       upstream_base_url: "https://opencode.ai/zen/go/v1",
       auto_start: false,
+      remote: { url: "", token: "" },
     },
     gatewayStatus: {
       running: true,
@@ -212,7 +213,7 @@ const handlers: Record<string, (args: Record<string, unknown>, state: MockState)
     state.gatewayStatus.key = config.gateway_key;
     state.gatewayStatus.upstream_base_url = config.upstream_base_url;
     saveState(state);
-    return state.config;
+    return state.gatewayStatus;
   },
 
   regenerate_gateway_key: (_args, state) => {

@@ -27,6 +27,8 @@ pub fn create_account(state: State<'_, AppState>, input: AccountInput) -> Result
     let db = state.core.db.lock();
     db.create_account(&account).map_err(|e| e.to_string())?;
     let _ = db.log_gateway("info", "account", &format!("created account {}", account.name));
+    drop(db);
+    crate::commands::sync::push_one(state.inner().clone(), Some(account.clone()), crate::commands::sync::PushOp::Create);
     Ok(account)
 }
 
@@ -54,15 +56,21 @@ pub fn update_account(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "account not found".to_string())?;
     let _ = db.log_gateway("info", "account", &format!("updated account {}", account.name));
+    drop(db);
+    crate::commands::sync::push_one(state.inner().clone(), Some(account.clone()), crate::commands::sync::PushOp::Update);
     Ok(account)
 }
 
 #[tauri::command]
 pub fn delete_account(state: State<'_, AppState>, id: String) -> Result<(), String> {
-    let mut db = state.core.db.lock();
-    if let Some(account) = db.get_account(&id).map_err(|e| e.to_string())? {
-        db.delete_account(&id).map_err(|e| e.to_string())?;
-        let _ = db.log_gateway("info", "account", &format!("deleted account {}", account.name));
+    {
+        let mut db = state.core.db.lock();
+        if let Some(account) = db.get_account(&id).map_err(|e| e.to_string())? {
+            db.delete_account(&id).map_err(|e| e.to_string())?;
+            let _ = db.log_gateway("info", "account", &format!("deleted account {}", account.name));
+            drop(db);
+            crate::commands::sync::push_one(state.inner().clone(), Some(account), crate::commands::sync::PushOp::Delete);
+        }
     }
     Ok(())
 }
@@ -91,6 +99,8 @@ pub fn toggle_account(state: State<'_, AppState>, id: String) -> Result<Account,
     let account = db.get_account(&id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "account not found after toggle".to_string())?;
+    drop(db);
+    crate::commands::sync::push_one(state.inner().clone(), Some(account.clone()), crate::commands::sync::PushOp::Update);
     Ok(account)
 }
 
@@ -130,5 +140,7 @@ pub fn reset_account_cooldown(state: State<'_, AppState>, id: String) -> Result<
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "account not found".to_string())?;
     let _ = db.log_gateway("info", "account", &format!("reset cooldown for {}", account.name));
+    drop(db);
+    crate::commands::sync::push_one(state.inner().clone(), Some(account.clone()), crate::commands::sync::PushOp::Update);
     Ok(account)
 }

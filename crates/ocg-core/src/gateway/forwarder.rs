@@ -1,5 +1,5 @@
 use crate::db::Database;
-use crate::gateway::cost::estimate_cost;
+use crate::gateway::cost::{cost_from_counts, estimate_cost};
 use crate::gateway::limit::parse_reset;
 use crate::gateway::selector::AccountSelector;
 use crate::models::{Account, ForwardLog};
@@ -8,10 +8,13 @@ use anyhow::Result;
 use axum::body::Body;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
+use bytes::BytesMut;
 use chrono::{Duration, Utc};
 use futures_util::StreamExt;
+use parking_lot::Mutex;
 use reqwest::Client;
 use serde_json::Value;
+use std::sync::Arc;
 use std::time::Duration as StdDuration;
 
 const UPSTREAM_TIMEOUT: StdDuration = StdDuration::from_secs(120);
@@ -186,66 +189,134 @@ async fn forward_request_impl(
             .header("cache-control", "no-cache")
             .header("connection", "keep-alive");
 
+        // Insert the "streaming" row up front so a process crash mid-stream still
+        // leaves a record. The finalizer updates it once the stream ends. The error
+        // path also updates this row (instead of inserting a duplicate) so every
+        // request maps to exactly one row in forward_logs.
+        let initial_id: i64 = {
+            let db = state.db.lock();
+            log_forward(
+                &*db,
+                account,
+                &model,
+                "streaming",
+                Some(status.as_u16() as i32),
+                0,
+                0,
+                0,
+                0.0,
+                None,
+            )?
+        };
+
         let stream = upstream_resp.bytes_stream();
-        let state_clone = state.clone();
-        let account_clone = account.clone();
-        let model_clone = model.clone();
+        let state_h = state.clone();
+        let st = Arc::new(Mutex::new(StreamState::default()));
+
+        let st_map = st.clone();
 
         let mapped = stream.map(move |result| {
             match result {
-                Ok(chunk) => Ok(chunk),
+                Ok(chunk) => {
+                    process_chunk_for_usage(&mut st_map.lock(), &chunk);
+                    Ok(chunk)
+                }
                 Err(e) => {
-                    let _ = {
-                        let db = state_clone.db.lock();
-                        log_forward(
-                            &*db,
-                            &account_clone,
-                            &model_clone,
-                            "error",
-                            None,
-                            0,
-                            0,
-                            0,
-                            0.0,
-                            Some(&format!("stream error: {}", e)),
-                        )
-                    };
-                    Err(std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        format!("stream error: {}", e),
-                    ))
+                    // Update the streaming row to "error" rather than inserting a new
+                    // row. Keeps the forward_logs invariant: one row per request.
+                    let msg = format!("stream error: {}", e);
+                    {
+                        let mut g = st_map.lock();
+                        g.error = true;
+                    }
+                    let db = state_h.db.lock();
+                    let _ = db.update_forward_log(
+                        initial_id,
+                        "error",
+                        None,
+                        0,
+                        0,
+                        0,
+                        0.0,
+                        Some(&msg),
+                    );
+                    Err(std::io::Error::new(std::io::ErrorKind::Other, msg))
                 }
             }
         });
 
-        {
-            let db = state.db.lock();
-            log_forward(&*db, account, &model, "streaming", Some(status.as_u16() as i32), 0, 0, 0, 0.0, None)?;
-        }
+        // Finalizer runs once, after the real stream is fully drained. It updates
+        // the streaming row with final token counts and cost (or marks
+        // success_no_usage if the upstream never sent a usage chunk).
+        let finalizer = {
+            let db_h = state.clone();
+            let st_f = st.clone();
+            let mdl = model.clone();
+            // `unfold` is a clean "run once, then end" stream. The DB write is the
+            // unfold's state transition, the body emits a single empty chunk, and
+            // the stream then terminates — no need for once() + flatten gymnastics.
+            futures_util::stream::unfold(
+                FinalizerState::Init { db_h, st_f, mdl, initial_id },
+                |state| async move {
+                    let (db_h, st_f, mdl, initial_id) = match state {
+                        FinalizerState::Init { db_h, st_f, mdl, initial_id } => (db_h, st_f, mdl, initial_id),
+                        FinalizerState::Done => return None,
+                    };
+                    let (status_str, prompt, completion, cached, cost) = {
+                        let g = st_f.lock();
+                        if g.error {
+                            // ponytail: the mapped Err arm already wrote the
+                            // 'error' row. Don't overwrite it back to success.
+                            ("error".to_string(), 0, 0, 0, 0.0)
+                        } else if let Some(u) = g.usage.as_ref() {
+                            let (p, c, cached) = extract_token_counts(u);
+                            ("success".to_string(), p, c, cached, cost_from_counts(&mdl, p, c, cached))
+                        } else {
+                            ("success_no_usage".to_string(), 0, 0, 0, 0.0)
+                        }
+                    };
+                    let db = db_h.db.lock();
+                    if let Err(e) = db.update_forward_log(
+                        initial_id,
+                        &status_str,
+                        None,
+                        prompt,
+                        completion,
+                        cached,
+                        cost,
+                        None,
+                    ) {
+                        let _ = db.log_gateway(
+                            "warn",
+                            "forwarder",
+                            &format!("failed to finalize streaming row {}: {}", initial_id, e),
+                        );
+                    }
+                    Some((
+                        Ok::<bytes::Bytes, std::io::Error>(bytes::Bytes::new()),
+                        FinalizerState::Done,
+                    ))
+                },
+            )
+        };
+
         Ok(ForwardResult {
-            response: response_builder.body(Body::from_stream(mapped))?,
+            response: response_builder.body(Body::from_stream(mapped.chain(finalizer)))?,
             account: account.clone(),
             success: true,
             error_message: None,
         })
     } else {
         let text = upstream_resp.text().await.unwrap_or_default();
-        let parsed: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
-        let usage = parsed.get("usage").cloned().unwrap_or(Value::Null);
+        // Distinguish "valid JSON with no usage" from "garbage body misclassified as
+        // 0-token success". An unparseable body is logged as client_error so the
+        // operator can see upstream misbehavior instead of free successful calls.
+        let (status_str, error_msg, usage) = match serde_json::from_str::<Value>(&text) {
+            Ok(v) => ("success", None, v.get("usage").cloned().unwrap_or(Value::Null)),
+            Err(_) => ("client_error", Some(text.clone()), Value::Null),
+        };
+        let (prompt_tokens, completion_tokens, cached_tokens) = extract_token_counts(&usage);
         let cost = estimate_cost(&model, &usage);
-        let prompt_tokens = usage
-            .get("prompt_tokens")
-            .and_then(Value::as_i64)
-            .unwrap_or(0);
-        let completion_tokens = usage
-            .get("completion_tokens")
-            .and_then(Value::as_i64)
-            .unwrap_or(0);
-        let cached_tokens = usage
-            .get("prompt_tokens_details")
-            .and_then(|d| d.get("cached_tokens"))
-            .and_then(Value::as_i64)
-            .unwrap_or(0);
 
         {
             let db = state.db.lock();
@@ -253,13 +324,13 @@ async fn forward_request_impl(
                 &*db,
                 account,
                 &model,
-                "success",
+                status_str,
                 Some(status.as_u16() as i32),
                 prompt_tokens,
                 completion_tokens,
                 cached_tokens,
                 cost,
-                None,
+                error_msg.as_deref(),
             )?;
         }
 
@@ -272,6 +343,19 @@ async fn forward_request_impl(
             error_message: None,
         })
     }
+}
+
+// ponytail: `unfold` with an Init/Done state is the simplest "run once, then
+// end" stream. The DB write is the unfold's transition; one empty chunk is
+// yielded so the chain's last poll has something to send; Done terminates.
+enum FinalizerState {
+    Init {
+        db_h: CoreState,
+        st_f: Arc<Mutex<StreamState>>,
+        mdl: String,
+        initial_id: i64,
+    },
+    Done,
 }
 
 /// Simple GET forward for endpoints like /v1/models — uses configured selection strategy.
@@ -350,7 +434,7 @@ fn log_forward(
     cached_tokens: i64,
     cost: f64,
     error_message: Option<&str>,
-) -> Result<()> {
+) -> Result<i64> {
     db.log_forward(&ForwardLog {
         id: 0,
         timestamp: Utc::now(),
@@ -365,4 +449,185 @@ fn log_forward(
         cost,
         error_message: error_message.map(|s| s.to_string()),
     })
+}
+
+// ----- SSE usage accumulation -----
+
+// ponytail: single Mutex<StreamState> instead of 3 separate Arc<Mutex<>>/
+// AtomicBool. Lock is held for a single chunk's processing (microseconds);
+// upgrade to per-chunk allocator if cross-stream contention ever shows up.
+#[derive(Default)]
+struct StreamState {
+    buf: BytesMut,
+    usage: Option<Value>,
+    /// Set by the mapped Err arm so the finalizer can skip its status overwrite.
+    error: bool,
+}
+
+const MAX_SSE_BUF: usize = 64 * 1024;
+
+// ponytail: SSE spec allows \n\n OR \r\n\r\n as event boundaries. Match both
+// so Windows-origin / proxy-CRLF upstreams don't accumulate buffer forever.
+fn find_event_boundary(buf: &[u8]) -> Option<usize> {
+    // \n\n
+    for i in 0..buf.len().saturating_sub(1) {
+        if buf[i] == b'\n' && buf[i + 1] == b'\n' {
+            return Some(i);
+        }
+    }
+    // \r\n\r\n
+    for i in 0..buf.len().saturating_sub(3) {
+        if &buf[i..i + 4] == b"\r\n\r\n" {
+            return Some(i);
+        }
+    }
+    None
+}
+
+fn event_boundary_len(buf: &[u8], start: usize) -> usize {
+    if start + 3 < buf.len() && &buf[start..start + 4] == b"\r\n\r\n" {
+        4
+    } else {
+        2
+    }
+}
+
+fn extract_data_payload(event: &[u8]) -> Option<String> {
+    let text = std::str::from_utf8(event).ok()?;
+    let mut parts: Vec<&str> = Vec::new();
+    for line in text.split('\n') {
+        let line = line.strip_suffix('\r').unwrap_or(line);
+        if let Some(rest) = line.strip_prefix("data:") {
+            parts.push(rest.strip_prefix(' ').unwrap_or(rest));
+        }
+    }
+    if parts.is_empty() { None } else { Some(parts.join("\n")) }
+}
+
+// ponytail: ignore_err on JSON parse — SSE frames may be comments or keep-alive
+// heartbeats. Silent skip; the last non-null usage frame still wins.
+// ponytail: bounded buffer — if the upstream never sends a complete event
+// (malformed stream, CRLF-only chunks, dropped keep-alive framing), drop the
+// garbage so memory can't grow unbounded.
+fn process_chunk_for_usage(st: &mut StreamState, chunk: &bytes::Bytes) {
+    if st.buf.len() + chunk.len() > MAX_SSE_BUF {
+        st.buf.clear();
+        return;
+    }
+    st.buf.extend_from_slice(chunk);
+    loop {
+        let bytes = st.buf.as_ref();
+        let Some(idx) = find_event_boundary(bytes) else { break };
+        let take = event_boundary_len(bytes, idx);
+        let event = st.buf.split_to(idx + take);
+        if let Some(payload) = extract_data_payload(&event) {
+            let payload = payload.trim();
+            if payload == "[DONE]" || payload.is_empty() {
+                continue;
+            }
+            if let Ok(v) = serde_json::from_str::<Value>(payload) {
+                if let Some(u) = v.get("usage") {
+                    if !u.is_null() && u.is_object() {
+                        st.usage = Some(u.clone());
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn extract_token_counts(usage: &Value) -> (i64, i64, i64) {
+    let prompt = usage.get("prompt_tokens").and_then(Value::as_i64).unwrap_or(0);
+    let completion = usage.get("completion_tokens").and_then(Value::as_i64).unwrap_or(0);
+    let cached = usage
+        .get("prompt_tokens_details")
+        .and_then(|d| d.get("cached_tokens"))
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
+    (prompt, completion, cached)
+}
+
+#[cfg(test)]
+mod stream_usage_tests {
+    use super::*;
+    use bytes::Bytes;
+
+    fn usage_event() -> Vec<u8> {
+        b"data: {\"id\":\"x\",\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":20,\"total_tokens\":30,\"prompt_tokens_details\":{\"cached_tokens\":5}}}\n\ndata: [DONE]\n\n".to_vec()
+    }
+
+    #[test]
+    fn single_chunk_extracts_usage() {
+        let mut st = StreamState::default();
+        let chunk = Bytes::from(usage_event());
+        process_chunk_for_usage(&mut st, &chunk);
+        let u = st.usage.clone().expect("usage should be set");
+        let (p, c, cached) = extract_token_counts(&u);
+        assert_eq!(p, 10);
+        assert_eq!(c, 20);
+        assert_eq!(cached, 5);
+        assert!(st.buf.is_empty(), "buffer should drain on full events");
+    }
+
+    #[test]
+    fn chunk_boundary_handling() {
+        let full = usage_event();
+        let a = &full[..20];
+        let b = &full[20..full.len() - 5];
+        let c = &full[full.len() - 5..];
+
+        let mut st = StreamState::default();
+        process_chunk_for_usage(&mut st, &Bytes::copy_from_slice(a));
+        process_chunk_for_usage(&mut st, &Bytes::copy_from_slice(b));
+        process_chunk_for_usage(&mut st, &Bytes::copy_from_slice(c));
+
+        let u = st.usage.clone().expect("usage should be set after boundary");
+        let (p, c, cached) = extract_token_counts(&u);
+        assert_eq!((p, c, cached), (10, 20, 5));
+        assert!(st.buf.is_empty(), "buffer should be empty after all chunks");
+    }
+
+    #[test]
+    fn no_usage_event_yields_none() {
+        let mut st = StreamState::default();
+        let payload = b"data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\ndata: [DONE]\n\n".to_vec();
+        process_chunk_for_usage(&mut st, &Bytes::from(payload));
+        assert!(st.usage.is_none(), "no usage field means None");
+        assert!(st.buf.is_empty());
+    }
+
+    #[test]
+    fn last_non_null_usage_wins() {
+        let mut st = StreamState::default();
+        let first = b"data: {\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":2}}\n\n".to_vec();
+        let second = b"data: {\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":200,\"prompt_tokens_details\":{\"cached_tokens\":50}}}\n\n".to_vec();
+        process_chunk_for_usage(&mut st, &Bytes::from(first));
+        process_chunk_for_usage(&mut st, &Bytes::from(second));
+        let u = st.usage.clone().expect("usage set");
+        let (p, c, cached) = extract_token_counts(&u);
+        assert_eq!((p, c, cached), (100, 200, 50));
+    }
+
+    #[test]
+    fn crlf_event_boundary_is_detected() {
+        // \r\n\r\n-terminated event must be split out, not accumulated.
+        let mut st = StreamState::default();
+        let payload =
+            b"data: {\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":11}}\r\n\r\n".to_vec();
+        process_chunk_for_usage(&mut st, &Bytes::from(payload));
+        let u = st.usage.clone().expect("CRLF usage should be parsed");
+        let (p, c, _) = extract_token_counts(&u);
+        assert_eq!((p, c), (7, 11));
+        assert!(st.buf.is_empty());
+    }
+
+    #[test]
+    fn buffer_bound_clears_on_oversize() {
+        let mut st = StreamState::default();
+        // Single chunk larger than MAX_SSE_BUF — must be dropped, not allocated.
+        let big = vec![b'x'; MAX_SSE_BUF + 1];
+        process_chunk_for_usage(&mut st, &Bytes::from(big));
+        assert!(st.buf.is_empty(), "oversize chunks are dropped");
+        assert!(st.usage.is_none());
+    }
 }

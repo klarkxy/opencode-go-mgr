@@ -36,6 +36,22 @@ export interface AppConfig {
   selection_strategy: SelectionStrategy;
   upstream_base_url: string;
   auto_start: boolean;
+  remote: RemoteSync;
+}
+
+export interface RemoteSync {
+  url: string;
+  token: string;
+}
+
+export interface RemoteStatus {
+  url: string;
+  bootstrapped: boolean;
+}
+
+export interface RemoteTestResult {
+  ok: boolean;
+  message: string;
 }
 
 export interface GatewayStatus {
@@ -98,8 +114,11 @@ export const tauriApi = {
 
   // Settings
   getSettings: () => invoke<AppConfig>("get_settings"),
-  updateSettings: (config: AppConfig) => invoke<AppConfig>("update_settings", { config }),
+  updateSettings: (config: AppConfig) => invoke<GatewayStatus>("update_settings", { config }),
   regenerateGatewayKey: () => invoke<string>("regenerate_gateway_key"),
+  getRemoteStatus: () => invoke<RemoteStatus>("get_remote_status"),
+  testRemote: (url: string, token: string) =>
+    invoke<RemoteTestResult>("test_remote", { url, token }),
 
   // Gateway
   getGatewayStatus: () => invoke<GatewayStatus>("get_gateway_status"),

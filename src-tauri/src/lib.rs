@@ -59,6 +59,13 @@ pub fn run() {
 
     let app_state = gui_state.clone();
 
+    // ponytail: fire-and-forget startup pull. Failures are warn-logged inside
+    // the function; we never block GUI startup on remote reachability.
+    let pull_state = gui_state.clone();
+    tauri::async_runtime::spawn(async move {
+        commands::sync::startup_pull(pull_state).await;
+    });
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
@@ -88,6 +95,8 @@ pub fn run() {
             commands::setting::get_settings,
             commands::setting::update_settings,
             commands::setting::regenerate_gateway_key,
+            commands::setting::get_remote_status,
+            commands::setting::test_remote,
             commands::gateway::get_gateway_status,
             commands::gateway::restart_gateway,
             commands::log::get_gateway_logs,

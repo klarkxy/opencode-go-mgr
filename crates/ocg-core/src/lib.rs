@@ -1,3 +1,4 @@
+pub mod admin;
 pub mod crypto;
 pub mod db;
 pub mod gateway;
