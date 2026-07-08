@@ -1,0 +1,51 @@
+{
+  "build": {
+    "beforeBuildCommand": "npm run build",
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:30001",
+    "frontendDist": "../dist"
+  },
+  "bundle": {
+    "active": true,
+    "category": "DeveloperTool",
+    "copyright": "",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/256x256.png",
+      "icons/512x512.png",
+      "icons/icon.ico"
+    ],
+    "targets": "nsis",
+    "windows": {
+      "nsis": {
+        "installMode": "perMachine",
+        "installerHooks": "installer.nsh"
+      }
+    }
+  },
+  "identifier": "com.ocg-manager.app",
+  "productName": "OCG Manager",
+  "version": "0.1.0",
+  "app": {
+    "security": {
+      "csp": "default-src 'self'; connect-src 'self' http://localhost:9042; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'",
+      "capabilities": ["default"]
+    },
+    "trayIcon": {
+      "iconPath": "icons/32x32.png",
+      "iconAsTemplate": false
+    },
+    "windows": [
+      {
+        "fullscreen": false,
+        "height": 800,
+        "resizable": true,
+        "title": "OCG Manager",
+        "width": 1200,
+        "visible": false
+      }
+    ]
+  },
+  "plugins": {}
+}

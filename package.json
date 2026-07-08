@@ -1,0 +1,31 @@
+{
+  "name": "ocg-manager-ui",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/cli": "^2.11.4",
+    "@tauri-apps/plugin-http": "^2",
+    "@tauri-apps/plugin-notification": "^2",
+    "@tauri-apps/plugin-shell": "^2",
+    "@tauri-apps/plugin-store": "^2",
+    "@vicons/antd": "^0.13.0",
+    "naive-ui": "^2.44.1",
+    "vfonts": "^0.0.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.1",
+    "@types/node": "^20",
+    "@vitejs/plugin-vue": "^5",
+    "typescript": "^5",
+    "vite": "^5",
+    "vue": "^3",
+    "vue-tsc": "^2"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "identifier": "default",
+  "description": "Default capabilities for OCG Manager main window",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:window:default",
+    "core:window:allow-hide",
+    "core:window:allow-show",
+    "core:window:allow-close",
+    "core:window:allow-minimize",
+    "core:window:allow-create",
+    "shell:allow-open"
+  ]
+}
