@@ -1,5 +1,9 @@
 [workspace]
-members = ["src-tauri"]
+members = [
+    "crates/ocg-core",
+    "crates/ocg-cli",
+    "src-tauri",
+]
 resolver = "2"
 
 [workspace.package]
@@ -8,6 +12,7 @@ edition = "2024"
 authors = ["ocg-manager"]
 license = "MIT"
 repository = ""
+rust-version = "1.85.0"
 
 [profile.release]
 opt-level = 3

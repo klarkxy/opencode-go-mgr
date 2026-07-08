@@ -64,14 +64,14 @@ function loadState(): MockState {
       gateway_port: 9042,
       gateway_key: generateKey(),
       selection_strategy: "round_robin",
-      upstream_base_url: "https://api.opencode.ai",
+      upstream_base_url: "https://opencode.ai/zen/go/v1",
       auto_start: false,
     },
     gatewayStatus: {
       running: true,
       port: 9042,
       key: generateKey(),
-      upstream_base_url: "https://api.opencode.ai",
+      upstream_base_url: "https://opencode.ai/zen/go/v1",
     },
     forwardLogs: [],
     gatewayLogs: [
@@ -131,6 +131,8 @@ const handlers: Record<string, (args: Record<string, unknown>, state: MockState)
       enabled: true,
       referral_code: input.referral_code || null,
       recharge_date: input.recharge_date || null,
+      cooldown_until: null,
+      last_error: null,
       created_at: now(),
       updated_at: now(),
     };
@@ -178,26 +180,22 @@ const handlers: Record<string, (args: Record<string, unknown>, state: MockState)
     return account;
   },
 
-  reset_circuit: (args, state) => {
-    const id = args.id as string;
-    const account = state.accounts.find((a) => a.id === id);
-    if (!account) throw new Error(`Account not found: ${id}`);
-    state.gatewayLogs.unshift({
-      id: state.gatewayLogs.length + 1,
-      level: "INFO",
-      category: "circuit",
-      message: `Circuit reset for ${account.name}`,
-      created_at: now(),
-    });
-    saveState(state);
-    return null;
-  },
-
   test_account: (args, state) => {
     const id = args.id as string;
     const account = state.accounts.find((a) => a.id === id);
     if (!account) throw new Error(`Account not found: ${id}`);
     return `Dev mock test passed for ${account.name}: ${maskKey(account.key_cipher.replace("cipher:", ""))}`;
+  },
+
+  reset_account_cooldown: (args, state) => {
+    const id = args.id as string;
+    const account = state.accounts.find((a) => a.id === id);
+    if (!account) throw new Error(`Account not found: ${id}`);
+    account.cooldown_until = null;
+    account.last_error = null;
+    account.updated_at = now();
+    saveState(state);
+    return account;
   },
 
   get_account_usage: (args, _state) => {

@@ -1,7 +1,7 @@
 use crate::db::Database;
-use crate::gateway::circuit_breaker::CircuitBreaker;
-use crate::models::{Account, CircuitState, SelectionStrategy};
+use crate::models::{Account, SelectionStrategy};
 use anyhow::Result;
+use chrono::Utc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -27,7 +27,8 @@ impl AccountSelector {
 
     pub fn select(&self, db: &Database, exclude_id: Option<&str>) -> Result<Option<Account>> {
         let accounts = db.list_accounts()?;
-        let mut available: Vec<(Account, CircuitState)> = Vec::new();
+        let now = Utc::now();
+        let mut available: Vec<Account> = Vec::new();
         for account in accounts {
             if !account.enabled {
                 continue;
@@ -37,10 +38,14 @@ impl AccountSelector {
                     continue;
                 }
             }
-            let state = db.get_circuit_state(&account.id)?;
-            if CircuitBreaker::is_available(&state) {
-                available.push((account, state));
+            // ponytail: cooldown check piggybacks on list_accounts (no extra query).
+            // Add a per-row cache or index when account count exceeds ~100.
+            if let Some(until) = account.cooldown_until {
+                if until > now {
+                    continue;
+                }
             }
+            available.push(account);
         }
 
         if available.is_empty() {
@@ -48,7 +53,7 @@ impl AccountSelector {
         }
 
         let selected = match self.strategy {
-            SelectionStrategy::Sequential => available.into_iter().next().map(|(a, _)| a),
+            SelectionStrategy::Sequential => available.into_iter().next(),
             SelectionStrategy::Random => {
                 use std::time::{SystemTime, UNIX_EPOCH};
                 let seed = SystemTime::now()
@@ -56,11 +61,11 @@ impl AccountSelector {
                     .unwrap_or_default()
                     .as_nanos();
                 let idx = (seed % available.len() as u128) as usize;
-                available.into_iter().nth(idx).map(|(a, _)| a)
+                available.into_iter().nth(idx)
             }
             SelectionStrategy::RoundRobin => {
                 let idx = self.round_robin_index.fetch_add(1, Ordering::SeqCst) % available.len();
-                available.into_iter().nth(idx).map(|(a, _)| a)
+                available.into_iter().nth(idx)
             }
         };
 

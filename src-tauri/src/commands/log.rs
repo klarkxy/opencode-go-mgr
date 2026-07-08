@@ -1,5 +1,5 @@
-use crate::models::{ForwardLog, GatewayLog};
 use crate::state::AppState;
+use ocg_core::models::{ForwardLog, GatewayLog};
 use tauri::State;
 
 #[tauri::command]
@@ -8,6 +8,7 @@ pub fn get_gateway_logs(
     limit: Option<i64>,
 ) -> Result<Vec<GatewayLog>, String> {
     state
+        .core
         .db
         .lock()
         .list_gateway_logs(limit.unwrap_or(200))
@@ -20,6 +21,7 @@ pub fn get_forward_logs(
     limit: Option<i64>,
 ) -> Result<Vec<ForwardLog>, String> {
     state
+        .core
         .db
         .lock()
         .list_forward_logs(limit.unwrap_or(200))

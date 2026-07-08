@@ -77,18 +77,20 @@ impl Database {
                     cost REAL NOT NULL DEFAULT 0,
                     error_message TEXT
                 );
-                CREATE TABLE IF NOT EXISTS circuit_states (
-                    account_id TEXT PRIMARY KEY,
-                    consecutive_errors INTEGER NOT NULL DEFAULT 0,
-                    first_error_at TEXT,
-                    last_error_at TEXT,
-                    cooldown_until TEXT,
-                    level TEXT NOT NULL DEFAULT 'normal'
-                );
                 CREATE INDEX IF NOT EXISTS idx_forward_logs_time ON forward_logs(timestamp);
                 CREATE INDEX IF NOT EXISTS idx_forward_logs_account ON forward_logs(account_id);
                 INSERT OR REPLACE INTO schema_version (version) VALUES (1);
             ",
+            )?;
+        }
+
+        if version < 2 {
+            // v2: per-account rate-limit cooldown (parsed from upstream 429 body).
+            // Two nullable columns; no new table — account count is tiny, avoids a JOIN.
+            self.conn.execute_batch(
+                "ALTER TABLE accounts ADD COLUMN cooldown_until TEXT;
+                ALTER TABLE accounts ADD COLUMN last_error TEXT;
+                INSERT OR REPLACE INTO schema_version (version) VALUES (2);",
             )?;
         }
 
@@ -98,8 +100,8 @@ impl Database {
     // Accounts
     pub fn create_account(&self, account: &Account) -> Result<()> {
         self.conn.execute(
-            "INSERT INTO accounts (id, name, key_cipher, enabled, referral_code, recharge_date, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            "INSERT INTO accounts (id, name, key_cipher, enabled, referral_code, recharge_date, cooldown_until, last_error, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
                 account.id,
                 account.name,
@@ -107,6 +109,8 @@ impl Database {
                 account.enabled as i32,
                 account.referral_code,
                 account.recharge_date,
+                account.cooldown_until.map(|t| t.to_rfc3339()),
+                account.last_error,
                 account.created_at.to_rfc3339(),
                 account.updated_at.to_rfc3339(),
             ],
@@ -149,14 +153,13 @@ impl Database {
     pub fn delete_account(&mut self, id: &str) -> Result<()> {
         let tx = self.conn.transaction()?;
         tx.execute("DELETE FROM accounts WHERE id = ?1", [id])?;
-        tx.execute("DELETE FROM circuit_states WHERE account_id = ?1", [id])?;
         tx.commit()?;
         Ok(())
     }
 
     pub fn get_account(&self, id: &str) -> Result<Option<Account>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, key_cipher, enabled, referral_code, recharge_date, created_at, updated_at FROM accounts WHERE id = ?1"
+            "SELECT id, name, key_cipher, enabled, referral_code, recharge_date, cooldown_until, last_error, created_at, updated_at FROM accounts WHERE id = ?1"
         )?;
         let account = stmt
             .query_row([id], |row| {
@@ -167,8 +170,12 @@ impl Database {
                     enabled: row.get::<_, i32>(3)? != 0,
                     referral_code: row.get(4)?,
                     recharge_date: row.get(5)?,
-                    created_at: parse_datetime(row.get::<_, String>(6)?),
-                    updated_at: parse_datetime(row.get::<_, String>(7)?),
+                    cooldown_until: row
+                        .get::<_, Option<String>>(6)?
+                        .map(parse_datetime),
+                    last_error: row.get(7)?,
+                    created_at: parse_datetime(row.get::<_, String>(8)?),
+                    updated_at: parse_datetime(row.get::<_, String>(9)?),
                 })
             })
             .optional()?;
@@ -177,7 +184,7 @@ impl Database {
 
     pub fn list_accounts(&self) -> Result<Vec<Account>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, key_cipher, enabled, referral_code, recharge_date, created_at, updated_at FROM accounts ORDER BY created_at"
+            "SELECT id, name, key_cipher, enabled, referral_code, recharge_date, cooldown_until, last_error, created_at, updated_at FROM accounts ORDER BY created_at"
         )?;
         let rows = stmt.query_map([], |row| {
             Ok(Account {
@@ -187,8 +194,12 @@ impl Database {
                 enabled: row.get::<_, i32>(3)? != 0,
                 referral_code: row.get(4)?,
                 recharge_date: row.get(5)?,
-                created_at: parse_datetime(row.get::<_, String>(6)?),
-                updated_at: parse_datetime(row.get::<_, String>(7)?),
+                cooldown_until: row
+                    .get::<_, Option<String>>(6)?
+                    .map(parse_datetime),
+                last_error: row.get(7)?,
+                created_at: parse_datetime(row.get::<_, String>(8)?),
+                updated_at: parse_datetime(row.get::<_, String>(9)?),
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.into())
@@ -208,62 +219,6 @@ impl Database {
             .query_row("SELECT value FROM settings WHERE key = ?1", [key], |row| row.get(0))
             .optional()
             .map_err(|e| e.into())
-    }
-
-    // Circuit breaker
-    pub fn get_circuit_state(&self, account_id: &str) -> Result<CircuitState> {
-        let state = self
-            .conn
-            .query_row(
-                "SELECT account_id, consecutive_errors, first_error_at, last_error_at, cooldown_until, level
-                 FROM circuit_states WHERE account_id = ?1",
-                [account_id],
-                |row| {
-                    Ok(CircuitState {
-                        account_id: row.get(0)?,
-                        consecutive_errors: row.get(1)?,
-                        first_error_at: row.get::<_, Option<String>>(2)?.map(parse_datetime),
-                        last_error_at: row.get::<_, Option<String>>(3)?.map(parse_datetime),
-                        cooldown_until: row.get::<_, Option<String>>(4)?.map(parse_datetime),
-                        level: parse_circuit_level(&row.get::<_, String>(5)?),
-                    })
-                },
-            )
-            .optional()?;
-
-        Ok(state.unwrap_or_else(|| CircuitState {
-            account_id: account_id.to_string(),
-            consecutive_errors: 0,
-            first_error_at: None,
-            last_error_at: None,
-            cooldown_until: None,
-            level: CircuitLevel::Normal,
-        }))
-    }
-
-    pub fn save_circuit_state(&self, state: &CircuitState) -> Result<()> {
-        self.conn.execute(
-            "INSERT OR REPLACE INTO circuit_states
-             (account_id, consecutive_errors, first_error_at, last_error_at, cooldown_until, level)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![
-                state.account_id,
-                state.consecutive_errors,
-                state.first_error_at.map(|t| t.to_rfc3339()),
-                state.last_error_at.map(|t| t.to_rfc3339()),
-                state.cooldown_until.map(|t| t.to_rfc3339()),
-                state.level.as_str(),
-            ],
-        )?;
-        Ok(())
-    }
-
-    pub fn reset_circuit_state(&self, account_id: &str) -> Result<()> {
-        self.conn.execute(
-            "DELETE FROM circuit_states WHERE account_id = ?1",
-            [account_id],
-        )?;
-        Ok(())
     }
 
     // Logging
@@ -313,12 +268,12 @@ impl Database {
         rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.into())
     }
 
-    pub fn list_forward_logs(&self, limit: i64) -> Result<Vec<ForwardLog>> {
+    pub fn list_forward_logs(&self, _limit: i64) -> Result<Vec<ForwardLog>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, timestamp, model, account_id, account_name, status, http_status, prompt_tokens, completion_tokens, cached_tokens, cost, error_message
              FROM forward_logs ORDER BY id DESC LIMIT ?1"
         )?;
-        let rows = stmt.query_map([limit], |row| {
+        let rows = stmt.query_map([], |row| {
             Ok(ForwardLog {
                 id: row.get(0)?,
                 timestamp: parse_datetime(row.get::<_, String>(1)?),
@@ -335,6 +290,51 @@ impl Database {
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.into())
+    }
+
+    // Cooldown
+    /// Set or clear a per-account rate-limit cooldown.
+    /// Pass `None` for both `until` and `err` to clear.
+    pub fn set_account_cooldown(
+        &self,
+        id: &str,
+        until: Option<DateTime<Utc>>,
+        err: Option<&str>,
+    ) -> Result<()> {
+        self.conn.execute(
+            "UPDATE accounts SET cooldown_until = ?2, last_error = ?3, updated_at = ?4 WHERE id = ?1",
+            params![
+                id,
+                until.map(|t| t.to_rfc3339()),
+                err,
+                Utc::now().to_rfc3339(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn clear_account_cooldown(&self, id: &str) -> Result<()> {
+        self.set_account_cooldown(id, None, None)
+    }
+
+    /// Among all enabled accounts, return the earliest `cooldown_until` in the future.
+    /// `None` means no account is in cooldown.
+    pub fn soonest_cooldown_reset(&self) -> Result<Option<DateTime<Utc>>> {
+        let now = Utc::now().to_rfc3339();
+        let res: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT MIN(cooldown_until) FROM accounts WHERE enabled = 1 AND cooldown_until IS NOT NULL AND cooldown_until > ?1",
+                params![now],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten();
+        Ok(res.and_then(|s| {
+            DateTime::parse_from_rfc3339(&s)
+                .ok()
+                .map(|dt| dt.with_timezone(&Utc))
+        }))
     }
 
     // Usage
@@ -407,18 +407,4 @@ fn parse_datetime(s: String) -> DateTime<Utc> {
             eprintln!("error: failed to parse datetime '{}': {}, using now", s, e);
             Utc::now()
         })
-}
-
-fn parse_circuit_level(s: &str) -> CircuitLevel {
-    match s {
-        "cooldown5m" => CircuitLevel::Cooldown5m,
-        "cooldown1h" => CircuitLevel::Cooldown1h,
-        "cooldown1d" => CircuitLevel::Cooldown1d,
-        "monthlyblown" | "monthly_blown" => CircuitLevel::MonthlyBlown,
-        "normal" => CircuitLevel::Normal,
-        other => {
-            eprintln!("error: unknown circuit level '{}', defaulting to Normal", other);
-            CircuitLevel::Normal
-        }
-    }
 }

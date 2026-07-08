@@ -16,13 +16,26 @@
           </n-switch>
           <n-tag v-if="account.referral_code" size="small">邀请码: {{ account.referral_code }}</n-tag>
           <n-tag v-if="account.recharge_date" size="small">充值日: {{ account.recharge_date }}</n-tag>
+          <n-tag v-if="isCooling(account)" type="error" size="small">
+            冷却中 · 剩 {{ formatRemaining(account) }}
+            <template v-if="account.last_error" #tooltip>
+              {{ account.last_error }}
+            </template>
+          </n-tag>
         </n-space>
 
         <n-space>
           <n-button size="small" @click="openEditModal(account)">编辑</n-button>
           <n-button size="small" @click="testAccount(account.id)">测试</n-button>
           <n-button size="small" @click="openBrowser(account.id)">打开浏览器</n-button>
-          <n-button size="small" type="warning" @click="resetCircuit(account.id)">重置熔断</n-button>
+          <n-button
+            v-if="isCooling(account)"
+            size="small"
+            type="warning"
+            @click="resetCooldown(account.id)"
+          >
+            重置冷却
+          </n-button>
           <n-popconfirm @positive-click="deleteAccount(account.id)">
             <template #trigger>
               <n-button size="small" type="error">删除</n-button>
@@ -116,6 +129,33 @@ function getUsage(accountId: string): UsageWindow {
   );
 }
 
+function isCooling(account: Account): boolean {
+  if (!account.cooldown_until) return false;
+  return new Date(account.cooldown_until).getTime() > Date.now();
+}
+
+function formatRemaining(account: Account): string {
+  if (!account.cooldown_until) return "";
+  const ms = new Date(account.cooldown_until).getTime() - Date.now();
+  if (ms <= 0) return "0s";
+  const min = Math.floor(ms / 60000);
+  if (min < 60) return `${min}min`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h${min % 60}m`;
+  const day = Math.floor(hr / 24);
+  return `${day}天${hr % 24}h`;
+}
+
+async function resetCooldown(id: string) {
+  try {
+    await tauriApi.resetAccountCooldown(id);
+    message.success("已重置冷却");
+    await loadAccounts();
+  } catch (e) {
+    message.error(`重置失败: ${e}`);
+  }
+}
+
 async function loadAccounts() {
   try {
     accounts.value = await tauriApi.getAccounts();
@@ -203,15 +243,6 @@ async function testAccount(id: string) {
     message.info(result);
   } catch (e) {
     message.error(`测试失败: ${e}`);
-  }
-}
-
-async function resetCircuit(id: string) {
-  try {
-    await tauriApi.resetCircuit(id);
-    message.success("熔断状态已重置");
-  } catch (e) {
-    message.error(`重置失败: ${e}`);
   }
 }
 

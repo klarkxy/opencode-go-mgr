@@ -46,3 +46,6 @@ check-*.mjs
 Cargo.lock.bak
 *.rlib
 *.rmeta
+
+# 测试用key
+ocg-key.local.txt

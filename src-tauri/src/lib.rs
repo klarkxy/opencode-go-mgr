@@ -1,20 +1,22 @@
 pub mod commands;
-pub mod crypto;
-pub mod db;
-pub mod gateway;
-pub mod models;
 pub mod state;
 pub mod tray;
 
 pub type Result<T> = anyhow::Result<T>;
 
-use state::AppStateInner;
+use ocg_core::crypto::MachineBoundCipher;
+use ocg_core::db::Database;
+use ocg_core::gateway;
+use ocg_core::state::CoreStateInner;
+use parking_lot::Mutex;
+use state::GuiState;
 use std::path::PathBuf;
+use std::sync::Arc;
 use tauri::Manager;
 
 pub fn run() {
     let data_dir = data_dir();
-    let db = match db::Database::open(data_dir.clone()) {
+    let db = match Database::open(data_dir.clone()) {
         Ok(db) => db,
         Err(e) => {
             eprintln!("failed to open database: {}", e);
@@ -22,8 +24,9 @@ pub fn run() {
         }
     };
 
-    let state = match AppStateInner::new(db, data_dir.clone()) {
-        Ok(s) => std::sync::Arc::new(s),
+    let cipher: Arc<dyn ocg_core::crypto::KeyCipher + Send + Sync> = Arc::new(MachineBoundCipher::new());
+    let core_state = match CoreStateInner::new(db, data_dir.clone(), cipher) {
+        Ok(s) => Arc::new(s),
         Err(e) => {
             eprintln!("failed to initialize state: {}", e);
             std::process::exit(1);
@@ -31,25 +34,30 @@ pub fn run() {
     };
 
     // Start gateway on startup
-    let config = state.config();
-    let gateway_state = state.clone();
+    let config = core_state.config();
+    let gateway_state = core_state.clone();
     let gateway_handle = match tauri::async_runtime::block_on(gateway::start_gateway(
         gateway_state,
         config.gateway_port,
     )) {
         Ok(handle) => {
-            let _ = state.db.lock().log_gateway("info", "gateway", &format!("gateway started on port {}", handle.port));
+            let _ = core_state.db.lock().log_gateway("info", "gateway", &format!("gateway started on port {}", handle.port));
             Some(handle)
         }
         Err(e) => {
-            let _ = state.db.lock().log_gateway("error", "gateway", &format!("failed to start gateway: {}", e));
+            let _ = core_state.db.lock().log_gateway("error", "gateway", &format!("failed to start gateway: {}", e));
             None
         }
     };
 
-    *state.gateway.lock() = gateway_handle;
+    *core_state.gateway.lock() = gateway_handle;
 
-    let app_state = state.clone();
+    let gui_state = Arc::new(GuiState {
+        core: core_state.clone(),
+        current_browser_window: Mutex::new(None),
+    });
+
+    let app_state = gui_state.clone();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -75,8 +83,8 @@ pub fn run() {
             commands::account::delete_account,
             commands::account::toggle_account,
             commands::account::test_account,
-            commands::account::reset_circuit,
             commands::account::get_account_usage,
+            commands::account::reset_account_cooldown,
             commands::setting::get_settings,
             commands::setting::update_settings,
             commands::setting::regenerate_gateway_key,
@@ -92,10 +100,10 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(move |_app_handle, event| {
             if let tauri::RunEvent::ExitRequested { .. } = event {
-                if let Some(handle) = state.gateway.lock().take() {
+                if let Some(handle) = core_state.gateway.lock().take() {
                     gateway::stop_gateway(handle);
                 }
-                let _ = state.db.lock().log_gateway("info", "gateway", "application exiting");
+                let _ = core_state.db.lock().log_gateway("info", "gateway", "application exiting");
             }
         });
 }

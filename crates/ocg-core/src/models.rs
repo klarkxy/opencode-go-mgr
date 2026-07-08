@@ -9,6 +9,8 @@ pub struct Account {
     pub enabled: bool,
     pub referral_code: Option<String>,
     pub recharge_date: Option<String>,
+    pub cooldown_until: Option<DateTime<Utc>>, // None = 可用
+    pub last_error: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -59,56 +61,8 @@ impl Default for AppConfig {
             gateway_port: 9042,
             gateway_key: String::new(),
             selection_strategy: SelectionStrategy::default(),
-            upstream_base_url: "https://api.opencode.ai".to_string(),
+            upstream_base_url: "https://opencode.ai/zen/go".to_string(),
             auto_start: false,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CircuitState {
-    pub account_id: String,
-    pub consecutive_errors: i32,
-    pub first_error_at: Option<DateTime<Utc>>,
-    pub last_error_at: Option<DateTime<Utc>>,
-    pub cooldown_until: Option<DateTime<Utc>>,
-    pub level: CircuitLevel,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum CircuitLevel {
-    Normal,
-    Cooldown5m,
-    Cooldown1h,
-    Cooldown1d,
-    MonthlyBlown,
-}
-
-impl Default for CircuitLevel {
-    fn default() -> Self {
-        CircuitLevel::Normal
-    }
-}
-
-impl CircuitLevel {
-    pub fn cooldown_seconds(&self) -> i64 {
-        match self {
-            CircuitLevel::Normal => 0,
-            CircuitLevel::Cooldown5m => 5 * 60,
-            CircuitLevel::Cooldown1h => 60 * 60,
-            CircuitLevel::Cooldown1d => 24 * 60 * 60,
-            CircuitLevel::MonthlyBlown => i64::MAX,
-        }
-    }
-
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            CircuitLevel::Normal => "normal",
-            CircuitLevel::Cooldown5m => "cooldown5m",
-            CircuitLevel::Cooldown1h => "cooldown1h",
-            CircuitLevel::Cooldown1d => "cooldown1d",
-            CircuitLevel::MonthlyBlown => "monthly_blown",
         }
     }
 }

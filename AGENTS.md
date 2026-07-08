@@ -13,15 +13,16 @@
 | Cargo 包名 | `ocg-manager` |
 | 产品名 | `OCG Manager` |
 | Tauri 应用标识符 | `com.ocg-manager.app` |
-| 目标平台 | Windows 桌面端（单 exe，系统托盘常驻） |
+| 目标平台 | Windows 桌面端（单 exe，系统托盘常驻）+ 跨平台 CLI（Linux / macOS / Windows / Docker） |
 | 核心目标 | 管理多个 OpenCode-Go 账号的 API key，并提供统一的 OpenAI 兼容 Gateway |
-| 当前状态 | **功能基本实现**：Gateway、账号管理、熔断、用量统计、内置浏览器、系统托盘、日志、设置均已落地 |
+| 当前状态 | **功能基本实现**：Gateway、账号管理、熔断、用量统计、内置浏览器、系统托盘、日志、设置均已落地；已拆分为 `ocg-core` lib + Tauri GUI + CLI 三个 Rust crate |
 
 当前代码已具备：
 
 - **前端**：Vue 3 + TypeScript + naive-ui，包含仪表盘、账号管理、日志、设置四个页面。
 - **Rust 后端**：完整的 Axum Gateway（`/v1/chat/completions`）、SQLite 持久化、多账号轮询/熔断/故障转移、用量估算、SSE 流式透传。
 - **Tauri 集成**：系统托盘、WebView2 内置浏览器、invoke 命令桥接。
+- **CLI**：跨平台命令行应用 `ocg-manager-cli`，最小化管理 key 列表与熔断状态，无 GUI。
 - 需求文档 `REQUIREMENTS.md` 中规划的系统托盘、Gateway、账号管理、熔断、用量估算、内置浏览器、日志、设置等模块均已实现。
 
 ## 2. 技术栈与运行时架构
@@ -40,9 +41,10 @@
 | HTTP 中间件 | tower / tower-http | CORS、trace |
 | 持久化 | SQLite | `rusqlite@0.33`（bundled） |
 | 序列化 | serde / serde_json | — |
-| 错误处理 | anyhow / thiserror | — |
-| 日志 | tracing / tracing-subscriber | — |
-| 工具 crate | once_cell / parking_lot / chrono / uuid / base64 / bytes | — |
+| 错误处理 | anyhow | — |
+| 日志 | tracing / tracing-subscriber | 当前代码中未实际使用 |
+| 工具 crate | parking_lot / chrono / uuid / base64 / bytes | — |
+| CLI 参数解析 | clap | `ocg-manager-cli` 使用 v4 derive API |
 
 ### 2.2 运行时架构
 
@@ -71,6 +73,20 @@ d:\0 code\ocg-manager
 ├── README.zh-CN.md           # 项目 README（中文）
 ├── REQUIREMENTS.md           # 需求文档 v1.0
 ├── assets/                   # 静态资源（Logo、源图、脚本）
+├── crates/                   # Rust workspace crates
+│   ├── ocg-core/             # 通用 lib：Gateway、DB、熔断、选择器、成本、crypto、models
+│   │   ├── Cargo.toml
+│   │   └── src/
+│   │       ├── lib.rs
+│   │       ├── crypto.rs     # KeyCipher trait + MachineBoundCipher/StaticKeyCipher
+│   │       ├── db.rs         # SQLite 打开 + 迁移 + 查询
+│   │       ├── models.rs     # serde 结构体、AppConfig、枚举
+│   │       ├── state.rs      # CoreState、配置读写、gateway-key 生成
+│   │       └── gateway/      # Axum Gateway（mod/handler/forwarder/selector/circuit_breaker/cost）
+│   └── ocg-cli/              # 命令行应用
+│       ├── Cargo.toml
+│       └── src/
+│           └── main.rs       # clap 命令解析 + serve/key/circuit/status
 ├── docs/                     # 中英文文档
 │   ├── en/
 │   └── zh/
@@ -85,7 +101,7 @@ d:\0 code\ocg-manager
 │   ├── App.vue               # 外壳 + 侧边栏导航
 │   ├── main.ts               # Vue + naive-ui 启动入口
 │   └── styles/main.css
-└── src-tauri/                # Tauri / Rust 源码
+└── src-tauri/                # Tauri GUI binary crate
     ├── Cargo.toml            # Tauri 包配置
     ├── build.rs              # Tauri 构建脚本
     ├── tauri.conf.json       # Tauri 应用配置
@@ -95,11 +111,7 @@ d:\0 code\ocg-manager
     ├── icons/                # 32/128/256/512 + icon.ico
     └── src/
         ├── commands/         # Tauri 命令处理（account/setting/gateway/log/dashboard/browser）
-        ├── gateway/          # Axum Gateway（mod/handler/forwarder/selector/circuit_breaker/cost）
-        ├── crypto.rs         # 机器绑定 key 混淆
-        ├── db.rs             # SQLite 打开 + 迁移 + 查询
-        ├── models.rs         # serde 结构体、AppConfig、枚举
-        ├── state.rs          # AppState、配置读写、gateway-key 生成
+        ├── state.rs          # GuiState 包装 CoreState + current_browser_window
         ├── tray.rs           # 系统托盘初始化
         ├── lib.rs            # run()——串联 DB、Gateway、托盘、命令
         └── main.rs           # 可执行入口 → run()
@@ -119,20 +131,33 @@ d:\0 code\ocg-manager
 
 ### 4.2 根目录 `Cargo.toml`
 
-- Workspace 仅包含 `src-tauri`
-- `edition = "2024"`
+- Workspace 成员：`crates/ocg-core`、`crates/ocg-cli`、`src-tauri`
+- 共享 `workspace.package`：`version = "0.1.0"`、`edition = "2024"`、`rust-version = "1.85.0"`
 - Release 配置：`opt-level = 3`、`lto = true`、`strip = true`、`panic = "abort"`
 
-### 4.3 `src-tauri/Cargo.toml`
+### 4.3 `crates/ocg-core/Cargo.toml`
+
+- 包名：`ocg-core`
+- 类型：`lib`
+- 包含通用依赖：`axum`、`tokio`、`reqwest`、`rusqlite`、`serde`、`chrono`、`uuid`、`parking_lot`、`anyhow`、`base64`、`bytes`、`futures-util`、`tower`、`tower-http`
+- 提供 `KeyCipher` trait 及两种实现：`MachineBoundCipher`（Windows 机器绑定）与 `StaticKeyCipher`（跨平台固定密钥）
+
+### 4.4 `crates/ocg-cli/Cargo.toml`
+
+- 包名：`ocg-manager-cli`
+- 类型：`bin`
+- 依赖：`ocg-core`、`clap`、`tokio`、`anyhow`、`chrono`、`uuid`
+
+### 4.5 `src-tauri/Cargo.toml`
 
 - 包名：`ocg-manager`
 - `rust-version = "1.85.0"`（与 `edition = "2024"` 一致）
 - Tauri feature：`["tray-icon"]`
-- 所有 Gateway、持久化、日志相关的 crate 已声明
+- 依赖 `ocg-core = { path = "../crates/ocg-core" }`，不再直接声明 Gateway/持久化相关 crate
 - `tauri-plugin-store` 已声明但被注释掉（暂未使用）
 - Release profile 包含 `opt-level = 3`、`lto = true`、`strip = true`、`panic = "abort"`
 
-### 4.4 `src-tauri/tauri.conf.json`
+### 4.6 `src-tauri/tauri.conf.json`
 
 - `devUrl`: `http://localhost:30001`
 - `frontendDist`: `../dist`
@@ -145,7 +170,7 @@ d:\0 code\ocg-manager
 - `security.capabilities`: `["default"]`
 - `plugins`: `{}`
 
-### 4.5 `vite.config.ts`
+### 4.7 `vite.config.ts`
 
 - 插件：`@vitejs/plugin-vue`
 - 端口：`30001`，`strictPort: true`，`host: "127.0.0.1"`
@@ -154,13 +179,13 @@ d:\0 code\ocg-manager
 - 构建目标：`es2022`，开启 minify，sourcemap 仅在 `TAURI_DEBUG` 时启用
 - `watch.ignored`: `["**/target/**", "**/src-tauri/target/**"]`
 
-### 4.6 `tsconfig.json`
+### 4.8 `tsconfig.json`
 
 - `target`: `ES2022`，`module`: `ESNext`
 - `strict`: `true`
 - 路径别名：`"@/*": ["./src/*"]`
 
-### 4.7 `src-tauri/capabilities/default.json`
+### 4.9 `src-tauri/capabilities/default.json`
 
 - 标识符：`default`，作用于 `main` 窗口
 - 权限：`core:default`、`core:window:*`、`shell:allow-open`
@@ -188,15 +213,17 @@ d:\0 code\ocg-manager
 
 | 命令 | 作用 |
 |---|---|
-| `cd src-tauri && cargo check` | 检查 Rust 代码 |
-| `cd src-tauri && cargo build --release` | 编译 Release 二进制 |
-| `cd src-tauri && cargo test` | 运行 Rust 测试（目前仅有 crypto 往返测试） |
+| `cargo check --workspace` | 检查整个 workspace |
+| `cargo build --release --bin ocg-manager` | 编译 Tauri GUI Release 二进制 |
+| `cargo build --release --bin ocg-manager-cli` | 编译 CLI Release 二进制 |
+| `cargo test --workspace` | 运行 workspace 全部 Rust 测试 |
+| `cargo run --bin ocg-manager-cli -- --help` | 查看 CLI 帮助 |
 | `npx tauri dev` | 启动 Tauri 开发模式 |
 | `npx tauri build` | 打包 Windows 安装包（NSIS） |
 
 ### 5.4 当前可行性
 
-项目处于可运行状态。`npx tauri dev` 和 `npx tauri build` 均可正常执行。
+项目处于可运行状态。`cargo check --workspace`、`cargo test --workspace`、`npx tauri dev` 和 `npx tauri build` 均可正常执行。CLI 可在 Windows / Linux / macOS 上编译运行（GUI 仍依赖 Windows + WebView2）。
 
 ## 6. 代码组织
 
@@ -211,15 +238,26 @@ d:\0 code\ocg-manager
 
 ### 6.2 后端 / Rust
 
-- `src-tauri/src/lib.rs`：`run()` 函数——初始化 DB、加载配置、启动 Gateway、构建 Tauri app、注册托盘和命令、拦截窗口关闭事件。
+#### 通用 core lib（`crates/ocg-core`）
+
+- `crates/ocg-core/src/lib.rs`：重新导出 `crypto`、`db`、`gateway`、`models`、`state`。
+- `crates/ocg-core/src/gateway/`：Gateway 核心，含 `mod.rs`（Axum 路由构建与启停）、`handler.rs`（请求鉴权 + 重试循环）、`forwarder.rs`（上游转发 + SSE 透传）、`selector.rs`（账号选择策略）、`circuit_breaker.rs`（熔断状态机）、`cost.rs`（价格表 + 成本计算）。
+- `crates/ocg-core/src/db.rs`：SQLite 数据库打开、迁移、CRUD 操作。
+- `crates/ocg-core/src/models.rs`：数据结构定义（`Account`、`AppConfig`、`ForwardLog` 等）。
+- `crates/ocg-core/src/state.rs`：`CoreState`（Arc 包装），管理配置、DB、Gateway handle、HTTP client、选择器计数器、加密器。
+- `crates/ocg-core/src/crypto.rs`：`KeyCipher` trait + `MachineBoundCipher`（Windows 机器绑定 XOR 混淆）+ `StaticKeyCipher`（跨平台固定密钥混淆）。
+
+#### Tauri GUI（`src-tauri`）
+
+- `src-tauri/src/lib.rs`：`run()` 函数——初始化 DB、加载配置、创建 `CoreState`、启动 Gateway、构建 Tauri app、注册托盘和命令、拦截窗口关闭事件。
 - `src-tauri/src/main.rs`：Windows 子系统入口，调用 `run()`。
 - `src-tauri/src/commands/`：9 个命令模块（`account.rs`、`setting.rs`、`gateway.rs`、`log.rs`、`dashboard.rs`、`browser.rs`、`mod.rs`），通过 `invoke_handler!` 注册。
-- `src-tauri/src/gateway/`：Gateway 核心，含 `mod.rs`（Axum 路由构建与启停）、`handler.rs`（请求鉴权 + 重试循环）、`forwarder.rs`（上游转发 + SSE 透传）、`selector.rs`（账号选择策略）、`circuit_breaker.rs`（熔断状态机）、`cost.rs`（价格表 + 成本计算）。
-- `src-tauri/src/db.rs`：SQLite 数据库打开、迁移、CRUD 操作。
-- `src-tauri/src/models.rs`：数据结构定义（`Account`、`AppConfig`、`ForwardLog` 等）。
-- `src-tauri/src/state.rs`：`AppState`（Arc 包装），管理配置、DB、Gateway handle、浏览器窗口。
-- `src-tauri/src/crypto.rs`：机器绑定 XOR 混淆（key 存储用）。
+- `src-tauri/src/state.rs`：`GuiState` 包装 `CoreState`，额外管理 `current_browser_window`。
 - `src-tauri/src/tray.rs`：系统托盘初始化（左键显示窗口、右键菜单）。
+
+#### CLI（`crates/ocg-cli`）
+
+- `crates/ocg-cli/src/main.rs`：使用 `clap` 解析命令，初始化 `CoreState`（注入 `StaticKeyCipher`），实现 `serve`/`key`/`circuit`/`status` 命令。
 
 ### 6.3 Tauri 插件
 

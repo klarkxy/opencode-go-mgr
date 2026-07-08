@@ -7,6 +7,8 @@ export interface Account {
   enabled: boolean;
   referral_code: string | null;
   recharge_date: string | null;
+  cooldown_until: string | null; // RFC3339; null = available
+  last_error: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -90,9 +92,9 @@ export const tauriApi = {
     invoke<Account>("update_account", { id, update }),
   deleteAccount: (id: string) => invoke<void>("delete_account", { id }),
   toggleAccount: (id: string) => invoke<Account>("toggle_account", { id }),
-  resetCircuit: (id: string) => invoke<void>("reset_circuit", { id }),
   testAccount: (id: string) => invoke<string>("test_account", { id }),
   getAccountUsage: (id: string) => invoke<UsageWindow>("get_account_usage", { id }),
+  resetAccountCooldown: (id: string) => invoke<Account>("reset_account_cooldown", { id }),
 
   // Settings
   getSettings: () => invoke<AppConfig>("get_settings"),

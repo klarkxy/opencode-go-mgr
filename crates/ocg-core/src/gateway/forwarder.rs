@@ -1,20 +1,20 @@
 use crate::db::Database;
-use crate::gateway::circuit_breaker::CircuitBreaker;
 use crate::gateway::cost::estimate_cost;
+use crate::gateway::limit::parse_reset;
 use crate::gateway::selector::AccountSelector;
 use crate::models::{Account, ForwardLog};
-use crate::state::AppState;
+use crate::state::CoreState;
 use anyhow::Result;
 use axum::body::Body;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
-use chrono::Utc;
+use chrono::{Duration, Utc};
 use futures_util::StreamExt;
 use reqwest::Client;
 use serde_json::Value;
-use std::time::Duration;
+use std::time::Duration as StdDuration;
 
-const UPSTREAM_TIMEOUT: Duration = Duration::from_secs(120);
+const UPSTREAM_TIMEOUT: StdDuration = StdDuration::from_secs(120);
 
 pub struct ForwardResult {
     pub response: Response,
@@ -25,27 +25,26 @@ pub struct ForwardResult {
 
 pub async fn forward_request(
     client: &Client,
-    state: &AppState,
+    state: &CoreState,
     account: &Account,
     upstream_base_url: &str,
     upstream_path: &str,
     headers: HeaderMap,
     body_bytes: bytes::Bytes,
 ) -> Result<ForwardResult> {
-    forward_request_with_breaker(client, state, account, upstream_base_url, upstream_path, headers, body_bytes, true).await
+    forward_request_impl(client, state, account, upstream_base_url, upstream_path, headers, body_bytes).await
 }
 
-async fn forward_request_with_breaker(
+async fn forward_request_impl(
     client: &Client,
-    state: &AppState,
+    state: &CoreState,
     account: &Account,
     upstream_base_url: &str,
     upstream_path: &str,
     headers: HeaderMap,
     body_bytes: bytes::Bytes,
-    record_breaker: bool,
 ) -> Result<ForwardResult> {
-    let key = crate::crypto::decrypt(&account.key_cipher)?;
+    let key = state.decrypt_key(&account.key_cipher)?;
     let mut upstream_headers = reqwest::header::HeaderMap::new();
 
     // Forward client headers except Authorization (we use the account's key)
@@ -84,9 +83,6 @@ async fn forward_request_with_breaker(
             let error_message = format!("upstream request failed: {}", e);
             {
                 let db = state.db.lock();
-                if record_breaker {
-                    CircuitBreaker::record_error(&*db, &account.id)?;
-                }
                 log_forward(&*db, account, &model, "error", None, 0, 0, 0, 0.0, Some(&error_message))?;
             }
             return Ok(ForwardResult {
@@ -111,9 +107,6 @@ async fn forward_request_with_breaker(
         let error_message = format!("upstream error {}: {}", status.as_u16(), text);
         {
             let db = state.db.lock();
-            if record_breaker {
-                CircuitBreaker::record_error(&*db, &account.id)?;
-            }
             log_forward(
                 &*db,
                 account,
@@ -134,15 +127,30 @@ async fn forward_request_with_breaker(
 
     if status.is_client_error() {
         let text = upstream_resp.text().await.unwrap_or_default();
-        // Only 429 (rate limit) is retryable — other 4xx are client errors, pass through
+
         if status.as_u16() == 429 {
-            let error_message = format!("upstream rate limited: {}", text);
+            // 429 from opencode-go carries the exact reset window ("Resets in 13 days" / "4 days" / "13min").
+            // Parse it, cool the account down until then, and fail over to the next account
+            // (success: false). 5xx/transport errors are environment-level — no cooldown, just failover.
+            let cooldown = parse_reset(&text).unwrap_or_else(|| Duration::minutes(5));
+            let until = Utc::now() + cooldown;
+            let error_message = format!(
+                "rate limited: {} (resets in {}s)",
+                text.trim(),
+                cooldown.num_seconds()
+            );
             {
                 let db = state.db.lock();
-                if record_breaker {
-                    CircuitBreaker::record_error(&*db, &account.id)?;
-                }
-                log_forward(&*db, account, &model, "error", Some(429), 0, 0, 0, 0.0, Some(&error_message))?;
+                log_forward(
+                    &*db,
+                    account,
+                    &model,
+                    "client_error",
+                    Some(429),
+                    0, 0, 0, 0.0,
+                    Some(&text),
+                )?;
+                db.set_account_cooldown(&account.id, Some(until), Some(&text))?;
             }
             return Ok(ForwardResult {
                 response: error_response(&error_message),
@@ -151,7 +159,8 @@ async fn forward_request_with_breaker(
                 error_message: Some(error_message),
             });
         }
-        // Non-rate-limit 4xx: pass through to client, don't record circuit error
+
+        // Other 4xx (400/401/403/404...): client- or key-level error. Pass through, don't retry.
         {
             let db = state.db.lock();
             log_forward(&*db, account, &model, "client_error", Some(status.as_u16() as i32), 0, 0, 0, 0.0, Some(&text))?;
@@ -161,7 +170,7 @@ async fn forward_request_with_breaker(
         return Ok(ForwardResult {
             response: (status, response_headers, text).into_response(),
             account: account.clone(),
-            success: true, // pass through to client, don't retry
+            success: true,
             error_message: None,
         });
     }
@@ -188,7 +197,6 @@ async fn forward_request_with_breaker(
                 Err(e) => {
                     let _ = {
                         let db = state_clone.db.lock();
-                        let _ = CircuitBreaker::record_error(&*db, &account_clone.id);
                         log_forward(
                             &*db,
                             &account_clone,
@@ -241,7 +249,6 @@ async fn forward_request_with_breaker(
 
         {
             let db = state.db.lock();
-            let _ = CircuitBreaker::record_success(&*db, &account.id);
             log_forward(
                 &*db,
                 account,
@@ -270,7 +277,7 @@ async fn forward_request_with_breaker(
 /// Simple GET forward for endpoints like /v1/models — uses configured selection strategy.
 pub async fn forward_get(
     client: &Client,
-    state: &AppState,
+    state: &CoreState,
     upstream_base_url: &str,
     upstream_path: &str,
 ) -> Result<Response> {
@@ -282,7 +289,7 @@ pub async fn forward_get(
             .ok_or_else(|| anyhow::anyhow!("no enabled accounts available"))
     }?;
 
-    let key = crate::crypto::decrypt(&account.key_cipher)?;
+    let key = state.decrypt_key(&account.key_cipher)?;
     let url = format!("{}{}", upstream_base_url.trim_end_matches('/'), upstream_path);
 
     let resp = match client
@@ -293,24 +300,27 @@ pub async fn forward_get(
         .await
     {
         Ok(r) => r,
-        Err(e) => {
-            let db = state.db.lock();
-            CircuitBreaker::record_error(&*db, &account.id)?;
-            return Err(e.into());
-        }
+        Err(e) => return Err(e.into()),
     };
 
     let status = resp.status();
     let body = resp.text().await.unwrap_or_default();
 
-    if status.is_server_error() || status.as_u16() == 429 {
+    {
         let db = state.db.lock();
-        CircuitBreaker::record_error(&*db, &account.id)?;
-        log_forward(&*db, &account, "", "error", Some(status.as_u16() as i32), 0, 0, 0, 0.0, Some(&body))?;
-    } else {
-        let db = state.db.lock();
-        let _ = CircuitBreaker::record_success(&*db, &account.id);
-        log_forward(&*db, &account, "", "success", Some(status.as_u16() as i32), 0, 0, 0, 0.0, None)?;
+        let category = if status.is_server_error() {
+            "error"
+        } else if status.is_client_error() {
+            "client_error"
+        } else {
+            "success"
+        };
+        log_forward(&*db, &account, "", category, Some(status.as_u16() as i32), 0, 0, 0, 0.0, Some(&body))?;
+        if status.as_u16() == 429 {
+            // 429 cooldown: parse the reset window so the next request skips this account.
+            let cooldown = parse_reset(&body).unwrap_or_else(|| Duration::minutes(5));
+            db.set_account_cooldown(&account.id, Some(Utc::now() + cooldown), Some(&body))?;
+        }
     }
 
     let mut headers = HeaderMap::new();

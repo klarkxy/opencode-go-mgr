@@ -1,12 +1,11 @@
-use crate::crypto;
-use crate::models::{Account, AccountInput, AccountUpdate};
 use crate::state::AppState;
 use chrono::Utc;
+use ocg_core::models::{Account, AccountInput, AccountUpdate};
 use tauri::State;
 
 #[tauri::command]
 pub fn get_accounts(state: State<'_, AppState>) -> Result<Vec<Account>, String> {
-    state.db.lock().list_accounts().map_err(|e| e.to_string())
+    state.core.db.lock().list_accounts().map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -16,14 +15,16 @@ pub fn create_account(state: State<'_, AppState>, input: AccountInput) -> Result
     let account = Account {
         id: id.clone(),
         name: input.name,
-        key_cipher: crypto::encrypt(&input.key).map_err(|e| e.to_string())?,
+        key_cipher: state.core.encrypt_key(&input.key).map_err(|e| e.to_string())?,
         enabled: true,
         referral_code: input.referral_code,
         recharge_date: input.recharge_date,
+        cooldown_until: None,
+        last_error: None,
         created_at: now,
         updated_at: now,
     };
-    let db = state.db.lock();
+    let db = state.core.db.lock();
     db.create_account(&account).map_err(|e| e.to_string())?;
     let _ = db.log_gateway("info", "account", &format!("created account {}", account.name));
     Ok(account)
@@ -39,15 +40,15 @@ pub fn update_account(
         .key
         .as_ref()
         .filter(|k| !k.is_empty())  // treat empty key string as "no update"
-        .map(|k| crypto::encrypt(k))
+        .map(|k| state.core.encrypt_key(k))
         .transpose()
         .map_err(|e| e.to_string())?;
     {
-        let db = state.db.lock();
+        let db = state.core.db.lock();
         db.update_account(&id, &update, key_cipher.as_deref())
             .map_err(|e| e.to_string())?;
     }
-    let db = state.db.lock();
+    let db = state.core.db.lock();
     let account = db
         .get_account(&id)
         .map_err(|e| e.to_string())?
@@ -58,7 +59,7 @@ pub fn update_account(
 
 #[tauri::command]
 pub fn delete_account(state: State<'_, AppState>, id: String) -> Result<(), String> {
-    let mut db = state.db.lock();
+    let mut db = state.core.db.lock();
     if let Some(account) = db.get_account(&id).map_err(|e| e.to_string())? {
         db.delete_account(&id).map_err(|e| e.to_string())?;
         let _ = db.log_gateway("info", "account", &format!("deleted account {}", account.name));
@@ -69,7 +70,7 @@ pub fn delete_account(state: State<'_, AppState>, id: String) -> Result<(), Stri
 #[tauri::command]
 pub fn toggle_account(state: State<'_, AppState>, id: String) -> Result<Account, String> {
     let account = {
-        let db = state.db.lock();
+        let db = state.core.db.lock();
         db.get_account(&id)
             .map_err(|e| e.to_string())?
             .ok_or_else(|| "account not found".to_string())?
@@ -82,11 +83,11 @@ pub fn toggle_account(state: State<'_, AppState>, id: String) -> Result<Account,
         recharge_date: None,
     };
     {
-        let db = state.db.lock();
+        let db = state.core.db.lock();
         db.update_account(&id, &update, None)
             .map_err(|e| e.to_string())?;
     }
-    let db = state.db.lock();
+    let db = state.core.db.lock();
     let account = db.get_account(&id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "account not found after toggle".to_string())?;
@@ -94,21 +95,13 @@ pub fn toggle_account(state: State<'_, AppState>, id: String) -> Result<Account,
 }
 
 #[tauri::command]
-pub fn reset_circuit(state: State<'_, AppState>, id: String) -> Result<(), String> {
-    let db = state.db.lock();
-    db.reset_circuit_state(&id).map_err(|e| e.to_string())?;
-    let _ = db.log_gateway("info", "circuit", &format!("reset circuit state for account {}", id));
-    Ok(())
-}
-
-#[tauri::command]
 pub fn test_account(state: State<'_, AppState>, id: String) -> Result<String, String> {
-    let db = state.db.lock();
+    let db = state.core.db.lock();
     let account = db
         .get_account(&id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "account not found".to_string())?;
-    let key = crypto::decrypt(&account.key_cipher).map_err(|e| e.to_string())?;
+    let key = state.core.decrypt_key(&account.key_cipher).map_err(|e| e.to_string())?;
     let masked = if key.len() > 8 && key.is_char_boundary(4) && key.is_char_boundary(key.len() - 4) {
         format!("{}...{}", &key[..4], &key[key.len() - 4..])
     } else {
@@ -121,6 +114,21 @@ pub fn test_account(state: State<'_, AppState>, id: String) -> Result<String, St
 pub fn get_account_usage(
     state: State<'_, AppState>,
     id: String,
-) -> Result<crate::models::UsageWindow, String> {
-    state.db.lock().account_usage(&id).map_err(|e| e.to_string())
+) -> Result<ocg_core::models::UsageWindow, String> {
+    state.core.db.lock().account_usage(&id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn reset_account_cooldown(state: State<'_, AppState>, id: String) -> Result<Account, String> {
+    {
+        let db = state.core.db.lock();
+        db.clear_account_cooldown(&id).map_err(|e| e.to_string())?;
+    }
+    let db = state.core.db.lock();
+    let account = db
+        .get_account(&id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "account not found".to_string())?;
+    let _ = db.log_gateway("info", "account", &format!("reset cooldown for {}", account.name));
+    Ok(account)
 }

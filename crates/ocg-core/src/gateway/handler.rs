@@ -1,13 +1,14 @@
 use crate::gateway::forwarder::{forward_get, forward_request};
 use crate::gateway::selector::AccountSelector;
-use crate::state::AppState;
+use crate::models::AppConfig;
+use crate::state::CoreState;
 use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 
 pub async fn chat_completions(
-    State(state): State<AppState>,
+    State(state): State<CoreState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> axum::response::Response {
@@ -15,7 +16,7 @@ pub async fn chat_completions(
 }
 
 pub async fn messages(
-    State(state): State<AppState>,
+    State(state): State<CoreState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> axum::response::Response {
@@ -24,7 +25,7 @@ pub async fn messages(
 
 /// GET /v1/models — passthrough, any enabled account's key works.
 pub async fn models(
-    State(state): State<AppState>,
+    State(state): State<CoreState>,
     headers: HeaderMap,
 ) -> axum::response::Response {
     if !check_auth(&headers, &state.config()) {
@@ -40,7 +41,7 @@ pub async fn models(
 }
 
 async fn proxy_handler(
-    state: AppState,
+    state: CoreState,
     headers: HeaderMap,
     body: Bytes,
     upstream_path: &str,
@@ -63,8 +64,16 @@ async fn proxy_handler(
             match selector.select(&*db, excluded_id.as_deref()) {
                 Ok(Some(a)) => a,
                 Ok(None) => {
-                    let msg = last_error.unwrap_or_else(|| "no available accounts".to_string());
-                    return error_response(StatusCode::SERVICE_UNAVAILABLE, &msg);
+                    // No enabled, non-cooldown, non-excluded account left.
+                    // If any enabled account is in cooldown, tell the client when the soonest resets.
+                    let soonest = state.db.lock().soonest_cooldown_reset().ok().flatten();
+                    return match soonest {
+                        Some(until) => rate_limited_response(until),
+                        None => {
+                            let msg = last_error.unwrap_or_else(|| "no available accounts".to_string());
+                            error_response(StatusCode::SERVICE_UNAVAILABLE, &msg)
+                        }
+                    };
                 }
                 Err(e) => {
                     return error_response(
@@ -118,7 +127,7 @@ async fn proxy_handler(
     )
 }
 
-fn check_auth(headers: &HeaderMap, config: &crate::models::AppConfig) -> bool {
+fn check_auth(headers: &HeaderMap, config: &AppConfig) -> bool {
     // Accept Authorization: Bearer <key> or x-api-key: <key> (Anthropic SDK compat)
     headers
         .get(axum::http::header::AUTHORIZATION)
@@ -144,4 +153,18 @@ fn error_response(status: StatusCode, message: &str) -> axum::response::Response
         }
     });
     (status, axum::Json(body)).into_response()
+}
+
+fn rate_limited_response(resets_at: chrono::DateTime<chrono::Utc>) -> axum::response::Response {
+    let body = serde_json::json!({
+        "error": {
+            "message": format!(
+                "all accounts rate-limited, soonest resets at {}",
+                resets_at.to_rfc3339()
+            ),
+            "type": "rate_limited",
+            "resets_at": resets_at.to_rfc3339(),
+        }
+    });
+    (StatusCode::TOO_MANY_REQUESTS, axum::Json(body)).into_response()
 }

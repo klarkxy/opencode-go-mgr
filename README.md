@@ -209,24 +209,32 @@ npx tauri build
 │   ├── App.vue                 # shell + sidebar nav
 │   ├── main.ts                 # Vue + naive-ui bootstrap
 │   └── styles/main.css
-├── src-tauri/                  # Rust + Tauri backend
+├── crates/                     # Rust workspace members
+│   ├── ocg-core/               # cross-platform lib: gateway, DB, models, crypto, state
+│   │   └── src/
+│   │       ├── lib.rs          # re-exports: crypto/db/gateway/models/state
+│   │       ├── crypto.rs       # KeyCipher trait + MachineBound/Static ciphers
+│   │       ├── db.rs           # SQLite open + migrations + queries
+│   │       ├── models.rs       # serde structs, AppConfig, enums
+│   │       ├── state.rs        # CoreState, config load/save, gateway-key gen
+│   │       └── gateway/        # Axum router, handler, forwarder, selector, circuit_breaker, cost
+│   └── ocg-cli/                # headless CLI binary
+│       ├── Cargo.toml
+│       └── src/main.rs         # clap: serve / key / circuit / status
+├── src-tauri/                  # Tauri GUI binary (depends on ocg-core)
 │   ├── capabilities/default.json   # Tauri v2 permissions for the main window
 │   ├── icons/                  # 32/128/256/512 + icon.ico
 │   ├── installer.nsh           # NSIS hook: prompt to delete data dir on uninstall
 │   ├── src/
 │   │   ├── commands/           # Tauri command handlers (account/setting/gateway/log/dashboard/browser)
-│   │   ├── gateway/            # Axum gateway (mod/handler/forwarder/selector/circuit_breaker/cost)
-│   │   ├── crypto.rs           # machine-bound key obfuscation
-│   │   ├── db.rs               # SQLite open + migrations + queries
-│   │   ├── models.rs           # serde structs, AppConfig, enums
-│   │   ├── state.rs            # AppState, config load/save, gateway-key generation
+│   │   ├── state.rs            # GuiState wraps CoreState + current_browser_window
 │   │   ├── tray.rs             # system tray setup
 │   │   ├── lib.rs              # run() — wires DB, gateway, tray, commands
 │   │   └── main.rs             # exe entry → run()
 │   ├── Cargo.toml
 │   ├── build.rs
 │   └── tauri.conf.json
-├── Cargo.toml                  # workspace root (members = src-tauri)
+├── Cargo.toml                  # workspace root (members = crates/ocg-core, crates/ocg-cli, src-tauri)
 ├── package.json
 ├── vite.config.ts              # dev port 30001, @ alias
 ├── tsconfig.json
@@ -240,19 +248,26 @@ Client (OpenAI SDK / curl / any tool)
   │  POST http://127.0.0.1:9042/v1/chat/completions
   │  Authorization: Bearer <gateway-key>
   ▼
-Tauri app (Rust + WebView2)
-  ├── WebView2 UI (Vue 3 + naive-ui) ──invoke()──► Tauri commands
-  ├── System tray (tray.rs)
-  └── Embedded Axum gateway (gateway/)
-        ├── auth: verify Bearer <gateway-key>
-        ├── AccountSelector: pick enabled, circuit-healthy account by strategy
-        ├── Forwarder: relay body to {upstream}/v1/chat/completions with the account's OCG key
-        │     ├── SSE stream passthrough  ─► client (bytes unchanged)
-        │     └── JSON response           ─► parse usage, estimate cost, log
-        ├── CircuitBreaker: record success/error per account, escalate cooldowns
-        └── DB (rusqlite): accounts, settings, logs, circuit_states
-                ▲
-        On failure: exclude account, retry next (≤5 attempts) → 502 if all fail
+┌─────────────────────────── ocg-core (cross-platform lib) ───────────────────────────┐
+│  Axum gateway (mod/handler/forwarder/selector/circuit_breaker/cost)                │
+│    ├── auth: verify Bearer <gateway-key>                                            │
+│    ├── AccountSelector: pick enabled, circuit-healthy account by strategy          │
+│    ├── Forwarder: relay body to {upstream}/v1/chat/completions with account's OCG  │
+│    │     ├── SSE stream passthrough  ─► client (bytes unchanged)                   │
+│    │     └── JSON response           ─► parse usage, estimate cost, log            │
+│    ├── CircuitBreaker: record success/error per account, escalate cooldowns        │
+│    ├── DB (rusqlite): accounts, settings, logs, circuit_states                      │
+│    └── KeyCipher trait: MachineBoundCipher (GUI) | StaticKeyCipher (CLI)           │
+│                                                                                     │
+│   On failure: exclude account, retry next (≤5 attempts) → 502 if all fail          │
+└─────────────────────────────────────────────────────────────────────────────────────┘
+  ▲                                                  ▲
+  │ Tauri invoke (state.core.*)                      │ CoreState + StaticKeyCipher
+  │                                                  │
+ocg-manager (Tauri GUI, Windows)             ocg-manager-cli (Linux/macOS/Win/Docker)
+├── WebView2 UI (Vue 3 + naive-ui)            ├── serve / key / circuit / status
+├── System tray (tray.rs)                     └── uses same gateway + db
+└── MachineBoundCipher (default)
 ```
 
 ### Key internals
@@ -265,7 +280,7 @@ Tauri app (Rust + WebView2)
 - **Cost** — `gateway/cost.rs` holds the price `HashMap`, normalizes model names (lowercase, separators → `-`), and computes `cost = prompt/1e6·in + completion/1e6·out + cached/1e6·cache_read`. Unknown models fall back to a fuzzy match, then a default price.
 - **Crypto** — `crypto.rs`. Machine-bound XOR obfuscation seeded from `USERNAME` / `COMPUTERNAME` / `APPDATA`. Documented as **not** cryptographically secure; swap for `aes-gcm` / a KMS if real secrecy is needed.
 - **DB** — `db.rs`. SQLite at `<data_dir>/data.sqlite`, schema versioned via `schema_version`. Tables: `accounts`, `settings`, `gateway_logs`, `forward_logs`, `circuit_states`. Indices on `forward_logs(timestamp)` and `forward_logs(account_id)`.
-- **State** — `state.rs`. `AppState` (Arc) holds `Mutex<Database>`, `Mutex<AppConfig>`, `Mutex<Option<GatewayHandle>>`, `Mutex<Option<browser-window-label>>`. Config is serialized to the `settings` table under key `config`; gateway key auto-generated as `ocg-<word>-<word>` on first run.
+- **State** — `state.rs`. `CoreState` (Arc) lives in `ocg-core` and holds `Mutex<Database>`, `Mutex<AppConfig>`, `Mutex<Option<GatewayHandle>>`, an atomic round-robin counter, `reqwest::Client`, `PathBuf`, and `Arc<dyn KeyCipher>`. Config is serialized to the `settings` table under key `config`; gateway key auto-generated as `ocg-<word>-<word>` on first run. The GUI's `src-tauri/src/state.rs` wraps it in `GuiState { core, current_browser_window }`; Tauri commands access state via `state.core.*`.
 - **Tray** — `tray.rs`. Left-click shows the main window; right-click menu opens/status/quit. `lib.rs` intercepts `CloseRequested` to hide instead of close.
 - **Tauri commands** — registered in `lib.rs::invoke_handler!`; typed wrappers in `src/api/tauri.ts`. Add a new command in both places.
 
@@ -300,8 +315,44 @@ Editable in-app (Settings) or directly in the `settings` table. After changing t
 
 ### Testing
 
-- `cd src-tauri && cargo test` — currently only the crypto round-trip test exists.
+- `cargo test --workspace` — runs the `ocg-core` crypto round-trip tests (MachineBoundCipher, StaticKeyCipher).
 - No frontend tests. Worth adding: selector strategy, circuit-breaker state machine, cost estimation, and an integration test with a mock upstream.
+
+### Headless CLI (`ocg-manager-cli`)
+
+The same Gateway and account-management code that the GUI uses is also exposed as a cross-platform CLI binary. It has no UI, no tray, no WebView — just a single `data.sqlite` plus an Axum server, so it runs on Linux, macOS, Windows, and inside Docker.
+
+```bash
+# Build
+cargo build --release --bin ocg-manager-cli
+
+# Start the gateway (defaults: port 9042, data dir ~/.ocg-mgr-cli)
+./target/release/ocg-manager-cli serve
+
+# With overrides
+./target/release/ocg-manager-cli --data-dir /var/lib/ocg --encryption-key "$OCG_KEY" serve --port 9042
+
+# Manage keys
+ocg-manager-cli key list
+ocg-manager-cli key add main sk-ocg-xxxxxxxx
+ocg-manager-cli key remove <account-id>
+ocg-manager-cli key enable <account-id>
+ocg-manager-cli key disable <account-id>
+
+# Circuit breaker
+ocg-manager-cli circuit reset <account-id>
+
+# Show runtime status
+ocg-manager-cli status
+```
+
+**Encryption key.** The CLI uses `StaticKeyCipher` (not machine-bound), so you can move its data dir to another host and decrypt. Resolution order:
+
+1. `--encryption-key <secret>` argument
+2. `OCG_MANAGER_ENCRYPTION_KEY` environment variable
+3. `<data-dir>/.encryption-key` file (auto-generated on first run — back it up)
+
+**Data dir.** Default is `~/.ocg-mgr-cli`. Pass `--data-dir` to override. Don't share the directory with the GUI's `%USERPROFILE%/.ocg-mgr/data.sqlite` — the GUI uses `MachineBoundCipher` and the two ciphers are not interchangeable.
 
 ### Packaging & release
 

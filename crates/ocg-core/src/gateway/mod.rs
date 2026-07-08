@@ -1,10 +1,10 @@
-pub mod circuit_breaker;
 pub mod cost;
 pub mod forwarder;
 pub mod handler;
+pub mod limit;
 pub mod selector;
 
-use crate::state::{AppState, GatewayHandle};
+use crate::state::{CoreState, GatewayHandle};
 use anyhow::Result;
 use axum::routing::{get, post};
 use axum::Router;
@@ -12,7 +12,7 @@ use std::net::SocketAddr;
 use tokio::sync::oneshot;
 use tower_http::cors::{Any, CorsLayer};
 
-pub fn build_router(state: AppState) -> Router {
+pub fn build_router(state: CoreState) -> Router {
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods(Any)
@@ -26,7 +26,7 @@ pub fn build_router(state: AppState) -> Router {
         .with_state(state)
 }
 
-pub async fn start_gateway(state: AppState, port: u16) -> Result<GatewayHandle> {
+pub async fn start_gateway(state: CoreState, port: u16) -> Result<GatewayHandle> {
     let app = build_router(state);
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     let listener = tokio::net::TcpListener::bind(addr).await?;
@@ -53,7 +53,7 @@ pub async fn start_gateway(state: AppState, port: u16) -> Result<GatewayHandle> 
 pub fn stop_gateway(handle: GatewayHandle) {
     let _ = handle.shutdown.send(());
     // ponytail: don't block_on the JoinHandle — stop_gateway is called from
-    // Tauri commands (on the tokio runtime) and ExitRequested handler.
+    // tokio runtime contexts and ExitRequested handlers.
     // The spawned task will exit when the graceful-shutdown future resolves.
     // If blocking is needed later, spawn the wait on a dedicated std::thread.
 }

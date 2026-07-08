@@ -209,24 +209,32 @@ npx tauri build
 │   ├── App.vue                 # 外壳 + 侧边栏导航
 │   ├── main.ts                 # Vue + naive-ui 启动
 │   └── styles/main.css
-├── src-tauri/                  # Rust + Tauri 后端
+├── crates/                     # Rust workspace 成员
+│   ├── ocg-core/               # 跨平台 lib：Gateway、DB、models、crypto、state
+│   │   └── src/
+│   │       ├── lib.rs          # 重新导出：crypto/db/gateway/models/state
+│   │       ├── crypto.rs       # KeyCipher trait + MachineBound/Static 两种实现
+│   │       ├── db.rs           # SQLite 打开 + 迁移 + 查询
+│   │       ├── models.rs       # serde 结构体、AppConfig、枚举
+│   │       ├── state.rs        # CoreState、配置读写、gateway-key 生成
+│   │       └── gateway/        # Axum 路由、handler、forwarder、selector、circuit_breaker、cost
+│   └── ocg-cli/                # 无头 CLI 二进制
+│       ├── Cargo.toml
+│       └── src/main.rs         # clap: serve / key / circuit / status
+├── src-tauri/                  # Tauri GUI 二进制（依赖 ocg-core）
 │   ├── capabilities/default.json   # 主窗口的 Tauri v2 权限
 │   ├── icons/                  # 32/128/256/512 + icon.ico
 │   ├── installer.nsh           # NSIS 钩子：卸载时询问是否删除数据目录
 │   ├── src/
 │   │   ├── commands/           # Tauri 命令处理（account/setting/gateway/log/dashboard/browser）
-│   │   ├── gateway/            # Axum Gateway（mod/handler/forwarder/selector/circuit_breaker/cost）
-│   │   ├── crypto.rs           # 机器绑定的 key 混淆
-│   │   ├── db.rs               # SQLite 打开 + 迁移 + 查询
-│   │   ├── models.rs           # serde 结构体、AppConfig、枚举
-│   │   ├── state.rs            # AppState、配置读写、gateway-key 生成
+│   │   ├── state.rs            # GuiState 包装 CoreState + current_browser_window
 │   │   ├── tray.rs             # 系统托盘初始化
 │   │   ├── lib.rs              # run()——串联 DB、Gateway、托盘、命令
 │   │   └── main.rs             # 可执行入口 → run()
 │   ├── Cargo.toml
 │   ├── build.rs
 │   └── tauri.conf.json
-├── Cargo.toml                  # workspace 根（members = src-tauri）
+├── Cargo.toml                  # workspace 根（members = crates/ocg-core, crates/ocg-cli, src-tauri）
 ├── package.json
 ├── vite.config.ts              # 开发端口 30001、@ 别名
 ├── tsconfig.json
@@ -240,19 +248,26 @@ npx tauri build
   │  POST http://127.0.0.1:9042/v1/chat/completions
   │  Authorization: Bearer <gateway-key>
   ▼
-Tauri 应用（Rust + WebView2）
-  ├── WebView2 UI（Vue 3 + naive-ui）──invoke()──► Tauri 命令
-  ├── 系统托盘（tray.rs）
-  └── 内嵌 Axum Gateway（gateway/）
-        ├── 鉴权：校验 Bearer <gateway-key>
-        ├── AccountSelector：按策略选出已启用且熔断健康的账号
-        ├── Forwarder：用该账号的 OCG key 将请求体转发到 {upstream}/v1/chat/completions
-        │     ├── SSE 流式透传 ─► 客户端（字节不变）
-        │     └── JSON 响应    ─► 解析 usage、估算成本、写日志
-        ├── CircuitBreaker：按账号记录成功/失败，升级冷却
-        └── DB（rusqlite）：accounts、settings、logs、circuit_states
-                ▲
-        失败时：排除该账号，重试下一个（≤5 次）→ 全部失败返回 502
+┌─────────────────────────── ocg-core（跨平台 lib）────────────────────────────┐
+│  Axum Gateway（mod/handler/forwarder/selector/circuit_breaker/cost）         │
+│    ├── 鉴权：校验 Bearer <gateway-key>                                       │
+│    ├── AccountSelector：按策略选出已启用且熔断健康的账号                      │
+│    ├── Forwarder：用该账号的 OCG key 将请求体转发到 {upstream}/v1/chat/...    │
+│    │     ├── SSE 流式透传 ─► 客户端（字节不变）                              │
+│    │     └── JSON 响应    ─► 解析 usage、估算成本、写日志                     │
+│    ├── CircuitBreaker：按账号记录成功/失败，升级冷却                         │
+│    ├── DB（rusqlite）：accounts、settings、logs、circuit_states              │
+│    └── KeyCipher trait：MachineBoundCipher（GUI） | StaticKeyCipher（CLI）  │
+│                                                                              │
+│   失败时：排除该账号，重试下一个（≤5 次）→ 全部失败返回 502                  │
+└──────────────────────────────────────────────────────────────────────────────┘
+  ▲                                              ▲
+  │ Tauri invoke（state.core.*）                 │ CoreState + StaticKeyCipher
+  │                                              │
+ocg-manager（Tauri GUI, Windows）         ocg-manager-cli（Linux/macOS/Win/Docker）
+├── WebView2 UI（Vue 3 + naive-ui）        ├── serve / key / circuit / status
+├── 系统托盘（tray.rs）                     └── 复用同一套 gateway + db
+└── MachineBoundCipher（默认）
 ```
 
 ### 关键实现
@@ -265,7 +280,7 @@ Tauri 应用（Rust + WebView2）
 - **成本**——`gateway/cost.rs` 持有价格 `HashMap`，规范化模型名（小写，分隔符→`-`），按 `cost = prompt/1e6·in + completion/1e6·out + cached/1e6·cache_read` 计算。未知模型先模糊匹配，再回退默认价。
 - **加密**——`crypto.rs`。以 `USERNAME` / `COMPUTERNAME` / `APPDATA` 为种子的机器绑定 XOR 混淆。文档明确**非**密码学安全；如需真实保密请替换为 `aes-gcm` / KMS。
 - **DB**——`db.rs`。SQLite 位于 `<data_dir>/data.sqlite`，通过 `schema_version` 版本化。表：`accounts`、`settings`、`gateway_logs`、`forward_logs`、`circuit_states`。索引在 `forward_logs(timestamp)` 与 `forward_logs(account_id)`。
-- **状态**——`state.rs`。`AppState`（Arc）持有 `Mutex<Database>`、`Mutex<AppConfig>`、`Mutex<Option<GatewayHandle>>`、`Mutex<Option<浏览器窗口 label>>`。配置以 JSON 序列化到 `settings` 表的 `config` 键；gateway key 在首次启动时自动生成为 `ocg-<word>-<word>`。
+- **状态**——`state.rs`。`CoreState`（Arc）位于 `ocg-core`，持有 `Mutex<Database>`、`Mutex<AppConfig>`、`Mutex<Option<GatewayHandle>>`、原子轮询计数器、`reqwest::Client`、`PathBuf`、`Arc<dyn KeyCipher>`。配置以 JSON 序列化到 `settings` 表的 `config` 键；gateway key 在首次启动时自动生成为 `ocg-<word>-<word>`。GUI 在 `src-tauri/src/state.rs` 用 `GuiState { core, current_browser_window }` 再包一层；Tauri 命令访问状态时走 `state.core.*`。
 - **托盘**——`tray.rs`。左键显示主窗口；右键菜单含 打开/状态/退出。`lib.rs` 拦截 `CloseRequested` 改为隐藏而非关闭。
 - **Tauri 命令**——在 `lib.rs::invoke_handler!` 中注册；类型化封装在 `src/api/tauri.ts`。新增命令需两处都改。
 
@@ -300,8 +315,44 @@ Tauri 应用（Rust + WebView2）
 
 ### 测试
 
-- `cd src-tauri && cargo test`——目前仅有 crypto 往返测试。
+- `cargo test --workspace`——运行 `ocg-core` 的 crypto 往返测试（MachineBoundCipher、StaticKeyCipher）。
 - 无前端测试。建议补充：选择器策略、熔断状态机、成本估算，以及对接 mock 上游的集成测试。
+
+### 无头 CLI（`ocg-manager-cli`）
+
+GUI 用的同一套 Gateway 与账号管理代码也以跨平台 CLI 二进制的形式暴露。无界面、无托盘、无 WebView——只有一份 `data.sqlite` 加一个 Axum 服务，所以可以跑在 Linux、macOS、Windows 和 Docker 里。
+
+```bash
+# 构建
+cargo build --release --bin ocg-manager-cli
+
+# 启动 Gateway（默认：端口 9042，数据目录 ~/.ocg-mgr-cli）
+./target/release/ocg-manager-cli serve
+
+# 覆盖参数
+./target/release/ocg-manager-cli --data-dir /var/lib/ocg --encryption-key "$OCG_KEY" serve --port 9042
+
+# 管理 key
+ocg-manager-cli key list
+ocg-manager-cli key add main sk-ocg-xxxxxxxx
+ocg-manager-cli key remove <account-id>
+ocg-manager-cli key enable <account-id>
+ocg-manager-cli key disable <account-id>
+
+# 熔断
+ocg-manager-cli circuit reset <account-id>
+
+# 查看运行状态
+ocg-manager-cli status
+```
+
+**加密密钥。** CLI 使用 `StaticKeyCipher`（非机器绑定），因此可以将数据目录迁到另一台机器并解密。解析优先级：
+
+1. `--encryption-key <secret>` 参数
+2. `OCG_MANAGER_ENCRYPTION_KEY` 环境变量
+3. `<data-dir>/.encryption-key` 文件（首次启动自动生成——请妥善备份）
+
+**数据目录。** 默认 `~/.ocg-mgr-cli`，可使用 `--data-dir` 覆盖。不要与 GUI 的 `%USERPROFILE%/.ocg-mgr/data.sqlite` 共享目录——GUI 使用 `MachineBoundCipher`，两种 cipher 不可互用。
 
 ### 打包与发布
 

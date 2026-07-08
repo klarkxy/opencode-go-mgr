@@ -11,7 +11,7 @@ pub fn open_browser(
     state: State<'_, AppState>,
     account_id: String,
 ) -> Result<String, String> {
-    let profile_dir = state.data_dir().join("profiles").join(&account_id);
+    let profile_dir = state.core.data_dir().join("profiles").join(&account_id);
     std::fs::create_dir_all(&profile_dir).map_err(|e| e.to_string())?;
 
     // Close existing browser window if any
@@ -42,6 +42,7 @@ pub fn open_browser(
     }
 
     let _ = state
+        .core
         .db
         .lock()
         .log_gateway("info", "browser", &format!("opened browser for account {}", account_id));
