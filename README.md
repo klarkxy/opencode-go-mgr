@@ -13,9 +13,9 @@
 ## Features
 
 - **Multi-account management** — add, edit, enable/disable, and switch between multiple OpenCode-Go accounts; keys are stored locally and never leave your machine.
-- **OpenAI-compatible gateway** — a local `http://127.0.0.1:9042/v1/chat/completions` endpoint that any OpenAI SDK or tool can target.
+- **OpenAI-compatible gateway** — a local `http://127.0.0.1:9042/v1/chat/completions` endpoint that any OpenAI SDK or tool can target. Also routes `POST /v1/messages` (Anthropic) and `GET /v1/models`.
 - **Rotation & fail-over** — sequential / random / round-robin selection; on failure the gateway automatically retries the next available account (up to 5 attempts).
-- **Per-account circuit breaker** — escalating cooldowns when an account errors repeatedly; automatic recovery, manual reset.
+- **Per-account cooldown** — when OpenCode-Go returns 429, the `Resets in X days/hours/min` text is parsed and the account is skipped by the selector for exactly that long. Manual reset from the account card.
 - **Usage & cost tracking** — per-account 5h / weekly / monthly cost estimated from token counts against the official price table.
 - **Built-in browser** — each account opens an isolated WebView2 window to the OpenCode-Go console for login, top-up, and key copying.
 - **System tray** — runs in the background; close the window and it stays in the tray.
@@ -71,9 +71,9 @@ for chunk in stream:
 
 Notes:
 
-- The gateway implements **only** `POST /v1/chat/completions`. Other OpenAI endpoints (`/models`, `/embeddings`, …) are not routed.
+- The gateway implements `POST /v1/chat/completions`, `POST /v1/messages` (Anthropic SDK shape), and `GET /v1/models`. Other OpenAI endpoints (`/embeddings`, etc.) are not routed.
 - The request body is passed through unchanged — tools, JSON mode, temperature, `stream`, etc. all work.
-- The client's `Authorization` header is consumed for gateway auth and **replaced** with the selected account's OCG key when forwarding upstream. Other request headers are not forwarded.
+- The client's `Authorization` header is consumed for gateway auth and **replaced** with the selected account's OCG key when forwarding upstream. The Anthropic-style `x-api-key` header is accepted as an auth alias. All other request headers **are** forwarded to the upstream.
 - SSE streaming responses are relayed byte-for-byte.
 - The gateway binds to `127.0.0.1` only — it is not reachable from the network.
 
@@ -87,22 +87,20 @@ Set the strategy in **Settings**:
 | Random | Pick a random available account. |
 | Round-robin | Cycle through available accounts. |
 
-"Available" means enabled **and** not in circuit-breaker cooldown. If the chosen account's request fails (4xx/5xx/timeout), the gateway excludes it and tries the next available account, up to 5 attempts. If all fail you get a `502` with the last error.
+"Available" means enabled **and** not in cooldown. If the chosen account's request fails (4xx/5xx/timeout), the gateway excludes it and tries the next available account, up to 5 attempts. If all fail you get a `502` with the last error.
 
-### Circuit breaker
+### Cooldown
 
-Each account tracks consecutive errors independently. When errors accumulate within a time window, the account enters a cooldown and is skipped by the selector.
+Each account has a `cooldown_until` column populated when OpenCode-Go returns a 429. The `Resets in …` text in the 429 body is parsed by `gateway/limit.rs` (`parse_reset`) and the resulting `Duration` (minutes / hours / days) is written verbatim. The selector skips any account whose `cooldown_until > now`.
 
-| Trigger | Cooldown | Meaning |
-|---------|----------|---------|
-| 6 errors within 30 min | 5 minutes | Likely rate-limit or network blip |
-| 6 errors within 5 h | 1 hour | 5h quota likely exhausted |
-| 6 errors within 24 h | 1 day | Weekly quota likely exhausted |
-| 7 errors within 7 days | Monthly blown | Monthly quota likely exhausted |
+| 429 phrase | Cooldown |
+|------------|----------|
+| `5-hour usage limit reached. Resets in 13min.` | 13 minutes |
+| `Weekly usage limit reached. Resets in 4 days.` | 4 days |
+| `Monthly usage limit reached. Resets in 13 days.` | 13 days |
 
-- Any **successful** request resets the error counter.
-- Short / medium / long cooldowns recover automatically when they expire.
-- **Monthly blown** does not auto-recover — use **重置熔断 (Reset circuit)** on the account card, or top up and reset.
+- A successful request does not clear cooldown on its own — only **重置冷却 (Reset cooldown)** on the account card does, or letting the timer expire.
+- Unknown 429 phrases (no `Resets in` text, or unrecognized unit) leave `cooldown_until` unset; the account is treated as available.
 
 ### Usage & cost
 
@@ -137,7 +135,7 @@ Use it to log in, check quota, top up, or copy a key without leaving the app.
 
 ### Data & security
 
-- **Data directory:** `%USERPROFILE%\.ocg-mgr\` — contains `data.sqlite` (accounts, logs, circuit state, settings) and `profiles/<account-id>/` (per-account WebView2 data). The uninstaller asks whether to delete it.
+- **Data directory:** `%USERPROFILE%\.ocg-mgr\` — contains `data.sqlite` (accounts, logs, cooldown, settings) and `profiles/<account-id>/` (per-account WebView2 data). The uninstaller asks whether to delete it.
 - **Key storage:** API keys are obfuscated with a machine-bound transform before being written to `data.sqlite`. This stops casual plaintext inspection but is **not** strong cryptography — it is not a substitute for a key vault. Anyone with read access to your user profile and the binary can recover the keys.
 - **Gateway key:** a local secret that gates access to the gateway. Keep it private; anyone who has it (and local access) can spend your accounts' quota.
 - **Network:** the gateway binds to `127.0.0.1` only. Do not tunnel it to the public internet without adding your own auth and TLS.
@@ -150,15 +148,15 @@ Use it to log in, check quota, top up, or copy a key without leaving the app.
 
 **I changed the port in Settings but my client still connects to 9042.** Update your client's `base_url` to the new port. The change takes effect after **重启 Gateway (Restart gateway)**.
 
-**An account is stuck in "monthly blown".** Use **重置熔断** on the account card after topping up.
+**An account is stuck in cooldown.** Use **重置冷却 (Reset cooldown)** on the account card. Cooldowns are not "monthly blown" — they come from the upstream 429 text directly.
 
 **Can I use this across the LAN / from another machine?** Not as shipped — the gateway binds to `127.0.0.1`. Use a local tunnel (e.g. `ngrok`, `cloudflared`) if you must, and understand the security implications.
 
 ### Known limitations
 
-- Only `/v1/chat/completions` is implemented; no `/models`, `/embeddings`, or Anthropic/Gemini protocol conversion.
+- Only `/v1/chat/completions`, `POST /v1/messages`, and `GET /v1/models` are implemented. No `/embeddings` and no Gemini protocol conversion.
 - Streaming requests are not reflected in usage/cost stats.
-- The **测试 (Test)** button on an account only checks that the stored key can be decrypted and shows a masked preview — it does **not** send a probe request to the upstream.
+- The **测试 (Test)** button on an account only checks that the stored key can be decrypted and shows a masked preview — it does **not** send a probe request to the upstream. (The CLI has a separate `key ping` subcommand that does probe.)
 - The **开机自启 (Launch on startup)** toggle is saved but not yet wired to the OS.
 - Quota windows are displayed, not enforced.
 - Single Gateway Key only (multi-key is a future option).
@@ -217,10 +215,10 @@ npx tauri build
 │   │       ├── db.rs           # SQLite open + migrations + queries
 │   │       ├── models.rs       # serde structs, AppConfig, enums
 │   │       ├── state.rs        # CoreState, config load/save, gateway-key gen
-│   │       └── gateway/        # Axum router, handler, forwarder, selector, circuit_breaker, cost
+│   │       └── gateway/        # Axum router, handler, forwarder, selector, limit, cost
 │   └── ocg-cli/                # headless CLI binary
 │       ├── Cargo.toml
-│       └── src/main.rs         # clap: serve / key / circuit / status
+│       └── src/main.rs         # clap: serve / key (list|add|remove|enable|disable|ping) / status
 ├── src-tauri/                  # Tauri GUI binary (depends on ocg-core)
 │   ├── capabilities/default.json   # Tauri v2 permissions for the main window
 │   ├── icons/                  # 32/128/256/512 + icon.ico
@@ -249,48 +247,47 @@ Client (OpenAI SDK / curl / any tool)
   │  Authorization: Bearer <gateway-key>
   ▼
 ┌─────────────────────────── ocg-core (cross-platform lib) ───────────────────────────┐
-│  Axum gateway (mod/handler/forwarder/selector/circuit_breaker/cost)                │
-│    ├── auth: verify Bearer <gateway-key>                                            │
-│    ├── AccountSelector: pick enabled, circuit-healthy account by strategy          │
-│    ├── Forwarder: relay body to {upstream}/v1/chat/completions with account's OCG  │
-│    │     ├── SSE stream passthrough  ─► client (bytes unchanged)                   │
-│    │     └── JSON response           ─► parse usage, estimate cost, log            │
-│    ├── CircuitBreaker: record success/error per account, escalate cooldowns        │
-│    ├── DB (rusqlite): accounts, settings, logs, circuit_states                      │
-│    └── KeyCipher trait: MachineBoundCipher (GUI) | StaticKeyCipher (CLI)           │
-│                                                                                     │
-│   On failure: exclude account, retry next (≤5 attempts) → 502 if all fail          │
+│  Axum gateway (mod/handler/forwarder/selector/limit/cost)                            │
+│    ├── auth: verify Bearer <gateway-key> (or x-api-key)                              │
+│    ├── AccountSelector: pick enabled, non-cooldown account by strategy               │
+│    ├── Forwarder: relay body to {upstream}/<path> with account's OCG key            │
+│    │     ├── SSE stream passthrough  ─► client (bytes unchanged)                     │
+│    │     └── JSON response           ─► parse usage, estimate cost, log              │
+│    ├── 429 parser (limit.rs): extract `Resets in X` → write cooldown_until          │
+│    ├── DB (rusqlite): accounts, settings, logs                                       │
+│    └── KeyCipher trait: MachineBoundCipher (GUI) | StaticKeyCipher (CLI)             │
+│                                                                                       │
+│   On failure: exclude account, retry next (≤5 attempts) → 502 if all fail            │
 └─────────────────────────────────────────────────────────────────────────────────────┘
   ▲                                                  ▲
   │ Tauri invoke (state.core.*)                      │ CoreState + StaticKeyCipher
   │                                                  │
 ocg-manager (Tauri GUI, Windows)             ocg-manager-cli (Linux/macOS/Win/Docker)
-├── WebView2 UI (Vue 3 + naive-ui)            ├── serve / key / circuit / status
+├── WebView2 UI (Vue 3 + naive-ui)            ├── serve / key (incl. ping) / status
 ├── System tray (tray.rs)                     └── uses same gateway + db
 └── MachineBoundCipher (default)
 ```
 
 ### Key internals
 
-- **Gateway wiring** — `gateway/mod.rs` builds the Axum router (`/v1/chat/completions` + permissive CORS), binds `127.0.0.1:<port>`, and runs with a graceful-shutdown oneshot. `start_gateway` / `stop_gateway` are called from `lib.rs` (startup) and `commands/gateway.rs` (restart).
-- **Request handler** — `gateway/handler.rs` checks the gateway key, then loops up to 5 attempts: select an account (excluding the last failed one), forward, and return on success or exclude-and-retry. Returns `401` / `503` (no accounts) / `502` (all failed).
-- **Forwarder** — `gateway/forwarder.rs` decrypts the account key, posts the **raw body** to `{upstream_base_url}/v1/chat/completions` (120 s timeout), then either streams SSE bytes through or parses the JSON `usage` block to estimate cost. Logs every attempt to `forward_logs`; records success/error with the circuit breaker.
-- **Selector** — `gateway/selector.rs` lists accounts, filters out disabled / excluded / circuit-unavailable ones, and picks by strategy (sequential = first; random = nano-time index; round-robin = atomic counter).
-- **Circuit breaker** — `gateway/circuit_breaker.rs`. `ERROR_THRESHOLD = 6`, `MONTHLY_THRESHOLD = 7`. `evaluate_level` maps the error-count + window to a level; `is_available` is false while `cooldown_until > now` or level is `MonthlyBlown`. Success resets the counter.
+- **Gateway wiring** — `gateway/mod.rs` builds the Axum router (`/v1/chat/completions`, `/v1/messages`, `/v1/models` + permissive CORS), binds `127.0.0.1:<port>`, and runs with a graceful-shutdown oneshot. `start_gateway` / `stop_gateway` are called from `lib.rs` (startup) and `commands/gateway.rs` (restart).
+- **Request handler** — `gateway/handler.rs` checks the gateway key (Bearer or `x-api-key`), then loops up to 5 attempts: select an account (excluding the last failed one), forward, and return on success or exclude-and-retry. Returns `401` / `503` (no accounts) / `429` (all in cooldown) / `502` (all failed).
+- **Forwarder** — `gateway/forwarder.rs` decrypts the account key, posts the **raw body** to `{upstream_base_url}{path}` (120 s timeout), forwarding all client headers except `Authorization` (replaced with the account's OCG key), then either streams SSE bytes through or parses the JSON `usage` block to estimate cost. On a 429 response, `parse_reset` extracts the cooldown duration and writes it to `accounts.cooldown_until`. Logs every attempt to `forward_logs`.
+- **Selector** — `gateway/selector.rs` lists accounts, filters out disabled / excluded / accounts whose `cooldown_until > now`, and picks by strategy (sequential = first; random = nano-time index; round-robin = atomic counter).
+- **Cooldown parser** — `gateway/limit.rs::parse_reset`. Recognises `Resets in N min|hour|day(s)` in upstream 429 messages; minutes/hours/days are all supported, other units return `None`.
 - **Cost** — `gateway/cost.rs` holds the price `HashMap`, normalizes model names (lowercase, separators → `-`), and computes `cost = prompt/1e6·in + completion/1e6·out + cached/1e6·cache_read`. Unknown models fall back to a fuzzy match, then a default price.
-- **Crypto** — `crypto.rs`. Machine-bound XOR obfuscation seeded from `USERNAME` / `COMPUTERNAME` / `APPDATA`. Documented as **not** cryptographically secure; swap for `aes-gcm` / a KMS if real secrecy is needed.
-- **DB** — `db.rs`. SQLite at `<data_dir>/data.sqlite`, schema versioned via `schema_version`. Tables: `accounts`, `settings`, `gateway_logs`, `forward_logs`, `circuit_states`. Indices on `forward_logs(timestamp)` and `forward_logs(account_id)`.
-- **State** — `state.rs`. `CoreState` (Arc) lives in `ocg-core` and holds `Mutex<Database>`, `Mutex<AppConfig>`, `Mutex<Option<GatewayHandle>>`, an atomic round-robin counter, `reqwest::Client`, `PathBuf`, and `Arc<dyn KeyCipher>`. Config is serialized to the `settings` table under key `config`; gateway key auto-generated as `ocg-<word>-<word>` on first run. The GUI's `src-tauri/src/state.rs` wraps it in `GuiState { core, current_browser_window }`; Tauri commands access state via `state.core.*`.
-- **Tray** — `tray.rs`. Left-click shows the main window; right-click menu opens/status/quit. `lib.rs` intercepts `CloseRequested` to hide instead of close.
+- **Crypto** — `crates/ocg-core/src/crypto.rs`. Machine-bound XOR obfuscation seeded from `USERNAME` / `COMPUTERNAME` / `APPDATA`. Documented as **not** cryptographically secure; swap for `aes-gcm` / a KMS if real secrecy is needed.
+- **DB** — `crates/ocg-core/src/db.rs`. SQLite at `<data_dir>/data.sqlite`, schema versioned via `schema_version` (currently v2). Tables: `accounts`, `settings`, `gateway_logs`, `forward_logs`. Indices on `forward_logs(timestamp)` and `forward_logs(account_id)`. The v2 migration added `accounts.cooldown_until` and `accounts.last_error`; there is no separate `circuit_states` table.
+- **State** — `crates/ocg-core/src/state.rs`. `CoreState` (Arc) lives in `ocg-core` and holds `Mutex<Database>`, `Mutex<AppConfig>`, `Mutex<Option<GatewayHandle>>`, an atomic round-robin counter, a shared `reqwest::Client` (built once with a 120 s timeout), `PathBuf`, and `Arc<dyn KeyCipher>`. Config is serialized to the `settings` table under key `config`; gateway key auto-generated as `ocg-<word>-<word>` on first run. The GUI's `src-tauri/src/state.rs` wraps it in `GuiState { core, current_browser_window }`; Tauri commands access state via `state.core.*`.
+- **Tray** — `src-tauri/src/tray.rs`. Left-click shows the main window; right-click menu opens/status/quit. `lib.rs` intercepts `CloseRequested` to hide instead of close.
 - **Tauri commands** — registered in `lib.rs::invoke_handler!`; typed wrappers in `src/api/tauri.ts`. Add a new command in both places.
 
 ### Data model
 
-`accounts(id, name, key_cipher, enabled, referral_code, recharge_date, created_at, updated_at)`
+`accounts(id, name, key_cipher, enabled, referral_code, recharge_date, cooldown_until, last_error, created_at, updated_at)` — `cooldown_until` and `last_error` added in schema v2
 `settings(key, value)` — app config stored as JSON under `key = "config"`
 `gateway_logs(id, level, category, message, created_at)`
 `forward_logs(id, timestamp, model, account_id, account_name, status, http_status, prompt_tokens, completion_tokens, cached_tokens, cost, error_message)`
-`circuit_states(account_id, consecutive_errors, first_error_at, last_error_at, cooldown_until, level)`
 
 ### Configuration
 
@@ -301,22 +298,22 @@ ocg-manager (Tauri GUI, Windows)             ocg-manager-cli (Linux/macOS/Win/Do
 | `gateway_port` | `9042` | Bind port of the local gateway. |
 | `gateway_key` | auto `ocg-xxxxxxxx-xxxxxxxx` | Regeneratable from Settings. |
 | `selection_strategy` | `sequential` | `sequential` / `random` / `round_robin`. |
-| `upstream_base_url` | `https://api.opencode.ai` | OpenCode-Go API base. |
+| `upstream_base_url` | `https://opencode.ai/zen/go` | OpenCode-Go API base. The path is appended to this in the forwarder; do not include `/v1`. |
 | `auto_start` | `false` | Saved only — not yet wired to OS startup. |
 
 Editable in-app (Settings) or directly in the `settings` table. After changing the port, restart the gateway. `tauri.conf.json` `security.csp` hardcodes `connect-src http://localhost:9042`; update it if you rely on the webview talking to a different port (the gateway is normally hit by external clients, not the webview, so this rarely matters).
 
 ### Extending
 
-- **Add a model to the price table** — add an entry in `gateway/cost.rs::price_table()`. Names are normalized (lowercase, ` /_.` → `-`), so match the upstream's model id loosely.
-- **Tune circuit thresholds** — `gateway/circuit_breaker.rs`: `ERROR_THRESHOLD`, `MONTHLY_THRESHOLD`, and the windows in `evaluate_level`.
+- **Add a model to the price table** — add an entry in `gateway/cost.rs::price_table_cell()`. Names are normalized (lowercase, ` /_.` → `-`), so match the upstream's model id loosely.
+- **Tune cooldown parsing** — `gateway/limit.rs::parse_reset`: add a unit arm in the `match` to recognise more 429 phrasings.
 - **Change the default port / upstream** — `models.rs::AppConfig::default()`.
 - **Add a Tauri command** — write the `#[tauri::command]` fn under `src-tauri/src/commands/`, register it in `lib.rs::invoke_handler!`, and add a typed wrapper in `src/api/tauri.ts`.
 
 ### Testing
 
-- `cargo test --workspace` — runs the `ocg-core` crypto round-trip tests (MachineBoundCipher, StaticKeyCipher).
-- No frontend tests. Worth adding: selector strategy, circuit-breaker state machine, cost estimation, and an integration test with a mock upstream.
+- `cargo test --workspace` — runs the `ocg-core` tests: `crypto` round-trip (MachineBoundCipher, StaticKeyCipher) and the `gateway::limit::parse_reset` known-message cases.
+- No frontend tests. Worth adding: selector strategy, cooldown math, cost estimation, and an integration test with a mock upstream.
 
 ### Headless CLI (`ocg-manager-cli`)
 
@@ -339,8 +336,10 @@ ocg-manager-cli key remove <account-id>
 ocg-manager-cli key enable <account-id>
 ocg-manager-cli key disable <account-id>
 
-# Circuit breaker
-ocg-manager-cli circuit reset <account-id>
+# Probe upstream (real HTTP) — pings one or all enabled accounts
+ocg-manager-cli key ping                        # all enabled accounts
+ocg-manager-cli key ping <account-id>           # one account
+ocg-manager-cli key ping <account-id> --model deepseek-v4-flash --message "hello"
 
 # Show runtime status
 ocg-manager-cli status
@@ -363,12 +362,12 @@ ocg-manager-cli status
 
 ### Known gaps / TODOs
 
-- No automated tests beyond `crypto` round-trip.
+- No automated tests beyond `crypto` round-trip and `parse_reset`.
 - Streaming requests log zero tokens/cost (usage stats cover non-streaming only).
-- `test_account` doesn't probe the upstream — it only decrypts and masks the key.
+- `test_account` doesn't probe the upstream — it only decrypts and masks the key. (The CLI's `key ping` does.)
 - `auto_start` flag is not wired to an OS autostart entry (no `tauri-plugin-autostart` registered).
-- Monthly circuit reset by recharge date is not implemented (manual reset only).
-- `reqwest::Client` is constructed per request — no connection pooling.
+- Monthly cooldown auto-reset by recharge date is not implemented (manual reset only).
+- `reqwest::Client` is built once in `CoreStateInner::new` with a 120 s timeout, so connection pooling is per-process and per-host — good enough for now.
 - Crypto is obfuscation, not AEAD.
 - `tauri-plugin-store` is declared as an npm dependency but commented out on the Rust side.
 

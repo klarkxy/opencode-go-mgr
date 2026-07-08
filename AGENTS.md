@@ -82,7 +82,7 @@ d:\0 code\ocg-manager
 │   │       ├── db.rs         # SQLite 打开 + 迁移 + 查询
 │   │       ├── models.rs     # serde 结构体、AppConfig、枚举
 │   │       ├── state.rs      # CoreState、配置读写、gateway-key 生成
-│   │       └── gateway/      # Axum Gateway（mod/handler/forwarder/selector/circuit_breaker/cost）
+│   │       └── gateway/      # Axum Gateway（mod/handler/forwarder/selector/limit/cost）
 │   └── ocg-cli/              # 命令行应用
 │       ├── Cargo.toml
 │       └── src/
@@ -241,7 +241,7 @@ d:\0 code\ocg-manager
 #### 通用 core lib（`crates/ocg-core`）
 
 - `crates/ocg-core/src/lib.rs`：重新导出 `crypto`、`db`、`gateway`、`models`、`state`。
-- `crates/ocg-core/src/gateway/`：Gateway 核心，含 `mod.rs`（Axum 路由构建与启停）、`handler.rs`（请求鉴权 + 重试循环）、`forwarder.rs`（上游转发 + SSE 透传）、`selector.rs`（账号选择策略）、`circuit_breaker.rs`（熔断状态机）、`cost.rs`（价格表 + 成本计算）。
+- `crates/ocg-core/src/gateway/`：Gateway 核心，含 `mod.rs`（Axum 路由构建与启停）、`handler.rs`（请求鉴权 + 重试循环）、`forwarder.rs`（上游转发 + SSE 透传 + 429 冷却写入）、`selector.rs`（账号选择策略）、`limit.rs`（解析 429 文案 `Resets in …` → Duration）、`cost.rs`（价格表 + 成本计算）。无独立 `circuit_breaker` 模块；冷却字段在 `accounts` 表上。
 - `crates/ocg-core/src/db.rs`：SQLite 数据库打开、迁移、CRUD 操作。
 - `crates/ocg-core/src/models.rs`：数据结构定义（`Account`、`AppConfig`、`ForwardLog` 等）。
 - `crates/ocg-core/src/state.rs`：`CoreState`（Arc 包装），管理配置、DB、Gateway handle、HTTP client、选择器计数器、加密器。
@@ -257,7 +257,7 @@ d:\0 code\ocg-manager
 
 #### CLI（`crates/ocg-cli`）
 
-- `crates/ocg-cli/src/main.rs`：使用 `clap` 解析命令，初始化 `CoreState`（注入 `StaticKeyCipher`），实现 `serve`/`key`/`circuit`/`status` 命令。
+- `crates/ocg-cli/src/main.rs`：使用 `clap` 解析命令，初始化 `CoreState`（注入 `StaticKeyCipher`），实现 `serve` / `key`（list/add/remove/enable/disable/ping）/ `status` 命令。
 
 ### 6.3 Tauri 插件
 
@@ -301,7 +301,7 @@ d:\0 code\ocg-manager
 
 当前自动化测试：
 
-- **Rust 单元测试**：`src-tauri/src/crypto.rs` 中 crypto 加解密往返测试（`#[cfg(test)]`）。
+- **Rust 单元测试**：`crates/ocg-core/src/crypto.rs` 中 crypto 加解密往返测试，`crates/ocg-core/src/gateway/limit.rs` 中 `parse_reset` 的已知文案用例。
 - **Playwright UI 冒烟测试**：`playwright-debug.mjs`，在 headless Chromium 中验证仪表盘、账号新增、日志页、设置页、侧边栏折叠等关键 UI 流程。依赖 `npm run dev` 启动的 Vite 开发服务器，并通过 `src/api/dev-mock.ts` 模拟 Tauri 后端。
 
 未找到：
@@ -312,7 +312,7 @@ d:\0 code\ocg-manager
 
 建议按以下顺序补充：
 
-1. **Rust 单元测试**：Gateway 账号选择策略、熔断状态机、成本计算。
+1. **Rust 单元测试**：Gateway 账号选择策略、cooldown 边界条件、成本计算。
 2. **Rust 集成测试**：模拟 OCG 上游，验证 `/v1/chat/completions` 转发与失败切换。
 3. **前端组件测试**：账号卡片、设置表单等 Vue 组件。
 4. **端到端测试**：真实 Tauri 应用启动、托盘、窗口行为（工具链较重，可延后）。
@@ -342,8 +342,8 @@ d:\0 code\ocg-manager
 1. 流式请求记录 0 token/0 成本（用量统计仅覆盖非流式响应）。
 2. `test_account` 命令不探测上游——仅解密并掩码展示 key。
 3. `auto_start` 配置标志未接入 OS 开机自启（`tauri-plugin-autostart` 未注册）。
-4. 按月充值日期自动重置熔断未实现（仅支持手动重置）。
-5. `reqwest::Client` 每请求新建——无连接池复用。
+4. 按月充值日期自动重置冷却未实现（仅支持手动重置）。
+5. `reqwest::Client` 在 `CoreStateInner::new` 中构建一次，120s 超时——连接池为进程级、复用同 host。
 6. 加密是 XOR 混淆，非 AEAD（`crypto.rs`）。
 7. `tauri-plugin-store` 已声明在 `package.json` 但 Rust 端被注释，未注册。
 8. Playwright 测试为浏览器内模拟，未覆盖真实 Tauri IPC、系统托盘、Gateway 网络转发等桌面端行为。
