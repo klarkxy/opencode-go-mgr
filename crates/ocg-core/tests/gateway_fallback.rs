@@ -39,11 +39,7 @@ const SUCCESS_BODY: &str = r#"{"id":"ok","object":"chat.completion","model":"dee
 
 fn temp_data_dir(label: &str) -> PathBuf {
     let mut dir = std::env::temp_dir();
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    dir.push(format!("ocg-gateway-test-{}-{}", label, nanos));
+    dir.push(format!("ocg-gateway-test-{}-{}", label, uuid::Uuid::new_v4()));
     fs::create_dir_all(&dir).unwrap();
     dir
 }

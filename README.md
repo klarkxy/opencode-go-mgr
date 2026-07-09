@@ -378,4 +378,4 @@ ocg-manager-cli status
 
 ## License
 
-MIT
+SATA-2.0 (SATA-2.0 License) — see LICENSE file for details.
