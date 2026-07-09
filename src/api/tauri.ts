@@ -28,12 +28,9 @@ export interface AccountUpdate {
   recharge_date?: string;
 }
 
-export type SelectionStrategy = "sequential" | "random" | "round_robin";
-
 export interface AppConfig {
   gateway_port: number;
   gateway_key: string;
-  selection_strategy: SelectionStrategy;
   upstream_base_url: string;
   auto_start: boolean;
   remote: RemoteSync;

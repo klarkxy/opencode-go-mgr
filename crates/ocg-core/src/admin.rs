@@ -45,7 +45,7 @@ pub fn build_admin_router(state: CoreState, token: String) -> Router {
     Router::new()
         .route("/admin/health", get(health))
         .route("/admin/keys", get(list_keys).post(upsert_key))
-        .route("/admin/keys/:id", delete(delete_key))
+        .route("/admin/keys/{id}", delete(delete_key))
         .route_layer(middleware::from_fn_with_state(
             AdminToken(token),
             require_bearer,

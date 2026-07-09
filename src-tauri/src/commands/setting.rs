@@ -16,8 +16,8 @@ pub fn update_settings(
 ) -> Result<GatewayStatus, String> {
     validate_upstream_url(&config.upstream_base_url)?;
     validate_remote_url(&config.remote.url)?;
-    // ponytail: only restart if the port actually changed. The other three fields
-    // (gateway_key / upstream_base_url / selection_strategy) are already live
+    // ponytail: only restart if the port actually changed. Gateway key and
+    // upstream URL are already live
     // — handler.rs reads state.config() per request. Restarting on every save
     // would drop in-flight requests for no reason.
     // ponytail: if the gateway is not running, do not start it here; the next

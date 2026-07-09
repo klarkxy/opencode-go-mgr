@@ -4,9 +4,21 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vue-tsc && vite build",
-    "preview": "vite preview"
+    "build:gateway": "cargo build -p ocg-core",
+    "test:gateway": "cargo test -p ocg-core",
+    "debug:gateway": "cargo run --bin ocg-manager-cli -- serve",
+    "build:cli": "cargo build --release --bin ocg-manager-cli",
+    "test:cli": "cargo test -p ocg-manager-cli",
+    "debug:cli": "cargo run --bin ocg-manager-cli --",
+    "build:gui": "tauri build",
+    "test:gui": "vue-tsc --noEmit",
+    "dev:gui": "tauri dev",
+    "debug:gui": "tauri dev",
+    "build": "pnpm run build:gateway && pnpm run build:cli && pnpm run build:gui",
+    "test": "pnpm run test:gateway && pnpm run test:cli && pnpm run test:gui",
+    "verify": "pnpm run test:gateway && pnpm run test:cli && vue-tsc --noEmit",
+    "fmt": "cargo fmt --all",
+    "clean": "node -e \"const { rmSync } = require('node:fs'); for (const p of ['dist', 'playwright-out']) rmSync(p, { recursive: true, force: true });\" && cargo clean"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

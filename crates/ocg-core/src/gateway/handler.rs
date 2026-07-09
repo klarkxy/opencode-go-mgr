@@ -53,13 +53,16 @@ async fn proxy_handler(
     }
 
     let client = &state.http_client;
-    let selector =
-        AccountSelector::with_counter(config.selection_strategy, state.round_robin_counter.clone());
+    let selector = AccountSelector::new();
+    let is_stream_request = serde_json::from_slice::<serde_json::Value>(&body)
+        .ok()
+        .and_then(|v| v.get("stream").and_then(serde_json::Value::as_bool))
+        .unwrap_or(false);
 
     let mut last_error: Option<String> = None;
     let mut failed_ids: Vec<String> = Vec::new();
 
-    for _attempt in 0..5 {
+    loop {
         let account = {
             let db = state.db.lock();
             let excluded = failed_ids.iter().map(String::as_str).collect::<Vec<_>>();
@@ -87,47 +90,59 @@ async fn proxy_handler(
             }
         };
 
-        match forward_request(
-            &client,
-            &state,
-            &account,
-            &config.upstream_base_url,
-            upstream_path,
-            headers.clone(),
-            body.clone(),
-        )
-        .await
-        {
-            Ok(result) => {
-                if result.success {
-                    return result.response;
-                } else {
+        let mut retried_same_account = false;
+        loop {
+            match forward_request(
+                client,
+                &state,
+                &account,
+                &config.upstream_base_url,
+                upstream_path,
+                headers.clone(),
+                body.clone(),
+            )
+            .await
+            {
+                Ok(result) => {
+                    if result.success {
+                        return result.response;
+                    }
                     last_error = result.error_message.clone();
-                    failed_ids.push(account.id.clone());
-                    let _ = {
-                        let db = state.db.lock();
-                        db.log_gateway(
+                    if result.retryable && !is_stream_request && !retried_same_account {
+                        retried_same_account = true;
+                        let _ = state.db.lock().log_gateway(
                             "warn",
                             "gateway",
                             &format!(
-                                "account {} failed, switching to next: {:?}",
+                                "account {} transient failure, retrying once: {:?}",
                                 account.name, result.error_message
                             ),
-                        )
-                    };
+                        );
+                        continue;
+                    }
+                    failed_ids.push(account.id.clone());
+                    let _ = state.db.lock().log_gateway(
+                        "warn",
+                        "gateway",
+                        &format!(
+                            "account {} failed, switching to next: {:?}",
+                            account.name, result.error_message
+                        ),
+                    );
+                    break;
                 }
-            }
-            Err(e) => {
-                last_error = Some(format!("forward error: {}", e));
-                failed_ids.push(account.id.clone());
+                Err(e) => {
+                    last_error = Some(format!("forward error: {}", e));
+                    if !is_stream_request && !retried_same_account {
+                        retried_same_account = true;
+                        continue;
+                    }
+                    failed_ids.push(account.id.clone());
+                    break;
+                }
             }
         }
     }
-
-    error_response(
-        StatusCode::BAD_GATEWAY,
-        &last_error.unwrap_or_else(|| "all accounts failed".to_string()),
-    )
 }
 
 fn check_auth(headers: &HeaderMap, config: &AppConfig) -> bool {

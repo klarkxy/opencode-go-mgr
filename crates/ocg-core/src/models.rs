@@ -32,25 +32,10 @@ pub struct AccountUpdate {
     pub recharge_date: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum SelectionStrategy {
-    Sequential,
-    Random,
-    RoundRobin,
-}
-
-impl Default for SelectionStrategy {
-    fn default() -> Self {
-        SelectionStrategy::Sequential
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     pub gateway_port: u16,
     pub gateway_key: String,
-    pub selection_strategy: SelectionStrategy,
     pub upstream_base_url: String,
     pub auto_start: bool,
     // ponytail: empty url = remote sync disabled. No separate `enabled` flag —
@@ -64,7 +49,6 @@ impl Default for AppConfig {
         Self {
             gateway_port: 9042,
             gateway_key: String::new(),
-            selection_strategy: SelectionStrategy::default(),
             upstream_base_url: "https://opencode.ai/zen/go".to_string(),
             auto_start: false,
             remote: RemoteSync::default(),

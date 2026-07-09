@@ -88,7 +88,6 @@ const showWizard = ref(false);
 const wizardConfig = ref<AppConfig>({
   gateway_port: 9042,
   gateway_key: "",
-  selection_strategy: "sequential",
   upstream_base_url: "https://opencode.ai/zen/go",
   auto_start: false,
   remote: { url: "", token: "" },

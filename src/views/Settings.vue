@@ -5,9 +5,6 @@
         <n-form-item label="监听端口">
           <n-input-number v-model:value="config.gateway_port" :min="1024" :max="65535" />
         </n-form-item>
-        <n-form-item label="选择策略">
-          <n-select v-model:value="config.selection_strategy" :options="strategyOptions" />
-        </n-form-item>
         <n-form-item label="上游地址">
           <n-input v-model:value="config.upstream_base_url" placeholder="https://api.opencode.ai" />
         </n-form-item>
@@ -43,12 +40,11 @@ import {
   NFormItem,
   NInput,
   NInputNumber,
-  NSelect,
   NSwitch,
   NButton,
   useMessage,
 } from "naive-ui";
-import { tauriApi, AppConfig, SelectionStrategy, GatewayStatus } from "../api/tauri";
+import { tauriApi, AppConfig, GatewayStatus } from "../api/tauri";
 
 const message = useMessage();
 // ponytail: keep in sync with AppConfig::default() in
@@ -56,19 +52,12 @@ const message = useMessage();
 const config = ref<AppConfig>({
   gateway_port: 9042,
   gateway_key: "",
-  selection_strategy: "sequential",
   upstream_base_url: "https://opencode.ai/zen/go",
   auto_start: false,
   remote: { url: "", token: "" },
 });
 const dataDir = ref("%USERPROFILE%\\.ocg-mgr");
 const savedPort = ref(9042);
-
-const strategyOptions = [
-  { label: "顺序", value: "sequential" as SelectionStrategy },
-  { label: "随机", value: "random" as SelectionStrategy },
-  { label: "轮询", value: "round_robin" as SelectionStrategy },
-];
 
 async function loadSettings() {
   try {

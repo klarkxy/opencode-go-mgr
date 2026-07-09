@@ -1,10 +1,9 @@
 use crate::crypto::KeyCipher;
 use crate::db::Database;
 use crate::models::AppConfig;
-use std::path::PathBuf;
-use std::sync::atomic::AtomicUsize;
-use std::sync::Arc;
 use parking_lot::Mutex;
+use std::path::PathBuf;
+use std::sync::Arc;
 
 pub struct GatewayHandle {
     pub port: u16,
@@ -18,7 +17,6 @@ pub struct CoreStateInner {
     pub db: Mutex<Database>,
     pub config: Mutex<AppConfig>,
     pub gateway: Mutex<Option<GatewayHandle>>,
-    pub round_robin_counter: Arc<AtomicUsize>,
     pub http_client: reqwest::Client,
     pub data_dir: PathBuf,
     pub cipher: Arc<dyn KeyCipher + Send + Sync>,
@@ -45,7 +43,6 @@ impl CoreStateInner {
             db: Mutex::new(db),
             config: Mutex::new(config),
             gateway: Mutex::new(None),
-            round_robin_counter: Arc::new(AtomicUsize::new(0)),
             http_client,
             data_dir,
             cipher,

@@ -23,6 +23,7 @@ pub struct ForwardResult {
     pub response: Response,
     pub account: Account,
     pub success: bool,
+    pub retryable: bool,
     pub error_message: Option<String>,
 }
 
@@ -74,6 +75,7 @@ async fn forward_request_impl(
                 | "content-length"
                 | "connection"
                 | "transfer-encoding"
+                | "accept-encoding"
         ) {
             upstream_headers.insert(name.clone(), value.clone());
         }
@@ -86,6 +88,10 @@ async fn forward_request_impl(
     upstream_headers.insert(
         reqwest::header::AUTHORIZATION,
         reqwest::header::HeaderValue::from_str(&format!("Bearer {}", key))?,
+    );
+    upstream_headers.insert(
+        reqwest::header::ACCEPT_ENCODING,
+        reqwest::header::HeaderValue::from_static("identity"),
     );
 
     let url = format!(
@@ -129,6 +135,7 @@ async fn forward_request_impl(
                 response: error_response(&error_message),
                 account: account.clone(),
                 success: false,
+                retryable: true,
                 error_message: Some(error_message),
             });
         }
@@ -168,6 +175,7 @@ async fn forward_request_impl(
             response: error_response(&error_message),
             account: account.clone(),
             success: false,
+            retryable: true,
             error_message: Some(error_message),
         });
     }
@@ -206,6 +214,33 @@ async fn forward_request_impl(
                 response: error_response(&error_message),
                 account: account.clone(),
                 success: false,
+                retryable: false,
+                error_message: Some(error_message),
+            });
+        }
+
+        if status.as_u16() == 408 {
+            let error_message = format!("upstream timeout 408: {}", sanitize_upstream_error(&text));
+            {
+                let db = state.db.lock();
+                log_forward(
+                    &*db,
+                    account,
+                    &model,
+                    "client_error",
+                    Some(408),
+                    0,
+                    0,
+                    0,
+                    0.0,
+                    Some(&error_message),
+                )?;
+            }
+            return Ok(ForwardResult {
+                response: error_response(&error_message),
+                account: account.clone(),
+                success: false,
+                retryable: true,
                 error_message: Some(error_message),
             });
         }
@@ -236,6 +271,7 @@ async fn forward_request_impl(
                 response: error_response(&error_message),
                 account: account.clone(),
                 success: false,
+                retryable: false,
                 error_message: Some(error_message),
             });
         }
@@ -262,6 +298,7 @@ async fn forward_request_impl(
             response: (status, response_headers, text).into_response(),
             account: account.clone(),
             success: true,
+            retryable: false,
             error_message: None,
         });
     }
@@ -400,6 +437,7 @@ async fn forward_request_impl(
             response: response_builder.body(Body::from_stream(mapped.chain(finalizer)))?,
             account: account.clone(),
             success: true,
+            retryable: false,
             error_message: None,
         })
     } else {
@@ -440,6 +478,7 @@ async fn forward_request_impl(
             response: (status, response_headers, text).into_response(),
             account: account.clone(),
             success: true,
+            retryable: false,
             error_message: None,
         })
     }
@@ -466,9 +505,7 @@ pub async fn forward_get(
     upstream_path: &str,
 ) -> Result<Response> {
     ensure_safe_upstream_base_url(upstream_base_url)?;
-    let config = state.config();
-    let selector =
-        AccountSelector::with_counter(config.selection_strategy, state.round_robin_counter.clone());
+    let selector = AccountSelector::new();
     let account = {
         let db = state.db.lock();
         selector

@@ -64,7 +64,6 @@ function loadState(): MockState {
     config: {
       gateway_port: 9042,
       gateway_key: generateKey(),
-      selection_strategy: "round_robin",
       upstream_base_url: "https://opencode.ai/zen/go/v1",
       auto_start: false,
       remote: { url: "", token: "" },

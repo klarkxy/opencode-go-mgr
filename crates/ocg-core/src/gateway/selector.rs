@@ -1,28 +1,13 @@
 use crate::db::Database;
-use crate::models::{Account, SelectionStrategy};
+use crate::models::Account;
 use anyhow::Result;
 use chrono::Utc;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
-pub struct AccountSelector {
-    strategy: SelectionStrategy,
-    round_robin_index: Arc<AtomicUsize>,
-}
+pub struct AccountSelector;
 
 impl AccountSelector {
-    pub fn new(strategy: SelectionStrategy) -> Self {
-        Self {
-            strategy,
-            round_robin_index: Arc::new(AtomicUsize::new(0)),
-        }
-    }
-
-    pub fn with_counter(strategy: SelectionStrategy, counter: Arc<AtomicUsize>) -> Self {
-        Self {
-            strategy,
-            round_robin_index: counter,
-        }
+    pub fn new() -> Self {
+        Self
     }
 
     pub fn select(&self, db: &Database, exclude_id: Option<&str>) -> Result<Option<Account>> {
@@ -31,47 +16,85 @@ impl AccountSelector {
     }
 
     pub fn select_excluding(&self, db: &Database, exclude_ids: &[&str]) -> Result<Option<Account>> {
-        let accounts = db.list_accounts()?;
         let now = Utc::now();
-        let mut available: Vec<Account> = Vec::new();
-        for account in accounts {
+        for account in db.list_accounts()? {
             if !account.enabled {
                 continue;
             }
             if exclude_ids.iter().any(|excluded| account.id == *excluded) {
                 continue;
             }
-            // ponytail: cooldown check piggybacks on list_accounts (no extra query).
-            // Add a per-row cache or index when account count exceeds ~100.
             if let Some(until) = account.cooldown_until {
                 if until > now {
                     continue;
                 }
             }
-            available.push(account);
+            return Ok(Some(account));
         }
 
-        if available.is_empty() {
-            return Ok(None);
+        Ok(None)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::crypto::{KeyCipher, StaticKeyCipher};
+    use crate::models::Account;
+    use chrono::{Duration, Utc};
+    use std::fs;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    fn temp_data_dir(label: &str) -> PathBuf {
+        let mut dir = std::env::temp_dir();
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        dir.push(format!("ocg-selector-test-{}-{}", label, nanos));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn account(id: &str, enabled: bool, cooldown: Option<chrono::DateTime<Utc>>) -> Account {
+        let cipher: Arc<dyn KeyCipher + Send + Sync> = Arc::new(StaticKeyCipher::new("test"));
+        Account {
+            id: id.into(),
+            name: id.into(),
+            key_cipher: cipher.encrypt(id).unwrap(),
+            enabled,
+            referral_code: None,
+            recharge_date: None,
+            cooldown_until: cooldown,
+            last_error: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
         }
+    }
 
-        let selected = match self.strategy {
-            SelectionStrategy::Sequential => available.into_iter().next(),
-            SelectionStrategy::Random => {
-                use std::time::{SystemTime, UNIX_EPOCH};
-                let seed = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_nanos();
-                let idx = (seed % available.len() as u128) as usize;
-                available.into_iter().nth(idx)
-            }
-            SelectionStrategy::RoundRobin => {
-                let idx = self.round_robin_index.fetch_add(1, Ordering::SeqCst) % available.len();
-                available.into_iter().nth(idx)
-            }
-        };
+    #[test]
+    fn skips_disabled_cooldown_and_excluded_accounts_in_order() {
+        let dir = temp_data_dir("skip");
+        let db = Database::open(dir.clone()).unwrap();
+        db.create_account(&account("disabled", false, None))
+            .unwrap();
+        db.create_account(&account(
+            "cooldown",
+            true,
+            Some(Utc::now() + Duration::hours(1)),
+        ))
+        .unwrap();
+        db.create_account(&account("failed", true, None)).unwrap();
+        db.create_account(&account("next", true, None)).unwrap();
 
-        Ok(selected)
+        let selected = AccountSelector::new()
+            .select_excluding(&db, &["failed"])
+            .unwrap()
+            .unwrap();
+        assert_eq!(selected.id, "next");
+
+        drop(db);
+        fs::remove_dir_all(dir).unwrap();
     }
 }
