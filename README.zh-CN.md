@@ -4,7 +4,7 @@
   <img src="assets/logo/ocg_logo_final_transparent.png" alt="OCG Manager Logo" width="160">
 </p>
 
-> 一款 Windows 桌面应用，用于管理多个 OpenCode-Go API key，并提供内置的 OpenAI 兼容 Gateway，可透明地在多个账号间轮询、故障转移并统计用量。
+> 一款 Windows 桌面应用，用于在 GUI 中管理 OpenCode-Go 账号，并提供内置的 OpenAI 兼容 Gateway，按顺序使用已启用 key 做转发、故障转移、冷却处理与日志记录。
 
 [功能特性](#功能特性) · [面向使用者](#面向使用者) · [面向维护者](#面向维护者) · [许可证](#许可证)
 
@@ -12,10 +12,10 @@
 
 ## 功能特性
 
-- **多账号管理**：添加、编辑、启用/禁用、切换多个 OpenCode-Go 账号；key 本地存储，绝不上传。
-- **OpenAI 兼容 Gateway**：本地 `http://127.0.0.1:9042/v1/chat/completions` 端点，任何 OpenAI SDK 或工具都可直连。同时支持 `POST /v1/messages`（Anthropic）和 `GET /v1/models`。
-- **轮询与故障转移**：顺序 / 随机 / 轮询三种选择策略；请求失败时自动切换到下一个可用账号（最多重试 5 次）。
-- **账号级冷却**：当 OpenCode-Go 返回 429 时，正文中的 `Resets in X days/hours/min` 会被解析，写入该账号的 `cooldown_until`；选择器在到期前直接跳过该账号。也支持在账号卡片上**手动重置**。
+- **GUI 账号管理**：在桌面应用中添加、编辑、启用/禁用、切换多个 OpenCode-Go 账号；key 本地存储，绝不上传。
+- **OpenAI 兼容 Gateway**：本地 `http://127.0.0.1:9042/v1/chat/completions` 端点，任何 OpenAI SDK 或工具都可直连。Gateway 只消费已存储且已启用的 key，不承担账号管理 UI 或控制面职责。同时支持 `POST /v1/messages`（Anthropic）和 `GET /v1/models`。
+- **顺序故障转移**：v1 始终按账号列表/创建顺序尝试，自动跳过禁用账号、冷却中账号，以及本次请求中已经失败的账号。
+- **账号级冷却**：当 OpenCode-Go 返回 429 时，正文中的 `Resets in X days/hours/min` 会被解析，写入该账号的 `cooldown_until`；选择器在到期前直接跳过该账号。手动重置是 GUI 账号卡片上的操作。
 - **用量与费用统计**：基于 token 数量按官方价格表估算每个账号的 5h / 周 / 月 成本。
 - **内置浏览器**：每个账号可打开独立隔离的 WebView2 窗口访问 OpenCode-Go 控制台，用于登录、充值、复制 key。
 - **系统托盘**：后台常驻；关闭窗口后驻留托盘。
@@ -73,25 +73,26 @@ for chunk in stream:
 
 - Gateway 实现 `POST /v1/chat/completions`、`POST /v1/messages`（Anthropic SDK 形态）和 `GET /v1/models`。其他 OpenAI 端点（`/embeddings` 等）不会被路由。
 - 请求体原样透传——工具调用、JSON 模式、temperature、`stream` 等都正常工作。
-- 客户端的 `Authorization` 头用于 Gateway 鉴权后会被**替换**为所选账号的 OCG key 再转发上游；Anthropic 风格的 `x-api-key` 头被接受为鉴权别名。其余请求头**会**原样转发到上游。
+- 客户端的 `Authorization` 头用于 Gateway 鉴权后会被**替换**为所选账号的 OCG key 再转发上游；Anthropic 风格的 `x-api-key` 头被接受为鉴权别名。Gateway 私有头、逐跳头、cookie/proxy 头以及 `accept-encoding` 会被过滤；上游请求会显式使用 `Accept-Encoding: identity`。
 - SSE 流式响应按字节原样透传。
 - Gateway 仅绑定 `127.0.0.1`，局域网/公网不可达。
 
-### 账号选择与故障转移
+### 顺序故障转移
 
-在 **设置** 中选择策略：
+账号级管理属于 GUI（以及 CLI 为无头场景提供的最小 `key` 命令）。Gateway 只读取已保存的账号列表，选择一个已启用 key，转发请求，并记录冷却、日志等请求结果。
 
-| 策略 | 行为 |
-|------|------|
-| 顺序 | 按账号列表顺序取第一个可用账号。 |
-| 随机 | 在可用账号中随机取一个。 |
-| 轮询 | 循环使用可用账号。 |
+v1 没有随机或轮询策略。Gateway 始终按账号列表/创建顺序尝试。「可用」指已启用、不在冷却中，并且没有在本次请求里失败过。
 
-「可用」指已启用 **且** 不在冷却中。若选中账号请求失败（4xx/5xx/超时），Gateway 会排除该账号并尝试下一个可用账号，最多 5 次。若全部失败，返回 `502` 并附带最后一次错误信息。
+- `429`：解析重置时间，写入 `cooldown_until` 和 `last_error`，然后直接尝试下一个可用账号。
+- `401` / `403`：视为该 key 的鉴权失败，不写冷却，直接尝试下一个账号。
+- `408` / `5xx` / 网络失败：非流式请求会在同一账号上原地重试 1 次，以尽量保留同 key 缓存命中；仍失败再切到下一个账号。流式请求不做原地重试。
+- 其他请求级 `4xx`：直接透传上游响应给客户端，不 fallback。
+
+没有固定重试次数上限。Gateway 会一直尝试，直到没有可选账号。若所有账号都在冷却中，返回 `429` 并带上最早重置时间；若所有可用账号都因非冷却原因失败，返回 `502` 和最后一次错误。
 
 ### 冷却策略
 
-每个账号有一个 `cooldown_until` 列，由 OpenCode-Go 返回 429 时填充。`gateway/limit.rs`（`parse_reset`）会解析 429 正文里的 `Resets in …`，把得到的 `Duration`（分钟 / 小时 / 天）原样写入。选择器跳过任何 `cooldown_until > now` 的账号。
+每个账号有一个 `cooldown_until` 列，由 OpenCode-Go 返回 429 时填充。`gateway/limit.rs`（`parse_reset`）会解析 429 正文里的 `Resets in …`，把得到的 `Duration`（分钟 / 小时 / 天）原样写入。选择器跳过任何 `cooldown_until > now` 的账号。Gateway 只写入这类请求结果状态；查看与手动重置由 GUI 账号页负责。
 
 | 429 文案 | 冷却时长 |
 |---------|---------|
@@ -119,7 +120,7 @@ for chunk in stream:
 
 OpenCode-Go 额度窗口供参考：**5h = $12**、**每周 = $30**、**每月 = $60**。应用会展示你的花费对照这些额度，但**不**强制限制。
 
-> ⚠️ **流式请求不计入用量统计。** 只有非流式响应包含可解析的 `usage` 字段，因此流式补全会以 `0` token、`$0.00` 记录。若依赖用量数据，请优先使用非流式调用，或将流式用量视为少计。
+> ⚠️ **流式用量是 best-effort。** 非流式响应通常包含可解析的 `usage` 字段。流式响应只有在上游发出 usage chunk 时才会记录 token/费用；否则会以 `success_no_usage`、`0` token、`$0.00` 结束。若依赖精确用量，请优先使用非流式调用，或在客户端支持时启用流式 usage。
 
 ### 内置浏览器
 
@@ -144,7 +145,7 @@ OpenCode-Go 额度窗口供参考：**5h = $12**、**每周 = $30**、**每月 =
 
 ### 常见问题
 
-**仪表盘显示 $0 但我一直在用。** 你大概率用了 `stream: true`。见 [流式请求注意事项](#用量与费用)——流式用量不会被记录。
+**仪表盘显示 $0 但我一直在用。** 上游响应大概率没有带 usage 数据。流式调用请在客户端支持时启用 usage chunk；否则用非流式调用才能得到更准确的仪表盘数字。
 
 **在设置里改了端口，但客户端仍连 9042。** 请将客户端的 `base_url` 更新为新端口。端口改动需 **重启 Gateway** 后生效。
 
@@ -155,7 +156,7 @@ OpenCode-Go 额度窗口供参考：**5h = $12**、**每周 = $30**、**每月 =
 ### 已知限制
 
 - 已实现 `/v1/chat/completions`、`POST /v1/messages` 和 `GET /v1/models`；未实现 `/embeddings`，也不做 Gemini 协议转换。
-- 流式请求不计入用量/费用统计。
+- 流式用量依赖上游 usage chunk；没有 usage 的流会以 `success_no_usage`、0 token、$0.00 记录。
 - 账号卡片上的 **测试** 按钮仅校验存储的 key 能否解密并显示掩码预览，**不会**向上游发送探测请求（CLI 的 `key ping` 子命令会）。
 - **开机自启**开关已保存但尚未接入操作系统。
 - 额度窗口仅展示，不强制。
@@ -249,7 +250,7 @@ npx tauri build
 ┌─────────────────────────── ocg-core（跨平台 lib）────────────────────────────┐
 │  Axum Gateway（mod/handler/forwarder/selector/limit/cost）                       │
 │    ├── 鉴权：校验 Bearer <gateway-key>（或 x-api-key）                           │
-│    ├── AccountSelector：按策略选出已启用且未在冷却中的账号                       │
+│    ├── AccountSelector：按列表顺序选出第一个已启用且未在冷却中的账号             │
 │    ├── Forwarder：用该账号的 OCG key 将请求体转发到 {upstream}{path}            │
 │    │     ├── SSE 流式透传 ─► 客户端（字节不变）                                 │
 │    │     └── JSON 响应    ─► 解析 usage、估算成本、写日志                        │
@@ -257,28 +258,29 @@ npx tauri build
 │    ├── DB（rusqlite）：accounts、settings、logs                                 │
 │    └── KeyCipher trait：MachineBoundCipher（GUI） | StaticKeyCipher（CLI）      │
 │                                                                                 │
-│   失败时：排除该账号，重试下一个（≤5 次）→ 全部失败返回 502                     │
+│   Fallback：429 -> 写冷却并切下一个；408/5xx/网络错误 -> 同 key 重试一次再切换   │
 └─────────────────────────────────────────────────────────────────────────────┘
   ▲                                              ▲
   │ Tauri invoke（state.core.*）                 │ CoreState + StaticKeyCipher
   │                                              │
 ocg-manager（Tauri GUI, Windows）         ocg-manager-cli（Linux/macOS/Win/Docker）
-├── WebView2 UI（Vue 3 + naive-ui）        ├── serve / key（含 ping）/ status
-├── 系统托盘（tray.rs）                     └── 复用同一套 gateway + db
+├── 账号管理 UI                            ├── serve / 最小 key 存储 / status
+├── WebView2 UI（Vue 3 + naive-ui）        └── 复用 gateway + db 基础能力
+├── 系统托盘（tray.rs）
 └── MachineBoundCipher（默认）
 ```
 
 ### 关键实现
 
 - **Gateway 装配**——`gateway/mod.rs` 构建 Axum 路由（`/v1/chat/completions`、`/v1/messages`、`/v1/models` + 宽松 CORS），绑定 `127.0.0.1:<port>`，并以 graceful-shutdown oneshot 运行。`start_gateway` / `stop_gateway` 在 `lib.rs`（启动）和 `commands/gateway.rs`（重启）中调用。
-- **请求处理**——`gateway/handler.rs` 校验 gateway key（Bearer 或 `x-api-key`），随后循环最多 5 次：选账号（排除上一次失败的）、转发、成功即返回，失败则排除并重试。返回 `401` / `503`（无可用账号）/ `429`（全部在冷却中）/ `502`（全部失败）。
-- **转发器**——`gateway/forwarder.rs` 解密账号 key，将**原始请求体** POST 到 `{upstream_base_url}{path}`（120s 超时），转发除 `Authorization`（替换为该账号的 OCG key）之外的所有客户端头，随后要么按字节透传 SSE 流，要么解析 JSON `usage` 估算成本。收到 429 时，`parse_reset` 解析冷却时长并写入 `accounts.cooldown_until`。每次尝试都写入 `forward_logs`。
-- **选择器**——`gateway/selector.rs` 列出账号，过滤掉已禁用/被排除/`cooldown_until > now` 的，再按策略挑选（顺序=第一个；随机=纳秒时间索引；轮询=原子计数器）。
+- **请求处理**——`gateway/handler.rs` 校验 gateway key（Bearer 或 `x-api-key`），随后循环直到没有可选账号。它会记录本次请求中已经失败的账号；非流式 `408` / `5xx` / 网络失败会在同一账号上重试 1 次；`429` / `401` / `403` 直接 fallback；普通请求级 `4xx` 直接透传。返回 `401` / `503`（无账号）/ `429`（全部在冷却中，并带最早重置时间）/ `502`（全部失败）。
+- **转发器**——`gateway/forwarder.rs` 解密账号 key，将**原始请求体** POST 到 `{upstream_base_url}{path}`（120s 超时），过滤 Gateway 私有头、逐跳头和 `accept-encoding`，用该账号的 OCG key 替换鉴权，并发送 `Accept-Encoding: identity`。随后要么按字节透传 SSE 流，要么解析 JSON `usage` 估算成本。收到 429 时，`parse_reset` 解析冷却时长并写入 `accounts.cooldown_until` 与 `last_error`。每次尝试都写入 `forward_logs`。
+- **选择器**——`gateway/selector.rs` 列出账号，过滤掉已禁用/被排除/`cooldown_until > now` 的，再返回第一个剩余账号。v1 没有随机或轮询策略。
 - **冷却解析**——`gateway/limit.rs::parse_reset`。识别上游 429 文案中的 `Resets in N min|hour|day(s)`；分钟/小时/天均支持，其他单位返回 `None`。
 - **成本**——`gateway/cost.rs` 持有价格 `HashMap`，规范化模型名（小写，分隔符→`-`），按 `cost = prompt/1e6·in + completion/1e6·out + cached/1e6·cache_read` 计算。未知模型先模糊匹配，再回退默认价。
 - **加密**——`crates/ocg-core/src/crypto.rs`。以 `USERNAME` / `COMPUTERNAME` / `APPDATA` 为种子的机器绑定 XOR 混淆。文档明确**非**密码学安全；如需真实保密请替换为 `aes-gcm` / KMS。
 - **DB**——`crates/ocg-core/src/db.rs`。SQLite 位于 `<data_dir>/data.sqlite`，通过 `schema_version` 版本化（当前 v2）。表：`accounts`、`settings`、`gateway_logs`、`forward_logs`。索引在 `forward_logs(timestamp)` 与 `forward_logs(account_id)`。v2 迁移新增了 `accounts.cooldown_until` 与 `accounts.last_error`；**没有**独立的 `circuit_states` 表。
-- **状态**——`crates/ocg-core/src/state.rs`。`CoreState`（Arc）位于 `ocg-core`，持有 `Mutex<Database>`、`Mutex<AppConfig>`、`Mutex<Option<GatewayHandle>>`、原子轮询计数器、一个共享的 `reqwest::Client`（启动时构建一次，120s 超时）、`PathBuf`、`Arc<dyn KeyCipher>`。配置以 JSON 序列化到 `settings` 表的 `config` 键；gateway key 在首次启动时自动生成为 `ocg-<word>-<word>`。GUI 在 `src-tauri/src/state.rs` 用 `GuiState { core, current_browser_window }` 再包一层；Tauri 命令访问状态时走 `state.core.*`。
+- **状态**——`crates/ocg-core/src/state.rs`。`CoreState`（Arc）位于 `ocg-core`，持有 `Mutex<Database>`、`Mutex<AppConfig>`、`Mutex<Option<GatewayHandle>>`、一个共享的 `reqwest::Client`（启动时构建一次，120s 超时）、`PathBuf`、`Arc<dyn KeyCipher>`。配置以 JSON 序列化到 `settings` 表的 `config` 键；gateway key 在首次启动时自动生成为 `ocg-<word>-<word>`。GUI 在 `src-tauri/src/state.rs` 用 `GuiState { core, current_browser_window }` 再包一层；Tauri 命令访问状态时走 `state.core.*`。
 - **托盘**——`src-tauri/src/tray.rs`。左键显示主窗口；右键菜单含 打开/状态/退出。`lib.rs` 拦截 `CloseRequested` 改为隐藏而非关闭。
 - **Tauri 命令**——在 `lib.rs::invoke_handler!` 中注册；类型化封装在 `src/api/tauri.ts`。新增命令需两处都改。
 
@@ -297,7 +299,6 @@ ocg-manager（Tauri GUI, Windows）         ocg-manager-cli（Linux/macOS/Win/Do
 |------|--------|------|
 | `gateway_port` | `9042` | 本地 Gateway 绑定端口。 |
 | `gateway_key` | 自动 `ocg-xxxxxxxx-xxxxxxxx` | 可在设置中重新生成。 |
-| `selection_strategy` | `sequential` | `sequential` / `random` / `round_robin`。 |
 | `upstream_base_url` | `https://opencode.ai/zen/go` | OpenCode-Go API 基址。转发器会拼上 path，**不要**带 `/v1`。 |
 | `auto_start` | `false` | 仅保存——尚未接入 OS 开机自启。 |
 | `remote.url` | ``（空） | 留空=纯本地。设置后，GUI 每次本地改动都会把 key 推送到该远端 admin API。 |
@@ -315,11 +316,11 @@ ocg-manager（Tauri GUI, Windows）         ocg-manager-cli（Linux/macOS/Win/Do
 ### 测试
 
 - `cargo test --workspace`——运行 `ocg-core` 的测试：`crypto` 往返（MachineBoundCipher、StaticKeyCipher）和 `gateway::limit::parse_reset` 已知文案用例。
-- 无前端测试。建议补充：选择器策略、冷却计时、成本估算，以及对接 mock 上游的集成测试。
+- 无前端测试。建议补充：顺序选择器行为、冷却计时、成本估算，以及对接 mock 上游的集成测试。
 
 ### 无头 CLI（`ocg-manager-cli`）
 
-GUI 用的同一套 Gateway 与账号管理代码也以跨平台 CLI 二进制的形式暴露。无界面、无托盘、无 WebView——只有一份 `data.sqlite` 加一个 Axum 服务，所以可以跑在 Linux、macOS、Windows 和 Docker 里。加 `--admin-port <u16>` 会在 `127.0.0.1:<port>` 再暴露一个 Bearer 鉴权的远端同步 admin API；HTTPS 请交给前方的反代，二进制本身不做 TLS 终结。
+CLI 复用 `ocg-core` 的 Gateway 与数据库基础能力，并为服务器场景提供一个最小无头 key 存储接口。它不是 GUI 账号管理界面：没有账号卡片、没有浏览器 profile、没有托盘、没有 WebView。运行形态是一份 `data.sqlite` 加一个 Axum 服务，所以可以跑在 Linux、macOS、Windows 和 Docker 里。加 `--admin-port <u16>` 会在 `127.0.0.1:<port>` 再暴露一个 Bearer 鉴权的远端同步 admin API；HTTPS 请交给前方的反代，二进制本身不做 TLS 终结。
 
 ```bash
 # 构建

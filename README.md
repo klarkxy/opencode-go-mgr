@@ -4,7 +4,7 @@
   <img src="assets/logo/ocg_logo_final_transparent.png" alt="OCG Manager Logo" width="160">
 </p>
 
-> A Windows desktop app for managing multiple OpenCode-Go API keys, with a built-in OpenAI-compatible gateway that transparently rotates, fail-overs, and tracks usage across accounts.
+> A Windows desktop app for managing OpenCode-Go accounts in the GUI, with a built-in OpenAI-compatible gateway that forwards through enabled keys using sequential fallback, cooldown handling, and usage logging.
 
 [Features](#features) · [For Users](#for-users) · [For Maintainers](#for-maintainers) · [License](#license)
 
@@ -12,10 +12,10 @@
 
 ## Features
 
-- **Multi-account management** — add, edit, enable/disable, and switch between multiple OpenCode-Go accounts; keys are stored locally and never leave your machine.
-- **OpenAI-compatible gateway** — a local `http://127.0.0.1:9042/v1/chat/completions` endpoint that any OpenAI SDK or tool can target. Also routes `POST /v1/messages` (Anthropic) and `GET /v1/models`.
-- **Rotation & fail-over** — sequential / random / round-robin selection; on failure the gateway automatically retries the next available account (up to 5 attempts).
-- **Per-account cooldown** — when OpenCode-Go returns 429, the `Resets in X days/hours/min` text is parsed and the account is skipped by the selector for exactly that long. Manual reset from the account card.
+- **GUI account management** — add, edit, enable/disable, and switch between multiple OpenCode-Go accounts from the desktop app; keys are stored locally and never leave your machine.
+- **OpenAI-compatible gateway** — a local `http://127.0.0.1:9042/v1/chat/completions` endpoint that any OpenAI SDK or tool can target. The gateway consumes the stored enabled keys; it is not an account-management UI or control plane. Also routes `POST /v1/messages` (Anthropic) and `GET /v1/models`.
+- **Sequential fallback** — v1 always tries accounts in list/creation order, skipping disabled accounts, accounts in cooldown, and accounts already failed during the current request.
+- **Per-account cooldown** — when OpenCode-Go returns 429, the `Resets in X days/hours/min` text is parsed and the account is skipped by the selector for exactly that long. Manual reset is a GUI account-card action.
 - **Usage & cost tracking** — per-account 5h / weekly / monthly cost estimated from token counts against the official price table.
 - **Built-in browser** — each account opens an isolated WebView2 window to the OpenCode-Go console for login, top-up, and key copying.
 - **System tray** — runs in the background; close the window and it stays in the tray.
@@ -73,25 +73,26 @@ Notes:
 
 - The gateway implements `POST /v1/chat/completions`, `POST /v1/messages` (Anthropic SDK shape), and `GET /v1/models`. Other OpenAI endpoints (`/embeddings`, etc.) are not routed.
 - The request body is passed through unchanged — tools, JSON mode, temperature, `stream`, etc. all work.
-- The client's `Authorization` header is consumed for gateway auth and **replaced** with the selected account's OCG key when forwarding upstream. The Anthropic-style `x-api-key` header is accepted as an auth alias. All other request headers **are** forwarded to the upstream.
+- The client's `Authorization` header is consumed for gateway auth and **replaced** with the selected account's OCG key when forwarding upstream. The Anthropic-style `x-api-key` header is accepted as an auth alias. Gateway-private, hop-by-hop, cookie/proxy, and `accept-encoding` headers are filtered; the upstream request explicitly uses `Accept-Encoding: identity`.
 - SSE streaming responses are relayed byte-for-byte.
 - The gateway binds to `127.0.0.1` only — it is not reachable from the network.
 
-### Account selection & fail-over
+### Sequential fallback
 
-Set the strategy in **Settings**:
+Account-level management belongs to the GUI (and the CLI's minimal `key` commands for headless use). The gateway only reads the stored account list, selects an enabled key, forwards the request, and records request outcomes such as cooldowns and logs.
 
-| Strategy | Behavior |
-|----------|----------|
-| Sequential | Pick the first available account in list order. |
-| Random | Pick a random available account. |
-| Round-robin | Cycle through available accounts. |
+There is no random or round-robin strategy in v1. The gateway tries accounts in list/creation order. "Available" means enabled, not in cooldown, and not already failed during the current request.
 
-"Available" means enabled **and** not in cooldown. If the chosen account's request fails (4xx/5xx/timeout), the gateway excludes it and tries the next available account, up to 5 attempts. If all fail you get a `502` with the last error.
+- `429`: parse the reset window, write `cooldown_until` and `last_error`, then immediately try the next available account.
+- `401` / `403`: treat as key-level auth failure and try the next account without writing cooldown.
+- `408` / `5xx` / network failure: for non-streaming requests, retry the same account once to preserve same-key cache locality; if it still fails, try the next account. Streaming requests do not do same-key retry.
+- Other request-level `4xx`: pass the upstream response through to the client; do not fallback.
+
+There is no fixed attempt cap. The gateway keeps going until no selectable account remains. If every account is in cooldown, the client gets `429` with the soonest reset time; if all available accounts fail for non-cooldown reasons, the client gets `502` with the last error.
 
 ### Cooldown
 
-Each account has a `cooldown_until` column populated when OpenCode-Go returns a 429. The `Resets in …` text in the 429 body is parsed by `gateway/limit.rs` (`parse_reset`) and the resulting `Duration` (minutes / hours / days) is written verbatim. The selector skips any account whose `cooldown_until > now`.
+Each account has a `cooldown_until` column populated when OpenCode-Go returns a 429. The `Resets in …` text in the 429 body is parsed by `gateway/limit.rs` (`parse_reset`) and the resulting `Duration` (minutes / hours / days) is written verbatim. The selector skips any account whose `cooldown_until > now`. The gateway writes this request-result state; viewing and manually resetting it is handled by the GUI account page.
 
 | 429 phrase | Cooldown |
 |------------|----------|
@@ -119,7 +120,7 @@ The **Dashboard** shows today's / this week's / this month's total cost across a
 
 OpenCode-Go quota windows for reference: **5h = $12**, **weekly = $30**, **monthly = $60**. The app shows your spend against these but does **not** enforce them.
 
-> ⚠️ **Streaming requests are not cost-tracked.** Only non-streaming responses include a parseable `usage` block, so streaming completions are logged with `0` tokens and `$0.00` cost. If you rely on usage numbers, prefer non-streaming calls, or treat streaming usage as an under-count.
+> ⚠️ **Streaming usage is best-effort.** Non-streaming responses usually include a parseable `usage` block. Streaming responses are logged with token/cost data when the upstream emits a usage chunk; otherwise they finish as `success_no_usage` with `0` tokens and `$0.00` cost. If you rely on exact usage numbers, prefer non-streaming calls or enable usage chunks where your client supports it.
 
 ### Built-in browser
 
@@ -144,7 +145,7 @@ Use it to log in, check quota, top up, or copy a key without leaving the app.
 
 ### FAQ
 
-**The dashboard says $0 but I've been using it.** You're probably using `stream: true`. See the [streaming caveat](#usage--cost) — streaming usage isn't recorded.
+**The dashboard says $0 but I've been using it.** The upstream response probably did not include usage data. For streaming calls, enable usage chunks if your client supports them; otherwise use non-streaming calls for exact dashboard numbers.
 
 **I changed the port in Settings but my client still connects to 9042.** Update your client's `base_url` to the new port. The change takes effect after **重启 Gateway (Restart gateway)**.
 
@@ -155,7 +156,7 @@ Use it to log in, check quota, top up, or copy a key without leaving the app.
 ### Known limitations
 
 - Only `/v1/chat/completions`, `POST /v1/messages`, and `GET /v1/models` are implemented. No `/embeddings` and no Gemini protocol conversion.
-- Streaming requests are not reflected in usage/cost stats.
+- Streaming usage depends on upstream usage chunks; streams without usage are logged as `success_no_usage` with 0 tokens and $0.00 cost.
 - The **测试 (Test)** button on an account only checks that the stored key can be decrypted and shows a masked preview — it does **not** send a probe request to the upstream. (The CLI has a separate `key ping` subcommand that does probe.)
 - The **开机自启 (Launch on startup)** toggle is saved but not yet wired to the OS.
 - Quota windows are displayed, not enforced.
@@ -249,7 +250,7 @@ Client (OpenAI SDK / curl / any tool)
 ┌─────────────────────────── ocg-core (cross-platform lib) ───────────────────────────┐
 │  Axum gateway (mod/handler/forwarder/selector/limit/cost)                            │
 │    ├── auth: verify Bearer <gateway-key> (or x-api-key)                              │
-│    ├── AccountSelector: pick enabled, non-cooldown account by strategy               │
+│    ├── AccountSelector: pick first enabled, non-cooldown account in list order       │
 │    ├── Forwarder: relay body to {upstream}/<path> with account's OCG key            │
 │    │     ├── SSE stream passthrough  ─► client (bytes unchanged)                     │
 │    │     └── JSON response           ─► parse usage, estimate cost, log              │
@@ -257,28 +258,29 @@ Client (OpenAI SDK / curl / any tool)
 │    ├── DB (rusqlite): accounts, settings, logs                                       │
 │    └── KeyCipher trait: MachineBoundCipher (GUI) | StaticKeyCipher (CLI)             │
 │                                                                                       │
-│   On failure: exclude account, retry next (≤5 attempts) → 502 if all fail            │
+│   Fallback: 429 -> cooldown + next; 408/5xx/network -> same-key retry once, then next │
 └─────────────────────────────────────────────────────────────────────────────────────┘
   ▲                                                  ▲
   │ Tauri invoke (state.core.*)                      │ CoreState + StaticKeyCipher
   │                                                  │
 ocg-manager (Tauri GUI, Windows)             ocg-manager-cli (Linux/macOS/Win/Docker)
-├── WebView2 UI (Vue 3 + naive-ui)            ├── serve / key (incl. ping) / status
-├── System tray (tray.rs)                     └── uses same gateway + db
+├── Account-management UI                     ├── serve / minimal key store / status
+├── WebView2 UI (Vue 3 + naive-ui)            └── uses same gateway + db primitives
+├── System tray (tray.rs)
 └── MachineBoundCipher (default)
 ```
 
 ### Key internals
 
 - **Gateway wiring** — `gateway/mod.rs` builds the Axum router (`/v1/chat/completions`, `/v1/messages`, `/v1/models` + permissive CORS), binds `127.0.0.1:<port>`, and runs with a graceful-shutdown oneshot. `start_gateway` / `stop_gateway` are called from `lib.rs` (startup) and `commands/gateway.rs` (restart).
-- **Request handler** — `gateway/handler.rs` checks the gateway key (Bearer or `x-api-key`), then loops up to 5 attempts: select an account (excluding the last failed one), forward, and return on success or exclude-and-retry. Returns `401` / `503` (no accounts) / `429` (all in cooldown) / `502` (all failed).
-- **Forwarder** — `gateway/forwarder.rs` decrypts the account key, posts the **raw body** to `{upstream_base_url}{path}` (120 s timeout), forwarding all client headers except `Authorization` (replaced with the account's OCG key), then either streams SSE bytes through or parses the JSON `usage` block to estimate cost. On a 429 response, `parse_reset` extracts the cooldown duration and writes it to `accounts.cooldown_until`. Logs every attempt to `forward_logs`.
-- **Selector** — `gateway/selector.rs` lists accounts, filters out disabled / excluded / accounts whose `cooldown_until > now`, and picks by strategy (sequential = first; random = nano-time index; round-robin = atomic counter).
+- **Request handler** — `gateway/handler.rs` checks the gateway key (Bearer or `x-api-key`), then loops until no selectable account remains. It tracks accounts that failed during the current request, retries the same account once for non-streaming `408` / `5xx` / network failures, falls back immediately for `429` / `401` / `403`, and passes through ordinary request-level `4xx`. Returns `401` / `503` (no accounts) / `429` (all in cooldown, with soonest reset) / `502` (all failed).
+- **Forwarder** — `gateway/forwarder.rs` decrypts the account key, posts the **raw body** to `{upstream_base_url}{path}` (120 s timeout), filters gateway-private / hop-by-hop / `accept-encoding` headers, replaces auth with the account's OCG key, and sends `Accept-Encoding: identity`. It then streams SSE bytes through or parses the JSON `usage` block to estimate cost. On a 429 response, `parse_reset` extracts the cooldown duration and writes `accounts.cooldown_until` plus `last_error`. Logs every attempt to `forward_logs`.
+- **Selector** — `gateway/selector.rs` lists accounts, filters out disabled / excluded / accounts whose `cooldown_until > now`, and returns the first remaining account. v1 has no random or round-robin strategy.
 - **Cooldown parser** — `gateway/limit.rs::parse_reset`. Recognises `Resets in N min|hour|day(s)` in upstream 429 messages; minutes/hours/days are all supported, other units return `None`.
 - **Cost** — `gateway/cost.rs` holds the price `HashMap`, normalizes model names (lowercase, separators → `-`), and computes `cost = prompt/1e6·in + completion/1e6·out + cached/1e6·cache_read`. Unknown models fall back to a fuzzy match, then a default price.
 - **Crypto** — `crates/ocg-core/src/crypto.rs`. Machine-bound XOR obfuscation seeded from `USERNAME` / `COMPUTERNAME` / `APPDATA`. Documented as **not** cryptographically secure; swap for `aes-gcm` / a KMS if real secrecy is needed.
 - **DB** — `crates/ocg-core/src/db.rs`. SQLite at `<data_dir>/data.sqlite`, schema versioned via `schema_version` (currently v2). Tables: `accounts`, `settings`, `gateway_logs`, `forward_logs`. Indices on `forward_logs(timestamp)` and `forward_logs(account_id)`. The v2 migration added `accounts.cooldown_until` and `accounts.last_error`; there is no separate `circuit_states` table.
-- **State** — `crates/ocg-core/src/state.rs`. `CoreState` (Arc) lives in `ocg-core` and holds `Mutex<Database>`, `Mutex<AppConfig>`, `Mutex<Option<GatewayHandle>>`, an atomic round-robin counter, a shared `reqwest::Client` (built once with a 120 s timeout), `PathBuf`, and `Arc<dyn KeyCipher>`. Config is serialized to the `settings` table under key `config`; gateway key auto-generated as `ocg-<word>-<word>` on first run. The GUI's `src-tauri/src/state.rs` wraps it in `GuiState { core, current_browser_window }`; Tauri commands access state via `state.core.*`.
+- **State** — `crates/ocg-core/src/state.rs`. `CoreState` (Arc) lives in `ocg-core` and holds `Mutex<Database>`, `Mutex<AppConfig>`, `Mutex<Option<GatewayHandle>>`, a shared `reqwest::Client` (built once with a 120 s timeout), `PathBuf`, and `Arc<dyn KeyCipher>`. Config is serialized to the `settings` table under key `config`; gateway key auto-generated as `ocg-<word>-<word>` on first run. The GUI's `src-tauri/src/state.rs` wraps it in `GuiState { core, current_browser_window }`; Tauri commands access state via `state.core.*`.
 - **Tray** — `src-tauri/src/tray.rs`. Left-click shows the main window; right-click menu opens/status/quit. `lib.rs` intercepts `CloseRequested` to hide instead of close.
 - **Tauri commands** — registered in `lib.rs::invoke_handler!`; typed wrappers in `src/api/tauri.ts`. Add a new command in both places.
 
@@ -297,7 +299,6 @@ ocg-manager (Tauri GUI, Windows)             ocg-manager-cli (Linux/macOS/Win/Do
 |-------|---------|-------|
 | `gateway_port` | `9042` | Bind port of the local gateway. |
 | `gateway_key` | auto `ocg-xxxxxxxx-xxxxxxxx` | Regeneratable from Settings. |
-| `selection_strategy` | `sequential` | `sequential` / `random` / `round_robin`. |
 | `upstream_base_url` | `https://opencode.ai/zen/go` | OpenCode-Go API base. The path is appended to this in the forwarder; do not include `/v1`. |
 | `auto_start` | `false` | Saved only — not yet wired to OS startup. |
 | `remote.url` | `` (empty) | When set, the GUI pushes account keys to this remote admin API on every local change. Empty = local-only. |
@@ -315,11 +316,11 @@ Editable in-app (Settings) or directly in the `settings` table. After changing t
 ### Testing
 
 - `cargo test --workspace` — runs the `ocg-core` tests: `crypto` round-trip (MachineBoundCipher, StaticKeyCipher) and the `gateway::limit::parse_reset` known-message cases.
-- No frontend tests. Worth adding: selector strategy, cooldown math, cost estimation, and an integration test with a mock upstream.
+- No frontend tests. Worth adding: sequential selector behavior, cooldown math, cost estimation, and an integration test with a mock upstream.
 
 ### Headless CLI (`ocg-manager-cli`)
 
-The same Gateway and account-management code that the GUI uses is also exposed as a cross-platform CLI binary. It has no UI, no tray, no WebView — just a single `data.sqlite` plus an Axum server, so it runs on Linux, macOS, Windows, and inside Docker. Pass `--admin-port <u16>` to also expose a remote-sync admin API on `127.0.0.1:<port>` (Bearer-authenticated); put a reverse proxy in front for HTTPS — the binary does not terminate TLS itself.
+The CLI shares the `ocg-core` gateway and database primitives, and adds a minimal headless key-store interface for servers. It is not the GUI account-management surface: no account cards, no browser profiles, no tray, no WebView. It runs as a single `data.sqlite` plus an Axum server on Linux, macOS, Windows, and inside Docker. Pass `--admin-port <u16>` to also expose a remote-sync admin API on `127.0.0.1:<port>` (Bearer-authenticated); put a reverse proxy in front for HTTPS — the binary does not terminate TLS itself.
 
 ```bash
 # Build
