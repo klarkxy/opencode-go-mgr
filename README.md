@@ -172,28 +172,28 @@ Prerequisites:
 
 - **Node.js** v20+ (v24 confirmed working)
 - **Rust** ≥ 1.85 (edition 2024, MSRV enforced in `src-tauri/Cargo.toml`)
-- **Tauri CLI** — included as a dev dependency, so `npx tauri ...` works without a global install.
+- **Tauri CLI** — included as a dev dependency, so `pnpm tauri ...` works without a global install.
 - Windows 10/11 with WebView2.
 
 ```bash
 # Frontend deps
-npm install
+pnpm install
 
 # Frontend-only dev server (http://127.0.0.1:30001)
-npm run dev
+pnpm run dev
 
 # Full Tauri app (frontend + Rust + desktop window)
-npx tauri dev
+pnpm tauri dev
 
 # Type-check + production frontend build
-npm run build        # = vue-tsc && vite build
+pnpm run build       # = vue-tsc && vite build
 
 # Rust checks / release binary
 cd src-tauri && cargo check
 cd src-tauri && cargo build --release
 
 # Windows NSIS installer → src-tauri/target/release/bundle/nsis/
-npx tauri build
+pnpm tauri build
 ```
 
 ### Project structure
@@ -358,7 +358,7 @@ ocg-manager-cli status
 
 ### Packaging & release
 
-- `npx tauri build` produces a per-machine **NSIS** installer under `src-tauri/target/release/bundle/nsis/`.
+- `pnpm tauri build` produces a per-machine **NSIS** installer under `src-tauri/target/release/bundle/nsis/`.
 - Release profile (`Cargo.toml`): `opt-level = 3`, `lto = true`, `strip = true`, `panic = "abort"` → a single stripped exe.
 - `installer.nsh` adds an uninstall hook that prompts before deleting `%USERPROFILE%\.ocg-mgr`.
 - No CI/CD or auto-publish is configured; cut releases manually.
@@ -372,7 +372,7 @@ ocg-manager-cli status
 - Monthly cooldown auto-reset by recharge date is not implemented (manual reset only).
 - `reqwest::Client` is built once in `CoreStateInner::new` with a 120 s timeout, so connection pooling is per-process and per-host — good enough for now.
 - Crypto is obfuscation, not AEAD.
-- `tauri-plugin-store` is declared as an npm dependency but commented out on the Rust side.
+- `tauri-plugin-store` is declared as a frontend dependency but commented out on the Rust side.
 
 ---
 

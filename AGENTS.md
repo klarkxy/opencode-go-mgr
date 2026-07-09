@@ -9,7 +9,7 @@
 | 项 | 值 |
 |---|---|
 | 项目代号 | `ocg-manager`（OpenCode-Go 多账号管理器） |
-| npm 包名 | `ocg-manager-ui` |
+| 前端包名 | `ocg-manager-ui` |
 | Cargo 包名 | `ocg-manager` |
 | 产品名 | `OCG Manager` |
 | Tauri 应用标识符 | `com.ocg-manager.app` |
@@ -91,8 +91,8 @@ d:\0 code\ocg-manager
 │   ├── en/
 │   └── zh/
 ├── index.html                # Vite 入口 HTML
-├── package.json              # 前端 npm 配置
-├── package-lock.json         # 锁定依赖版本
+├── package.json              # 前端 pnpm 配置
+├── pnpm-lock.yaml            # 锁定依赖版本
 ├── tsconfig.json             # TypeScript 配置
 ├── vite.config.ts            # Vite 配置
 ├── src/                      # 前端源码
@@ -127,7 +127,7 @@ d:\0 code\ocg-manager
 - scripts：`dev`、`build`（`vue-tsc && vite build`）、`preview`
 - 依赖：Tauri API 与四个插件（shell / http / notification / store）、`naive-ui`、`@vicons/antd`、`vfonts`
 - 开发依赖：`vite`、`vue`、`typescript`、`vue-tsc`、`@vitejs/plugin-vue`、`@types/node`
-- `@tauri-apps/cli` 已在 dependencies 中，`npx tauri ...` 可直接使用。
+- `@tauri-apps/cli` 已在 dependencies 中，`pnpm tauri ...` 可直接使用。
 
 ### 4.2 根目录 `Cargo.toml`
 
@@ -161,8 +161,8 @@ d:\0 code\ocg-manager
 
 - `devUrl`: `http://localhost:30001`
 - `frontendDist`: `../dist`
-- `beforeDevCommand`: `npm run dev`
-- `beforeBuildCommand`: `npm run build`
+- `beforeDevCommand`: `pnpm run dev`
+- `beforeBuildCommand`: `pnpm run build`
 - Bundle 目标：`nsis`（Windows 安装包），`perMachine` 安装，含 `installer.nsh` 卸载钩子
 - 主窗口：1200×800，可缩放，标题 `OCG Manager`，`visible: false`（由 setup 控制显示）
 - 系统托盘：`trayIcon.iconPath = "icons/32x32.png"`
@@ -196,18 +196,18 @@ d:\0 code\ocg-manager
 
 - **Node.js**：当前环境 `v24.16.0`（`package.json` 未声明 `engines`）
 - **Rust**：当前环境 `rustc 1.96.0`、`cargo 1.96.0`
-- **Tauri CLI**：已在 `package.json` 依赖中，`npx tauri ...` 可直接使用
+- **Tauri CLI**：已在 `package.json` 依赖中，`pnpm tauri ...` 可直接使用
 - **Windows**：10/11 + WebView2
 
-### 5.2 npm 脚本
+### 5.2 pnpm 脚本
 
 | 命令 | 作用 |
 |---|---|
-| `npm install` | 安装前端依赖 |
-| `npm run dev` | 启动 Vite 开发服务器（`http://127.0.0.1:30001`） |
-| `npm run build` | `vue-tsc` 类型检查 + `vite build` 生成 `dist/` |
-| `npm run preview` | 预览生产构建 |
-| `node playwright-debug.mjs` | 运行 Playwright UI 冒烟测试（需 `npm run dev` 已启动） |
+| `pnpm install` | 安装前端依赖 |
+| `pnpm run dev` | 启动 Vite 开发服务器（`http://127.0.0.1:30001`） |
+| `pnpm run build` | `vue-tsc` 类型检查 + `vite build` 生成 `dist/` |
+| `pnpm run preview` | 预览生产构建 |
+| `node playwright-debug.mjs` | 运行 Playwright UI 冒烟测试（需 `pnpm run dev` 已启动） |
 
 ### 5.3 Cargo / Tauri 命令
 
@@ -218,12 +218,12 @@ d:\0 code\ocg-manager
 | `cargo build --release --bin ocg-manager-cli` | 编译 CLI Release 二进制 |
 | `cargo test --workspace` | 运行 workspace 全部 Rust 测试 |
 | `cargo run --bin ocg-manager-cli -- --help` | 查看 CLI 帮助 |
-| `npx tauri dev` | 启动 Tauri 开发模式 |
-| `npx tauri build` | 打包 Windows 安装包（NSIS） |
+| `pnpm tauri dev` | 启动 Tauri 开发模式 |
+| `pnpm tauri build` | 打包 Windows 安装包（NSIS） |
 
 ### 5.4 当前可行性
 
-项目处于可运行状态。`cargo check --workspace`、`cargo test --workspace`、`npx tauri dev` 和 `npx tauri build` 均可正常执行。CLI 可在 Windows / Linux / macOS 上编译运行（GUI 仍依赖 Windows + WebView2）。
+项目处于可运行状态。`cargo check --workspace`、`cargo test --workspace`、`pnpm tauri dev` 和 `pnpm tauri build` 均可正常执行。CLI 可在 Windows / Linux / macOS 上编译运行（GUI 仍依赖 Windows + WebView2）。
 
 ## 6. 代码组织
 
@@ -302,7 +302,7 @@ d:\0 code\ocg-manager
 当前自动化测试：
 
 - **Rust 单元测试**：`crates/ocg-core/src/crypto.rs` 中 crypto 加解密往返测试，`crates/ocg-core/src/gateway/limit.rs` 中 `parse_reset` 的已知文案用例。
-- **Playwright UI 冒烟测试**：`playwright-debug.mjs`，在 headless Chromium 中验证仪表盘、账号新增、日志页、设置页、侧边栏折叠等关键 UI 流程。依赖 `npm run dev` 启动的 Vite 开发服务器，并通过 `src/api/dev-mock.ts` 模拟 Tauri 后端。
+- **Playwright UI 冒烟测试**：`playwright-debug.mjs`，在 headless Chromium 中验证仪表盘、账号新增、日志页、设置页、侧边栏折叠等关键 UI 流程。依赖 `pnpm run dev` 启动的 Vite 开发服务器，并通过 `src/api/dev-mock.ts` 模拟 Tauri 后端。
 
 未找到：
 

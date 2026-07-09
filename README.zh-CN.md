@@ -172,28 +172,28 @@ OpenCode-Go 额度窗口供参考：**5h = $12**、**每周 = $30**、**每月 =
 
 - **Node.js** v20+（v24 实测可用）
 - **Rust** ≥ 1.85（edition 2024，MSRV 在 `src-tauri/Cargo.toml` 中强制）
-- **Tauri CLI**——已作为开发依赖包含，`npx tauri ...` 无需全局安装即可使用。
+- **Tauri CLI**——已作为开发依赖包含，`pnpm tauri ...` 无需全局安装即可使用。
 - Windows 10/11，已装 WebView2。
 
 ```bash
 # 安装前端依赖
-npm install
+pnpm install
 
 # 仅前端开发服务器（http://127.0.0.1:30001）
-npm run dev
+pnpm run dev
 
 # 完整 Tauri 应用（前端 + Rust + 桌面窗口）
-npx tauri dev
+pnpm tauri dev
 
 # 类型检查 + 前端生产构建
-npm run build        # = vue-tsc && vite build
+pnpm run build       # = vue-tsc && vite build
 
 # Rust 检查 / Release 二进制
 cd src-tauri && cargo check
 cd src-tauri && cargo build --release
 
 # Windows NSIS 安装包 → src-tauri/target/release/bundle/nsis/
-npx tauri build
+pnpm tauri build
 ```
 
 ### 项目结构
@@ -358,7 +358,7 @@ ocg-manager-cli status
 
 ### 打包与发布
 
-- `npx tauri build` 产出每机器级 **NSIS** 安装包，位于 `src-tauri/target/release/bundle/nsis/`。
+- `pnpm tauri build` 产出每机器级 **NSIS** 安装包，位于 `src-tauri/target/release/bundle/nsis/`。
 - Release 配置（`Cargo.toml`）：`opt-level = 3`、`lto = true`、`strip = true`、`panic = "abort"`——生成单个 stripped exe。
 - `installer.nsh` 增加卸载钩子，删除 `%USERPROFILE%\.ocg-mgr` 前会询问用户。
 - 未配置 CI/CD 或自动发布；手动切版本发布。
@@ -372,7 +372,7 @@ ocg-manager-cli status
 - 按充值日期自动重置月冷却未实现（仅支持手动重置）。
 - `reqwest::Client` 在 `CoreStateInner::new` 中构建一次（120s 超时），连接池是进程级、按 host 复用的——目前够用。
 - 加密是混淆，非 AEAD。
-- `tauri-plugin-store` 已在 npm 端声明但 Rust 端被注释掉。
+- `tauri-plugin-store` 已在前端依赖中声明但 Rust 端被注释掉。
 
 ---
 
