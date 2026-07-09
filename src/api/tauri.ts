@@ -100,6 +100,12 @@ export interface DashboardSummary {
   month_cost: number;
 }
 
+export interface DailyModelCost {
+  date: string; // YYYY-MM-DD
+  model: string;
+  cost: number;
+}
+
 export const tauriApi = {
   // Accounts
   getAccounts: () => invoke<Account[]>("get_accounts"),
@@ -134,4 +140,6 @@ export const tauriApi = {
 
   // Dashboard
   getDashboardSummary: () => invoke<DashboardSummary>("get_dashboard_summary"),
+  getDailyCostByModel: (days?: number) =>
+    invoke<DailyModelCost[]>("get_daily_cost_by_model", { days }),
 };

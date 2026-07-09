@@ -62,6 +62,7 @@ const config = ref<AppConfig>({
   remote: { url: "", token: "" },
 });
 const dataDir = ref("%USERPROFILE%\\.ocg-mgr");
+const savedPort = ref(9042);
 
 const strategyOptions = [
   { label: "顺序", value: "sequential" as SelectionStrategy },
@@ -72,15 +73,17 @@ const strategyOptions = [
 async function loadSettings() {
   try {
     config.value = await tauriApi.getSettings();
+    savedPort.value = config.value.gateway_port;
   } catch (e) {
     message.error(`加载设置失败: ${e}`);
   }
 }
 
 async function saveSettings() {
-  const oldPort = config.value.gateway_port;
+  const oldPort = savedPort.value;
   try {
     const status: GatewayStatus = await tauriApi.updateSettings(config.value);
+    savedPort.value = status.port;
     if (status.running && oldPort !== status.port) {
       message.success(`设置已保存，Gateway 已切换到端口 ${status.port}`);
     } else {

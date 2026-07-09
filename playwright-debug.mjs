@@ -30,16 +30,23 @@ async function main() {
   console.log("=== 1. Dashboard ===");
   let content = await goTo("仪表盘");
   let html = await content.innerHTML();
+  let dashboardOk = false;
+  let dashboardAfterOk = false;
 
-  const statCards = page.locator(".n-statistic");
-  console.log(`  stat cards: ${await statCards.count()}`);
+  const kpiCards = page.locator(".kpi-card");
+  const kpiCount = await kpiCards.count();
+  console.log(`  KPI cards: ${kpiCount}`);
 
-  const descItems = page.locator(".n-descriptions-item");
-  console.log(`  desc items: ${await descItems.count()}`);
+  const gatewayPill = page.locator(".status-pill").filter({ hasText: "运行中" });
+  const gatewayVisible = await gatewayPill.isVisible();
+  console.log(`  gateway running pill visible: ${gatewayVisible}`);
 
-  // Gateway should be reported as running by the dev mock.
-  const runningTag = page.locator(".n-descriptions .n-tag").filter({ hasText: "运行中" });
-  console.log(`  gateway running tag visible: ${await runningTag.isVisible()}`);
+  const chartSvg = page.locator("svg.chart-svg");
+  const chartVisible = await chartSvg.isVisible();
+  const chartBars = await page.locator(".bar-seg").count();
+  const chartEmpty = await page.locator(".chart-card .n-empty").isVisible().catch(() => false);
+  console.log(`  chart visible: ${chartVisible}, bars: ${chartBars}, empty: ${chartEmpty}`);
+  dashboardOk = kpiCount === 4 && gatewayVisible && chartVisible && (chartBars > 0 || chartEmpty);
 
   await page.screenshot({ path: "playwright-out/01-dashboard.png" });
 
@@ -87,11 +94,12 @@ async function main() {
   content = await goTo("仪表盘");
   await page.waitForTimeout(400);
 
-  const accountOverview = page.locator(".n-list-item");
+  const accountOverview = page.locator(".acct-cell");
   console.log(`  overview items: ${await accountOverview.count()}`);
 
-  const summaryText = await page.locator(".n-statistic").first().textContent();
+  const summaryText = await page.locator(".kpi-card").first().textContent();
   console.log(`  account summary: ${summaryText?.replace(/\s+/g, " ").trim()}`);
+  dashboardAfterOk = (await accountOverview.filter({ hasText: "测试账号" }).count()) === 1;
 
   await page.screenshot({ path: "playwright-out/04-dashboard-with-account.png" });
 
@@ -169,7 +177,7 @@ async function main() {
     errors.forEach((e) => console.log(`    ! ${e.substring(0, 200)}`));
   }
 
-  const ok = errors.length === 0 && cardVisible;
+  const ok = errors.length === 0 && cardVisible && dashboardOk && dashboardAfterOk;
   if (ok) {
     console.log("\n✓ UI smoke test passed — 8 screenshots saved to playwright-out/");
   } else {

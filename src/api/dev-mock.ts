@@ -16,6 +16,7 @@ import type {
   AccountUpdate,
   AppConfig,
   DashboardSummary,
+  DailyModelCost,
   ForwardLog,
   GatewayLog,
   GatewayStatus,
@@ -109,14 +110,68 @@ function computeUsage(_accountId: string): UsageWindow {
   };
 }
 
+// Stable-model set for the dev-mock chart. Mirrors the model names ocg-core
+// actually sees from the upstream (chat-variant + reasoning + mini), so the
+// legend colors line up with what a real dataset would show.
+const MOCK_MODELS = ["claude-3-7-sonnet", "claude-3-5-haiku", "gpt-4o-mini", "claude-opus-4"];
+
+/// Generate a deterministic-ish 30-day dataset of per-day, per-model cost so
+/// the dashboard chart is never empty in browser dev / Playwright runs. The
+/// shape is a gentle decay with weekly wobble + two spike days, so the chart
+/// reads like a real usage curve, not random noise.
+function generateMockDailyCosts(days = 30): DailyModelCost[] {
+  const out: DailyModelCost[] = [];
+  const today = new Date();
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date(today);
+    d.setUTCDate(today.getUTCDate() - i);
+    const date = d.toISOString().slice(0, 10);
+    // base decay: older days less, recent days more; plus a weekly bump
+    const recent = (days - i) / days; // 0 → 1
+    const weeklyBump = [0.4, 0.2, 0.1, 0.0, 0.0, 0.6, 0.9][d.getUTCDay()];
+    // two spike days to make the chart visually interesting
+    const spike = i === 3 || i === 9 ? 1.8 : 1.0;
+    const base = (0.05 + recent * 0.55) * (0.6 + weeklyBump) * spike;
+    // distribute base across models with fixed-ish weights
+    const weights = [0.5, 0.25, 0.18, 0.07];
+    MOCK_MODELS.forEach((model, idx) => {
+      const cost = Math.max(0, +(base * weights[idx] * (0.8 + Math.random() * 0.4)).toFixed(4));
+      if (cost > 0.0001) {
+        out.push({ date, model, cost });
+      }
+    });
+  }
+  return out;
+}
+
+let cachedMockDailyCosts: DailyModelCost[] | null = null;
+
 function dashboardSummary(state: MockState): DashboardSummary {
+  const costs = cachedMockDailyCosts ?? (cachedMockDailyCosts = generateMockDailyCosts());
+  const now = new Date();
+  const todayStr = now.toISOString().slice(0, 10);
+  const weekAgo = new Date(now);
+  weekAgo.setUTCDate(now.getUTCDate() - 7);
+  const weekStart = weekAgo.toISOString().slice(0, 10);
+  const monthAgo = new Date(now);
+  monthAgo.setUTCDate(now.getUTCDate() - 30);
+  const monthStart = monthAgo.toISOString().slice(0, 10);
+  const today_cost = costs
+    .filter((c) => c.date === todayStr)
+    .reduce((s, c) => s + c.cost, 0);
+  const week_cost = costs
+    .filter((c) => c.date >= weekStart)
+    .reduce((s, c) => s + c.cost, 0);
+  const month_cost = costs
+    .filter((c) => c.date >= monthStart)
+    .reduce((s, c) => s + c.cost, 0);
   return {
     total_accounts: state.accounts.length,
     available_accounts: state.accounts.filter((a) => a.enabled).length,
     gateway_running: state.gatewayStatus.running,
-    today_cost: 0,
-    week_cost: 0,
-    month_cost: 0,
+    today_cost: +today_cost.toFixed(4),
+    week_cost: +week_cost.toFixed(4),
+    month_cost: +month_cost.toFixed(4),
   };
 }
 
@@ -227,12 +282,12 @@ const handlers: Record<string, (args: Record<string, unknown>, state: MockState)
   get_gateway_status: (_args, state) => state.gatewayStatus,
 
   restart_gateway: (_args, state) => {
-    state.gatewayStatus.running = !state.gatewayStatus.running;
+    state.gatewayStatus.running = true;
     state.gatewayLogs.unshift({
       id: state.gatewayLogs.length + 1,
       level: "INFO",
       category: "gateway",
-      message: `Gateway ${state.gatewayStatus.running ? "started" : "stopped"}`,
+      message: "Gateway restarted",
       created_at: now(),
     });
     saveState(state);
@@ -256,6 +311,16 @@ const handlers: Record<string, (args: Record<string, unknown>, state: MockState)
   close_browser: () => null,
 
   get_dashboard_summary: (_args, state) => dashboardSummary(state),
+
+  get_daily_cost_by_model: (args) => {
+    const days = (args.days as number) ?? 30;
+    if (!cachedMockDailyCosts) {
+      cachedMockDailyCosts = generateMockDailyCosts(30);
+    }
+    if (days === 30) return cachedMockDailyCosts;
+    // for non-default ranges, regenerate lazily
+    return generateMockDailyCosts(days);
+  },
 };
 
 export function installDevMock() {

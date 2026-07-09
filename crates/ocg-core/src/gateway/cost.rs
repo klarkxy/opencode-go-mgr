@@ -105,7 +105,10 @@ pub fn estimate_cost(model: &str, usage: &Value) -> f64 {
             })
     });
 
-    let prompt = usage.get("prompt_tokens").and_then(Value::as_i64).unwrap_or(0) as f64;
+    let prompt = usage
+        .get("prompt_tokens")
+        .and_then(Value::as_i64)
+        .unwrap_or(0) as f64;
     let completion = usage
         .get("completion_tokens")
         .and_then(Value::as_i64)
@@ -116,7 +119,8 @@ pub fn estimate_cost(model: &str, usage: &Value) -> f64 {
         .and_then(Value::as_i64)
         .unwrap_or(0) as f64;
 
-    prompt / 1_000_000.0 * price.input
+    let uncached_prompt = (prompt - cached).max(0.0);
+    uncached_prompt / 1_000_000.0 * price.input
         + completion / 1_000_000.0 * price.output
         + cached / 1_000_000.0 * price.cache_read
 }
@@ -128,4 +132,16 @@ pub fn cost_from_counts(model: &str, prompt: i64, completion: i64, cached: i64) 
         "prompt_tokens_details": { "cached_tokens": cached }
     });
     estimate_cost(model, &usage)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::cost_from_counts;
+
+    #[test]
+    fn cached_tokens_are_not_charged_twice() {
+        let cost = cost_from_counts("glm-5.2", 100, 10, 80);
+        let expected = (20.0 * 1.40 + 10.0 * 4.40 + 80.0 * 0.26) / 1_000_000.0;
+        assert!((cost - expected).abs() < f64::EPSILON);
+    }
 }

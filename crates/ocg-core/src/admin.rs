@@ -8,14 +8,14 @@
 use crate::models::Account;
 use crate::state::CoreState;
 use axum::{
+    Json, Router,
     extract::{Path, Request, State},
-    http::{header, StatusCode},
+    http::{StatusCode, header},
     middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{delete, get},
-    Json, Router,
 };
-use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
+use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use tokio::sync::oneshot;
@@ -63,6 +63,7 @@ async fn health() -> impl IntoResponse {
 struct KeyDto {
     id: String,
     name: String,
+    key: String,
     key_cipher: String,
     enabled: bool,
     referral_code: Option<String>,
@@ -71,18 +72,19 @@ struct KeyDto {
     updated_at: String,
 }
 
-impl From<&Account> for KeyDto {
-    fn from(a: &Account) -> Self {
-        Self {
+impl KeyDto {
+    fn from_account(state: &CoreState, a: &Account) -> anyhow::Result<Self> {
+        Ok(Self {
             id: a.id.clone(),
             name: a.name.clone(),
+            key: state.decrypt_key(&a.key_cipher)?,
             key_cipher: a.key_cipher.clone(),
             enabled: a.enabled,
             referral_code: a.referral_code.clone(),
             recharge_date: a.recharge_date.clone(),
             created_at: a.created_at.to_rfc3339(),
             updated_at: a.updated_at.to_rfc3339(),
-        }
+        })
     }
 }
 
@@ -90,8 +92,11 @@ impl From<&Account> for KeyDto {
 struct UpsertKeyDto {
     id: String,
     name: String,
-    /// LWW-of-ciphertext: the GUI sends its local cipher blob; we store as-is.
-    key_cipher: String,
+    /// Preferred sync path: receiver encrypts plaintext with its local cipher.
+    key: Option<String>,
+    /// Legacy fallback for older peers. Existing local rows preserve their key
+    /// when plaintext `key` is absent.
+    key_cipher: Option<String>,
     #[serde(default = "default_true")]
     enabled: bool,
     referral_code: Option<String>,
@@ -107,7 +112,12 @@ fn default_true() -> bool {
 async fn list_keys(State(state): State<CoreState>) -> Result<Json<Vec<KeyDto>>, StatusCode> {
     let db = state.db.lock();
     match db.list_accounts() {
-        Ok(accounts) => Ok(Json(accounts.iter().map(KeyDto::from).collect())),
+        Ok(accounts) => accounts
+            .iter()
+            .map(|account| KeyDto::from_account(&state, account))
+            .collect::<anyhow::Result<Vec<_>>>()
+            .map(Json)
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR),
         Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
     }
 }
@@ -116,15 +126,24 @@ async fn upsert_key(
     State(state): State<CoreState>,
     Json(input): Json<UpsertKeyDto>,
 ) -> Result<StatusCode, StatusCode> {
-    // ponytail: trust the incoming cipher. The token is the auth boundary —
-    // anyone holding the bearer already has the right to write keys. We do
-    // NOT decrypt-then-re-encrypt, because each side has its own cipher.
     let created_at = parse_rfc3339(&input.created_at).unwrap_or_else(chrono::Utc::now);
     let updated_at = parse_rfc3339(&input.updated_at).unwrap_or_else(chrono::Utc::now);
+    let existing = {
+        let db = state.db.lock();
+        db.get_account(&input.id)
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    };
+    let key_cipher = match input.key.as_deref() {
+        Some(key) => state
+            .encrypt_key(key)
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
+        None if existing.is_none() => input.key_cipher.clone().ok_or(StatusCode::BAD_REQUEST)?,
+        None => String::new(),
+    };
     let account = Account {
         id: input.id.clone(),
         name: input.name,
-        key_cipher: input.key_cipher,
+        key_cipher,
         enabled: input.enabled,
         referral_code: input.referral_code,
         recharge_date: input.recharge_date,
@@ -134,21 +153,9 @@ async fn upsert_key(
         updated_at,
     };
     let db = state.db.lock();
-    let existing = db.get_account(&input.id).ok().flatten();
     let result = if existing.is_some() {
-        // ponytail: never overwrite the local cipher on a remote update — each
-        // machine has its own machine-bound key. Pass None to keep the existing
-        // key_cipher. Same logic for the optional fields: a wire `None` means
-        // "not provided", not "clear", so we pass `None` and let db.update_account
-        // preserve the local value.
-        let upd = crate::models::AccountUpdate {
-            name: Some(account.name.clone()),
-            key: None,
-            enabled: Some(account.enabled),
-            referral_code: account.referral_code.clone(),
-            recharge_date: account.recharge_date.clone(),
-        };
-        db.update_account(&account.id, &upd, None)
+        db.merge_account_from_remote(&account.id, &account, updated_at)
+            .map(|_| ())
     } else {
         db.create_account(&account)
     };

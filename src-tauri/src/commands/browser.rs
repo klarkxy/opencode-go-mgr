@@ -1,6 +1,6 @@
 use crate::state::AppState;
-use tauri::{State, AppHandle, Manager};
 use tauri::webview::WebviewWindowBuilder;
+use tauri::{AppHandle, Manager, State};
 
 const OCG_CONSOLE_URL: &str = "https://opencode.ai/zen/go";
 const BROWSER_WINDOW_LABEL: &str = "ocg-browser";
@@ -11,6 +11,15 @@ pub fn open_browser(
     state: State<'_, AppState>,
     account_id: String,
 ) -> Result<String, String> {
+    if account_id.contains(['/', '\\']) || account_id.contains("..") {
+        return Err("invalid account id".to_string());
+    }
+    {
+        let db = state.core.db.lock();
+        db.get_account(&account_id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "account not found".to_string())?;
+    }
     let profile_dir = state.core.data_dir().join("profiles").join(&account_id);
     std::fs::create_dir_all(&profile_dir).map_err(|e| e.to_string())?;
 
@@ -41,11 +50,11 @@ pub fn open_browser(
         *current = Some(window.label().to_string());
     }
 
-    let _ = state
-        .core
-        .db
-        .lock()
-        .log_gateway("info", "browser", &format!("opened browser for account {}", account_id));
+    let _ = state.core.db.lock().log_gateway(
+        "info",
+        "browser",
+        &format!("opened browser for account {}", account_id),
+    );
     Ok(OCG_CONSOLE_URL.to_string())
 }
 

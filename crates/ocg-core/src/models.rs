@@ -133,3 +133,13 @@ pub struct DashboardSummary {
     pub week_cost: f64,
     pub month_cost: f64,
 }
+
+/// One row of "daily cost per model" aggregation for the dashboard chart.
+/// `date` is `YYYY-MM-DD` (UTC). The frontend groups rows by date into a
+/// stacked bar for each day.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DailyModelCost {
+    pub date: String,
+    pub model: String,
+    pub cost: f64,
+}

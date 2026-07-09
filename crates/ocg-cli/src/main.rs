@@ -144,6 +144,11 @@ fn load_or_create_key_file(data_dir: &PathBuf) -> Result<String> {
         let key = random_word();
         std::fs::write(&key_path, &key)
             .with_context(|| format!("failed to write encryption key to {:?}", key_path))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600));
+        }
         eprintln!(
             "info: generated encryption key at {:?}. Back it up; losing it means losing access to stored API keys.",
             key_path
@@ -187,8 +192,8 @@ async fn serve(
             let token = resolve_admin_token(&data_dir, admin_token_flag)?;
             let h = ocg_core::admin::start_admin(state.clone(), p, token.clone()).await?;
             println!(
-                "admin api started on http://127.0.0.1:{} (bearer token: {})",
-                h.port, token
+                "admin api started on http://127.0.0.1:{} (bearer token saved in data dir)",
+                h.port
             );
             Some(h)
         }

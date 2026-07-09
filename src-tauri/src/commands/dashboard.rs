@@ -1,6 +1,6 @@
 use crate::state::AppState;
 use chrono::Utc;
-use ocg_core::models::DashboardSummary;
+use ocg_core::models::{DashboardSummary, DailyModelCost};
 use tauri::State;
 
 #[tauri::command]
@@ -26,4 +26,19 @@ pub fn get_dashboard_summary(state: State<'_, AppState>) -> Result<DashboardSumm
         week_cost,
         month_cost,
     })
+}
+
+/// Return per-day, per-model cost buckets for the last `days` days, for the
+/// dashboard stacked-bar chart. Defaults to 30 days.
+#[tauri::command]
+pub fn get_daily_cost_by_model(
+    state: State<'_, AppState>,
+    days: Option<i64>,
+) -> Result<Vec<DailyModelCost>, String> {
+    state
+        .core
+        .db
+        .lock()
+        .daily_cost_by_model(days.unwrap_or(30))
+        .map_err(|e| e.to_string())
 }

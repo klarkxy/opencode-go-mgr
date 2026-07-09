@@ -6,10 +6,10 @@
 //! - Cross-cipher incompatibility: an account encrypted with one cipher
 //!   cannot be decrypted by another — the safety property the README warns about.
 
-use chrono::Utc;
+use chrono::{Duration, Utc};
 use ocg_core::crypto::{KeyCipher, MachineBoundCipher, StaticKeyCipher};
 use ocg_core::db::Database;
-use ocg_core::models::Account;
+use ocg_core::models::{Account, ForwardLog};
 use ocg_core::state::CoreStateInner;
 use std::fs;
 use std::path::PathBuf;
@@ -102,7 +102,11 @@ fn core_state_generates_gateway_key_on_first_run_and_persists() {
     let db = Database::open(dir.clone()).unwrap();
     let state = Arc::new(CoreStateInner::new(db, dir.clone(), cipher).unwrap());
     let key1 = state.config().gateway_key;
-    assert!(key1.starts_with("ocg-"), "expected auto-generated gateway key, got {:?}", key1);
+    assert!(
+        key1.starts_with("ocg-"),
+        "expected auto-generated gateway key, got {:?}",
+        key1
+    );
 
     // Reopen — same key, persisted in settings table.
     let db2 = Database::open(dir).unwrap();
@@ -139,4 +143,69 @@ fn machine_bound_cipher_roundtrip_through_core_state() {
     let enc = state.encrypt_key("sk-ocg-machine-bound").unwrap();
     let dec = state.decrypt_key(&enc).unwrap();
     assert_eq!(dec, "sk-ocg-machine-bound");
+}
+
+#[test]
+fn list_forward_logs_binds_limit_parameter() {
+    let dir = temp_data_dir("logs");
+    let db = Database::open(dir).unwrap();
+    db.log_forward(&ForwardLog {
+        id: 0,
+        timestamp: Utc::now(),
+        model: "glm-5.2".into(),
+        account_id: "acct".into(),
+        account_name: "main".into(),
+        status: "success".into(),
+        http_status: Some(200),
+        prompt_tokens: 1,
+        completion_tokens: 2,
+        cached_tokens: 0,
+        cost: 0.01,
+        error_message: None,
+    })
+    .unwrap();
+
+    let rows = db.list_forward_logs(1).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].model, "glm-5.2");
+}
+
+#[test]
+fn daily_cost_by_model_groups_success_rows_only() {
+    let dir = temp_data_dir("daily");
+    let db = Database::open(dir).unwrap();
+    let today = Utc::now();
+    for (model, status, cost, offset) in [
+        ("glm-5.2", "success", 1.0, 0),
+        ("glm-5.2", "success", 2.0, 0),
+        ("kimi-k2.7-code", "success", 3.0, 1),
+        ("glm-5.2", "error", 9.0, 0),
+    ] {
+        db.log_forward(&ForwardLog {
+            id: 0,
+            timestamp: today - Duration::days(offset),
+            model: model.into(),
+            account_id: "acct".into(),
+            account_name: "main".into(),
+            status: status.into(),
+            http_status: Some(200),
+            prompt_tokens: 0,
+            completion_tokens: 0,
+            cached_tokens: 0,
+            cost,
+            error_message: None,
+        })
+        .unwrap();
+    }
+
+    let rows = db.daily_cost_by_model(3).unwrap();
+    assert_eq!(rows.len(), 2);
+    assert!(
+        rows.iter()
+            .any(|row| row.model == "glm-5.2" && (row.cost - 3.0).abs() < f64::EPSILON)
+    );
+    assert!(
+        rows.iter()
+            .any(|row| row.model == "kimi-k2.7-code" && (row.cost - 3.0).abs() < f64::EPSILON)
+    );
 }

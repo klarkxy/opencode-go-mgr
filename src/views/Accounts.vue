@@ -16,12 +16,14 @@
           </n-switch>
           <n-tag v-if="account.referral_code" size="small">邀请码: {{ account.referral_code }}</n-tag>
           <n-tag v-if="account.recharge_date" size="small">充值日: {{ account.recharge_date }}</n-tag>
-          <n-tag v-if="isCooling(account)" type="error" size="small">
-            冷却中 · 剩 {{ formatRemaining(account) }}
-            <template v-if="account.last_error" #tooltip>
-              {{ account.last_error }}
+          <n-tooltip v-if="isCooling(account)" :disabled="!account.last_error">
+            <template #trigger>
+              <n-tag type="error" size="small">
+                冷却中 · 剩 {{ formatRemaining(account) }}
+              </n-tag>
             </template>
-          </n-tag>
+            {{ account.last_error }}
+          </n-tooltip>
         </n-space>
 
         <n-space>

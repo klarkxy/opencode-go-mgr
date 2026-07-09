@@ -14,6 +14,8 @@ pub fn update_settings(
     state: State<'_, AppState>,
     config: AppConfig,
 ) -> Result<GatewayStatus, String> {
+    validate_upstream_url(&config.upstream_base_url)?;
+    validate_remote_url(&config.remote.url)?;
     // ponytail: only restart if the port actually changed. The other three fields
     // (gateway_key / upstream_base_url / selection_strategy) are already live
     // — handler.rs reads state.config() per request. Restarting on every save
@@ -55,8 +57,15 @@ pub fn update_settings(
         }
     }
 
-    state.core.set_config(config.clone()).map_err(|e| e.to_string())?;
-    let _ = state.core.db.lock().log_gateway("info", "settings", "settings updated");
+    state
+        .core
+        .set_config(config.clone())
+        .map_err(|e| e.to_string())?;
+    let _ = state
+        .core
+        .db
+        .lock()
+        .log_gateway("info", "settings", "settings updated");
     // ponytail: latch the wizard-once flag here, not in a separate command.
     // The wizard's only job is to populate AppConfig.remote; once any
     // update_settings runs the user has made a deliberate choice.
@@ -79,8 +88,15 @@ pub fn update_settings(
 pub fn regenerate_gateway_key(state: State<'_, AppState>) -> Result<String, String> {
     let mut config = state.core.config();
     config.gateway_key = format!("ocg-{}-{}", random_word(), random_word());
-    state.core.set_config(config.clone()).map_err(|e| e.to_string())?;
-    let _ = state.core.db.lock().log_gateway("info", "settings", "gateway key regenerated");
+    state
+        .core
+        .set_config(config.clone())
+        .map_err(|e| e.to_string())?;
+    let _ = state
+        .core
+        .db
+        .lock()
+        .log_gateway("info", "settings", "gateway key regenerated");
     Ok(config.gateway_key)
 }
 
@@ -126,12 +142,8 @@ pub async fn test_remote(
     // used to exfiltrate the bearer token to an arbitrary scheme handler
     // (file://, javascript:, data:, etc.).
     let base = url.trim_end_matches('/');
-    let scheme = base.split("://").next().unwrap_or("").to_ascii_lowercase();
-    if !matches!(scheme.as_str(), "http" | "https") {
-        return Ok(RemoteTestResult {
-            ok: false,
-            message: format!("scheme '{}' not allowed (use http or https)", scheme),
-        });
+    if let Err(message) = validate_remote_url(base) {
+        return Ok(RemoteTestResult { ok: false, message });
     }
     let health_url = format!("{}/admin/health", base);
     let result = state
@@ -155,4 +167,32 @@ pub async fn test_remote(
             message: format!("connection failed: {}", e),
         }),
     }
+}
+
+fn validate_upstream_url(url: &str) -> Result<(), String> {
+    let parsed = tauri::Url::parse(url).map_err(|e| format!("invalid upstream URL: {}", e))?;
+    match parsed.scheme() {
+        "https" => Ok(()),
+        "http" if is_loopback(&parsed) => Ok(()),
+        _ => Err("upstream must use https, except loopback http for local development".to_string()),
+    }
+}
+
+fn validate_remote_url(url: &str) -> Result<(), String> {
+    if url.trim().is_empty() {
+        return Ok(());
+    }
+    let parsed = tauri::Url::parse(url).map_err(|e| format!("invalid remote URL: {}", e))?;
+    match parsed.scheme() {
+        "https" => Ok(()),
+        "http" if is_loopback(&parsed) => Ok(()),
+        _ => Err("remote sync must use https, except loopback http".to_string()),
+    }
+}
+
+fn is_loopback(url: &tauri::Url) -> bool {
+    matches!(
+        url.host_str(),
+        Some("localhost") | Some("127.0.0.1") | Some("::1") | Some("[::1]")
+    )
 }

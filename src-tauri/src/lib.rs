@@ -67,7 +67,6 @@ pub fn run() {
     });
 
     tauri::Builder::default()
-        .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_http::init())
         .manage(app_state.clone())
@@ -102,6 +101,7 @@ pub fn run() {
             commands::log::get_gateway_logs,
             commands::log::get_forward_logs,
             commands::dashboard::get_dashboard_summary,
+            commands::dashboard::get_daily_cost_by_model,
             commands::browser::open_browser,
             commands::browser::close_browser,
         ])

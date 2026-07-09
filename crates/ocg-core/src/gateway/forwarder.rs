@@ -35,7 +35,16 @@ pub async fn forward_request(
     headers: HeaderMap,
     body_bytes: bytes::Bytes,
 ) -> Result<ForwardResult> {
-    forward_request_impl(client, state, account, upstream_base_url, upstream_path, headers, body_bytes).await
+    forward_request_impl(
+        client,
+        state,
+        account,
+        upstream_base_url,
+        upstream_path,
+        headers,
+        body_bytes,
+    )
+    .await
 }
 
 async fn forward_request_impl(
@@ -47,12 +56,25 @@ async fn forward_request_impl(
     headers: HeaderMap,
     body_bytes: bytes::Bytes,
 ) -> Result<ForwardResult> {
+    ensure_safe_upstream_base_url(upstream_base_url)?;
     let key = state.decrypt_key(&account.key_cipher)?;
     let mut upstream_headers = reqwest::header::HeaderMap::new();
 
-    // Forward client headers except Authorization (we use the account's key)
+    // Forward harmless client headers only. Auth and hop-by-hop/private headers
+    // belong to the gateway/client boundary, not the upstream request.
     for (name, value) in headers.iter() {
-        if name.as_str().to_lowercase() != "authorization" {
+        let header = name.as_str().to_ascii_lowercase();
+        if !matches!(
+            header.as_str(),
+            "authorization"
+                | "x-api-key"
+                | "cookie"
+                | "proxy-authorization"
+                | "host"
+                | "content-length"
+                | "connection"
+                | "transfer-encoding"
+        ) {
             upstream_headers.insert(name.clone(), value.clone());
         }
     }
@@ -66,7 +88,11 @@ async fn forward_request_impl(
         reqwest::header::HeaderValue::from_str(&format!("Bearer {}", key))?,
     );
 
-    let url = format!("{}{}", upstream_base_url.trim_end_matches('/'), upstream_path);
+    let url = format!(
+        "{}{}",
+        upstream_base_url.trim_end_matches('/'),
+        upstream_path
+    );
 
     let request_body: Value = serde_json::from_slice(&body_bytes).unwrap_or(Value::Null);
     let model = request_body
@@ -86,7 +112,18 @@ async fn forward_request_impl(
             let error_message = format!("upstream request failed: {}", e);
             {
                 let db = state.db.lock();
-                log_forward(&*db, account, &model, "error", None, 0, 0, 0, 0.0, Some(&error_message))?;
+                log_forward(
+                    &*db,
+                    account,
+                    &model,
+                    "error",
+                    None,
+                    0,
+                    0,
+                    0,
+                    0.0,
+                    Some(&error_message),
+                )?;
             }
             return Ok(ForwardResult {
                 response: error_response(&error_message),
@@ -107,7 +144,11 @@ async fn forward_request_impl(
 
     if status.is_server_error() {
         let text = upstream_resp.text().await.unwrap_or_default();
-        let error_message = format!("upstream error {}: {}", status.as_u16(), text);
+        let error_message = format!(
+            "upstream error {}: {}",
+            status.as_u16(),
+            sanitize_upstream_error(&text)
+        );
         {
             let db = state.db.lock();
             log_forward(
@@ -116,7 +157,10 @@ async fn forward_request_impl(
                 &model,
                 "error",
                 Some(status.as_u16() as i32),
-                0, 0, 0, 0.0,
+                0,
+                0,
+                0,
+                0.0,
                 Some(&error_message),
             )?;
         }
@@ -150,7 +194,10 @@ async fn forward_request_impl(
                     &model,
                     "client_error",
                     Some(429),
-                    0, 0, 0, 0.0,
+                    0,
+                    0,
+                    0,
+                    0.0,
                     Some(&text),
                 )?;
                 db.set_account_cooldown(&account.id, Some(until), Some(&text))?;
@@ -163,10 +210,51 @@ async fn forward_request_impl(
             });
         }
 
-        // Other 4xx (400/401/403/404...): client- or key-level error. Pass through, don't retry.
+        // Key-level auth failures may be isolated to this account; fail over.
+        if matches!(status.as_u16(), 401 | 403) {
+            let error_message = format!(
+                "upstream auth error {}: {}",
+                status.as_u16(),
+                sanitize_upstream_error(&text)
+            );
+            {
+                let db = state.db.lock();
+                log_forward(
+                    &*db,
+                    account,
+                    &model,
+                    "client_error",
+                    Some(status.as_u16() as i32),
+                    0,
+                    0,
+                    0,
+                    0.0,
+                    Some(&sanitize_upstream_error(&text)),
+                )?;
+            }
+            return Ok(ForwardResult {
+                response: error_response(&error_message),
+                account: account.clone(),
+                success: false,
+                error_message: Some(error_message),
+            });
+        }
+
+        // Other 4xx: request-level error. Pass through, don't retry.
         {
             let db = state.db.lock();
-            log_forward(&*db, account, &model, "client_error", Some(status.as_u16() as i32), 0, 0, 0, 0.0, Some(&text))?;
+            log_forward(
+                &*db,
+                account,
+                &model,
+                "client_error",
+                Some(status.as_u16() as i32),
+                0,
+                0,
+                0,
+                0.0,
+                Some(&sanitize_upstream_error(&text)),
+            )?;
         }
         let mut response_headers = HeaderMap::new();
         response_headers.insert("content-type", HeaderValue::from_static("application/json"));
@@ -230,16 +318,8 @@ async fn forward_request_impl(
                         g.error = true;
                     }
                     let db = state_h.db.lock();
-                    let _ = db.update_forward_log(
-                        initial_id,
-                        "error",
-                        None,
-                        0,
-                        0,
-                        0,
-                        0.0,
-                        Some(&msg),
-                    );
+                    let _ =
+                        db.update_forward_log(initial_id, "error", None, 0, 0, 0, 0.0, Some(&msg));
                     Err(std::io::Error::new(std::io::ErrorKind::Other, msg))
                 }
             }
@@ -256,10 +336,20 @@ async fn forward_request_impl(
             // unfold's state transition, the body emits a single empty chunk, and
             // the stream then terminates — no need for once() + flatten gymnastics.
             futures_util::stream::unfold(
-                FinalizerState::Init { db_h, st_f, mdl, initial_id },
+                FinalizerState::Init {
+                    db_h,
+                    st_f,
+                    mdl,
+                    initial_id,
+                },
                 |state| async move {
                     let (db_h, st_f, mdl, initial_id) = match state {
-                        FinalizerState::Init { db_h, st_f, mdl, initial_id } => (db_h, st_f, mdl, initial_id),
+                        FinalizerState::Init {
+                            db_h,
+                            st_f,
+                            mdl,
+                            initial_id,
+                        } => (db_h, st_f, mdl, initial_id),
                         FinalizerState::Done => return None,
                     };
                     let (status_str, prompt, completion, cached, cost) = {
@@ -270,7 +360,13 @@ async fn forward_request_impl(
                             ("error".to_string(), 0, 0, 0, 0.0)
                         } else if let Some(u) = g.usage.as_ref() {
                             let (p, c, cached) = extract_token_counts(u);
-                            ("success".to_string(), p, c, cached, cost_from_counts(&mdl, p, c, cached))
+                            (
+                                "success".to_string(),
+                                p,
+                                c,
+                                cached,
+                                cost_from_counts(&mdl, p, c, cached),
+                            )
                         } else {
                             ("success_no_usage".to_string(), 0, 0, 0, 0.0)
                         }
@@ -312,7 +408,11 @@ async fn forward_request_impl(
         // 0-token success". An unparseable body is logged as client_error so the
         // operator can see upstream misbehavior instead of free successful calls.
         let (status_str, error_msg, usage) = match serde_json::from_str::<Value>(&text) {
-            Ok(v) => ("success", None, v.get("usage").cloned().unwrap_or(Value::Null)),
+            Ok(v) => (
+                "success",
+                None,
+                v.get("usage").cloned().unwrap_or(Value::Null),
+            ),
             Err(_) => ("client_error", Some(text.clone()), Value::Null),
         };
         let (prompt_tokens, completion_tokens, cached_tokens) = extract_token_counts(&usage);
@@ -365,16 +465,23 @@ pub async fn forward_get(
     upstream_base_url: &str,
     upstream_path: &str,
 ) -> Result<Response> {
+    ensure_safe_upstream_base_url(upstream_base_url)?;
     let config = state.config();
-    let selector = AccountSelector::with_counter(config.selection_strategy, state.round_robin_counter.clone());
+    let selector =
+        AccountSelector::with_counter(config.selection_strategy, state.round_robin_counter.clone());
     let account = {
         let db = state.db.lock();
-        selector.select(&*db, None)?
+        selector
+            .select(&*db, None)?
             .ok_or_else(|| anyhow::anyhow!("no enabled accounts available"))
     }?;
 
     let key = state.decrypt_key(&account.key_cipher)?;
-    let url = format!("{}{}", upstream_base_url.trim_end_matches('/'), upstream_path);
+    let url = format!(
+        "{}{}",
+        upstream_base_url.trim_end_matches('/'),
+        upstream_path
+    );
 
     let resp = match client
         .get(&url)
@@ -399,7 +506,18 @@ pub async fn forward_get(
         } else {
             "success"
         };
-        log_forward(&*db, &account, "", category, Some(status.as_u16() as i32), 0, 0, 0, 0.0, Some(&body))?;
+        log_forward(
+            &*db,
+            &account,
+            "",
+            category,
+            Some(status.as_u16() as i32),
+            0,
+            0,
+            0,
+            0.0,
+            Some(&body),
+        )?;
         if status.as_u16() == 429 {
             // 429 cooldown: parse the reset window so the next request skips this account.
             let cooldown = parse_reset(&body).unwrap_or_else(|| Duration::minutes(5));
@@ -411,6 +529,35 @@ pub async fn forward_get(
     headers.insert("content-type", HeaderValue::from_static("application/json"));
 
     Ok((status, headers, body).into_response())
+}
+
+fn ensure_safe_upstream_base_url(base: &str) -> Result<()> {
+    let url = reqwest::Url::parse(base)?;
+    match url.scheme() {
+        "https" => Ok(()),
+        "http" if is_loopback_host(&url) => Ok(()),
+        scheme => anyhow::bail!("unsafe upstream scheme or host: {}", scheme),
+    }
+}
+
+fn is_loopback_host(url: &reqwest::Url) -> bool {
+    matches!(
+        url.host_str(),
+        Some("localhost") | Some("127.0.0.1") | Some("::1") | Some("[::1]")
+    )
+}
+
+fn sanitize_upstream_error(text: &str) -> String {
+    let mut out = String::new();
+    for token in text.split_whitespace().take(40) {
+        if token.starts_with("sk-") || token.to_ascii_lowercase().contains("bearer") {
+            out.push_str("<redacted> ");
+        } else {
+            out.push_str(token);
+            out.push(' ');
+        }
+    }
+    out.trim_end().chars().take(500).collect()
 }
 
 fn error_response(message: &str) -> Response {
@@ -501,7 +648,11 @@ fn extract_data_payload(event: &[u8]) -> Option<String> {
             parts.push(rest.strip_prefix(' ').unwrap_or(rest));
         }
     }
-    if parts.is_empty() { None } else { Some(parts.join("\n")) }
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join("\n"))
+    }
 }
 
 // ponytail: ignore_err on JSON parse — SSE frames may be comments or keep-alive
@@ -517,7 +668,9 @@ fn process_chunk_for_usage(st: &mut StreamState, chunk: &bytes::Bytes) {
     st.buf.extend_from_slice(chunk);
     loop {
         let bytes = st.buf.as_ref();
-        let Some(idx) = find_event_boundary(bytes) else { break };
+        let Some(idx) = find_event_boundary(bytes) else {
+            break;
+        };
         let take = event_boundary_len(bytes, idx);
         let event = st.buf.split_to(idx + take);
         if let Some(payload) = extract_data_payload(&event) {
@@ -537,8 +690,14 @@ fn process_chunk_for_usage(st: &mut StreamState, chunk: &bytes::Bytes) {
 }
 
 fn extract_token_counts(usage: &Value) -> (i64, i64, i64) {
-    let prompt = usage.get("prompt_tokens").and_then(Value::as_i64).unwrap_or(0);
-    let completion = usage.get("completion_tokens").and_then(Value::as_i64).unwrap_or(0);
+    let prompt = usage
+        .get("prompt_tokens")
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
+    let completion = usage
+        .get("completion_tokens")
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
     let cached = usage
         .get("prompt_tokens_details")
         .and_then(|d| d.get("cached_tokens"))
@@ -581,7 +740,10 @@ mod stream_usage_tests {
         process_chunk_for_usage(&mut st, &Bytes::copy_from_slice(b));
         process_chunk_for_usage(&mut st, &Bytes::copy_from_slice(c));
 
-        let u = st.usage.clone().expect("usage should be set after boundary");
+        let u = st
+            .usage
+            .clone()
+            .expect("usage should be set after boundary");
         let (p, c, cached) = extract_token_counts(&u);
         assert_eq!((p, c, cached), (10, 20, 5));
         assert!(st.buf.is_empty(), "buffer should be empty after all chunks");
@@ -590,7 +752,8 @@ mod stream_usage_tests {
     #[test]
     fn no_usage_event_yields_none() {
         let mut st = StreamState::default();
-        let payload = b"data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\ndata: [DONE]\n\n".to_vec();
+        let payload =
+            b"data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\ndata: [DONE]\n\n".to_vec();
         process_chunk_for_usage(&mut st, &Bytes::from(payload));
         assert!(st.usage.is_none(), "no usage field means None");
         assert!(st.buf.is_empty());

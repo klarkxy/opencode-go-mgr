@@ -1,15 +1,21 @@
 <template>
+  <n-message-provider>
   <n-layout has-sider style="height: 100%">
     <n-layout-sider
       bordered
       collapse-mode="width"
       :collapsed-width="64"
-      :width="180"
+      :width="200"
       :collapsed="collapsed"
       show-trigger
       @collapse="collapsed = true"
       @expand="collapsed = false"
+      class="app-sider"
     >
+      <div class="brand" :class="{ collapsed }">
+        <span class="brand-mark">OCG</span>
+        <span v-if="!collapsed" class="brand-name">Manager</span>
+      </div>
       <n-menu
         :collapsed="collapsed"
         :collapsed-width="64"
@@ -20,19 +26,22 @@
       />
     </n-layout-sider>
     <n-layout>
-      <n-layout-header bordered style="padding: 16px; display: flex; align-items: center; justify-content: space-between">
-        <n-h3 style="margin: 0">OCG Manager</n-h3>
-        <n-tag :type="gatewayRunning ? 'success' : 'error'">
-          Gateway {{ gatewayRunning ? "运行中" : "已停止" }}
-        </n-tag>
+      <n-layout-header bordered class="app-header">
+        <div class="header-left">
+          <span class="header-title">{{ currentTitle }}</span>
+        </div>
+        <div class="header-right">
+          <span class="gw-status" :class="gatewayRunning ? 'on' : 'off'">
+            <span class="gw-dot" />
+            Gateway {{ gatewayRunning ? "运行中" : "已停止" }}
+          </span>
+        </div>
       </n-layout-header>
-      <n-layout-content style="padding: 16px; overflow-y: auto">
-        <n-message-provider>
+      <n-layout-content class="app-content">
           <Dashboard v-if="activeKey === 'dashboard'" />
           <Accounts v-else-if="activeKey === 'accounts'" />
           <Logs v-else-if="activeKey === 'logs'" />
           <Settings v-else-if="activeKey === 'settings'" />
-        </n-message-provider>
       </n-layout-content>
     </n-layout>
   </n-layout>
@@ -42,18 +51,17 @@
     :config="wizardConfig"
     @done="showWizard = false"
   />
+  </n-message-provider>
 </template>
 
 <script setup lang="ts">
-import { h, ref, onMounted } from "vue";
+import { h, ref, onMounted, computed } from "vue";
 import {
   NLayout,
   NLayoutSider,
   NLayoutHeader,
   NLayoutContent,
   NMenu,
-  NH3,
-  NTag,
   NMessageProvider,
 } from "naive-ui";
 import {
@@ -113,6 +121,14 @@ const menuOptions = [
   },
 ];
 
+const titleMap: Record<string, string> = {
+  dashboard: "仪表盘",
+  accounts: "账号管理",
+  logs: "日志",
+  settings: "设置",
+};
+const currentTitle = computed(() => titleMap[activeKey.value] ?? "OCG Manager");
+
 onMounted(async () => {
   try {
     const status: GatewayStatus = await tauriApi.getGatewayStatus();
@@ -138,3 +154,86 @@ onMounted(async () => {
   }
 });
 </script>
+
+<style scoped>
+.app-sider {
+  background: var(--n-color, #fff);
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 56px;
+  padding: 0 18px;
+  border-bottom: 1px solid var(--n-border-color, rgba(0, 0, 0, 0.06));
+  overflow: hidden;
+}
+.brand.collapsed {
+  padding: 0;
+  justify-content: center;
+}
+.brand-mark {
+  font-weight: 800;
+  font-size: 15px;
+  letter-spacing: 0.04em;
+  background: linear-gradient(135deg, #18a058 0%, #2080f0 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.brand-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--n-text-color, #222);
+}
+
+.app-header {
+  height: 56px;
+  padding: 0 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.header-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--n-text-color, #222);
+}
+.gw-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: 999px;
+}
+.gw-status.on {
+  background: rgba(24, 160, 88, 0.12);
+  color: #18a058;
+}
+.gw-status.off {
+  background: rgba(208, 48, 80, 0.12);
+  color: #d03050;
+}
+.gw-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.gw-status.on .gw-dot {
+  box-shadow: 0 0 0 0 rgba(24, 160, 88, 0.5);
+  animation: pulse 1.8s infinite;
+}
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 rgba(24, 160, 88, 0.5); }
+  70% { box-shadow: 0 0 0 6px rgba(24, 160, 88, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(24, 160, 88, 0); }
+}
+
+.app-content {
+  padding: 20px;
+  overflow-y: auto;
+}
+</style>

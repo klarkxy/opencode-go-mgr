@@ -2,8 +2,8 @@ use crate::db::Database;
 use crate::models::{Account, SelectionStrategy};
 use anyhow::Result;
 use chrono::Utc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 pub struct AccountSelector {
     strategy: SelectionStrategy,
@@ -26,6 +26,11 @@ impl AccountSelector {
     }
 
     pub fn select(&self, db: &Database, exclude_id: Option<&str>) -> Result<Option<Account>> {
+        let excluded = exclude_id.into_iter().collect::<Vec<_>>();
+        self.select_excluding(db, &excluded)
+    }
+
+    pub fn select_excluding(&self, db: &Database, exclude_ids: &[&str]) -> Result<Option<Account>> {
         let accounts = db.list_accounts()?;
         let now = Utc::now();
         let mut available: Vec<Account> = Vec::new();
@@ -33,10 +38,8 @@ impl AccountSelector {
             if !account.enabled {
                 continue;
             }
-            if let Some(excluded) = exclude_id {
-                if account.id == excluded {
-                    continue;
-                }
+            if exclude_ids.iter().any(|excluded| account.id == *excluded) {
+                continue;
             }
             // ponytail: cooldown check piggybacks on list_accounts (no extra query).
             // Add a per-row cache or index when account count exceeds ~100.

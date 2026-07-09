@@ -53,24 +53,27 @@ async fn proxy_handler(
     }
 
     let client = &state.http_client;
-    let selector = AccountSelector::with_counter(config.selection_strategy, state.round_robin_counter.clone());
+    let selector =
+        AccountSelector::with_counter(config.selection_strategy, state.round_robin_counter.clone());
 
     let mut last_error: Option<String> = None;
-    let mut excluded_id: Option<String> = None;
+    let mut failed_ids: Vec<String> = Vec::new();
 
     for _attempt in 0..5 {
         let account = {
             let db = state.db.lock();
-            match selector.select(&*db, excluded_id.as_deref()) {
+            let excluded = failed_ids.iter().map(String::as_str).collect::<Vec<_>>();
+            match selector.select_excluding(&*db, &excluded) {
                 Ok(Some(a)) => a,
                 Ok(None) => {
                     // No enabled, non-cooldown, non-excluded account left.
                     // If any enabled account is in cooldown, tell the client when the soonest resets.
-                    let soonest = state.db.lock().soonest_cooldown_reset().ok().flatten();
+                    let soonest = db.soonest_cooldown_reset().ok().flatten();
                     return match soonest {
                         Some(until) => rate_limited_response(until),
                         None => {
-                            let msg = last_error.unwrap_or_else(|| "no available accounts".to_string());
+                            let msg =
+                                last_error.unwrap_or_else(|| "no available accounts".to_string());
                             error_response(StatusCode::SERVICE_UNAVAILABLE, &msg)
                         }
                     };
@@ -100,7 +103,7 @@ async fn proxy_handler(
                     return result.response;
                 } else {
                     last_error = result.error_message.clone();
-                    excluded_id = Some(account.id);
+                    failed_ids.push(account.id.clone());
                     let _ = {
                         let db = state.db.lock();
                         db.log_gateway(
@@ -116,7 +119,7 @@ async fn proxy_handler(
             }
             Err(e) => {
                 last_error = Some(format!("forward error: {}", e));
-                excluded_id = Some(account.id);
+                failed_ids.push(account.id.clone());
             }
         }
     }

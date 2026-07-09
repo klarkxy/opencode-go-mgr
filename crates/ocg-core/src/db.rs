@@ -1,7 +1,7 @@
 use crate::models::*;
 use anyhow::Result;
 use chrono::{DateTime, Duration, Utc};
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 use std::path::PathBuf;
 
 pub struct Database {
@@ -118,14 +118,21 @@ impl Database {
         Ok(())
     }
 
-    pub fn update_account(&self, id: &str, update: &AccountUpdate, key_cipher: Option<&str>) -> Result<()> {
-        let existing = self.get_account(id)?.ok_or_else(|| anyhow::anyhow!("account not found"))?;
+    pub fn update_account(
+        &self,
+        id: &str,
+        update: &AccountUpdate,
+        key_cipher: Option<&str>,
+    ) -> Result<()> {
+        let existing = self
+            .get_account(id)?
+            .ok_or_else(|| anyhow::anyhow!("account not found"))?;
         let name = update.name.as_ref().unwrap_or(&existing.name);
         let enabled = update.enabled.unwrap_or(existing.enabled);
         let referral_code = match &update.referral_code {
-            Some(s) if s.is_empty() => None,          // explicitly cleared
-            Some(s) => Some(s.clone()),                // set to new value
-            None => existing.referral_code.clone(),    // not provided, keep existing
+            Some(s) if s.is_empty() => None,        // explicitly cleared
+            Some(s) => Some(s.clone()),             // set to new value
+            None => existing.referral_code.clone(), // not provided, keep existing
         };
         let recharge_date = match &update.recharge_date {
             Some(s) if s.is_empty() => None,
@@ -175,10 +182,9 @@ impl Database {
             // for both the admin and the startup_pull paths.
             return Ok(false);
         }
-        // Wire is newer — apply its non-empty fields verbatim, but NEVER
-        // overwrite the local cipher (each machine has its own machine-bound
-        // key). The optional fields use the same Some("")=>None / None=>keep
-        // convention as update_account above.
+        // Wire is newer — apply its fields. New sync payloads carry plaintext
+        // keys that callers re-encrypt locally before calling this helper.
+        // Empty key_cipher means "metadata only; keep the local key".
         let upd = crate::models::AccountUpdate {
             name: Some(wire.name.clone()),
             key: None,
@@ -188,11 +194,17 @@ impl Database {
         };
         // ponytail: optional fields are Option<String> in the DB; unwrap with
         // a fallback to the local value when the wire didn't send them.
+        let key_cipher = if wire.key_cipher.is_empty() {
+            existing.key_cipher
+        } else {
+            wire.key_cipher.clone()
+        };
         self.conn.execute(
-            "UPDATE accounts SET name = ?1, enabled = ?2, referral_code = ?3, recharge_date = ?4, updated_at = ?5
-             WHERE id = ?6",
+            "UPDATE accounts SET name = ?1, key_cipher = ?2, enabled = ?3, referral_code = ?4, recharge_date = ?5, updated_at = ?6
+             WHERE id = ?7",
             params![
                 upd.name.as_deref().unwrap_or(&existing.name),
+                key_cipher,
                 upd.enabled.unwrap_or(existing.enabled) as i32,
                 upd.referral_code.unwrap_or_else(|| existing.referral_code.clone().unwrap_or_default()),
                 upd.recharge_date.unwrap_or_else(|| existing.recharge_date.clone().unwrap_or_default()),
@@ -223,9 +235,7 @@ impl Database {
                     enabled: row.get::<_, i32>(3)? != 0,
                     referral_code: row.get(4)?,
                     recharge_date: row.get(5)?,
-                    cooldown_until: row
-                        .get::<_, Option<String>>(6)?
-                        .map(parse_datetime),
+                    cooldown_until: row.get::<_, Option<String>>(6)?.map(parse_datetime),
                     last_error: row.get(7)?,
                     created_at: parse_datetime(row.get::<_, String>(8)?),
                     updated_at: parse_datetime(row.get::<_, String>(9)?),
@@ -247,9 +257,7 @@ impl Database {
                 enabled: row.get::<_, i32>(3)? != 0,
                 referral_code: row.get(4)?,
                 recharge_date: row.get(5)?,
-                cooldown_until: row
-                    .get::<_, Option<String>>(6)?
-                    .map(parse_datetime),
+                cooldown_until: row.get::<_, Option<String>>(6)?.map(parse_datetime),
                 last_error: row.get(7)?,
                 created_at: parse_datetime(row.get::<_, String>(8)?),
                 updated_at: parse_datetime(row.get::<_, String>(9)?),
@@ -269,7 +277,9 @@ impl Database {
 
     pub fn get_setting(&self, key: &str) -> Result<Option<String>> {
         self.conn
-            .query_row("SELECT value FROM settings WHERE key = ?1", [key], |row| row.get(0))
+            .query_row("SELECT value FROM settings WHERE key = ?1", [key], |row| {
+                row.get(0)
+            })
             .optional()
             .map_err(|e| e.into())
     }
@@ -330,7 +340,16 @@ impl Database {
                  cost = ?7,
                  error_message = COALESCE(?8, error_message)
              WHERE id = ?1",
-            params![id, status, http_status, prompt_tokens, completion_tokens, cached_tokens, cost, error_message],
+            params![
+                id,
+                status,
+                http_status,
+                prompt_tokens,
+                completion_tokens,
+                cached_tokens,
+                cost,
+                error_message
+            ],
         )?;
         Ok(())
     }
@@ -351,12 +370,12 @@ impl Database {
         rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.into())
     }
 
-    pub fn list_forward_logs(&self, _limit: i64) -> Result<Vec<ForwardLog>> {
+    pub fn list_forward_logs(&self, limit: i64) -> Result<Vec<ForwardLog>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, timestamp, model, account_id, account_name, status, http_status, prompt_tokens, completion_tokens, cached_tokens, cost, error_message
              FROM forward_logs ORDER BY id DESC LIMIT ?1"
         )?;
-        let rows = stmt.query_map([], |row| {
+        let rows = stmt.query_map([limit], |row| {
             Ok(ForwardLog {
                 id: row.get(0)?,
                 timestamp: parse_datetime(row.get::<_, String>(1)?),
@@ -459,7 +478,12 @@ impl Database {
 
     pub fn total_usage(&self) -> Result<(f64, f64, f64)> {
         let now = Utc::now();
-        let today_start = now.date_naive().and_hms_opt(0, 0, 0).unwrap().and_utc().to_rfc3339();
+        let today_start = now
+            .date_naive()
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+            .and_utc()
+            .to_rfc3339();
         let week_ago = (now - Duration::days(7)).to_rfc3339();
         let month_ago = (now - Duration::days(30)).to_rfc3339();
 
@@ -480,6 +504,36 @@ impl Database {
         )?;
 
         Ok((today, week, month))
+    }
+
+    /// Aggregate `forward_logs` into per-day, per-model cost buckets covering
+    /// the last `days` calendar days (UTC). Rows with zero activity on a given
+    /// day are omitted — the frontend synthesizes empty days so the x-axis
+    /// never collapses. Only `status = 'success'` rows count, matching the
+    /// convention of `total_usage` / `usage_for_account`.
+    pub fn daily_cost_by_model(&self, days: i64) -> Result<Vec<DailyModelCost>> {
+        // Bone-simple SQLite date math: store timestamps as RFC3339 strings,
+        // so group by `substr(timestamp, 1, 10)` to collapse to YYYY-MM-DD.
+        // UTC-only is fine — the gateway runs local and the dashboard is a
+        // single-user tool; a TZ-correct grouping would need a calendar table
+        // or a strftime('%Y-%m-%d', ...) with proper epoch arg, which is more
+        // machinery than this needs right now.
+        let since = (Utc::now() - Duration::days(days - 1)).to_rfc3339();
+        let mut stmt = self.conn.prepare(
+            "SELECT substr(timestamp, 1, 10) AS day, model, COALESCE(SUM(cost), 0)
+             FROM forward_logs
+             WHERE status = 'success' AND timestamp > ?1
+             GROUP BY day, model
+             ORDER BY day ASC, model ASC",
+        )?;
+        let rows = stmt.query_map([&since], |row| {
+            Ok(DailyModelCost {
+                date: row.get::<_, String>(0)?,
+                model: row.get::<_, String>(1)?,
+                cost: row.get::<_, f64>(2)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.into())
     }
 }
 

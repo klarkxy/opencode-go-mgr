@@ -23,7 +23,8 @@ pub enum PushOp {
 struct RemoteKeyDto {
     id: String,
     name: String,
-    key_cipher: String,
+    key: Option<String>,
+    key_cipher: Option<String>,
     enabled: bool,
     referral_code: Option<String>,
     recharge_date: Option<String>,
@@ -35,6 +36,7 @@ struct RemoteKeyDto {
 struct PushPayload<'a> {
     id: &'a str,
     name: &'a str,
+    key: String,
     key_cipher: &'a str,
     enabled: bool,
     referral_code: Option<&'a str>,
@@ -53,6 +55,14 @@ pub async fn startup_pull(state: AppState) -> usize {
         return 0;
     }
     let base = cfg.remote.url.trim_end_matches('/').to_string();
+    if !is_safe_remote_base(&base) {
+        let _ = state.core.db.lock().log_gateway(
+            "warn",
+            "remote_sync",
+            "startup pull skipped unsafe remote url",
+        );
+        return 0;
+    }
     let token = cfg.remote.token.clone();
     let url = format!("{}/admin/keys", base);
 
@@ -131,14 +141,25 @@ pub async fn startup_pull(state: AppState) -> usize {
             continue; // 本地为准
         }
         let created_at = parse_rfc3339(&r.created_at).unwrap_or_else(chrono::Utc::now);
+        let key_cipher = match r.key.as_deref() {
+            Some(key) => match state.core.encrypt_key(key) {
+                Ok(cipher) => cipher,
+                Err(e) => {
+                    let _ = db.log_gateway(
+                        "warn",
+                        "remote_sync",
+                        &format!("startup pull encrypt {} failed: {}", r.id, e),
+                    );
+                    errors += 1;
+                    continue;
+                }
+            },
+            None => r.key_cipher.clone().unwrap_or_default(),
+        };
         let account = Account {
             id: r.id.clone(),
             name: r.name.clone(),
-            // ponytail: trust the remote cipher on FIRST CREATE only. For
-            // existing rows we keep the local machine-bound cipher and only
-            // sync the metadata fields. This prevents a stale or buggy peer
-            // from poisoning the local DB with a cipher we cannot decrypt.
-            key_cipher: r.key_cipher.clone(),
+            key_cipher,
             enabled: r.enabled,
             referral_code: r.referral_code.clone(),
             recharge_date: r.recharge_date.clone(),
@@ -186,6 +207,14 @@ pub fn push_one(state: AppState, account: Option<Account>, op: PushOp) {
             return;
         }
         let base = cfg.remote.url.trim_end_matches('/');
+        if !is_safe_remote_base(base) {
+            let _ = state.core.db.lock().log_gateway(
+                "warn",
+                "remote_sync",
+                "push skipped unsafe remote url",
+            );
+            return;
+        }
         let token = cfg.remote.token.clone();
 
         // Ponytail: read snapshot under the config lock; do not hold the lock
@@ -203,9 +232,21 @@ pub fn push_one(state: AppState, account: Option<Account>, op: PushOp) {
                     Some(a) => a,
                     None => return,
                 };
+                let key = match state.core.decrypt_key(&a.key_cipher) {
+                    Ok(key) => key,
+                    Err(e) => {
+                        let _ = state.core.db.lock().log_gateway(
+                            "warn",
+                            "remote_sync",
+                            &format!("push decrypt {} failed: {}", a.id, e),
+                        );
+                        return;
+                    }
+                };
                 let payload = PushPayload {
                     id: &a.id,
                     name: &a.name,
+                    key,
                     key_cipher: &a.key_cipher,
                     enabled: a.enabled,
                     referral_code: a.referral_code.as_deref(),
@@ -227,9 +268,7 @@ pub fn push_one(state: AppState, account: Option<Account>, op: PushOp) {
         };
         let req = req.bearer_auth(&token);
         let req = match body {
-            Some(b) => req
-                .header("content-type", "application/json")
-                .body(b),
+            Some(b) => req.header("content-type", "application/json").body(b),
             None => req,
         };
         let result = req.send().await;
@@ -252,4 +291,18 @@ fn parse_rfc3339(s: &str) -> Option<chrono::DateTime<chrono::Utc>> {
     chrono::DateTime::parse_from_rfc3339(s)
         .ok()
         .map(|d| d.with_timezone(&chrono::Utc))
+}
+
+fn is_safe_remote_base(base: &str) -> bool {
+    let Ok(url) = tauri::Url::parse(base) else {
+        return false;
+    };
+    match url.scheme() {
+        "https" => true,
+        "http" => matches!(
+            url.host_str(),
+            Some("localhost") | Some("127.0.0.1") | Some("::1") | Some("[::1]")
+        ),
+        _ => false,
+    }
 }
