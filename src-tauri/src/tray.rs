@@ -4,10 +4,9 @@ use tauri_plugin_shell::ShellExt;
 
 pub fn open_dashboard(app: &AppHandle) {
     let state = app.state::<crate::state::AppState>();
-    let config = state.core.config();
     let url = format!(
-        "http://127.0.0.1:{}/dashboard/?token={}",
-        config.gateway_port, state.core.dashboard_token
+        "http://127.0.0.1:{}/dashboard/",
+        state.core.active_gateway_port()
     );
     #[allow(deprecated)]
     let opened = app.shell().open(url, None);

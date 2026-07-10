@@ -16,10 +16,9 @@ ocg-core = { path = "../crates/ocg-core" }
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-shell = "2"
 tauri-plugin-single-instance = "2"
-serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }
-chrono = { version = "0.4", features = ["serde"] }
-uuid = { version = "1", features = ["v4", "serde"] }
+chrono = "0.4"
+uuid = { version = "1", features = ["v4"] }
 anyhow = "1"
 parking_lot = "0.12"
 

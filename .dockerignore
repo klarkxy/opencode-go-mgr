@@ -1,0 +1,9 @@
+.git
+.github
+.learnings
+node_modules
+target
+dist
+release
+*.log
+.env*

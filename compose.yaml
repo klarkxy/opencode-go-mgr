@@ -1,0 +1,26 @@
+services:
+  ocg-manager:
+    build:
+      context: .
+      args:
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
+        CARGO_REGISTRY: ${CARGO_REGISTRY:-sparse+https://index.crates.io/}
+    image: ocg-manager:local
+    restart: unless-stopped
+    environment:
+      - OCG_ADMIN_USERNAME
+      - OCG_ADMIN_PASSWORD
+    ports:
+      - "127.0.0.1:${OCG_PORT:-9042}:9042"
+    volumes:
+      - ocg-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  ocg-data:

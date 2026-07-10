@@ -44,10 +44,6 @@ pub struct AppConfig {
     pub gateway_key: String,
     pub upstream_base_url: String,
     pub auto_start: bool,
-    // ponytail: empty url = remote sync disabled. No separate `enabled` flag —
-    // it would just be a second source of truth for the same boolean.
-    #[serde(default)]
-    pub remote: RemoteSync,
 }
 
 impl Default for AppConfig {
@@ -57,20 +53,8 @@ impl Default for AppConfig {
             gateway_key: String::new(),
             upstream_base_url: "https://opencode.ai/zen/go".to_string(),
             auto_start: false,
-            remote: RemoteSync::default(),
         }
     }
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct RemoteSync {
-    /// Base URL of the remote admin API, e.g. "https://ocg.example.com".
-    /// Empty string means remote sync is disabled.
-    #[serde(default)]
-    pub url: String,
-    /// Bearer token for Authorization header. Never logged.
-    #[serde(default)]
-    pub token: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

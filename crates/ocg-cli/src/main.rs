@@ -6,6 +6,7 @@ use ocg_core::db::Database;
 use ocg_core::gateway;
 use ocg_core::models::{Account, AppConfig};
 use ocg_core::state::{CoreStateInner, random_word};
+use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -30,20 +31,15 @@ struct Cli {
 enum Commands {
     /// Start the gateway server
     Serve {
+        /// Address to listen on
+        #[arg(long, default_value = "127.0.0.1")]
+        host: IpAddr,
         /// Gateway port (overrides config)
         #[arg(short, long)]
         port: Option<u16>,
         /// Directory containing the built web dashboard (dist)
         #[arg(long)]
         dashboard_dir: Option<PathBuf>,
-        /// Bind the remote-sync admin API on this port (127.0.0.1 only).
-        /// Omit to disable. GUI clients use this to push account keys.
-        #[arg(long)]
-        admin_port: Option<u16>,
-        /// Bearer token for the admin API. If omitted with --admin-port,
-        /// a 32-byte token is generated and written to <data-dir>/admin_token (chmod 0600).
-        #[arg(long)]
-        admin_token: Option<String>,
     },
     /// Manage API keys
     Key {
@@ -110,21 +106,10 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Commands::Serve {
+            host,
             port,
             dashboard_dir,
-            admin_port,
-            admin_token,
-        } => {
-            serve(
-                data_dir,
-                cipher,
-                port,
-                dashboard_dir,
-                admin_port,
-                admin_token,
-            )
-            .await
-        }
+        } => serve(data_dir, cipher, host, port, dashboard_dir).await,
         Commands::Key { action } => key_command(data_dir, cipher, action).await,
         Commands::Status => status_command(data_dir, cipher).await,
     }
@@ -188,12 +173,11 @@ fn build_state(
 async fn serve(
     data_dir: PathBuf,
     cipher: Arc<dyn KeyCipher + Send + Sync>,
+    host: IpAddr,
     port: Option<u16>,
     dashboard_dir: Option<PathBuf>,
-    admin_port: Option<u16>,
-    admin_token_flag: Option<String>,
 ) -> Result<()> {
-    let state = build_state(data_dir.clone(), cipher)?;
+    let state = build_state(data_dir, cipher)?;
     state.set_dashboard_dir(dashboard_dir);
 
     let mut config = state.config();
@@ -202,29 +186,14 @@ async fn serve(
         state.set_config(config.clone())?;
     }
 
-    let handle = gateway::start_gateway(state.clone(), config.gateway_port).await?;
-    println!("gateway started on http://127.0.0.1:{}", handle.port);
+    let handle =
+        gateway::start_gateway_on(state.clone(), SocketAddr::new(host, config.gateway_port))
+            .await?;
+    println!("gateway started on http://{}:{}", host, handle.port);
     println!("gateway key: {}", config.gateway_key);
-    println!(
-        "dashboard: http://127.0.0.1:{}/dashboard/?token={}",
-        handle.port, state.dashboard_token
-    );
+    println!("dashboard: http://{}:{}/dashboard/", host, handle.port);
     println!("upstream: {}", config.upstream_base_url);
 
-    // ponytail: admin port/token are independent from AppConfig — the gateway
-    // config and the admin token are different secrets with different lifecycles.
-    let admin_handle = match admin_port {
-        Some(p) => {
-            let token = resolve_admin_token(&data_dir, admin_token_flag)?;
-            let h = ocg_core::admin::start_admin(state.clone(), p, token.clone()).await?;
-            println!(
-                "admin api started on http://127.0.0.1:{} (bearer token saved in data dir)",
-                h.port
-            );
-            Some(h)
-        }
-        None => None,
-    };
     println!("press Ctrl+C to stop");
 
     // Hold the gateway handle so it stays alive
@@ -244,9 +213,6 @@ async fn serve(
     if let Some(handle) = state.gateway.lock().take() {
         gateway::stop_gateway(handle);
     }
-    if let Some(h) = admin_handle {
-        ocg_core::admin::stop_admin(h);
-    }
     let _ = state
         .db
         .lock()
@@ -254,33 +220,19 @@ async fn serve(
     Ok(())
 }
 
-/// Resolve the admin bearer token: explicit flag > persisted file > generate new.
-fn resolve_admin_token(data_dir: &PathBuf, flag: Option<String>) -> Result<String> {
-    if let Some(t) = flag {
-        return Ok(t);
+#[cfg(test)]
+mod tests {
+    use super::{Cli, Commands};
+    use clap::Parser;
+
+    #[test]
+    fn serve_accepts_container_bind_address() {
+        let cli = Cli::try_parse_from(["ocg-manager-cli", "serve", "--host", "0.0.0.0"]).unwrap();
+        let Commands::Serve { host, .. } = cli.command else {
+            panic!("expected serve command");
+        };
+        assert!(host.is_unspecified());
     }
-    let path = data_dir.join("admin_token");
-    if path.exists() {
-        return std::fs::read_to_string(&path)
-            .with_context(|| format!("failed to read admin token from {:?}", path))
-            .map(|s| s.trim().to_string());
-    }
-    std::fs::create_dir_all(data_dir)?;
-    let token = ocg_core::admin::generate_admin_token();
-    std::fs::write(&path, &token)
-        .with_context(|| format!("failed to write admin token to {:?}", path))?;
-    // ponytail: 0600 on unix; on Windows std::fs::set_permissions is a no-op for
-    // this bit but the file lives in the user's own data dir so ACL handles it.
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
-    }
-    eprintln!(
-        "info: generated admin token at {:?}. Pass it to the GUI's remote-sync settings.",
-        path
-    );
-    Ok(token)
 }
 
 async fn key_command(

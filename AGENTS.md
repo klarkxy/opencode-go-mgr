@@ -10,15 +10,15 @@
 - Rust workspace：`crates/ocg-core`、`crates/ocg-cli`、`src-tauri`。
 - 核心 Gateway：Axum + Tokio + reqwest，默认监听 `127.0.0.1:9042`。
 - 持久化：SQLite，GUI 数据目录 `%USERPROFILE%\.ocg-mgr`，CLI 默认 `~/.ocg-mgr-cli`。
-- 桌面端：Tauri v2 Windows 托盘应用，主窗口默认隐藏；托盘/单实例逻辑用系统浏览器打开 `http://127.0.0.1:<port>/dashboard/?token=...`。
+- 桌面端：Tauri v2 Windows 托盘应用，主窗口默认隐藏；托盘/单实例逻辑用系统浏览器打开 `http://127.0.0.1:<port>/dashboard/`，回环监听自动跳过登录。
 - Tauri commands 仍注册在 `src-tauri/src/commands/`，但不是当前 Vue dashboard 的主调用路径。
-- Remote sync 是手动操作：本地 dashboard 可 push 到 CLI `serve --admin-port` 暴露的 admin API；远端删除/编辑用远端自己的 dashboard。
+- 每个节点都由自己的 dashboard 管理；项目不提供远端同步或 Admin API。
+- 非回环监听使用单管理员登录；Docker 可通过 `OCG_ADMIN_USERNAME` 和 `OCG_ADMIN_PASSWORD` 首次初始化，未提供时由首个注册者创建管理员。
 
 ## 关键文件
 
 - `crates/ocg-core/src/gateway/`：OpenAI/Anthropic 兼容路由、转发、选择器、冷却、费用统计。
 - `crates/ocg-core/src/dashboard.rs`：当前 Vue 面板使用的 `/dashboard/api`。
-- `crates/ocg-core/src/admin.rs`：远端同步 admin API。
 - `crates/ocg-core/src/db.rs`：SQLite schema、迁移、查询。
 - `crates/ocg-core/src/models.rs`：共享 serde 类型和 `AppConfig`。
 - `crates/ocg-cli/src/main.rs`：CLI `serve`、`key`、`status`。
@@ -47,8 +47,8 @@ cargo test --workspace
 - 工作区可能是脏树。先看 `git status --short`，不要回退不是你改的内容。
 - Ponytail 原则优先：能删就删，能复用现有代码就复用，别加“以后可能用”的抽象。
 - 不要新增 Tauri `invoke` 前端路径，除非你明确要恢复桌面 WebView 内调用；当前主路径是 HTTP dashboard。
-- 安全边界别省：Gateway 鉴权、key 存储混淆、远端 sync token、HTTP URL 校验、冷却状态写入、SSE 透传都不能为了简化拿掉。
-- Remote sync 会传 key/password 到用户配置的远端 admin API。文档和日志不要写成“key 永不离开本机”。
+- 安全边界别省：Gateway 鉴权、key 存储混淆、HTTP URL 校验、冷却状态写入、SSE 透传都不能为了简化拿掉。
+- 不要重新引入远端同步；远端节点通过自己的 dashboard 管理。
 - `auto_start` 目前存在 Windows 注册表 helper，但当前 HTTP dashboard 不暴露这个设置。
 
 ## 测试策略

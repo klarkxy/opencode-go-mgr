@@ -18,7 +18,7 @@
     "build:cli": "cargo build --release --bin ocg-manager-cli",
     "test:cli": "cargo test -p ocg-manager-cli",
     "dev:gui": "tauri dev",
-    "build:gui": "tauri build",
+    "build:gui": "node -e \"require('node:fs').rmSync('target/release/dist', { recursive: true, force: true })\" && tauri build",
     "test:gui": "pnpm run typecheck",
     "build:all": "pnpm run build:gateway && pnpm run build:cli && pnpm run build:gui",
     "artifacts": "node scripts/collect-artifacts.mjs",

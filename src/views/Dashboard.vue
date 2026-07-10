@@ -3,11 +3,20 @@
     - 卡片用柔和阴影 + 细边框,避免重描边
     - 4 个 KPI 卡片占顶部一行,各自有图标徽章 + 主数值 + 趋势副文本
     - 中间主打区是按日按模型分段的堆叠柱状图(占主视觉)
-    - 右侧次区 Gateway 状态 + Key 复制
+    - 右侧次区服务连接信息 + Key 复制
     - 底部账号概览用紧凑卡片网格替代长 list
 -->
 <template>
   <div class="dashboard">
+    <section class="hero-card" aria-label="OCG Manager">
+      <div class="hero-copy">
+        <span class="hero-kicker">OCG Manager</span>
+        <h2>多账号，一处管理</h2>
+        <p>集中查看账号、用量与转发配置。</p>
+      </div>
+      <img :src="characterImage" alt="" class="hero-character" />
+    </section>
+
     <!-- KPI 卡片行 -->
     <section class="kpi-row">
       <div class="kpi-card">
@@ -63,7 +72,7 @@
       </div>
     </section>
 
-    <!-- 主体: 图表 + Gateway 侧栏 -->
+    <!-- 主体: 图表 + 服务连接侧栏 -->
     <section class="main-grid">
       <div class="card chart-card">
         <div class="card-head">
@@ -85,22 +94,18 @@
       </div>
 
       <div class="side-stack">
-        <div class="card gateway-card">
+        <div class="card service-card">
           <div class="card-head">
-            <h3 class="card-title">Gateway 状态</h3>
-            <span class="status-pill" :class="gatewayStatus.running ? 'on' : 'off'">
-              <span class="pulse" v-if="gatewayStatus.running" />
-              {{ gatewayStatus.running ? "运行中" : "已停止" }}
-            </span>
+            <h3 class="card-title">服务连接</h3>
           </div>
           <div class="gw-rows">
             <div class="gw-row">
-              <span class="gw-key">监听端口</span>
-              <span class="gw-val">{{ gatewayStatus.port }}</span>
+              <span class="gw-key">API 地址</span>
+              <span class="gw-val mono">{{ serviceApiUrl }}</span>
             </div>
             <div class="gw-row">
               <span class="gw-key">上游地址</span>
-              <span class="gw-val mono">{{ gatewayStatus.upstream_base_url || "—" }}</span>
+              <span class="gw-val mono">{{ serviceConfig.upstream_base_url || "—" }}</span>
             </div>
             <div class="gw-row align-top">
               <span class="gw-key">Gateway Key</span>
@@ -110,10 +115,6 @@
                   <template #icon><CopyOutlined /></template>
                 </n-button>
               </div>
-            </div>
-            <div v-if="!gatewayStatus.running && gatewayStatus.last_error" class="gw-row align-top">
-              <span class="gw-key">最近错误</span>
-              <span class="gw-val error-text">{{ gatewayStatus.last_error }}</span>
             </div>
           </div>
         </div>
@@ -180,24 +181,23 @@ import {
 } from "@vicons/antd";
 import StackedBarChart from "../components/StackedBarChart.vue";
 import { tauriApi } from "../api/tauri";
-import type { Account, GatewayStatus, UsageWindow, DashboardSummary, DailyModelCost } from "../api/tauri";
+import type { Account, AppConfig, UsageWindow, DashboardSummary, DailyModelCost } from "../api/tauri";
 
 const message = useMessage();
+const characterImage = new URL("../../assets/opencode娘.png", import.meta.url).href;
 const accounts = ref<Account[]>([]);
 const usageMap = ref<Record<string, UsageWindow>>({});
 const dailyCosts = ref<DailyModelCost[]>([]);
 const loading = ref(true);
-const gatewayStatus = ref<GatewayStatus>({
-  running: false,
-  port: 9042,
-  key: "",
+const serviceConfig = ref<AppConfig>({
+  gateway_port: 9042,
+  gateway_key: "",
   upstream_base_url: "",
-  last_error: null,
+  auto_start: false,
 });
 const summary = ref<DashboardSummary>({
   total_accounts: 0,
   available_accounts: 0,
-  gateway_running: false,
   today_cost: 0,
   week_cost: 0,
   month_cost: 0,
@@ -229,11 +229,14 @@ function formatCost(v: number): string {
 }
 
 const maskedKey = computed(() => {
-  const key = gatewayStatus.value.key;
+  const key = serviceConfig.value.gateway_key;
   if (!key) return "未设置";
   if (key.length <= 8) return key;
   return key.slice(0, 4) + "…" + key.slice(-4);
 });
+const serviceApiUrl = window.location.pathname.startsWith("/dashboard")
+  ? `${window.location.origin}/v1`
+  : "http://127.0.0.1:9042/v1";
 
 function isCoolingDown(account: Account): boolean {
   if (!account.cooldown_until) return false;
@@ -253,9 +256,9 @@ function getUsageText(accountId: string) {
 }
 
 async function copyKey() {
-  if (!gatewayStatus.value.key) return;
+  if (!serviceConfig.value.gateway_key) return;
   try {
-    await navigator.clipboard.writeText(gatewayStatus.value.key);
+    await navigator.clipboard.writeText(serviceConfig.value.gateway_key);
     message.success("已复制 Gateway Key");
   } catch {
     message.error("复制失败");
@@ -265,7 +268,7 @@ async function copyKey() {
 onMounted(async () => {
   try {
     accounts.value = await tauriApi.getAccounts();
-    gatewayStatus.value = await tauriApi.getGatewayStatus();
+    serviceConfig.value = await tauriApi.getSettings();
     summary.value = await tauriApi.getDashboardSummary();
     dailyCosts.value = await tauriApi.getDailyCostByModel(30);
     for (const account of accounts.value) {
@@ -285,6 +288,58 @@ onMounted(async () => {
   flex-direction: column;
   gap: 16px;
 }
+.hero-card {
+  position: relative;
+  min-height: 168px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at 74% 38%, rgba(122, 77, 240, 0.12), transparent 30%),
+    linear-gradient(112deg, rgba(239, 250, 246, 0.96) 0%, rgba(246, 247, 252, 0.9) 58%, rgba(234, 237, 245, 0.78) 100%);
+  box-shadow: 0 8px 32px rgba(24, 38, 56, 0.07);
+}
+.hero-copy {
+  position: relative;
+  z-index: 1;
+  padding: 34px 36px;
+}
+.hero-kicker {
+  color: #18a058;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.hero-copy h2 {
+  margin: 8px 0 6px;
+  font-size: 26px;
+  line-height: 1.25;
+}
+.hero-copy p {
+  margin: 0;
+  color: #667085;
+}
+.hero-character {
+  position: absolute;
+  right: 4%;
+  top: -26px;
+  width: 330px;
+  max-width: 48%;
+  mix-blend-mode: multiply;
+  pointer-events: none;
+  user-select: none;
+}
+@media (max-width: 720px) {
+  .hero-copy {
+    padding: 28px 24px;
+  }
+  .hero-character {
+    right: -60px;
+    max-width: 62%;
+    opacity: 0.38;
+  }
+}
 
 /* --- KPI 卡片行 --- */
 .kpi-row {
@@ -302,7 +357,8 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   padding: 16px 18px;
-  background: var(--n-card-color, #fff);
+  background: rgba(255, 255, 255, 0.86);
+  backdrop-filter: blur(5px);
   border: 1px solid var(--n-border-color, rgba(0, 0, 0, 0.05));
   border-radius: 12px;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
@@ -368,7 +424,8 @@ onMounted(async () => {
 
 /* --- 通用卡片 --- */
 .card {
-  background: var(--n-card-color, #fff);
+  background: rgba(255, 255, 255, 0.86);
+  backdrop-filter: blur(5px);
   border: 1px solid var(--n-border-color, rgba(0, 0, 0, 0.05));
   border-radius: 12px;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
@@ -438,38 +495,8 @@ onMounted(async () => {
   flex-direction: column;
   gap: 16px;
 }
-.gateway-card {
+.service-card {
   padding-bottom: 14px;
-}
-.status-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 10px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 600;
-}
-.status-pill.on {
-  background: rgba(24, 160, 88, 0.12);
-  color: #18a058;
-}
-.status-pill.off {
-  background: rgba(208, 48, 80, 0.12);
-  color: #d03050;
-}
-.pulse {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #18a058;
-  box-shadow: 0 0 0 0 rgba(24, 160, 88, 0.5);
-  animation: pulse 1.8s infinite;
-}
-@keyframes pulse {
-  0% { box-shadow: 0 0 0 0 rgba(24, 160, 88, 0.5); }
-  70% { box-shadow: 0 0 0 6px rgba(24, 160, 88, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(24, 160, 88, 0); }
 }
 .gw-rows {
   padding: 0 18px;
@@ -496,9 +523,6 @@ onMounted(async () => {
   color: var(--n-text-color, #222);
   text-align: right;
   word-break: break-all;
-}
-.error-text {
-  color: #d03050;
 }
 .gw-val.mono,
 .mono {

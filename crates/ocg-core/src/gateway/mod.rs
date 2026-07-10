@@ -40,9 +40,15 @@ pub fn build_router(state: CoreState) -> Router {
 }
 
 pub async fn start_gateway(state: CoreState, port: u16) -> Result<GatewayHandle> {
-    let app = build_router(state);
-    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    start_gateway_on(state, SocketAddr::from(([127, 0, 0, 1], port))).await
+}
+
+pub async fn start_gateway_on(state: CoreState, addr: SocketAddr) -> Result<GatewayHandle> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
+    let local_addr = listener.local_addr()?;
+    state.set_dashboard_local_mode(local_addr.ip().is_loopback());
+    let app = build_router(state);
+    let port = local_addr.port();
 
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
 

@@ -31,20 +31,6 @@ export interface AppConfig {
   gateway_key: string;
   upstream_base_url: string;
   auto_start: boolean;
-  remote: RemoteSync;
-}
-
-export interface RemoteSync {
-  url: string;
-  token: string;
-}
-
-export interface GatewayStatus {
-  running: boolean;
-  port: number;
-  key: string;
-  upstream_base_url: string;
-  last_error: string | null;
 }
 
 export interface GatewayLog {
@@ -80,7 +66,6 @@ export interface UsageWindow {
 export interface DashboardSummary {
   total_accounts: number;
   available_accounts: number;
-  gateway_running: boolean;
   today_cost: number;
   week_cost: number;
   month_cost: number;
@@ -92,52 +77,25 @@ export interface DailyModelCost {
   cost: number;
 }
 
-export interface RemoteNodeStatus {
-  url: string;
-  version: string;
-  gateway: {
-    running: boolean;
-    port: number;
-    upstream_base_url: string;
-    last_error: string | null;
-  };
-  accounts: {
-    total: number;
-    enabled: number;
-    disabled: number;
-    cooldown: number;
-    available: number;
-  };
-  usage: {
-    today_cost: number;
-    week_cost: number;
-    month_cost: number;
-  };
-  last_error: string | null;
+export const DASHBOARD_AUTH_REQUIRED_EVENT = "ocg-dashboard-auth-required";
+
+export interface DashboardAuthStatus {
+  local: boolean;
+  initialized: boolean;
+  authenticated: boolean;
 }
 
-export interface RemoteTestResult {
-  ok: boolean;
-  message: string;
-}
-
-export interface RemoteSyncResult {
-  pushed: number;
-  message: string;
-}
-
-const TOKEN_KEY = "ocg-dashboard-token";
-
-function dashboardToken(): string {
-  const url = new URL(window.location.href);
-  const token = url.searchParams.get("token");
-  if (token) {
-    sessionStorage.setItem(TOKEN_KEY, token);
-    url.searchParams.delete("token");
-    window.history.replaceState({}, "", url);
-    return token;
+export class DashboardAuthError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "DashboardAuthError";
   }
-  return sessionStorage.getItem(TOKEN_KEY) || "";
+}
+
+function dashboardAuthError(message: string): DashboardAuthError {
+  const error = new DashboardAuthError(message);
+  window.dispatchEvent(new CustomEvent(DASHBOARD_AUTH_REQUIRED_EVENT, { detail: message }));
+  return error;
 }
 
 function apiBase(): string {
@@ -147,15 +105,24 @@ function apiBase(): string {
   return "http://127.0.0.1:9042/dashboard/api";
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const token = dashboardToken();
+async function request<T>(
+  path: string,
+  init: RequestInit = {},
+  notifyAuthRequired = true,
+): Promise<T> {
   const headers = new Headers(init.headers);
-  headers.set("Authorization", `Bearer ${token}`);
   if (init.body && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
-  const response = await fetch(`${apiBase()}${path}`, { ...init, headers });
+  const response = await fetch(`${apiBase()}${path}`, {
+    ...init,
+    headers,
+    credentials: "same-origin",
+  });
   if (!response.ok) {
+    if (response.status === 401 && notifyAuthRequired) {
+      throw dashboardAuthError("登录已失效，请重新登录");
+    }
     let message = `${response.status} ${response.statusText}`;
     try {
       const body = await response.json();
@@ -175,6 +142,22 @@ function jsonBody(value: unknown): BodyInit {
 }
 
 export const tauriApi = {
+  getAuthStatus: () => request<DashboardAuthStatus>("/auth/status", {}, false),
+  registerAdmin: (username: string, password: string) =>
+    request<{ ok: boolean }>(
+      "/auth/register",
+      { method: "POST", body: jsonBody({ username, password }) },
+      false,
+    ),
+  loginAdmin: (username: string, password: string) =>
+    request<{ ok: boolean }>(
+      "/auth/login",
+      { method: "POST", body: jsonBody({ username, password }) },
+      false,
+    ),
+  logoutAdmin: () =>
+    request<void>("/auth/logout", { method: "POST" }, false),
+
   getAccounts: () => request<Account[]>("/accounts"),
   createAccount: (input: AccountInput) =>
     request<Account>("/accounts", { method: "POST", body: jsonBody(input) }),
@@ -191,30 +174,19 @@ export const tauriApi = {
     request<Account>(`/accounts/${id}/reset-cooldown`, { method: "POST" }),
 
   getSettings: () => request<AppConfig>("/settings"),
-  updateSettings: (config: AppConfig) =>
-    request<GatewayStatus>("/settings", { method: "POST", body: jsonBody(config) }),
+  updateSettings: async (config: AppConfig) => {
+    await request<unknown>("/settings", { method: "POST", body: jsonBody(config) });
+  },
   regenerateGatewayKey: async () => {
     const result = await request<{ key: string }>("/settings/regenerate-gateway-key", {
       method: "POST",
     });
     return result.key;
   },
-
-  getGatewayStatus: () => request<GatewayStatus>("/gateway/status"),
-
   getGatewayLogs: (limit?: number) => request<GatewayLog[]>(`/logs/gateway?limit=${limit ?? 100}`),
   getForwardLogs: (limit?: number) => request<ForwardLog[]>(`/logs/forward?limit=${limit ?? 100}`),
 
   getDashboardSummary: () => request<DashboardSummary>("/dashboard/summary"),
   getDailyCostByModel: (days?: number) =>
     request<DailyModelCost[]>(`/dashboard/daily-cost-by-model?days=${days ?? 30}`),
-
-  testRemote: (url: string, token: string) =>
-    request<RemoteTestResult>("/remote/test", {
-      method: "POST",
-      body: jsonBody({ url, token }),
-    }),
-  getRemoteNodeStatus: () => request<RemoteNodeStatus>("/remote/status"),
-  pushLocalToRemote: () =>
-    request<RemoteSyncResult>("/remote/push", { method: "POST" }),
 };

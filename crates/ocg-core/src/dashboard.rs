@@ -1,20 +1,22 @@
+use crate::auth;
+use crate::gateway::limit::parse_reset;
 use crate::models::*;
 use crate::state::CoreState;
 use axum::{
     Json, Router,
     body::Body,
     extract::{Path, Query, Request, State},
-    http::{Response as HttpResponse, StatusCode, header},
+    http::{HeaderMap, HeaderValue, Response as HttpResponse, StatusCode, header},
     middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{get, patch, post},
 };
-use chrono::Utc;
+use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::{Component, Path as FsPath, PathBuf};
 
 pub fn api_router(state: CoreState) -> Router<CoreState> {
-    Router::new()
+    let protected = Router::new()
         .route("/accounts", get(list_accounts).post(create_account))
         .route(
             "/accounts/{id}",
@@ -37,13 +39,17 @@ pub fn api_router(state: CoreState) -> Router<CoreState> {
         .route("/logs/forward", get(forward_logs))
         .route("/dashboard/summary", get(dashboard_summary))
         .route("/dashboard/daily-cost-by-model", get(daily_cost_by_model))
-        .route("/remote/test", post(test_remote))
-        .route("/remote/status", get(remote_status))
-        .route("/remote/push", post(push_local_to_remote))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
-            require_dashboard_token,
-        ))
+            require_dashboard_session,
+        ));
+
+    Router::new()
+        .route("/auth/status", get(auth_status))
+        .route("/auth/register", post(register_admin))
+        .route("/auth/login", post(login_admin))
+        .route("/auth/logout", post(logout_admin))
+        .merge(protected)
 }
 
 pub fn dashboard_dir(state: &CoreState) -> PathBuf {
@@ -122,24 +128,158 @@ fn content_type(ext: Option<&str>) -> &'static str {
     }
 }
 
-async fn require_dashboard_token(
+const SESSION_COOKIE: &str = "ocg_dashboard_session";
+
+#[derive(Serialize)]
+struct AuthStatus {
+    local: bool,
+    initialized: bool,
+    authenticated: bool,
+}
+
+#[derive(Deserialize)]
+struct AdminCredentials {
+    username: String,
+    password: String,
+}
+
+async fn auth_status(
+    State(state): State<CoreState>,
+    headers: HeaderMap,
+) -> Result<Json<AuthStatus>, ApiError> {
+    let local = is_local_dashboard_request(&state, &headers);
+    let initialized = {
+        let db = state.db.lock();
+        auth::load_admin(&db).map_err(ApiError::internal)?.is_some()
+    };
+    Ok(Json(AuthStatus {
+        local,
+        initialized,
+        authenticated: local || has_dashboard_session(&state, &headers),
+    }))
+}
+
+async fn register_admin(
+    State(state): State<CoreState>,
+    headers: HeaderMap,
+    Json(input): Json<AdminCredentials>,
+) -> Result<Response, ApiError> {
+    let admin = auth::build_admin(&input.username, &input.password)
+        .map_err(|e| ApiError::bad_request(e.to_string()))?;
+    {
+        let db = state.db.lock();
+        if auth::load_admin(&db).map_err(ApiError::internal)?.is_some() {
+            return Err(ApiError::status(
+                StatusCode::CONFLICT,
+                "管理员已经创建，请直接登录",
+            ));
+        }
+        auth::save_admin(&db, &admin).map_err(ApiError::internal)?;
+    }
+    session_response(&state, &headers, StatusCode::CREATED)
+}
+
+async fn login_admin(
+    State(state): State<CoreState>,
+    headers: HeaderMap,
+    Json(input): Json<AdminCredentials>,
+) -> Result<Response, ApiError> {
+    let admin = {
+        let db = state.db.lock();
+        auth::load_admin(&db).map_err(ApiError::internal)?
+    };
+    let valid = admin
+        .as_ref()
+        .map(|admin| auth::verify_admin(admin, &input.username, &input.password))
+        .unwrap_or(false);
+    if !valid {
+        return Err(ApiError::status(
+            StatusCode::UNAUTHORIZED,
+            "用户名或密码错误",
+        ));
+    }
+    session_response(&state, &headers, StatusCode::OK)
+}
+
+async fn logout_admin(headers: HeaderMap) -> Result<Response, ApiError> {
+    let mut response = StatusCode::NO_CONTENT.into_response();
+    response
+        .headers_mut()
+        .insert(header::SET_COOKIE, cookie_header("", &headers, true)?);
+    Ok(response)
+}
+
+async fn require_dashboard_session(
     State(state): State<CoreState>,
     req: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    let header_token = req
-        .headers()
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "));
-    let ok = header_token
-        .map(|token| token == state.dashboard_token)
-        .unwrap_or(false);
-    if ok {
+    if is_local_dashboard_request(&state, req.headers())
+        || has_dashboard_session(&state, req.headers())
+    {
         Ok(next.run(req).await)
     } else {
         Err(StatusCode::UNAUTHORIZED)
     }
+}
+
+fn is_local_dashboard_request(state: &CoreState, headers: &HeaderMap) -> bool {
+    state.dashboard_local_mode()
+        && [
+            "forwarded",
+            "x-forwarded-for",
+            "x-forwarded-proto",
+            "x-real-ip",
+        ]
+        .iter()
+        .all(|name| !headers.contains_key(*name))
+}
+
+fn has_dashboard_session(state: &CoreState, headers: &HeaderMap) -> bool {
+    headers
+        .get(header::COOKIE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|cookies| {
+            cookies.split(';').find_map(|cookie| {
+                let (name, value) = cookie.trim().split_once('=')?;
+                (name == SESSION_COOKIE).then_some(value)
+            })
+        })
+        .map(|value| value == state.dashboard_session_token)
+        .unwrap_or(false)
+}
+
+fn session_response(
+    state: &CoreState,
+    headers: &HeaderMap,
+    status: StatusCode,
+) -> Result<Response, ApiError> {
+    let mut response = (status, Json(serde_json::json!({ "ok": true }))).into_response();
+    response.headers_mut().insert(
+        header::SET_COOKIE,
+        cookie_header(&state.dashboard_session_token, headers, false)?,
+    );
+    Ok(response)
+}
+
+fn cookie_header(
+    value: &str,
+    request_headers: &HeaderMap,
+    clear: bool,
+) -> Result<HeaderValue, ApiError> {
+    let mut cookie =
+        format!("{SESSION_COOKIE}={value}; HttpOnly; SameSite=Strict; Path=/dashboard");
+    if clear {
+        cookie.push_str("; Max-Age=0");
+    }
+    if request_headers
+        .get("x-forwarded-proto")
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.eq_ignore_ascii_case("https"))
+    {
+        cookie.push_str("; Secure");
+    }
+    HeaderValue::from_str(&cookie).map_err(ApiError::internal)
 }
 
 #[derive(Debug)]
@@ -149,6 +289,13 @@ struct ApiError {
 }
 
 impl ApiError {
+    fn status(status: StatusCode, message: impl Into<String>) -> Self {
+        Self {
+            status,
+            message: message.into(),
+        }
+    }
+
     fn bad_request(message: impl Into<String>) -> Self {
         Self {
             status: StatusCode::BAD_REQUEST,
@@ -195,26 +342,19 @@ struct DashboardAccount {
     updated_at: String,
 }
 
-fn dashboard_account(state: &CoreState, account: Account) -> Result<DashboardAccount, ApiError> {
-    let key = state
-        .decrypt_key(&account.key_cipher)
-        .map_err(ApiError::internal)?;
-    let password = match account.password_cipher.as_deref() {
-        Some(cipher) => state.decrypt_key(cipher).map_err(ApiError::internal)?,
-        None => String::new(),
-    };
-    Ok(DashboardAccount {
+fn dashboard_account(account: Account) -> DashboardAccount {
+    DashboardAccount {
         id: account.id,
         name: account.name,
         username: account.username.unwrap_or_default(),
-        password,
-        key,
+        password: String::new(),
+        key: String::new(),
         enabled: account.enabled,
         cooldown_until: account.cooldown_until.map(|t| t.to_rfc3339()),
         last_error: account.last_error,
         created_at: account.created_at.to_rfc3339(),
         updated_at: account.updated_at.to_rfc3339(),
-    })
+    }
 }
 
 fn clean_optional(value: Option<String>) -> Option<String> {
@@ -246,11 +386,12 @@ async fn list_accounts(
         .lock()
         .list_accounts()
         .map_err(ApiError::internal)?;
-    accounts
-        .into_iter()
-        .map(|account| dashboard_account(&state, account))
-        .collect::<Result<Vec<_>, _>>()
-        .map(Json)
+    Ok(Json(
+        accounts
+            .into_iter()
+            .map(dashboard_account)
+            .collect::<Vec<_>>(),
+    ))
 }
 
 async fn create_account(
@@ -290,7 +431,7 @@ async fn create_account(
             &format!("created account {}", account.name),
         );
     }
-    dashboard_account(&state, account).map(Json)
+    Ok(Json(dashboard_account(account)))
 }
 
 async fn update_account(
@@ -324,7 +465,7 @@ async fn update_account(
         .get_account(&id)
         .map_err(ApiError::internal)?
         .ok_or_else(|| ApiError::not_found("account not found"))?;
-    dashboard_account(&state, account).map(Json)
+    Ok(Json(dashboard_account(account)))
 }
 
 async fn delete_account(
@@ -367,7 +508,7 @@ async fn toggle_account(
         .get_account(&id)
         .map_err(ApiError::internal)?
         .ok_or_else(|| ApiError::not_found("account not found"))?;
-    dashboard_account(&state, account).map(Json)
+    Ok(Json(dashboard_account(account)))
 }
 
 async fn test_account(
@@ -383,6 +524,49 @@ async fn test_account(
     let key = state
         .decrypt_key(&account.key_cipher)
         .map_err(ApiError::internal)?;
+    let config = state.config();
+    validate_upstream_url(&config.upstream_base_url)?;
+    let response = state
+        .http_client
+        .post(format!(
+            "{}/v1/chat/completions",
+            config.upstream_base_url.trim_end_matches('/')
+        ))
+        .bearer_auth(&key)
+        .json(&account_ping_payload())
+        .send()
+        .await
+        .map_err(ApiError::internal)?;
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    if status == StatusCode::TOO_MANY_REQUESTS {
+        let cooldown = parse_reset(&body).unwrap_or_else(|| Duration::minutes(5));
+        let until = Utc::now() + cooldown;
+        {
+            let db = state.db.lock();
+            db.set_account_cooldown(&account.id, Some(until), Some(&body))
+                .map_err(ApiError::internal)?;
+            let _ = db.log_gateway(
+                "warn",
+                "account",
+                &format!("ping quota reached for account {}", account.name),
+            );
+        }
+        return Err(ApiError::status(
+            StatusCode::TOO_MANY_REQUESTS,
+            format!(
+                "Ping 到达额度或限流，已熔断到 {}",
+                until.format("%Y-%m-%d %H:%M:%S UTC")
+            ),
+        ));
+    }
+    if !status.is_success() {
+        return Err(ApiError::bad_request(format!(
+            "Ping failed: upstream returned {}: {}",
+            status,
+            short_body(&body)
+        )));
+    }
     let masked = if key.len() > 8 && key.is_char_boundary(4) && key.is_char_boundary(key.len() - 4)
     {
         format!("{}...{}", &key[..4], &key[key.len() - 4..])
@@ -390,8 +574,27 @@ async fn test_account(
         "***".to_string()
     };
     Ok(Json(serde_json::json!({
-        "message": format!("account {} key looks valid ({})", account.name, masked)
+        "message": format!("Ping OK: {} ({})", account.name, masked)
     })))
+}
+
+fn account_ping_payload() -> serde_json::Value {
+    serde_json::json!({
+        "model": "deepseek-v4-flash",
+        "messages": [{ "role": "user", "content": "ping" }],
+        "max_tokens": 1,
+        "stream": false
+    })
+}
+
+fn short_body(body: &str) -> String {
+    body.split_whitespace()
+        .take(40)
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(300)
+        .collect()
 }
 
 async fn account_usage(
@@ -420,7 +623,7 @@ async fn reset_account_cooldown(
         .get_account(&id)
         .map_err(ApiError::internal)?
         .ok_or_else(|| ApiError::not_found("account not found"))?;
-    dashboard_account(&state, account).map(Json)
+    Ok(Json(dashboard_account(account)))
 }
 
 async fn get_settings(State(state): State<CoreState>) -> Json<AppConfig> {
@@ -432,13 +635,6 @@ async fn update_settings(
     Json(config): Json<AppConfig>,
 ) -> Result<Json<GatewayStatus>, ApiError> {
     validate_upstream_url(&config.upstream_base_url)?;
-    validate_remote_url(&config.remote.url)?;
-    let running = state.gateway.lock().is_some();
-    if running && config.gateway_port != state.config().gateway_port {
-        return Err(ApiError::bad_request(
-            "changing gateway_port from the dashboard requires restarting the app",
-        ));
-    }
     state.set_config(config).map_err(ApiError::internal)?;
     Ok(Json(status_from_state(&state)))
 }
@@ -530,198 +726,6 @@ async fn daily_cost_by_model(
         .map_err(ApiError::internal)
 }
 
-#[derive(Deserialize)]
-struct RemoteTestInput {
-    url: String,
-    token: String,
-}
-
-#[derive(Serialize)]
-struct RemoteTestResult {
-    ok: bool,
-    message: String,
-}
-
-#[derive(Serialize)]
-struct RemoteSyncResult {
-    pushed: usize,
-    message: String,
-}
-
-#[derive(Serialize)]
-struct RemotePushPayload {
-    id: String,
-    name: String,
-    username: Option<String>,
-    password: Option<String>,
-    password_cipher: Option<String>,
-    key: String,
-    key_cipher: String,
-    enabled: bool,
-    referral_code: Option<String>,
-    recharge_date: Option<String>,
-    created_at: String,
-    updated_at: String,
-}
-
-async fn test_remote(
-    State(state): State<CoreState>,
-    Json(input): Json<RemoteTestInput>,
-) -> Json<RemoteTestResult> {
-    let base = input.url.trim().trim_end_matches('/').to_string();
-    if let Err(e) = validate_remote_url(&base) {
-        return Json(RemoteTestResult {
-            ok: false,
-            message: e.message,
-        });
-    }
-    let result = state
-        .http_client
-        .get(format!("{}/admin/health", base))
-        .bearer_auth(input.token.trim())
-        .send()
-        .await;
-    match result {
-        Ok(r) if r.status().is_success() => Json(RemoteTestResult {
-            ok: true,
-            message: format!("{} OK", r.status()),
-        }),
-        Ok(r) => Json(RemoteTestResult {
-            ok: false,
-            message: format!("server replied {}", r.status()),
-        }),
-        Err(e) => Json(RemoteTestResult {
-            ok: false,
-            message: format!("connection failed: {}", e),
-        }),
-    }
-}
-
-async fn remote_status(
-    State(state): State<CoreState>,
-) -> Result<Json<serde_json::Value>, ApiError> {
-    let (base, token) = configured_remote(&state)?;
-    let response = state
-        .http_client
-        .get(format!("{}/admin/status", base))
-        .bearer_auth(&token)
-        .send()
-        .await
-        .map_err(ApiError::internal)?;
-    if !response.status().is_success() {
-        return Err(ApiError::bad_request(format!(
-            "remote status returned {}",
-            response.status()
-        )));
-    }
-    let mut value = response
-        .json::<serde_json::Value>()
-        .await
-        .map_err(ApiError::internal)?;
-    if let serde_json::Value::Object(map) = &mut value {
-        map.insert("url".to_string(), serde_json::Value::String(base));
-    }
-    Ok(Json(value))
-}
-
-async fn push_local_to_remote(
-    State(state): State<CoreState>,
-) -> Result<Json<RemoteSyncResult>, ApiError> {
-    sync_local_to_remote(&state).await.map(Json)
-}
-
-async fn sync_local_to_remote(state: &CoreState) -> Result<RemoteSyncResult, ApiError> {
-    let (base, token) = configured_remote(state)?;
-    let payloads = remote_payloads(state)?;
-
-    let mut pushed = 0usize;
-    for payload in &payloads {
-        upsert_remote_key(state, &base, &token, payload).await?;
-        pushed += 1;
-    }
-
-    let message = format!("推送完成：推送 {} 个账号，未删除远端账号", pushed);
-    let _ = state.db.lock().log_gateway("info", "remote_sync", &message);
-
-    Ok(RemoteSyncResult { pushed, message })
-}
-
-fn configured_remote(state: &CoreState) -> Result<(String, String), ApiError> {
-    let cfg = state.config();
-    let base = cfg.remote.url.trim().trim_end_matches('/').to_string();
-    if base.is_empty() {
-        return Err(ApiError::bad_request("请先填写并保存远端 URL"));
-    }
-    validate_remote_url(&base)?;
-    let token = cfg.remote.token.trim().to_string();
-    if token.is_empty() {
-        return Err(ApiError::bad_request("请先填写并保存远端 token"));
-    }
-    Ok((base, token))
-}
-
-fn remote_payloads(state: &CoreState) -> Result<Vec<RemotePushPayload>, ApiError> {
-    let accounts = state
-        .db
-        .lock()
-        .list_accounts()
-        .map_err(ApiError::internal)?;
-    accounts
-        .iter()
-        .map(|account| remote_payload_from_account(state, account))
-        .collect()
-}
-
-fn remote_payload_from_account(
-    state: &CoreState,
-    account: &Account,
-) -> Result<RemotePushPayload, ApiError> {
-    Ok(RemotePushPayload {
-        id: account.id.clone(),
-        name: account.name.clone(),
-        username: account.username.clone(),
-        password: match account.password_cipher.as_deref() {
-            Some(cipher) => Some(state.decrypt_key(cipher).map_err(ApiError::internal)?),
-            None => None,
-        },
-        password_cipher: account.password_cipher.clone(),
-        key: state
-            .decrypt_key(&account.key_cipher)
-            .map_err(ApiError::internal)?,
-        key_cipher: account.key_cipher.clone(),
-        enabled: account.enabled,
-        referral_code: account.referral_code.clone(),
-        recharge_date: account.recharge_date.clone(),
-        created_at: account.created_at.to_rfc3339(),
-        updated_at: account.updated_at.to_rfc3339(),
-    })
-}
-
-async fn upsert_remote_key(
-    state: &CoreState,
-    base: &str,
-    token: &str,
-    payload: &RemotePushPayload,
-) -> Result<(), ApiError> {
-    let response = state
-        .http_client
-        .post(format!("{}/admin/keys", base))
-        .bearer_auth(token)
-        .json(payload)
-        .send()
-        .await
-        .map_err(ApiError::internal)?;
-    if response.status().is_success() {
-        Ok(())
-    } else {
-        Err(ApiError::bad_request(format!(
-            "push account {} returned {}",
-            payload.name,
-            response.status()
-        )))
-    }
-}
-
 fn status_from_state(state: &CoreState) -> GatewayStatus {
     let config = state.config();
     let running = state.gateway.lock().is_some();
@@ -732,7 +736,7 @@ fn status_from_state(state: &CoreState) -> GatewayStatus {
     };
     GatewayStatus {
         running,
-        port: config.gateway_port,
+        port: state.active_gateway_port(),
         key: config.gateway_key,
         upstream_base_url: config.upstream_base_url,
         last_error,
@@ -740,17 +744,10 @@ fn status_from_state(state: &CoreState) -> GatewayStatus {
 }
 
 fn validate_upstream_url(url: &str) -> Result<(), ApiError> {
-    validate_http_url(url, "upstream", false)
+    validate_http_url(url, "upstream")
 }
 
-fn validate_remote_url(url: &str) -> Result<(), ApiError> {
-    validate_http_url(url, "remote sync", true)
-}
-
-fn validate_http_url(url: &str, label: &str, allow_empty: bool) -> Result<(), ApiError> {
-    if allow_empty && url.trim().is_empty() {
-        return Ok(());
-    }
+fn validate_http_url(url: &str, label: &str) -> Result<(), ApiError> {
     let parsed = reqwest::Url::parse(url)
         .map_err(|e| ApiError::bad_request(format!("invalid {} URL: {}", label, e)))?;
     match parsed.scheme() {
@@ -772,8 +769,26 @@ fn is_loopback(url: &reqwest::Url) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::asset_path;
-    use std::path::Path;
+    use super::{asset_path, dashboard_account};
+    use crate::crypto::{KeyCipher, StaticKeyCipher};
+    use crate::db::Database;
+    use crate::models::Account;
+    use crate::state::CoreStateInner;
+    use chrono::Utc;
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::sync::Arc;
+
+    fn temp_data_dir(label: &str) -> PathBuf {
+        let mut dir = std::env::temp_dir();
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        dir.push(format!("ocg-dashboard-test-{}-{}", label, nanos));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
 
     #[test]
     fn asset_path_rejects_escape_components() {
@@ -792,5 +807,34 @@ mod tests {
         assert!(asset_path(root, "/secret.txt").is_none());
         assert!(asset_path(root, r"nested\secret.txt").is_none());
         assert!(asset_path(root, "C:/secret.txt").is_none());
+    }
+
+    #[test]
+    fn dashboard_account_does_not_export_secrets() {
+        let dir = temp_data_dir("secret-list");
+        let cipher: Arc<dyn KeyCipher + Send + Sync> = Arc::new(StaticKeyCipher::new("test"));
+        let db = Database::open(dir.clone()).unwrap();
+        let state = Arc::new(CoreStateInner::new(db, dir.clone(), cipher).unwrap());
+        let account = Account {
+            id: "acct-1".into(),
+            name: "main".into(),
+            username: Some("user".into()),
+            password_cipher: Some(state.encrypt_key("password-secret").unwrap()),
+            key_cipher: state.encrypt_key("sk-secret").unwrap(),
+            enabled: true,
+            referral_code: None,
+            recharge_date: None,
+            cooldown_until: None,
+            last_error: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+
+        let dto = dashboard_account(account);
+
+        assert_eq!(dto.username, "user");
+        assert!(dto.password.is_empty());
+        assert!(dto.key.is_empty());
+        let _ = fs::remove_dir_all(dir);
     }
 }

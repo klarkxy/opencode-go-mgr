@@ -4,11 +4,10 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::post;
 use chrono::Utc;
-use ocg_core::admin;
 use ocg_core::crypto::{KeyCipher, StaticKeyCipher};
 use ocg_core::db::Database;
 use ocg_core::gateway;
-use ocg_core::models::{Account, ForwardLog};
+use ocg_core::models::Account;
 use ocg_core::state::{CoreStateInner, GatewayHandle};
 use std::collections::{HashMap, VecDeque};
 use std::fs;
@@ -25,6 +24,7 @@ struct MockReply {
 #[derive(Clone)]
 struct MockCall {
     key: String,
+    body: String,
     accept_encoding: Option<String>,
 }
 
@@ -82,7 +82,11 @@ async fn start_mock_upstream(
     (format!("http://{}", addr), calls, shutdown_tx)
 }
 
-async fn mock_chat(State(state): State<MockState>, headers: HeaderMap) -> impl IntoResponse {
+async fn mock_chat(
+    State(state): State<MockState>,
+    headers: HeaderMap,
+    body: String,
+) -> impl IntoResponse {
     let key = headers
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
@@ -95,6 +99,7 @@ async fn mock_chat(State(state): State<MockState>, headers: HeaderMap) -> impl I
         .map(str::to_string);
     state.calls.lock().unwrap().push(MockCall {
         key: key.clone(),
+        body,
         accept_encoding,
     });
 
@@ -373,219 +378,86 @@ async fn all_limited_accounts_return_429_with_soonest_reset() {
 }
 
 #[tokio::test]
-async fn admin_health_works_with_bearer_token() {
-    let (state, dir) = build_state("http://127.0.0.1:1".into(), &[]);
-    let port = free_port();
-    let handle = admin::start_admin(state, port, "admin-token".into())
-        .await
-        .unwrap();
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+async fn dashboard_ping_marks_quota_cooldown() {
+    let replies = HashMap::from([(
+        "key-1".to_string(),
+        VecDeque::from([MockReply {
+            status: 429,
+            body: LIMITED_BODY,
+        }]),
+    )]);
+    let (base_url, calls, stop_mock) = start_mock_upstream(replies).await;
+    let (state, dir) = build_state(base_url, &["key-1"]);
+    let (port, gateway_handle) = start_gateway(state.clone()).await;
 
     let response = reqwest::Client::new()
-        .get(format!("http://127.0.0.1:{}/admin/health", port))
-        .header(reqwest::header::AUTHORIZATION, "Bearer admin-token")
+        .post(format!(
+            "http://127.0.0.1:{}/dashboard/api/accounts/acct-1/test",
+            port
+        ))
         .send()
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::OK);
-    assert!(response.text().await.unwrap().contains("\"status\":\"ok\""));
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert!(body["error"].as_str().unwrap().contains("额度"));
 
-    admin::stop_admin(handle);
+    let stored = state.db.lock().get_account("acct-1").unwrap().unwrap();
+    assert!(stored.cooldown_until.unwrap() > Utc::now());
+    assert!(stored.last_error.unwrap().contains("Weekly usage limit"));
+
+    let calls = calls.lock().unwrap();
+    assert_eq!(calls[0].key, "key-1");
+    let payload: serde_json::Value = serde_json::from_str(&calls[0].body).unwrap();
+    assert_eq!(payload["model"], "deepseek-v4-flash");
+    assert_eq!(payload["messages"][0]["content"], "ping");
+
+    gateway::stop_gateway(gateway_handle);
+    let _ = stop_mock.send(());
     let _ = fs::remove_dir_all(dir);
 }
 
 #[tokio::test]
-async fn admin_status_requires_token_and_hides_secrets() {
-    let (state, dir) = build_state(
-        "http://127.0.0.1:1".into(),
-        &["secret-key-1", "secret-key-2"],
-    );
-    let gateway_port = free_port();
-    let mut config = state.config();
-    config.gateway_port = gateway_port;
-    state.set_config(config).unwrap();
-
-    let gateway_handle = gateway::start_gateway(state.clone(), gateway_port)
-        .await
-        .unwrap();
-    *state.gateway.lock() = Some(gateway_handle);
-    state
-        .db
-        .lock()
-        .set_account_cooldown(
-            "acct-1",
-            Some(Utc::now() + chrono::Duration::days(1)),
-            Some("limit reached"),
-        )
-        .unwrap();
-    state
-        .db
-        .lock()
-        .log_forward(&ForwardLog {
-            id: 0,
-            timestamp: Utc::now(),
-            model: "deepseek-v4-flash".into(),
-            account_id: "acct-2".into(),
-            account_name: "acct-2".into(),
-            status: "success".into(),
-            http_status: Some(200),
-            prompt_tokens: 10,
-            completion_tokens: 2,
-            cached_tokens: 0,
-            cost: 1.25,
-            error_message: None,
-        })
-        .unwrap();
-    state
-        .db
-        .lock()
-        .log_gateway("warn", "gateway", "recent status warning")
-        .unwrap();
-
-    let admin_port = free_port();
-    let admin_handle = admin::start_admin(state.clone(), admin_port, "admin-token".into())
-        .await
-        .unwrap();
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    let client = reqwest::Client::new();
-
-    let unauthorized = client
-        .get(format!("http://127.0.0.1:{}/admin/status", admin_port))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
-
-    let response = client
-        .get(format!("http://127.0.0.1:{}/admin/status", admin_port))
-        .header(reqwest::header::AUTHORIZATION, "Bearer admin-token")
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    let body = response.text().await.unwrap();
-    assert!(!body.contains("admin-token"));
-    assert!(!body.contains("gw-test"));
-    assert!(!body.contains("secret-key-1"));
-    assert!(!body.contains("secret-key-2"));
-    assert!(!body.contains("key_cipher"));
-
-    let value: serde_json::Value = serde_json::from_str(&body).unwrap();
-    assert_eq!(value["gateway"]["running"].as_bool(), Some(true));
-    assert_eq!(value["gateway"]["port"].as_u64(), Some(gateway_port as u64));
-    assert_eq!(value["accounts"]["total"].as_u64(), Some(2));
-    assert_eq!(value["accounts"]["enabled"].as_u64(), Some(2));
-    assert_eq!(value["accounts"]["cooldown"].as_u64(), Some(1));
-    assert_eq!(value["accounts"]["available"].as_u64(), Some(1));
-    assert_eq!(value["usage"]["today_cost"].as_f64(), Some(1.25));
-    assert_eq!(value["usage"]["week_cost"].as_f64(), Some(1.25));
-    assert_eq!(value["usage"]["month_cost"].as_f64(), Some(1.25));
-    assert_eq!(value["last_error"].as_str(), Some("recent status warning"));
-
-    admin::stop_admin(admin_handle);
-    if let Some(handle) = state.gateway.lock().take() {
-        gateway::stop_gateway(handle);
-    }
-    let _ = fs::remove_dir_all(dir);
-}
-
-#[tokio::test]
-async fn admin_keys_upsert_preserves_keys() {
+async fn dashboard_port_change_is_saved_for_next_restart() {
     let (state, dir) = build_state("http://127.0.0.1:1".into(), &[]);
-    let admin_port = free_port();
-    let admin_handle = admin::start_admin(state.clone(), admin_port, "admin-token".into())
+    let current_port = free_port();
+    let handle = gateway::start_gateway(state.clone(), current_port)
         .await
         .unwrap();
+    *state.gateway.lock() = Some(handle);
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+    let requested_port = free_port();
+    let mut config = state.config();
+    config.gateway_port = requested_port;
     let client = reqwest::Client::new();
-    let created_at = (Utc::now() - chrono::Duration::minutes(10)).to_rfc3339();
-    let first_updated_at = (Utc::now() - chrono::Duration::minutes(5)).to_rfc3339();
-
-    let create = client
-        .post(format!("http://127.0.0.1:{}/admin/keys", admin_port))
-        .header(reqwest::header::AUTHORIZATION, "Bearer admin-token")
-        .json(&serde_json::json!({
-            "id": "remote-1",
-            "name": "remote",
-            "key": "plain-secret",
-            "enabled": true,
-            "referral_code": "REF",
-            "recharge_date": "15",
-            "created_at": created_at,
-            "updated_at": first_updated_at,
-        }))
+    let response = client
+        .post(format!(
+            "http://127.0.0.1:{}/dashboard/api/settings",
+            current_port
+        ))
+        .json(&config)
         .send()
         .await
         .unwrap();
-    assert_eq!(create.status(), StatusCode::NO_CONTENT);
 
-    let stored = state.db.lock().get_account("remote-1").unwrap().unwrap();
-    assert_ne!(stored.key_cipher, "plain-secret");
-    assert_eq!(
-        state.decrypt_key(&stored.key_cipher).unwrap(),
-        "plain-secret"
-    );
+    assert_eq!(response.status(), StatusCode::OK);
+    let status: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(status["port"].as_u64(), Some(current_port as u64));
+    assert_eq!(state.config().gateway_port, requested_port);
+    assert_eq!(state.active_gateway_port(), current_port);
 
-    let newer_updated_at = Utc::now().to_rfc3339();
-    let update_without_key = client
-        .post(format!("http://127.0.0.1:{}/admin/keys", admin_port))
-        .header(reqwest::header::AUTHORIZATION, "Bearer admin-token")
-        .json(&serde_json::json!({
-            "id": "remote-1",
-            "name": "renamed",
-            "enabled": false,
-            "referral_code": "NEW",
-            "recharge_date": "20",
-            "created_at": created_at,
-            "updated_at": newer_updated_at,
-        }))
+    let status_response = client
+        .get(format!(
+            "http://127.0.0.1:{}/dashboard/api/gateway/status",
+            current_port
+        ))
         .send()
         .await
         .unwrap();
-    assert_eq!(update_without_key.status(), StatusCode::NO_CONTENT);
+    assert_eq!(status_response.status(), StatusCode::OK);
 
-    let stored = state.db.lock().get_account("remote-1").unwrap().unwrap();
-    assert_eq!(stored.name, "renamed");
-    assert!(!stored.enabled);
-    assert_eq!(stored.referral_code.as_deref(), Some("NEW"));
-    assert_eq!(stored.recharge_date.as_deref(), Some("20"));
-    assert_eq!(
-        state.decrypt_key(&stored.key_cipher).unwrap(),
-        "plain-secret"
-    );
-
-    let stale_update = client
-        .post(format!("http://127.0.0.1:{}/admin/keys", admin_port))
-        .header(reqwest::header::AUTHORIZATION, "Bearer admin-token")
-        .json(&serde_json::json!({
-            "id": "remote-1",
-            "name": "stale",
-            "key": "wrong-secret",
-            "enabled": true,
-            "created_at": created_at,
-            "updated_at": first_updated_at,
-        }))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(stale_update.status(), StatusCode::NO_CONTENT);
-
-    let stored = state.db.lock().get_account("remote-1").unwrap().unwrap();
-    assert_eq!(stored.name, "renamed");
-    assert_eq!(
-        state.decrypt_key(&stored.key_cipher).unwrap(),
-        "plain-secret"
-    );
-
-    let listed = client
-        .get(format!("http://127.0.0.1:{}/admin/keys", admin_port))
-        .header(reqwest::header::AUTHORIZATION, "Bearer admin-token")
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(listed.status(), StatusCode::METHOD_NOT_ALLOWED);
-
-    admin::stop_admin(admin_handle);
+    gateway::stop_gateway(state.gateway.lock().take().unwrap());
     let _ = fs::remove_dir_all(dir);
 }

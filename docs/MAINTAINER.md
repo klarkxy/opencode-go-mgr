@@ -5,8 +5,8 @@ This guide is for people changing code, building releases, or debugging the proj
 ## Layout
 
 - `src`: Vue 3 dashboard. `src/api/tauri.ts` is a historical name; it wraps HTTP `/dashboard/api`, not Tauri `invoke()`.
-- `crates/ocg-core`: Gateway, dashboard HTTP API, admin API, SQLite, models, crypto, selectors, cooldown, and cost accounting.
-- `crates/ocg-cli`: Headless CLI and remote-sync admin server entrypoint.
+- `crates/ocg-core`: Gateway, dashboard HTTP API, SQLite, models, crypto, selectors, cooldown, and cost accounting.
+- `crates/ocg-cli`: Headless CLI and gateway entrypoint.
 - `src-tauri`: Windows tray app, single-instance behavior, Tauri commands, and NSIS packaging.
 
 ## Commands
@@ -43,9 +43,11 @@ cargo test -p ocg-manager-cli
 
 The dashboard is served by the gateway under `/dashboard` and uses `/dashboard/api`. Tauri still registers command handlers, but those are not the main Vue data path.
 
+Dashboard authentication is skipped for direct requests when the gateway binds a loopback address. Requests carrying standard reverse-proxy forwarding headers still require login. Non-loopback binds use a single administrator stored as an Argon2 password hash in SQLite and an HttpOnly session cookie. Docker may bootstrap the first administrator with `OCG_ADMIN_USERNAME` and `OCG_ADMIN_PASSWORD`; otherwise the first registration wins.
+
 The gateway binds loopback, validates the Gateway Key, selects an enabled account, rewrites auth for upstream, and records logs, usage, cooldown, and errors in SQLite.
 
-Remote sync is manual. The dashboard can push local accounts to a CLI admin API started with `serve --admin-port`; edit or delete remote accounts from the remote dashboard.
+Each node owns its account data and is managed through its own dashboard. There is no cross-node sync or Admin API.
 
 ## Release Artifacts
 

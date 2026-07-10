@@ -11,6 +11,6 @@ Do not use this project to:
 - run spam, scraping, credential attacks, fraud, or other abusive traffic;
 - disguise automated misuse as normal local client traffic.
 
-OCG Manager records upstream 429 cooldowns and skips cooled-down accounts because respecting upstream limits is part of the design. Remote sync is for user-owned nodes; it must not be used to collect unauthorized keys.
+OCG Manager records upstream 429 cooldowns and skips cooled-down accounts because respecting upstream limits is part of the design.
 
 Users are responsible for following OpenCode-Go's terms, local law, and the rules of any upstream service they access. Maintainers may refuse support for workflows that appear abusive.

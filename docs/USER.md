@@ -6,7 +6,7 @@ This guide is for people running OCG Manager as a desktop app or a headless gate
 
 OCG Manager keeps OpenCode-Go account keys in a local SQLite database and exposes a loopback gateway at `http://127.0.0.1:9042/v1`. The gateway supports `POST /v1/chat/completions`, `POST /v1/messages`, and `GET /v1/models`.
 
-The dashboard lets you manage accounts, view cost estimates, inspect logs, edit gateway settings, and manually push local keys to a remote admin node.
+The dashboard lets you manage accounts, view cost estimates, inspect logs, and edit gateway settings.
 
 ## First Run
 
@@ -32,13 +32,30 @@ target/release/ocg-manager-cli.exe key list
 target/release/ocg-manager-cli.exe serve --port 9042
 ```
 
-For a remote sync target:
+## Docker
+
+Build and start the headless gateway with its dashboard:
 
 ```bash
-target/release/ocg-manager-cli.exe serve --admin-port 9091
+cp .env.example .env
+# Edit .env and choose the initial administrator credentials.
+docker compose up -d --build
+docker compose logs ocg-manager
 ```
 
-The admin API binds `127.0.0.1` and requires a Bearer token. Add your own reverse proxy, TLS, and network auth before exposing it to another machine.
+`OCG_ADMIN_USERNAME` and `OCG_ADMIN_PASSWORD` create the administrator only when the database has no administrator yet. If both are omitted, the first visitor creates the administrator in the dashboard. Setting only one variable stops startup with an error. Later environment changes do not reset an existing administrator.
+
+Open the dashboard URL printed in the logs and sign in. Data and the generated encryption key persist in the `ocg-data` volume. The container publishes the gateway only at `127.0.0.1:9042` on the host. Direct requests to a gateway bound to a loopback address skip dashboard login; reverse-proxied requests still require it.
+
+For HTTPS, point an existing reverse proxy at that loopback port. For example, with Caddy:
+
+```caddyfile
+ocg.example.com {
+    reverse_proxy 127.0.0.1:9042
+}
+```
+
+After signing in, set a non-empty Gateway Key before sending API traffic. Stop the service with `docker compose down`; add `-v` only when you intentionally want to delete all stored accounts, credentials, and keys.
 
 ## Data And Security
 
@@ -46,7 +63,7 @@ GUI data lives under `%USERPROFILE%\.ocg-mgr`. CLI data defaults to `~/.ocg-mgr-
 
 Keys are obfuscated before storage, not strongly encrypted. Treat anyone with the data directory and binary as able to recover stored keys.
 
-Remote sync sends account keys, and optionally login fields, to the configured remote admin API. Leave the remote URL and token empty for local-only use.
+Each node manages its own accounts through its own dashboard. OCG Manager does not synchronize account credentials between nodes.
 
 ## Limits
 

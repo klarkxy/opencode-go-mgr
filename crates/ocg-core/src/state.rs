@@ -3,7 +3,10 @@ use crate::db::Database;
 use crate::models::AppConfig;
 use parking_lot::Mutex;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 
 pub struct GatewayHandle {
     pub port: u16,
@@ -17,7 +20,8 @@ pub struct CoreStateInner {
     pub db: Mutex<Database>,
     pub config: Mutex<AppConfig>,
     pub gateway: Mutex<Option<GatewayHandle>>,
-    pub dashboard_token: String,
+    pub dashboard_session_token: String,
+    dashboard_local_mode: AtomicBool,
     pub dashboard_dir: Mutex<Option<PathBuf>>,
     pub http_client: reqwest::Client,
     pub data_dir: PathBuf,
@@ -32,10 +36,10 @@ impl CoreStateInner {
         data_dir: PathBuf,
         cipher: Arc<dyn KeyCipher + Send + Sync>,
     ) -> crate::Result<Self> {
+        crate::auth::bootstrap_admin_from_env(&db)?;
         let (config, needs_persist) = load_config(&db)?;
         if needs_persist {
-            // ponytail: persist the auto-generated gateway_key once so it survives restarts;
-            // load_config returns needs_persist=true when it had to invent the key.
+            // Persist generated defaults and drop fields removed from AppConfig.
             save_config(&db, &config)?;
         }
         let http_client = reqwest::Client::builder()
@@ -45,7 +49,8 @@ impl CoreStateInner {
             db: Mutex::new(db),
             config: Mutex::new(config),
             gateway: Mutex::new(None),
-            dashboard_token: format!("ocg-dashboard-{}", random_word()),
+            dashboard_session_token: uuid::Uuid::new_v4().simple().to_string(),
+            dashboard_local_mode: AtomicBool::new(false),
             dashboard_dir: Mutex::new(None),
             http_client,
             data_dir,
@@ -55,6 +60,23 @@ impl CoreStateInner {
 
     pub fn config(&self) -> AppConfig {
         self.config.lock().clone()
+    }
+
+    pub fn active_gateway_port(&self) -> u16 {
+        let configured = self.config().gateway_port;
+        self.gateway
+            .lock()
+            .as_ref()
+            .map(|handle| handle.port)
+            .unwrap_or(configured)
+    }
+
+    pub fn set_dashboard_local_mode(&self, local: bool) {
+        self.dashboard_local_mode.store(local, Ordering::Relaxed);
+    }
+
+    pub fn dashboard_local_mode(&self) -> bool {
+        self.dashboard_local_mode.load(Ordering::Relaxed)
     }
 
     pub fn set_config(&self, config: AppConfig) -> crate::Result<()> {
@@ -87,13 +109,13 @@ impl CoreStateInner {
     }
 }
 
-/// Loads the persisted config. The `bool` is `true` when the config was
-/// freshly created with an auto-generated gateway_key and must be persisted.
+/// Loads persisted config. The `bool` marks config that needs canonical rewriting.
 fn load_config(db: &Database) -> crate::Result<(AppConfig, bool)> {
     let mut config = AppConfig::default();
     let mut needs_persist = false;
     if let Some(value) = db.get_setting("config")? {
         config = serde_json::from_str(&value)?;
+        needs_persist = serde_json::to_string(&config)? != value;
     }
     if config.gateway_key.is_empty() {
         config.gateway_key = generate_gateway_key();

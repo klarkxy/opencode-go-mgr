@@ -10,13 +10,14 @@ description = "Core library for OCG Manager gateway, account management, cooldow
 
 [dependencies]
 anyhow = "1"
+argon2 = "0.5"
 axum = { version = "0.8", features = ["macros"] }
 base64 = "0.22"
 bytes = "1"
 chrono = { version = "0.4", features = ["serde"] }
 futures-util = "0.3"
 parking_lot = "0.12"
-reqwest = { version = "0.12", features = ["json", "stream"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
 rusqlite = { version = "0.33", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

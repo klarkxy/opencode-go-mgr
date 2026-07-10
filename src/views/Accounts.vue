@@ -1,32 +1,25 @@
 <template>
-  <n-space vertical :size="16">
-    <n-space justify="space-between" align="center">
+  <div class="accounts-view">
+  <n-space vertical :size="16" class="accounts-content">
+    <n-space justify="space-between" align="center" class="accounts-toolbar">
       <n-h3 style="margin: 0">账号管理</n-h3>
+      <n-button type="primary" @click="showCreateModal = true">
+        <template #icon>
+          <n-icon :component="PlusOutlined" />
+        </template>
+        新增账号
+      </n-button>
     </n-space>
-
-    <n-card title="快速创建" size="small">
-      <n-form :model="newAccount" label-placement="top" :show-feedback="false">
-        <div class="quick-grid">
-          <n-form-item label="名称">
-            <n-input v-model:value="newAccount.name" placeholder="主号" />
-          </n-form-item>
-          <n-form-item label="账号">
-            <n-input v-model:value="newAccount.username" placeholder="OpenCode-Go 账号" />
-          </n-form-item>
-          <n-form-item label="密码">
-            <n-input v-model:value="newAccount.password" placeholder="OpenCode-Go 密码" />
-          </n-form-item>
-          <n-form-item label="API Key">
-            <n-input v-model:value="newAccount.key" placeholder="sk-..." />
-          </n-form-item>
-          <n-button type="primary" :loading="busy" @click="createAccount">保存</n-button>
-        </div>
-      </n-form>
-    </n-card>
 
     <n-empty v-if="accounts.length === 0" description="暂无账号" />
 
-    <n-card v-for="account in accounts" :key="account.id" size="small" class="account-card">
+    <n-card
+      v-for="account in accounts"
+      :key="account.id"
+      size="small"
+      class="account-card"
+      :class="{ 'account-card--cooling': isCooling(account) }"
+    >
       <template #header>
         <div class="account-title">
           <span>{{ account.name }}</span>
@@ -35,7 +28,7 @@
           </n-tag>
           <n-tooltip v-if="isCooling(account)" :disabled="!account.last_error">
             <template #trigger>
-              <n-tag type="error" size="small">冷却中 · 剩 {{ formatRemaining(account) }}</n-tag>
+              <n-tag type="error" size="small">熔断 · 剩 {{ formatRemaining(account) }}</n-tag>
             </template>
             {{ account.last_error }}
           </n-tooltip>
@@ -43,6 +36,17 @@
       </template>
       <template #header-extra>
         <n-space align="center" :size="8">
+          <n-button
+            secondary
+            size="small"
+            :loading="pinging[account.id]"
+            @click="pingAccount(account.id)"
+          >
+            <template #icon>
+              <n-icon :component="ThunderboltOutlined" />
+            </template>
+            Ping
+          </n-button>
           <n-switch :value="account.enabled" @update:value="toggleAccount(account.id)">
             <template #checked>启用</template>
             <template #unchecked>禁用</template>
@@ -50,11 +54,25 @@
           <n-button quaternary size="small" @click="toggleExpanded(account.id)">
             {{ expanded[account.id] ? "收起" : "展开" }}
           </n-button>
+          <n-popconfirm
+            positive-text="删除"
+            negative-text="取消"
+            @positive-click="deleteAccount(account.id)"
+          >
+            <template #trigger>
+              <n-button circle quaternary size="small" type="error" title="删除账号">
+                <template #icon>
+                  <n-icon :component="CloseOutlined" />
+                </template>
+              </n-button>
+            </template>
+            确定删除账号 {{ account.name }} 吗？
+          </n-popconfirm>
         </n-space>
       </template>
 
-      <div class="usage-stack">
-        <div v-for="limit in usageLimits" :key="limit.key" class="usage-row">
+      <div class="usage-strip">
+        <div v-for="limit in usageLimits" :key="limit.key" class="usage-segment">
           <div class="usage-meta">
             <span>{{ limit.label }}</span>
             <strong>${{ formatCost(usageCost(account.id, limit.key)) }} / ${{ limit.limit }}</strong>
@@ -76,16 +94,33 @@
               <n-input v-model:value="drafts[account.id].name" />
             </n-form-item>
             <n-form-item label="账号">
-              <n-input v-model:value="drafts[account.id].username" />
+              <n-input v-model:value="drafts[account.id].username" placeholder="OpenCode-Go 账号" />
             </n-form-item>
             <n-form-item label="密码">
-              <n-input v-model:value="drafts[account.id].password" />
+              <div class="secret-field">
+                <n-input
+                  v-model:value="drafts[account.id].password"
+                  type="password"
+                  show-password-on="click"
+                  placeholder="留空不修改"
+                  :disabled="drafts[account.id].clearPassword"
+                />
+                <n-button
+                  text
+                  size="tiny"
+                  type="warning"
+                  @click="drafts[account.id].clearPassword = !drafts[account.id].clearPassword"
+                >
+                  {{ drafts[account.id].clearPassword ? "取消清除密码" : "清除已存密码" }}
+                </n-button>
+              </div>
             </n-form-item>
             <n-form-item label="API Key">
               <n-input
                 v-model:value="drafts[account.id].key"
-                type="textarea"
-                :autosize="{ minRows: 2, maxRows: 4 }"
+                type="password"
+                show-password-on="click"
+                placeholder="留空不修改"
               />
             </n-form-item>
           </div>
@@ -102,20 +137,53 @@
           <n-button size="small" type="primary" :loading="busy" @click="saveAccount(account)">
             保存
           </n-button>
-          <n-popconfirm
-            positive-text="删除"
-            negative-text="取消"
-            @positive-click="deleteAccount(account.id)"
-          >
-            <template #trigger>
-              <n-button size="small" type="error">删除</n-button>
-            </template>
-            确定删除账号 {{ account.name }} 吗？
-          </n-popconfirm>
         </n-space>
       </div>
     </n-card>
   </n-space>
+
+  <n-modal
+    v-model:show="showCreateModal"
+    preset="card"
+    title="新增账号"
+    class="account-modal"
+    style="width: 560px; max-width: calc(100vw - 32px)"
+    :mask-closable="false"
+  >
+    <n-form :model="newAccount" label-placement="top" :show-feedback="false">
+      <div class="modal-grid">
+        <n-form-item label="名称">
+          <n-input v-model:value="newAccount.name" placeholder="主号" />
+        </n-form-item>
+        <n-form-item label="账号">
+          <n-input v-model:value="newAccount.username" placeholder="OpenCode-Go 账号" />
+        </n-form-item>
+        <n-form-item label="密码">
+          <n-input
+            v-model:value="newAccount.password"
+            type="password"
+            show-password-on="click"
+            placeholder="OpenCode-Go 密码"
+          />
+        </n-form-item>
+        <n-form-item label="API Key">
+          <n-input
+            v-model:value="newAccount.key"
+            type="password"
+            show-password-on="click"
+            placeholder="sk-..."
+          />
+        </n-form-item>
+      </div>
+    </n-form>
+    <template #footer>
+      <n-space justify="end">
+        <n-button @click="showCreateModal = false">取消</n-button>
+        <n-button type="primary" :loading="busy" @click="createAccount">保存</n-button>
+      </n-space>
+    </template>
+  </n-modal>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -127,7 +195,9 @@ import {
   NForm,
   NFormItem,
   NH3,
+  NIcon,
   NInput,
+  NModal,
   NPopconfirm,
   NProgress,
   NSpace,
@@ -136,6 +206,7 @@ import {
   NTooltip,
   useMessage,
 } from "naive-ui";
+import { CloseOutlined, PlusOutlined, ThunderboltOutlined } from "@vicons/antd";
 import { tauriApi } from "../api/tauri";
 import type { Account, AccountInput, AccountUpdate, UsageWindow } from "../api/tauri";
 
@@ -145,6 +216,7 @@ type AccountDraft = {
   username: string;
   password: string;
   key: string;
+  clearPassword: boolean;
 };
 
 const usageLimits: Array<{ key: UsageKey; label: string; limit: number }> = [
@@ -158,12 +230,15 @@ const accounts = ref<Account[]>([]);
 const usageMap = ref<Record<string, UsageWindow>>({});
 const drafts = ref<Record<string, AccountDraft>>({});
 const expanded = ref<Record<string, boolean>>({});
+const pinging = ref<Record<string, boolean>>({});
+const showCreateModal = ref(false);
 const busy = ref(false);
 const newAccount = ref<AccountDraft>({
   name: "",
   username: "",
   password: "",
   key: "",
+  clearPassword: false,
 });
 
 function blankUsage(accountId: string): UsageWindow {
@@ -179,8 +254,9 @@ function draftFromAccount(account: Account): AccountDraft {
   return {
     name: account.name,
     username: account.username,
-    password: account.password,
-    key: account.key,
+    password: "",
+    key: "",
+    clearPassword: false,
   };
 }
 
@@ -243,6 +319,19 @@ function trimmedDraft(draft: AccountDraft): AccountInput {
   };
 }
 
+function trimmedUpdate(draft: AccountDraft): AccountUpdate {
+  const update: AccountUpdate = {
+    name: draft.name.trim(),
+    username: draft.username.trim(),
+  };
+  const password = draft.password.trim();
+  const key = draft.key.trim();
+  if (draft.clearPassword) update.password = "";
+  else if (password) update.password = password;
+  if (key) update.key = key;
+  return update;
+}
+
 async function loadAccounts() {
   try {
     const loaded = await tauriApi.getAccounts();
@@ -269,7 +358,14 @@ async function createAccount() {
   busy.value = true;
   try {
     await tauriApi.createAccount(input);
-    newAccount.value = { name: "", username: "", password: "", key: "" };
+    newAccount.value = {
+      name: "",
+      username: "",
+      password: "",
+      key: "",
+      clearPassword: false,
+    };
+    showCreateModal.value = false;
     message.success("账号已添加");
     await loadAccounts();
   } catch (e) {
@@ -281,20 +377,33 @@ async function createAccount() {
 
 async function saveAccount(account: Account) {
   const draft = drafts.value[account.id];
-  const update: AccountUpdate = trimmedDraft(draft);
-  if (!update.name || !update.key) {
-    message.warning("名称和 API Key 不能为空");
+  const update = trimmedUpdate(draft);
+  if (!update.name) {
+    message.warning("名称不能为空");
     return;
   }
   busy.value = true;
   try {
-    await tauriApi.updateAccount(account.id, update);
+    const saved = await tauriApi.updateAccount(account.id, update);
+    drafts.value[account.id] = draftFromAccount(saved);
     message.success("账号已更新");
     await loadAccounts();
   } catch (e) {
     message.error(`保存失败: ${e}`);
   } finally {
     busy.value = false;
+  }
+}
+
+async function pingAccount(id: string) {
+  pinging.value[id] = true;
+  try {
+    message.success(await tauriApi.testAccount(id));
+  } catch (e) {
+    message.error(`Ping 失败: ${e}`);
+  } finally {
+    pinging.value[id] = false;
+    await loadAccounts();
   }
 }
 
@@ -331,25 +440,47 @@ onMounted(loadAccounts);
 </script>
 
 <style scoped>
-.quick-grid,
+.accounts-view {
+  position: relative;
+}
+
+.accounts-content {
+  position: relative;
+  z-index: 1;
+}
+
+.accounts-toolbar {
+  min-height: 34px;
+}
+
 .detail-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(160px, 1fr)) auto;
+  grid-template-columns: repeat(3, minmax(180px, 1fr));
   gap: 12px;
   align-items: end;
 }
 
-.detail-grid {
-  grid-template-columns: repeat(3, minmax(180px, 1fr));
-  margin-bottom: 12px;
+.detail-grid :deep(.n-form-item:last-child) {
+  grid-column: auto;
 }
 
-.detail-grid :deep(.n-form-item:last-child) {
-  grid-column: 1 / -1;
+.secret-field {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+  justify-items: start;
+}
+
+.secret-field :deep(.n-input) {
+  width: 100%;
 }
 
 .account-card :deep(.n-card-header) {
   align-items: center;
+}
+
+.account-card--cooling {
+  border-color: rgba(208, 48, 80, 0.45);
 }
 
 .account-title {
@@ -365,14 +496,16 @@ onMounted(loadAccounts);
   white-space: nowrap;
 }
 
-.usage-stack {
+.usage-strip {
   display: grid;
-  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
 }
 
-.usage-row {
+.usage-segment {
   display: grid;
   gap: 4px;
+  min-width: 0;
 }
 
 .usage-meta {
@@ -388,6 +521,11 @@ onMounted(loadAccounts);
   font-weight: 600;
 }
 
+.modal-grid {
+  display: grid;
+  gap: 12px;
+}
+
 .account-detail {
   margin-top: 14px;
   padding-top: 14px;
@@ -395,8 +533,8 @@ onMounted(loadAccounts);
 }
 
 @media (max-width: 900px) {
-  .quick-grid,
-  .detail-grid {
+  .detail-grid,
+  .usage-strip {
     grid-template-columns: 1fr;
   }
 }

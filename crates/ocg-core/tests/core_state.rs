@@ -138,6 +138,23 @@ fn core_state_set_config_persists() {
 }
 
 #[test]
+fn core_state_scrubs_removed_config_fields() {
+    let dir = temp_data_dir("removed-config");
+    let db = Database::open(dir.clone()).unwrap();
+    db.set_setting(
+        "config",
+        r#"{"gateway_port":9042,"gateway_key":"gw","upstream_base_url":"https://example.com","auto_start":false,"remote":{"url":"https://old.example.com","token":"remote-secret"}}"#,
+    )
+    .unwrap();
+    let cipher: Arc<dyn KeyCipher + Send + Sync> = Arc::new(StaticKeyCipher::new("k"));
+    let state = Arc::new(CoreStateInner::new(db, dir, cipher).unwrap());
+
+    let persisted = state.db.lock().get_setting("config").unwrap().unwrap();
+    assert!(!persisted.contains("remote"));
+    assert!(!persisted.contains("remote-secret"));
+}
+
+#[test]
 fn machine_bound_cipher_roundtrip_through_core_state() {
     // Sanity check that the GUI's default cipher flows through CoreState correctly.
     let dir = temp_data_dir("machine");

@@ -21,10 +21,10 @@ if (installers[0]) {
 }
 
 const missing = files.filter(([source]) => !existsSync(source)).map(([source]) => source);
-const dashboardDist = existsSync("target/release/dist")
-  ? "target/release/dist"
-  : existsSync("dist")
-    ? "dist"
+const dashboardDist = existsSync("dist")
+  ? "dist"
+  : existsSync("target/release/dist")
+    ? "target/release/dist"
     : null;
 
 if (files.length < 3 || !dashboardDist || missing.length > 0) {
