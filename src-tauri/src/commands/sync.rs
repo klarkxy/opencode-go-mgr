@@ -1,30 +1,21 @@
-//! Remote sync glue. Two responsibilities:
-//!   1. `startup_pull` — fired once on GUI boot. Pulls every key from the
-//!      remote admin API; per-row LWW by `updated_at` (local wins on tie).
-//!   2. `push_one`    — fire-and-forget POST/DELETE fired after each local
-//!      mutation. No retry queue, no backoff. Failures are warn-logged.
-//!
-//! ponytail: spawn + drop JoinHandle. If we ever need backpressure or error
-//! aggregation, swap to a bounded mpsc + a single drain task — do not grow
-//! these functions.
+//! Manual remote-node actions. The GUI is local-first: no startup pull, no
+//! account-CRUD auto push. These commands only run when the user clicks the
+//! remote buttons in Settings.
 
 use crate::state::AppState;
 use ocg_core::models::Account;
 use serde::{Deserialize, Serialize};
+use tauri::State;
 
-#[derive(Copy, Clone, Debug)]
-pub enum PushOp {
-    Create,
-    Update,
-    Delete,
-}
-
-#[derive(Deserialize)]
-struct RemoteKeyDto {
+#[derive(Serialize)]
+struct PushPayload {
     id: String,
     name: String,
-    key: Option<String>,
-    key_cipher: Option<String>,
+    username: Option<String>,
+    password: Option<String>,
+    password_cipher: Option<String>,
+    key: String,
+    key_cipher: String,
     enabled: bool,
     referral_code: Option<String>,
     recharge_date: Option<String>,
@@ -32,277 +23,301 @@ struct RemoteKeyDto {
     updated_at: String,
 }
 
-#[derive(Serialize)]
-struct PushPayload<'a> {
-    id: &'a str,
-    name: &'a str,
-    key: String,
-    key_cipher: &'a str,
-    enabled: bool,
-    referral_code: Option<&'a str>,
-    recharge_date: Option<&'a str>,
-    created_at: String,
-    updated_at: String,
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RemoteNodeStatus {
+    #[serde(default)]
+    pub url: String,
+    pub version: String,
+    pub gateway: RemoteGatewayStatus,
+    pub accounts: RemoteAccountStatus,
+    pub usage: RemoteUsageStatus,
+    #[serde(default)]
+    pub last_error: Option<String>,
 }
 
-/// Pull all keys from the configured remote admin API and merge them into
-/// the local database using last-write-wins by `updated_at`. Local entries
-/// equal-or-newer than the remote copy are preserved. Returns the number of
-/// rows actually merged.
-pub async fn startup_pull(state: AppState) -> usize {
-    let cfg = state.core.config();
-    if cfg.remote.url.is_empty() {
-        return 0;
-    }
-    let base = cfg.remote.url.trim_end_matches('/').to_string();
-    if !is_safe_remote_base(&base) {
-        let _ = state.core.db.lock().log_gateway(
-            "warn",
-            "remote_sync",
-            "startup pull skipped unsafe remote url",
-        );
-        return 0;
-    }
-    let token = cfg.remote.token.clone();
-    let url = format!("{}/admin/keys", base);
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RemoteGatewayStatus {
+    pub running: bool,
+    pub port: u16,
+    pub upstream_base_url: String,
+    #[serde(default)]
+    pub last_error: Option<String>,
+}
 
-    let resp = match state
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RemoteAccountStatus {
+    pub total: usize,
+    pub enabled: usize,
+    pub disabled: usize,
+    pub cooldown: usize,
+    pub available: usize,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RemoteUsageStatus {
+    pub today_cost: f64,
+    pub week_cost: f64,
+    pub month_cost: f64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RemoteSyncResult {
+    pub pushed: usize,
+    pub message: String,
+}
+
+#[tauri::command]
+pub async fn get_remote_node_status(
+    state: State<'_, AppState>,
+) -> Result<RemoteNodeStatus, String> {
+    fetch_remote_node_status(state.inner().clone()).await
+}
+
+#[tauri::command]
+pub async fn push_local_to_remote(state: State<'_, AppState>) -> Result<RemoteSyncResult, String> {
+    sync_local_to_remote(state.inner().clone()).await
+}
+
+async fn fetch_remote_node_status(state: AppState) -> Result<RemoteNodeStatus, String> {
+    let (base, token) = configured_remote(&state)?;
+    let url = format!("{}/admin/status", base);
+    let response = state
         .core
         .http_client
         .get(&url)
         .bearer_auth(&token)
         .send()
         .await
-    {
-        Ok(r) => r,
-        Err(e) => {
-            let _ = state.core.db.lock().log_gateway(
-                "warn",
-                "remote_sync",
-                &format!("startup pull failed: {}", e),
-            );
-            return 0;
-        }
-    };
-    if !resp.status().is_success() {
-        let _ = state.core.db.lock().log_gateway(
-            "warn",
-            "remote_sync",
-            &format!("startup pull status {}", resp.status()),
-        );
-        return 0;
+        .map_err(|e| format!("刷新远端状态失败: {}", e))?;
+    if !response.status().is_success() {
+        return Err(format!("远端状态返回 {}", response.status()));
     }
-    let remote: Vec<RemoteKeyDto> = match resp.json().await {
-        Ok(v) => v,
-        Err(e) => {
-            let _ = state.core.db.lock().log_gateway(
-                "warn",
-                "remote_sync",
-                &format!("startup pull decode: {}", e),
-            );
-            return 0;
-        }
-    };
+    let mut status = response
+        .json::<RemoteNodeStatus>()
+        .await
+        .map_err(|e| format!("解析远端状态失败: {}", e))?;
+    status.url = base;
+    Ok(status)
+}
 
-    // ponytail: capture the total BEFORE consuming the Vec so the log line
-    // can report a real denominator (the old version hardcoded 0).
-    let total = remote.len();
-    let mut merged = 0usize;
-    let mut skipped = 0usize;
-    let mut errors = 0usize;
-    // ponytail: one db lock for the loop. parking_lot::Mutex serializes
-    // regardless, and per-row lock+unlock would also contend with the
-    // gateway's hot path. Single scope = simpler + faster.
-    let db = state.core.db.lock();
-    for r in remote {
-        // ponytail: distinguish "row not present" (Ok(None)) from a real
-        // lookup error. The old code used `.ok().flatten()` which silently
-        // turned Err into None and then ran the create path — re-creating a
-        // row the user had just deleted.
-        let local = match db.get_account(&r.id) {
-            Ok(opt) => opt,
-            Err(e) => {
-                let _ = db.log_gateway(
-                    "warn",
-                    "remote_sync",
-                    &format!("startup pull lookup {} failed: {}", r.id, e),
-                );
-                errors += 1;
-                continue;
-            }
-        };
-        let wire_updated_at = parse_rfc3339(&r.updated_at).unwrap_or_else(chrono::Utc::now);
-        let local_newer = local
-            .as_ref()
-            .map(|l| l.updated_at >= wire_updated_at)
-            .unwrap_or(false);
-        if local_newer {
-            skipped += 1;
-            continue; // 本地为准
-        }
-        let created_at = parse_rfc3339(&r.created_at).unwrap_or_else(chrono::Utc::now);
-        let key_cipher = match r.key.as_deref() {
-            Some(key) => match state.core.encrypt_key(key) {
-                Ok(cipher) => cipher,
-                Err(e) => {
-                    let _ = db.log_gateway(
-                        "warn",
-                        "remote_sync",
-                        &format!("startup pull encrypt {} failed: {}", r.id, e),
-                    );
-                    errors += 1;
-                    continue;
-                }
-            },
-            None => r.key_cipher.clone().unwrap_or_default(),
-        };
+async fn sync_local_to_remote(state: AppState) -> Result<RemoteSyncResult, String> {
+    let (base, token) = configured_remote(&state)?;
+    let payloads = local_payloads(&state)?;
+
+    let mut pushed = 0usize;
+    for payload in &payloads {
+        upsert_remote_key(&state, &base, &token, payload).await?;
+        pushed += 1;
+    }
+
+    let message = format!("推送完成：推送 {} 个账号，未删除远端账号", pushed);
+    let _ = state
+        .core
+        .db
+        .lock()
+        .log_gateway("info", "remote_sync", &message);
+
+    Ok(RemoteSyncResult { pushed, message })
+}
+
+fn configured_remote(state: &AppState) -> Result<(String, String), String> {
+    let cfg = state.core.config();
+    let base = cfg.remote.url.trim().trim_end_matches('/').to_string();
+    if base.is_empty() {
+        return Err("请先填写并保存远端 URL".to_string());
+    }
+    validate_remote_base(&base)?;
+    let token = cfg.remote.token.trim().to_string();
+    if token.is_empty() {
+        return Err("请先填写并保存远端 token".to_string());
+    }
+    Ok((base, token))
+}
+
+fn local_payloads(state: &AppState) -> Result<Vec<PushPayload>, String> {
+    let accounts = state
+        .core
+        .db
+        .lock()
+        .list_accounts()
+        .map_err(|e| e.to_string())?;
+    accounts
+        .iter()
+        .map(|account| payload_from_account(state, account))
+        .collect()
+}
+
+fn payload_from_account(state: &AppState, account: &Account) -> Result<PushPayload, String> {
+    let key = state
+        .core
+        .decrypt_key(&account.key_cipher)
+        .map_err(|e| format!("解密账号 {} 失败: {}", account.name, e))?;
+    Ok(PushPayload {
+        id: account.id.clone(),
+        name: account.name.clone(),
+        username: account.username.clone(),
+        password: match account.password_cipher.as_deref() {
+            Some(cipher) => Some(
+                state
+                    .core
+                    .decrypt_key(cipher)
+                    .map_err(|e| format!("解密账号 {} 密码失败: {}", account.name, e))?,
+            ),
+            None => None,
+        },
+        password_cipher: account.password_cipher.clone(),
+        key,
+        key_cipher: account.key_cipher.clone(),
+        enabled: account.enabled,
+        referral_code: account.referral_code.clone(),
+        recharge_date: account.recharge_date.clone(),
+        created_at: account.created_at.to_rfc3339(),
+        updated_at: account.updated_at.to_rfc3339(),
+    })
+}
+
+async fn upsert_remote_key(
+    state: &AppState,
+    base: &str,
+    token: &str,
+    payload: &PushPayload,
+) -> Result<(), String> {
+    let response = state
+        .core
+        .http_client
+        .post(format!("{}/admin/keys", base))
+        .bearer_auth(token)
+        .json(payload)
+        .send()
+        .await
+        .map_err(|e| format!("推送账号 {} 失败: {}", payload.name, e))?;
+    if response.status().is_success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "推送账号 {} 返回 {}",
+            payload.name,
+            response.status()
+        ))
+    }
+}
+
+fn validate_remote_base(base: &str) -> Result<(), String> {
+    let parsed = tauri::Url::parse(base).map_err(|e| format!("invalid remote URL: {}", e))?;
+    match parsed.scheme() {
+        "https" => Ok(()),
+        "http" if is_loopback(&parsed) => Ok(()),
+        _ => Err("remote node must use https, except loopback http".to_string()),
+    }
+}
+
+fn is_loopback(url: &tauri::Url) -> bool {
+    matches!(
+        url.host_str(),
+        Some("localhost") | Some("127.0.0.1") | Some("::1") | Some("[::1]")
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::GuiState;
+    use chrono::Utc;
+    use ocg_core::admin;
+    use ocg_core::crypto::{KeyCipher, StaticKeyCipher};
+    use ocg_core::db::Database;
+    use ocg_core::models::Account;
+    use ocg_core::state::CoreStateInner;
+    use parking_lot::Mutex as ParkingMutex;
+    use std::fs;
+    use std::net::TcpListener as StdTcpListener;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    fn temp_data_dir(label: &str) -> PathBuf {
+        let mut dir = std::env::temp_dir();
+        dir.push(format!(
+            "ocg-gui-sync-test-{}-{}",
+            label,
+            uuid::Uuid::new_v4()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn free_port() -> u16 {
+        let listener = StdTcpListener::bind(("127.0.0.1", 0)).unwrap();
+        listener.local_addr().unwrap().port()
+    }
+
+    fn build_core(label: &str) -> (Arc<CoreStateInner>, PathBuf) {
+        let dir = temp_data_dir(label);
+        let db = Database::open(dir.clone()).unwrap();
+        let cipher: Arc<dyn KeyCipher + Send + Sync> = Arc::new(StaticKeyCipher::new(label));
+        let state = Arc::new(CoreStateInner::new(db, dir.clone(), cipher).unwrap());
+        (state, dir)
+    }
+
+    fn app_state(core: Arc<CoreStateInner>) -> AppState {
+        Arc::new(GuiState {
+            core,
+            current_browser_window: ParkingMutex::new(None),
+        })
+    }
+
+    fn insert_account(state: &Arc<CoreStateInner>, id: &str, name: &str, key: &str) {
+        let now = Utc::now();
         let account = Account {
-            id: r.id.clone(),
-            name: r.name.clone(),
-            key_cipher,
-            enabled: r.enabled,
-            referral_code: r.referral_code.clone(),
-            recharge_date: r.recharge_date.clone(),
+            id: id.to_string(),
+            name: name.to_string(),
+            username: None,
+            password_cipher: None,
+            key_cipher: state.encrypt_key(key).unwrap(),
+            enabled: true,
+            referral_code: None,
+            recharge_date: None,
             cooldown_until: None,
             last_error: None,
-            created_at,
-            updated_at: wire_updated_at,
+            created_at: now,
+            updated_at: now,
         };
-        // ponytail: use the LWW helper that respects the wire's updated_at
-        // AND refuses to overwrite the local cipher. Avoids both the
-        // "LWW-by-arrival" bug (db.update_account bumps server clock) and
-        // the cross-machine cipher poisoning bug.
-        let result = db.merge_account_from_remote(&account.id, &account, wire_updated_at);
-        match result {
-            Ok(true) => merged += 1,
-            Ok(false) => skipped += 1,
-            Err(e) => {
-                let _ = db.log_gateway(
-                    "warn",
-                    "remote_sync",
-                    &format!("startup pull merge {} failed: {}", r.id, e),
-                );
-                errors += 1;
-            }
-        }
+        state.db.lock().create_account(&account).unwrap();
     }
-    let _ = db.log_gateway(
-        "info",
-        "remote_sync",
-        &format!(
-            "startup pull merged {} skipped {} errors {} of {}",
-            merged, skipped, errors, total
-        ),
-    );
-    merged
-}
 
-/// Fire-and-forget push one account to the configured remote. Called after
-/// any local mutation (create/update/delete). Failures are warn-logged;
-/// there is no retry — the next local mutation will push again.
-pub fn push_one(state: AppState, account: Option<Account>, op: PushOp) {
-    tauri::async_runtime::spawn(async move {
-        let cfg = state.core.config();
-        if cfg.remote.url.is_empty() {
-            return;
-        }
-        let base = cfg.remote.url.trim_end_matches('/');
-        if !is_safe_remote_base(base) {
-            let _ = state.core.db.lock().log_gateway(
-                "warn",
-                "remote_sync",
-                "push skipped unsafe remote url",
-            );
-            return;
-        }
-        let token = cfg.remote.token.clone();
+    #[tokio::test]
+    async fn push_preserves_remote_extras() {
+        let (remote_core, remote_dir) = build_core("remote");
+        insert_account(&remote_core, "remote-extra", "remote extra", "remote-key");
+        let admin_port = free_port();
+        let admin_handle =
+            admin::start_admin(remote_core.clone(), admin_port, "admin-token".into())
+                .await
+                .unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
-        // Ponytail: read snapshot under the config lock; do not hold the lock
-        // across the await below.
-        let (url, method, body) = match op {
-            PushOp::Delete => {
-                let id = match account.as_ref() {
-                    Some(a) => a.id.clone(),
-                    None => return,
-                };
-                (format!("{}/admin/keys/{}", base, id), "DELETE", None)
-            }
-            PushOp::Create | PushOp::Update => {
-                let a = match account.as_ref() {
-                    Some(a) => a,
-                    None => return,
-                };
-                let key = match state.core.decrypt_key(&a.key_cipher) {
-                    Ok(key) => key,
-                    Err(e) => {
-                        let _ = state.core.db.lock().log_gateway(
-                            "warn",
-                            "remote_sync",
-                            &format!("push decrypt {} failed: {}", a.id, e),
-                        );
-                        return;
-                    }
-                };
-                let payload = PushPayload {
-                    id: &a.id,
-                    name: &a.name,
-                    key,
-                    key_cipher: &a.key_cipher,
-                    enabled: a.enabled,
-                    referral_code: a.referral_code.as_deref(),
-                    recharge_date: a.recharge_date.as_deref(),
-                    created_at: a.created_at.to_rfc3339(),
-                    updated_at: a.updated_at.to_rfc3339(),
-                };
-                let json = match serde_json::to_string(&payload) {
-                    Ok(s) => s,
-                    Err(_) => return,
-                };
-                (format!("{}/admin/keys", base), "POST", Some(json))
-            }
-        };
+        let (local_core, local_dir) = build_core("local");
+        let mut config = local_core.config();
+        config.remote.url = format!("http://127.0.0.1:{}", admin_port);
+        config.remote.token = "admin-token".into();
+        local_core.set_config(config).unwrap();
+        insert_account(&local_core, "local-1", "local one", "local-key");
+        let local_app = app_state(local_core);
 
-        let req = match method {
-            "DELETE" => state.core.http_client.delete(&url),
-            _ => state.core.http_client.post(&url),
-        };
-        let req = req.bearer_auth(&token);
-        let req = match body {
-            Some(b) => req.header("content-type", "application/json").body(b),
-            None => req,
-        };
-        let result = req.send().await;
-        let line = match &result {
-            Ok(r) if r.status().is_success() => {
-                format!("push {:?} ok {}", op, r.status())
-            }
-            Ok(r) => format!("push {:?} status {}", op, r.status()),
-            Err(e) => format!("push {:?} error: {}", op, e),
-        };
-        let _ = state
-            .core
-            .db
-            .lock()
-            .log_gateway("warn", "remote_sync", &line);
-    });
-}
+        let pushed = sync_local_to_remote(local_app).await.unwrap();
+        assert_eq!(pushed.pushed, 1);
+        let remote_accounts = remote_core.db.lock().list_accounts().unwrap();
+        assert!(remote_accounts.iter().any(|a| a.id == "remote-extra"));
+        let imported = remote_accounts
+            .iter()
+            .find(|a| a.id == "local-1")
+            .expect("local account should be imported");
+        assert_eq!(
+            remote_core.decrypt_key(&imported.key_cipher).unwrap(),
+            "local-key"
+        );
 
-fn parse_rfc3339(s: &str) -> Option<chrono::DateTime<chrono::Utc>> {
-    chrono::DateTime::parse_from_rfc3339(s)
-        .ok()
-        .map(|d| d.with_timezone(&chrono::Utc))
-}
-
-fn is_safe_remote_base(base: &str) -> bool {
-    let Ok(url) = tauri::Url::parse(base) else {
-        return false;
-    };
-    match url.scheme() {
-        "https" => true,
-        "http" => matches!(
-            url.host_str(),
-            Some("localhost") | Some("127.0.0.1") | Some("::1") | Some("[::1]")
-        ),
-        _ => false,
+        admin::stop_admin(admin_handle);
+        let _ = fs::remove_dir_all(remote_dir);
+        let _ = fs::remove_dir_all(local_dir);
     }
 }

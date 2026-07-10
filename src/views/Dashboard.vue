@@ -111,6 +111,10 @@
                 </n-button>
               </div>
             </div>
+            <div v-if="!gatewayStatus.running && gatewayStatus.last_error" class="gw-row align-top">
+              <span class="gw-key">最近错误</span>
+              <span class="gw-val error-text">{{ gatewayStatus.last_error }}</span>
+            </div>
           </div>
         </div>
 
@@ -175,7 +179,8 @@ import {
   CopyOutlined,
 } from "@vicons/antd";
 import StackedBarChart from "../components/StackedBarChart.vue";
-import { tauriApi, Account, GatewayStatus, UsageWindow, DashboardSummary, DailyModelCost } from "../api/tauri";
+import { tauriApi } from "../api/tauri";
+import type { Account, GatewayStatus, UsageWindow, DashboardSummary, DailyModelCost } from "../api/tauri";
 
 const message = useMessage();
 const accounts = ref<Account[]>([]);
@@ -187,6 +192,7 @@ const gatewayStatus = ref<GatewayStatus>({
   port: 9042,
   key: "",
   upstream_base_url: "",
+  last_error: null,
 });
 const summary = ref<DashboardSummary>({
   total_accounts: 0,
@@ -490,6 +496,9 @@ onMounted(async () => {
   color: var(--n-text-color, #222);
   text-align: right;
   word-break: break-all;
+}
+.error-text {
+  color: #d03050;
 }
 .gw-val.mono,
 .mono {

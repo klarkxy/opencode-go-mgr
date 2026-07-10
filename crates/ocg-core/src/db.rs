@@ -6,7 +6,6 @@ use std::path::PathBuf;
 
 pub struct Database {
     conn: Connection,
-    data_dir: PathBuf,
 }
 
 impl Database {
@@ -14,13 +13,9 @@ impl Database {
         std::fs::create_dir_all(&data_dir)?;
         let db_path = data_dir.join("data.sqlite");
         let conn = Connection::open(db_path)?;
-        let db = Self { conn, data_dir };
+        let db = Self { conn };
         db.migrate()?;
         Ok(db)
-    }
-
-    pub fn data_dir(&self) -> PathBuf {
-        self.data_dir.clone()
     }
 
     fn migrate(&self) -> Result<()> {
@@ -94,17 +89,27 @@ impl Database {
             )?;
         }
 
+        if version < 3 {
+            self.conn.execute_batch(
+                "ALTER TABLE accounts ADD COLUMN username TEXT;
+                ALTER TABLE accounts ADD COLUMN password_cipher TEXT;
+                INSERT OR REPLACE INTO schema_version (version) VALUES (3);",
+            )?;
+        }
+
         Ok(())
     }
 
     // Accounts
     pub fn create_account(&self, account: &Account) -> Result<()> {
         self.conn.execute(
-            "INSERT INTO accounts (id, name, key_cipher, enabled, referral_code, recharge_date, cooldown_until, last_error, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            "INSERT INTO accounts (id, name, username, password_cipher, key_cipher, enabled, referral_code, recharge_date, cooldown_until, last_error, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 account.id,
                 account.name,
+                account.username,
+                account.password_cipher,
                 account.key_cipher,
                 account.enabled as i32,
                 account.referral_code,
@@ -123,11 +128,17 @@ impl Database {
         id: &str,
         update: &AccountUpdate,
         key_cipher: Option<&str>,
+        password_cipher: Option<&str>,
     ) -> Result<()> {
         let existing = self
             .get_account(id)?
             .ok_or_else(|| anyhow::anyhow!("account not found"))?;
         let name = update.name.as_ref().unwrap_or(&existing.name);
+        let username = match &update.username {
+            Some(s) if s.is_empty() => None,
+            Some(s) => Some(s.clone()),
+            None => existing.username.clone(),
+        };
         let enabled = update.enabled.unwrap_or(existing.enabled);
         let referral_code = match &update.referral_code {
             Some(s) if s.is_empty() => None,        // explicitly cleared
@@ -140,12 +151,19 @@ impl Database {
             None => existing.recharge_date.clone(),
         };
         let key = key_cipher.unwrap_or(&existing.key_cipher);
+        let password = match password_cipher {
+            Some(s) if s.is_empty() => None,
+            Some(s) => Some(s.to_string()),
+            None => existing.password_cipher.clone(),
+        };
 
         self.conn.execute(
-            "UPDATE accounts SET name = ?1, key_cipher = ?2, enabled = ?3, referral_code = ?4, recharge_date = ?5, updated_at = ?6
-             WHERE id = ?7",
+            "UPDATE accounts SET name = ?1, username = ?2, password_cipher = ?3, key_cipher = ?4, enabled = ?5, referral_code = ?6, recharge_date = ?7, updated_at = ?8
+             WHERE id = ?9",
             params![
                 name,
+                username,
+                password,
                 key,
                 enabled as i32,
                 referral_code,
@@ -159,7 +177,7 @@ impl Database {
 
     /// LWW-aware variant: only overwrite fields when the wire's `updated_at` is
     /// strictly newer than the local row's. This is the merge used by
-    /// admin::upsert_key and sync::startup_pull — both treat the wire payload
+    /// admin::upsert_key and manual remote sync — both treat the wire payload
     /// as a snapshot from a peer machine and refuse to clobber a fresher local
     /// edit. Pass `wire_updated_at = None` to fall back to the unconditional
     /// update (legacy callers, e.g. local GUI mutations).
@@ -179,7 +197,7 @@ impl Database {
         if existing.updated_at >= wire_updated_at {
             // ponytail: local is at least as new — preserve it. The wire's
             // payload is discarded wholesale. LWW-by-timestamp is enforced here
-            // for both the admin and the startup_pull paths.
+            // for both the admin and manual sync paths.
             return Ok(false);
         }
         // Wire is newer — apply its fields. New sync payloads carry plaintext
@@ -187,6 +205,8 @@ impl Database {
         // Empty key_cipher means "metadata only; keep the local key".
         let upd = crate::models::AccountUpdate {
             name: Some(wire.name.clone()),
+            username: wire.username.clone(),
+            password: None,
             key: None,
             enabled: Some(wire.enabled),
             referral_code: wire.referral_code.clone(),
@@ -195,19 +215,26 @@ impl Database {
         // ponytail: optional fields are Option<String> in the DB; unwrap with
         // a fallback to the local value when the wire didn't send them.
         let key_cipher = if wire.key_cipher.is_empty() {
-            existing.key_cipher
+            existing.key_cipher.clone()
         } else {
             wire.key_cipher.clone()
         };
+        let password_cipher = match &wire.password_cipher {
+            Some(s) if s.is_empty() => existing.password_cipher.clone(),
+            Some(s) => Some(s.clone()),
+            None => existing.password_cipher.clone(),
+        };
         self.conn.execute(
-            "UPDATE accounts SET name = ?1, key_cipher = ?2, enabled = ?3, referral_code = ?4, recharge_date = ?5, updated_at = ?6
-             WHERE id = ?7",
+            "UPDATE accounts SET name = ?1, username = ?2, password_cipher = ?3, key_cipher = ?4, enabled = ?5, referral_code = ?6, recharge_date = ?7, updated_at = ?8
+             WHERE id = ?9",
             params![
                 upd.name.as_deref().unwrap_or(&existing.name),
+                upd.username.or_else(|| existing.username.clone()),
+                password_cipher,
                 key_cipher,
                 upd.enabled.unwrap_or(existing.enabled) as i32,
-                upd.referral_code.unwrap_or_else(|| existing.referral_code.clone().unwrap_or_default()),
-                upd.recharge_date.unwrap_or_else(|| existing.recharge_date.clone().unwrap_or_default()),
+                upd.referral_code.or_else(|| existing.referral_code.clone()),
+                upd.recharge_date.or_else(|| existing.recharge_date.clone()),
                 wire_updated_at.to_rfc3339(),
                 id,
             ],
@@ -224,21 +251,23 @@ impl Database {
 
     pub fn get_account(&self, id: &str) -> Result<Option<Account>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, key_cipher, enabled, referral_code, recharge_date, cooldown_until, last_error, created_at, updated_at FROM accounts WHERE id = ?1"
+            "SELECT id, name, username, password_cipher, key_cipher, enabled, referral_code, recharge_date, cooldown_until, last_error, created_at, updated_at FROM accounts WHERE id = ?1"
         )?;
         let account = stmt
             .query_row([id], |row| {
                 Ok(Account {
                     id: row.get(0)?,
                     name: row.get(1)?,
-                    key_cipher: row.get(2)?,
-                    enabled: row.get::<_, i32>(3)? != 0,
-                    referral_code: row.get(4)?,
-                    recharge_date: row.get(5)?,
-                    cooldown_until: row.get::<_, Option<String>>(6)?.map(parse_datetime),
-                    last_error: row.get(7)?,
-                    created_at: parse_datetime(row.get::<_, String>(8)?),
-                    updated_at: parse_datetime(row.get::<_, String>(9)?),
+                    username: row.get(2)?,
+                    password_cipher: row.get(3)?,
+                    key_cipher: row.get(4)?,
+                    enabled: row.get::<_, i32>(5)? != 0,
+                    referral_code: row.get(6)?,
+                    recharge_date: row.get(7)?,
+                    cooldown_until: row.get::<_, Option<String>>(8)?.map(parse_datetime),
+                    last_error: row.get(9)?,
+                    created_at: parse_datetime(row.get::<_, String>(10)?),
+                    updated_at: parse_datetime(row.get::<_, String>(11)?),
                 })
             })
             .optional()?;
@@ -247,20 +276,22 @@ impl Database {
 
     pub fn list_accounts(&self) -> Result<Vec<Account>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, key_cipher, enabled, referral_code, recharge_date, cooldown_until, last_error, created_at, updated_at FROM accounts ORDER BY created_at"
+            "SELECT id, name, username, password_cipher, key_cipher, enabled, referral_code, recharge_date, cooldown_until, last_error, created_at, updated_at FROM accounts ORDER BY created_at"
         )?;
         let rows = stmt.query_map([], |row| {
             Ok(Account {
                 id: row.get(0)?,
                 name: row.get(1)?,
-                key_cipher: row.get(2)?,
-                enabled: row.get::<_, i32>(3)? != 0,
-                referral_code: row.get(4)?,
-                recharge_date: row.get(5)?,
-                cooldown_until: row.get::<_, Option<String>>(6)?.map(parse_datetime),
-                last_error: row.get(7)?,
-                created_at: parse_datetime(row.get::<_, String>(8)?),
-                updated_at: parse_datetime(row.get::<_, String>(9)?),
+                username: row.get(2)?,
+                password_cipher: row.get(3)?,
+                key_cipher: row.get(4)?,
+                enabled: row.get::<_, i32>(5)? != 0,
+                referral_code: row.get(6)?,
+                recharge_date: row.get(7)?,
+                cooldown_until: row.get::<_, Option<String>>(8)?.map(parse_datetime),
+                last_error: row.get(9)?,
+                created_at: parse_datetime(row.get::<_, String>(10)?),
+                updated_at: parse_datetime(row.get::<_, String>(11)?),
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.into())
@@ -368,6 +399,32 @@ impl Database {
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.into())
+    }
+
+    pub fn latest_gateway_error(&self) -> Result<Option<String>> {
+        self.conn
+            .query_row(
+                "SELECT message FROM gateway_logs
+                 WHERE lower(level) = 'error' AND category = 'gateway'
+                 ORDER BY id DESC LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|e| e.into())
+    }
+
+    pub fn latest_error_summary(&self) -> Result<Option<String>> {
+        self.conn
+            .query_row(
+                "SELECT message FROM gateway_logs
+                 WHERE lower(level) IN ('error', 'warn')
+                 ORDER BY id DESC LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|e| e.into())
     }
 
     pub fn list_forward_logs(&self, limit: i64) -> Result<Vec<ForwardLog>> {

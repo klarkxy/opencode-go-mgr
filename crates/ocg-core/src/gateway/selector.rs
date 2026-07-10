@@ -62,6 +62,8 @@ mod tests {
         Account {
             id: id.into(),
             name: id.into(),
+            username: None,
+            password_cipher: None,
             key_cipher: cipher.encrypt(id).unwrap(),
             enabled,
             referral_code: None,

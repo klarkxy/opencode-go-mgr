@@ -11,7 +11,7 @@
 //! - `StaticKeyCipher`: derives a key from an arbitrary user-supplied secret,
 //!   suitable for headless / cross-platform / Docker deployments.
 
-use base64::{engine::general_purpose::STANDARD, Engine};
+use base64::{Engine, engine::general_purpose::STANDARD};
 use std::env;
 
 const NONCE_LEN: usize = 16;
@@ -193,13 +193,15 @@ mod tests {
     /// that the README warns about for shared data dirs.
     #[test]
     fn static_key_wrong_secret_fails_to_decrypt() {
-        let enc = StaticKeyCipher::new("right-key").encrypt("payload").unwrap();
+        let enc = StaticKeyCipher::new("right-key")
+            .encrypt("payload")
+            .unwrap();
         let result = StaticKeyCipher::new("wrong-key").decrypt(&enc);
         // XOR with a different key gives garbage; we accept either a UTF-8 error or a wrong-string
         // result, but the result must NOT equal the original payload.
         match result {
-            Err(_) => {}                                  // invalid utf-8 — fine
-            Ok(s) => assert_ne!(s, "payload"),           // decoded but wrong — still wrong
+            Err(_) => {}                       // invalid utf-8 — fine
+            Ok(s) => assert_ne!(s, "payload"), // decoded but wrong — still wrong
         }
     }
 

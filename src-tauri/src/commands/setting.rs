@@ -42,6 +42,7 @@ pub fn update_settings(
         if was_running {
             match crate::commands::gateway::restart_inner(&state.core, &config) {
                 Ok(status) => {
+                    crate::autostart::sync(config.auto_start).map_err(|e| e.to_string())?;
                     state.core.set_config(config).map_err(|e| e.to_string())?;
                     return Ok(status);
                 }
@@ -57,6 +58,7 @@ pub fn update_settings(
         }
     }
 
+    crate::autostart::sync(config.auto_start).map_err(|e| e.to_string())?;
     state
         .core
         .set_config(config.clone())
@@ -66,22 +68,13 @@ pub fn update_settings(
         .db
         .lock()
         .log_gateway("info", "settings", "settings updated");
-    // ponytail: latch the wizard-once flag here, not in a separate command.
-    // The wizard's only job is to populate AppConfig.remote; once any
-    // update_settings runs the user has made a deliberate choice.
-    let _ = state
-        .core
-        .db
-        .lock()
-        .set_setting("settings.bootstrapped", "1");
 
     let snapshot = state.core.config();
-    Ok(GatewayStatus {
-        running: was_running,
-        port: snapshot.gateway_port,
-        key: snapshot.gateway_key,
-        upstream_base_url: snapshot.upstream_base_url,
-    })
+    Ok(crate::commands::gateway::status_from_config(
+        &state.core,
+        was_running,
+        &snapshot,
+    ))
 }
 
 #[tauri::command]
@@ -101,30 +94,6 @@ pub fn regenerate_gateway_key(state: State<'_, AppState>) -> Result<String, Stri
 }
 
 #[derive(Serialize)]
-pub struct RemoteStatus {
-    pub url: String,
-    pub bootstrapped: bool,
-}
-
-#[tauri::command]
-pub fn get_remote_status(state: State<'_, AppState>) -> RemoteStatus {
-    let cfg = state.core.config();
-    let bootstrapped = state
-        .core
-        .db
-        .lock()
-        .get_setting("settings.bootstrapped")
-        .ok()
-        .flatten()
-        .as_deref()
-        == Some("1");
-    RemoteStatus {
-        url: cfg.remote.url,
-        bootstrapped,
-    }
-}
-
-#[derive(Serialize)]
 pub struct RemoteTestResult {
     pub ok: bool,
     pub message: String,
@@ -136,8 +105,8 @@ pub async fn test_remote(
     url: String,
     token: String,
 ) -> Result<RemoteTestResult, String> {
-    // ponytail: probe the same /admin/health the GUI will use. We do NOT
-    // mutate settings here — that is the wizard's job after a successful probe.
+    // ponytail: probe the same /admin/health the manual remote buttons use.
+    // Testing does not save settings; the user decides when to persist them.
     // ponytail: reject schemes other than http(s) so a free-text URL can't be
     // used to exfiltrate the bearer token to an arbitrary scheme handler
     // (file://, javascript:, data:, etc.).

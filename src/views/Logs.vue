@@ -50,7 +50,8 @@ import {
   useMessage,
   NTag,
 } from "naive-ui";
-import { tauriApi, GatewayLog, ForwardLog, Account } from "../api/tauri";
+import { tauriApi } from "../api/tauri";
+import type { GatewayLog, ForwardLog, Account } from "../api/tauri";
 
 const message = useMessage();
 const activeTab = ref("gateway");

@@ -7,10 +7,10 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
 authors = ["ocg-manager"]
-license = "MIT"
+license-file = "LICENSE"
 repository = ""
 rust-version = "1.85.0"
 

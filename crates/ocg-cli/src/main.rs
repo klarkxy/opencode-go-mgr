@@ -33,6 +33,9 @@ enum Commands {
         /// Gateway port (overrides config)
         #[arg(short, long)]
         port: Option<u16>,
+        /// Directory containing the built web dashboard (dist)
+        #[arg(long)]
+        dashboard_dir: Option<PathBuf>,
         /// Bind the remote-sync admin API on this port (127.0.0.1 only).
         /// Omit to disable. GUI clients use this to push account keys.
         #[arg(long)]
@@ -61,6 +64,12 @@ enum KeyAction {
         name: String,
         /// The OpenCode-Go API key
         key: String,
+        /// OpenCode-Go login account
+        #[arg(long)]
+        username: Option<String>,
+        /// OpenCode-Go login password
+        #[arg(long)]
+        password: Option<String>,
     },
     /// Remove a key
     Remove {
@@ -102,9 +111,20 @@ async fn main() -> Result<()> {
     match cli.command {
         Commands::Serve {
             port,
+            dashboard_dir,
             admin_port,
             admin_token,
-        } => serve(data_dir, cipher, port, admin_port, admin_token).await,
+        } => {
+            serve(
+                data_dir,
+                cipher,
+                port,
+                dashboard_dir,
+                admin_port,
+                admin_token,
+            )
+            .await
+        }
         Commands::Key { action } => key_command(data_dir, cipher, action).await,
         Commands::Status => status_command(data_dir, cipher).await,
     }
@@ -157,7 +177,10 @@ fn load_or_create_key_file(data_dir: &PathBuf) -> Result<String> {
     }
 }
 
-fn build_state(data_dir: PathBuf, cipher: Arc<dyn KeyCipher + Send + Sync>) -> Result<Arc<CoreStateInner>> {
+fn build_state(
+    data_dir: PathBuf,
+    cipher: Arc<dyn KeyCipher + Send + Sync>,
+) -> Result<Arc<CoreStateInner>> {
     let db = Database::open(data_dir.clone())?;
     Ok(Arc::new(CoreStateInner::new(db, data_dir, cipher)?))
 }
@@ -166,10 +189,12 @@ async fn serve(
     data_dir: PathBuf,
     cipher: Arc<dyn KeyCipher + Send + Sync>,
     port: Option<u16>,
+    dashboard_dir: Option<PathBuf>,
     admin_port: Option<u16>,
     admin_token_flag: Option<String>,
 ) -> Result<()> {
     let state = build_state(data_dir.clone(), cipher)?;
+    state.set_dashboard_dir(dashboard_dir);
 
     let mut config = state.config();
     if let Some(port) = port {
@@ -178,11 +203,12 @@ async fn serve(
     }
 
     let handle = gateway::start_gateway(state.clone(), config.gateway_port).await?;
-    println!(
-        "gateway started on http://127.0.0.1:{}",
-        handle.port
-    );
+    println!("gateway started on http://127.0.0.1:{}", handle.port);
     println!("gateway key: {}", config.gateway_key);
+    println!(
+        "dashboard: http://127.0.0.1:{}/dashboard/?token={}",
+        handle.port, state.dashboard_token
+    );
     println!("upstream: {}", config.upstream_base_url);
 
     // ponytail: admin port/token are independent from AppConfig — the gateway
@@ -206,10 +232,11 @@ async fn serve(
     *gateway_lock = Some(handle);
     drop(gateway_lock);
 
-    let _ = state
-        .db
-        .lock()
-        .log_gateway("info", "gateway", &format!("cli gateway started on port {}", config.gateway_port));
+    let _ = state.db.lock().log_gateway(
+        "info",
+        "gateway",
+        &format!("cli gateway started on port {}", config.gateway_port),
+    );
 
     tokio::signal::ctrl_c().await?;
     println!("shutting down...");
@@ -220,7 +247,10 @@ async fn serve(
     if let Some(h) = admin_handle {
         ocg_core::admin::stop_admin(h);
     }
-    let _ = state.db.lock().log_gateway("info", "gateway", "cli gateway stopped");
+    let _ = state
+        .db
+        .lock()
+        .log_gateway("info", "gateway", "cli gateway stopped");
     Ok(())
 }
 
@@ -278,13 +308,31 @@ async fn key_command(
                 );
             }
         }
-        KeyAction::Add { name, key } => {
+        KeyAction::Add {
+            name,
+            key,
+            username,
+            password,
+        } => {
             let id = uuid::Uuid::new_v4().to_string();
             let now = Utc::now();
             let key_cipher = state.encrypt_key(&key)?;
+            let password_cipher = match password {
+                Some(p) if !p.trim().is_empty() => Some(state.encrypt_key(p.trim())?),
+                _ => None,
+            };
             let account = Account {
                 id: id.clone(),
                 name,
+                username: username.and_then(|s| {
+                    let trimmed = s.trim().to_string();
+                    if trimmed.is_empty() {
+                        None
+                    } else {
+                        Some(trimmed)
+                    }
+                }),
+                password_cipher,
                 key_cipher,
                 enabled: true,
                 referral_code: None,
@@ -295,7 +343,11 @@ async fn key_command(
                 updated_at: now,
             };
             db.create_account(&account)?;
-            db.log_gateway("info", "account", &format!("cli added account {}", account.name))?;
+            db.log_gateway(
+                "info",
+                "account",
+                &format!("cli added account {}", account.name),
+            )?;
             println!("added key {} ({})", id, account.name);
         }
         KeyAction::Remove { id } => {
@@ -305,7 +357,11 @@ async fn key_command(
             let mut db = state.db.lock();
             if let Some(account) = db.get_account(&id)? {
                 db.delete_account(&id)?;
-                db.log_gateway("info", "account", &format!("cli removed account {}", account.name))?;
+                db.log_gateway(
+                    "info",
+                    "account",
+                    &format!("cli removed account {}", account.name),
+                )?;
                 println!("removed key {} ({})", id, account.name);
             } else {
                 anyhow::bail!("key not found: {}", id);
@@ -319,7 +375,12 @@ async fn key_command(
             drop(db);
             toggle_account(&state, &id, false)?;
         }
-        KeyAction::Ping { id, model, message, max_tokens } => {
+        KeyAction::Ping {
+            id,
+            model,
+            message,
+            max_tokens,
+        } => {
             drop(db);
             ping_keys(&state, id.as_deref(), &model, &message, max_tokens).await?;
         }
@@ -334,25 +395,33 @@ fn toggle_account(state: &Arc<CoreStateInner>, id: &str, enabled: bool) -> Resul
         .ok_or_else(|| anyhow::anyhow!("key not found: {}", id))?;
     let update = ocg_core::models::AccountUpdate {
         name: None,
+        username: None,
+        password: None,
         key: None,
         enabled: Some(enabled),
         referral_code: None,
         recharge_date: None,
     };
-    db.update_account(id, &update, None)?;
+    db.update_account(id, &update, None, None)?;
     db.log_gateway(
         "info",
         "account",
-        &format!("cli {} account {}", if enabled { "enabled" } else { "disabled" }, account.name),
+        &format!(
+            "cli {} account {}",
+            if enabled { "enabled" } else { "disabled" },
+            account.name
+        ),
     )?;
-    println!("{} key {} ({})", if enabled { "enabled" } else { "disabled" }, id, account.name);
+    println!(
+        "{} key {} ({})",
+        if enabled { "enabled" } else { "disabled" },
+        id,
+        account.name
+    );
     Ok(())
 }
 
-async fn status_command(
-    data_dir: PathBuf,
-    cipher: Arc<dyn KeyCipher + Send + Sync>,
-) -> Result<()> {
+async fn status_command(data_dir: PathBuf, cipher: Arc<dyn KeyCipher + Send + Sync>) -> Result<()> {
     let state = build_state(data_dir, cipher)?;
     let config: AppConfig = state.config();
     let db = state.db.lock();
@@ -405,7 +474,10 @@ async fn ping_one(
             let trimmed = text.chars().take(200).collect::<String>();
             (status, format!("{}ms {}", elapsed.as_millis(), trimmed))
         }
-        Err(e) => (0, format!("{}ms request failed: {}", elapsed.as_millis(), e)),
+        Err(e) => (
+            0,
+            format!("{}ms request failed: {}", elapsed.as_millis(), e),
+        ),
     }
 }
 
@@ -434,7 +506,12 @@ async fn ping_keys(
         println!("no enabled keys to ping");
         return Ok(());
     }
-    println!("pinging {} key(s) with model={} message={:?}", targets.len(), model, message);
+    println!(
+        "pinging {} key(s) with model={} message={:?}",
+        targets.len(),
+        model,
+        message
+    );
     for account in targets {
         let (status, body) = ping_one(state, &account, model, message, max_tokens).await;
         let verdict = if status == 200 { "OK" } else { "FAIL" };

@@ -61,10 +61,7 @@ mod tests {
 
     #[test]
     fn parses_with_extra_whitespace() {
-        assert_eq!(
-            parse_reset("Resets in  1  day."),
-            Some(Duration::days(1))
-        );
+        assert_eq!(parse_reset("Resets in  1  day."), Some(Duration::days(1)));
     }
 
     #[test]

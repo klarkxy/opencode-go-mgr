@@ -1,5 +1,6 @@
 pub mod admin;
 pub mod crypto;
+pub mod dashboard;
 pub mod db;
 pub mod gateway;
 pub mod models;

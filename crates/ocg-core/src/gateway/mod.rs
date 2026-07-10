@@ -6,8 +6,8 @@ pub mod selector;
 
 use crate::state::{CoreState, GatewayHandle};
 use anyhow::Result;
-use axum::routing::{get, post};
 use axum::Router;
+use axum::routing::{get, post};
 use std::net::SocketAddr;
 use tokio::sync::oneshot;
 use tower_http::cors::{Any, CorsLayer};
@@ -18,11 +18,24 @@ pub fn build_router(state: CoreState) -> Router {
         .allow_methods(Any)
         .allow_headers(Any);
 
-    Router::new()
+    let gateway_api = Router::new()
         .route("/v1/chat/completions", post(handler::chat_completions))
         .route("/v1/messages", post(handler::messages))
         .route("/v1/models", get(handler::models))
-        .layer(cors)
+        .layer(cors);
+
+    Router::new()
+        .merge(gateway_api)
+        .nest(
+            "/dashboard/api",
+            crate::dashboard::api_router(state.clone()),
+        )
+        .route("/dashboard", get(crate::dashboard::serve_index))
+        .route("/dashboard/", get(crate::dashboard::serve_index))
+        .route(
+            "/dashboard/assets/{*path}",
+            get(crate::dashboard::serve_asset),
+        )
         .with_state(state)
 }
 

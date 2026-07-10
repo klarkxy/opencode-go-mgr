@@ -1,3 +1,4 @@
+pub mod autostart;
 pub mod commands;
 pub mod state;
 pub mod tray;
@@ -24,7 +25,8 @@ pub fn run() {
         }
     };
 
-    let cipher: Arc<dyn ocg_core::crypto::KeyCipher + Send + Sync> = Arc::new(MachineBoundCipher::new());
+    let cipher: Arc<dyn ocg_core::crypto::KeyCipher + Send + Sync> =
+        Arc::new(MachineBoundCipher::new());
     let core_state = match CoreStateInner::new(db, data_dir.clone(), cipher) {
         Ok(s) => Arc::new(s),
         Err(e) => {
@@ -41,11 +43,19 @@ pub fn run() {
         config.gateway_port,
     )) {
         Ok(handle) => {
-            let _ = core_state.db.lock().log_gateway("info", "gateway", &format!("gateway started on port {}", handle.port));
+            let _ = core_state.db.lock().log_gateway(
+                "info",
+                "gateway",
+                &format!("gateway started on port {}", handle.port),
+            );
             Some(handle)
         }
         Err(e) => {
-            let _ = core_state.db.lock().log_gateway("error", "gateway", &format!("failed to start gateway: {}", e));
+            let _ = core_state.db.lock().log_gateway(
+                "error",
+                "gateway",
+                &format!("failed to start gateway: {}", e),
+            );
             None
         }
     };
@@ -58,22 +68,24 @@ pub fn run() {
     });
 
     let app_state = gui_state.clone();
-
-    // ponytail: fire-and-forget startup pull. Failures are warn-logged inside
-    // the function; we never block GUI startup on remote reachability.
-    let pull_state = gui_state.clone();
-    tauri::async_runtime::spawn(async move {
-        commands::sync::startup_pull(pull_state).await;
-    });
+    let setup_core_state = core_state.clone();
 
     tauri::Builder::default()
-        .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_http::init())
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            if !args.iter().any(|arg| arg == "--startup") {
+                tray::open_dashboard(app);
+            }
+        }))
+        .plugin(tauri_plugin_shell::init())
         .manage(app_state.clone())
         .setup(move |app| {
+            if let Ok(resource_dir) = app.path().resource_dir() {
+                setup_core_state.set_dashboard_dir(Some(resource_dir.join("dist")));
+            }
             tray::setup_tray(app)?;
-            let window = app.get_webview_window("main").expect("main window not found");
-            window.show()?;
+            if !autostart::is_startup_launch() {
+                tray::open_dashboard(app.handle());
+            }
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -94,8 +106,9 @@ pub fn run() {
             commands::setting::get_settings,
             commands::setting::update_settings,
             commands::setting::regenerate_gateway_key,
-            commands::setting::get_remote_status,
             commands::setting::test_remote,
+            commands::sync::get_remote_node_status,
+            commands::sync::push_local_to_remote,
             commands::gateway::get_gateway_status,
             commands::gateway::restart_gateway,
             commands::log::get_gateway_logs,
@@ -112,7 +125,10 @@ pub fn run() {
                 if let Some(handle) = core_state.gateway.lock().take() {
                     gateway::stop_gateway(handle);
                 }
-                let _ = core_state.db.lock().log_gateway("info", "gateway", "application exiting");
+                let _ = core_state
+                    .db
+                    .lock()
+                    .log_gateway("info", "gateway", "application exiting");
             }
         });
 }

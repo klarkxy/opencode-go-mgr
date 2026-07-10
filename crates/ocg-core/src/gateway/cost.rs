@@ -81,11 +81,6 @@ fn price_table_cell() -> &'static HashMap<String, ModelPrice> {
     })
 }
 
-#[deprecated(note = "use price_table_cell() instead")]
-pub fn price_table() -> HashMap<String, ModelPrice> {
-    price_table_cell().clone()
-}
-
 pub fn normalize_model_name(name: &str) -> String {
     name.to_lowercase().replace([' ', '_', '/'], "-")
 }

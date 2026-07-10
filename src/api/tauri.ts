@@ -1,13 +1,11 @@
-import { invoke } from "@tauri-apps/api/core";
-
 export interface Account {
   id: string;
   name: string;
-  key_cipher: string;
+  username: string;
+  password: string;
+  key: string;
   enabled: boolean;
-  referral_code: string | null;
-  recharge_date: string | null;
-  cooldown_until: string | null; // RFC3339; null = available
+  cooldown_until: string | null;
   last_error: string | null;
   created_at: string;
   updated_at: string;
@@ -15,17 +13,17 @@ export interface Account {
 
 export interface AccountInput {
   name: string;
+  username?: string;
+  password?: string;
   key: string;
-  referral_code?: string;
-  recharge_date?: string;
 }
 
 export interface AccountUpdate {
   name?: string;
+  username?: string;
+  password?: string;
   key?: string;
   enabled?: boolean;
-  referral_code?: string;
-  recharge_date?: string;
 }
 
 export interface AppConfig {
@@ -41,21 +39,12 @@ export interface RemoteSync {
   token: string;
 }
 
-export interface RemoteStatus {
-  url: string;
-  bootstrapped: boolean;
-}
-
-export interface RemoteTestResult {
-  ok: boolean;
-  message: string;
-}
-
 export interface GatewayStatus {
   running: boolean;
   port: number;
   key: string;
   upstream_base_url: string;
+  last_error: string | null;
 }
 
 export interface GatewayLog {
@@ -98,45 +87,134 @@ export interface DashboardSummary {
 }
 
 export interface DailyModelCost {
-  date: string; // YYYY-MM-DD
+  date: string;
   model: string;
   cost: number;
 }
 
+export interface RemoteNodeStatus {
+  url: string;
+  version: string;
+  gateway: {
+    running: boolean;
+    port: number;
+    upstream_base_url: string;
+    last_error: string | null;
+  };
+  accounts: {
+    total: number;
+    enabled: number;
+    disabled: number;
+    cooldown: number;
+    available: number;
+  };
+  usage: {
+    today_cost: number;
+    week_cost: number;
+    month_cost: number;
+  };
+  last_error: string | null;
+}
+
+export interface RemoteTestResult {
+  ok: boolean;
+  message: string;
+}
+
+export interface RemoteSyncResult {
+  pushed: number;
+  message: string;
+}
+
+const TOKEN_KEY = "ocg-dashboard-token";
+
+function dashboardToken(): string {
+  const url = new URL(window.location.href);
+  const token = url.searchParams.get("token");
+  if (token) {
+    sessionStorage.setItem(TOKEN_KEY, token);
+    url.searchParams.delete("token");
+    window.history.replaceState({}, "", url);
+    return token;
+  }
+  return sessionStorage.getItem(TOKEN_KEY) || "";
+}
+
+function apiBase(): string {
+  if (window.location.pathname.startsWith("/dashboard")) {
+    return "/dashboard/api";
+  }
+  return "http://127.0.0.1:9042/dashboard/api";
+}
+
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const token = dashboardToken();
+  const headers = new Headers(init.headers);
+  headers.set("Authorization", `Bearer ${token}`);
+  if (init.body && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+  const response = await fetch(`${apiBase()}${path}`, { ...init, headers });
+  if (!response.ok) {
+    let message = `${response.status} ${response.statusText}`;
+    try {
+      const body = await response.json();
+      if (body?.error) message = body.error;
+    } catch {
+      const text = await response.text().catch(() => "");
+      if (text) message = text;
+    }
+    throw new Error(message);
+  }
+  if (response.status === 204) return undefined as T;
+  return response.json() as Promise<T>;
+}
+
+function jsonBody(value: unknown): BodyInit {
+  return JSON.stringify(value);
+}
+
 export const tauriApi = {
-  // Accounts
-  getAccounts: () => invoke<Account[]>("get_accounts"),
-  createAccount: (input: AccountInput) => invoke<Account>("create_account", { input }),
+  getAccounts: () => request<Account[]>("/accounts"),
+  createAccount: (input: AccountInput) =>
+    request<Account>("/accounts", { method: "POST", body: jsonBody(input) }),
   updateAccount: (id: string, update: AccountUpdate) =>
-    invoke<Account>("update_account", { id, update }),
-  deleteAccount: (id: string) => invoke<void>("delete_account", { id }),
-  toggleAccount: (id: string) => invoke<Account>("toggle_account", { id }),
-  testAccount: (id: string) => invoke<string>("test_account", { id }),
-  getAccountUsage: (id: string) => invoke<UsageWindow>("get_account_usage", { id }),
-  resetAccountCooldown: (id: string) => invoke<Account>("reset_account_cooldown", { id }),
+    request<Account>(`/accounts/${id}`, { method: "PATCH", body: jsonBody(update) }),
+  deleteAccount: (id: string) => request<void>(`/accounts/${id}`, { method: "DELETE" }),
+  toggleAccount: (id: string) => request<Account>(`/accounts/${id}/toggle`, { method: "POST" }),
+  testAccount: async (id: string) => {
+    const result = await request<{ message: string }>(`/accounts/${id}/test`, { method: "POST" });
+    return result.message;
+  },
+  getAccountUsage: (id: string) => request<UsageWindow>(`/accounts/${id}/usage`),
+  resetAccountCooldown: (id: string) =>
+    request<Account>(`/accounts/${id}/reset-cooldown`, { method: "POST" }),
 
-  // Settings
-  getSettings: () => invoke<AppConfig>("get_settings"),
-  updateSettings: (config: AppConfig) => invoke<GatewayStatus>("update_settings", { config }),
-  regenerateGatewayKey: () => invoke<string>("regenerate_gateway_key"),
-  getRemoteStatus: () => invoke<RemoteStatus>("get_remote_status"),
-  testRemote: (url: string, token: string) =>
-    invoke<RemoteTestResult>("test_remote", { url, token }),
+  getSettings: () => request<AppConfig>("/settings"),
+  updateSettings: (config: AppConfig) =>
+    request<GatewayStatus>("/settings", { method: "POST", body: jsonBody(config) }),
+  regenerateGatewayKey: async () => {
+    const result = await request<{ key: string }>("/settings/regenerate-gateway-key", {
+      method: "POST",
+    });
+    return result.key;
+  },
 
-  // Gateway
-  getGatewayStatus: () => invoke<GatewayStatus>("get_gateway_status"),
-  restartGateway: () => invoke<GatewayStatus>("restart_gateway"),
+  getGatewayStatus: () => request<GatewayStatus>("/gateway/status"),
 
-  // Logs
-  getGatewayLogs: (limit?: number) => invoke<GatewayLog[]>("get_gateway_logs", { limit }),
-  getForwardLogs: (limit?: number) => invoke<ForwardLog[]>("get_forward_logs", { limit }),
+  getGatewayLogs: (limit?: number) => request<GatewayLog[]>(`/logs/gateway?limit=${limit ?? 100}`),
+  getForwardLogs: (limit?: number) => request<ForwardLog[]>(`/logs/forward?limit=${limit ?? 100}`),
 
-  // Browser
-  openBrowser: (accountId: string) => invoke<string>("open_browser", { accountId }),
-  closeBrowser: () => invoke<void>("close_browser"),
-
-  // Dashboard
-  getDashboardSummary: () => invoke<DashboardSummary>("get_dashboard_summary"),
+  getDashboardSummary: () => request<DashboardSummary>("/dashboard/summary"),
   getDailyCostByModel: (days?: number) =>
-    invoke<DailyModelCost[]>("get_daily_cost_by_model", { days }),
+    request<DailyModelCost[]>(`/dashboard/daily-cost-by-model?days=${days ?? 30}`),
+
+  testRemote: (url: string, token: string) =>
+    request<RemoteTestResult>("/remote/test", {
+      method: "POST",
+      body: jsonBody({ url, token }),
+    }),
+  getRemoteNodeStatus: () => request<RemoteNodeStatus>("/remote/status"),
+  pushLocalToRemote: () =>
+    request<RemoteSyncResult>("/remote/push", { method: "POST" }),
 };

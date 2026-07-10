@@ -11,6 +11,7 @@
       @collapse="collapsed = true"
       @expand="collapsed = false"
       class="app-sider"
+      :class="{ 'app-sider--collapsed': collapsed }"
     >
       <div class="brand" :class="{ collapsed }">
         <span class="brand-mark">OCG</span>
@@ -45,17 +46,11 @@
       </n-layout-content>
     </n-layout>
   </n-layout>
-  <RemoteWizard
-    v-if="showWizard"
-    :show="showWizard"
-    :config="wizardConfig"
-    @done="showWizard = false"
-  />
   </n-message-provider>
 </template>
 
 <script setup lang="ts">
-import { h, ref, onMounted, computed } from "vue";
+import { h, ref, onMounted, onUnmounted, computed } from "vue";
 import {
   NLayout,
   NLayoutSider,
@@ -75,23 +70,12 @@ import Dashboard from "./views/Dashboard.vue";
 import Accounts from "./views/Accounts.vue";
 import Logs from "./views/Logs.vue";
 import Settings from "./views/Settings.vue";
-import RemoteWizard from "./components/RemoteWizard.vue";
-import { tauriApi, AppConfig, GatewayStatus } from "./api/tauri";
+import { tauriApi } from "./api/tauri";
+import type { GatewayStatus } from "./api/tauri";
 
 const collapsed = ref(false);
 const activeKey = ref("dashboard");
 const gatewayRunning = ref(false);
-const showWizard = ref(false);
-// ponytail: wizardConfig is only the FALLBACK for when getSettings()
-// fails on boot. Keep it in sync with AppConfig::default() in
-// crates/ocg-core/src/models.rs. The Rust Default is the source of truth.
-const wizardConfig = ref<AppConfig>({
-  gateway_port: 9042,
-  gateway_key: "",
-  upstream_base_url: "https://opencode.ai/zen/go",
-  auto_start: false,
-  remote: { url: "", token: "" },
-});
 
 function renderIcon(icon: Component) {
   return () => h(icon);
@@ -128,35 +112,42 @@ const titleMap: Record<string, string> = {
 };
 const currentTitle = computed(() => titleMap[activeKey.value] ?? "OCG Manager");
 
+function onGatewayStatusEvent(event: Event) {
+  const status = (event as CustomEvent<GatewayStatus>).detail;
+  gatewayRunning.value = status.running;
+}
+
 onMounted(async () => {
+  window.addEventListener("ocg-gateway-status", onGatewayStatusEvent);
   try {
     const status: GatewayStatus = await tauriApi.getGatewayStatus();
     gatewayRunning.value = status.running;
   } catch (e) {
     console.error("failed to get gateway status", e);
   }
-  try {
-    const cfg = await tauriApi.getSettings();
-    wizardConfig.value = cfg;
-    const rs = await tauriApi.getRemoteStatus();
-    // ponytail: only show wizard when the user has never completed the
-    // bootstrap path. They can still clear remote.url in Settings later
-    // and re-run it; clearing the bootstrapped flag is a separate, future
-    // maintenance task.
-    // ponytail: show wizard whenever the remote URL is empty, regardless
-    // of the bootstrapped flag. The flag is a one-way switch from the old
-    // design; if the user clears the URL in Settings they should be able
-    // to re-run the wizard. The wizard itself is harmless on a no-op save.
-    showWizard.value = rs.url === "";
-  } catch (e) {
-    console.error("failed to load remote status", e);
-  }
+});
+
+onUnmounted(() => {
+  window.removeEventListener("ocg-gateway-status", onGatewayStatusEvent);
 });
 </script>
 
 <style scoped>
 .app-sider {
-  background: var(--n-color, #fff);
+  --opencode-bg-position: center center;
+  --opencode-bg-size: 320px auto;
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.96) 0%,
+      rgba(255, 255, 255, 0.88) 48%,
+      rgba(255, 255, 255, 0.18) 100%
+    ),
+    url("../assets/opencode娘.png") var(--opencode-bg-position) / var(--opencode-bg-size) no-repeat,
+    var(--n-color, #fff);
+}
+.app-sider--collapsed {
+  --opencode-bg-size: 180px auto;
 }
 .brand {
   display: flex;

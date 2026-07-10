@@ -1,53 +1,21 @@
 # OCG Manager
 
 <p align="center">
-  <img src="assets/logo/ocg_logo_final_transparent.png" alt="OCG Manager Logo" width="160">
+  <img src="assets/logo/ocg_logo_final_transparent.png" alt="OCG Manager Logo" width="140">
 </p>
 
-> 一款 Windows 桌面应用，用于在 GUI 中管理 OpenCode-Go 账号，并提供内置的 OpenAI 兼容 Gateway，按顺序使用已启用 key 做转发、故障转移、冷却处理与日志记录。
+OCG Manager 是一个本地 OpenCode-Go 多账号管理器，并提供 OpenAI 兼容 Gateway。它本地保存 key，通过 Gateway 托管管理面板，并由 Windows 托盘应用常驻后台。
 
-[功能特性](#功能特性) · [面向使用者](#面向使用者) · [面向维护者](#面向维护者) · [许可证](#许可证)
+<p align="center">
+  <img src="assets/opencode娘.png" alt="OpenCode-Go 娘" width="360">
+</p>
 
----
+## 快速开始
 
-## 功能特性
-
-- **GUI 账号管理**：在桌面应用中添加、编辑、启用/禁用、切换多个 OpenCode-Go 账号；key 本地存储，绝不上传。
-- **OpenAI 兼容 Gateway**：本地 `http://127.0.0.1:9042/v1/chat/completions` 端点，任何 OpenAI SDK 或工具都可直连。Gateway 只消费已存储且已启用的 key，不承担账号管理 UI 或控制面职责。同时支持 `POST /v1/messages`（Anthropic）和 `GET /v1/models`。
-- **顺序故障转移**：v1 始终按账号列表/创建顺序尝试，自动跳过禁用账号、冷却中账号，以及本次请求中已经失败的账号。
-- **账号级冷却**：当 OpenCode-Go 返回 429 时，正文中的 `Resets in X days/hours/min` 会被解析，写入该账号的 `cooldown_until`；选择器在到期前直接跳过该账号。手动重置是 GUI 账号卡片上的操作。
-- **用量与费用统计**：基于 token 数量按官方价格表估算每个账号的 5h / 周 / 月 成本。
-- **内置浏览器**：每个账号可打开独立隔离的 WebView2 窗口访问 OpenCode-Go 控制台，用于登录、充值、复制 key。
-- **系统托盘**：后台常驻；关闭窗口后驻留托盘。
-- **本地优先**：所有数据存于本地 SQLite 文件；无遥测、无远程服务器。
-
----
-
-## 面向使用者
-
-### 环境要求
-
-- Windows 10 或 11，且已安装 **WebView2**（现代 Windows 多数预装；否则从微软官网下载）。
-- 一个或多个 OpenCode-Go API key。
-
-### 安装
-
-从 Releases 页面下载最新的 NSIS 安装包并运行。安装为「每机器」级别，会创建开始菜单条目和桌面快捷方式。卸载时会询问是否同时删除数据目录。
-
-如需从源码构建，请见 [面向维护者 → 从源码构建](#从源码构建)。
-
-### 首次使用
-
-1. 启动 **OCG Manager**，默认进入 **仪表盘**，Gateway 随应用自动在端口 `9042` 启动。
-2. 进入 **账号管理** → **添加账号**。填写名称（如 `主号`）并粘贴 OpenCode-Go API key。key 在写入磁盘前会被混淆处理。
-3. 同样方式添加更多账号，启用希望 Gateway 使用的账号。
-4. 在 **仪表盘** 或 **设置** 中复制你的 **Gateway Key**（格式 `ocg-xxxxxxxx-xxxxxxxx`）。该 key 在首次启动时自动生成，可随时重新生成。
-
-至此，Gateway 已在 `http://127.0.0.1:9042/v1/` 运行。
-
-### 使用 Gateway
-
-将任意 OpenAI 兼容客户端指向 Gateway，并携带你的 Gateway Key：
+```text
+Gateway: http://127.0.0.1:9042/v1
+鉴权:    Authorization: Bearer <gateway-key>
+```
 
 ```bash
 curl http://127.0.0.1:9042/v1/chat/completions \
@@ -56,326 +24,23 @@ curl http://127.0.0.1:9042/v1/chat/completions \
   -d '{"model":"glm-5.2","messages":[{"role":"user","content":"hello"}],"stream":true}'
 ```
 
-```python
-from openai import OpenAI
+## 文档
 
-client = OpenAI(base_url="http://127.0.0.1:9042/v1", api_key="ocg-xxxxxxxx-xxxxxxxx")
-stream = client.chat.completions.create(
-    model="glm-5.2",
-    messages=[{"role": "user", "content": "hello"}],
-    stream=True,
-)
-for chunk in stream:
-    print(chunk.choices[0].delta.content or "", end="")
-```
+- [User guide](docs/USER.md)
+- [Maintainer guide](docs/MAINTAINER.md)
+- [OpenCode-Go 防滥用声明](OPENCODE_GO_ANTI_ABUSE.zh-CN.md)
+- [English README](README.md)
 
-注意事项：
-
-- Gateway 实现 `POST /v1/chat/completions`、`POST /v1/messages`（Anthropic SDK 形态）和 `GET /v1/models`。其他 OpenAI 端点（`/embeddings` 等）不会被路由。
-- 请求体原样透传——工具调用、JSON 模式、temperature、`stream` 等都正常工作。
-- 客户端的 `Authorization` 头用于 Gateway 鉴权后会被**替换**为所选账号的 OCG key 再转发上游；Anthropic 风格的 `x-api-key` 头被接受为鉴权别名。Gateway 私有头、逐跳头、cookie/proxy 头以及 `accept-encoding` 会被过滤；上游请求会显式使用 `Accept-Encoding: identity`。
-- SSE 流式响应按字节原样透传。
-- Gateway 仅绑定 `127.0.0.1`，局域网/公网不可达。
-
-### 顺序故障转移
-
-账号级管理属于 GUI（以及 CLI 为无头场景提供的最小 `key` 命令）。Gateway 只读取已保存的账号列表，选择一个已启用 key，转发请求，并记录冷却、日志等请求结果。
-
-v1 没有随机或轮询策略。Gateway 始终按账号列表/创建顺序尝试。「可用」指已启用、不在冷却中，并且没有在本次请求里失败过。
-
-- `429`：解析重置时间，写入 `cooldown_until` 和 `last_error`，然后直接尝试下一个可用账号。
-- `401` / `403`：视为该 key 的鉴权失败，不写冷却，直接尝试下一个账号。
-- `408` / `5xx` / 网络失败：非流式请求会在同一账号上原地重试 1 次，以尽量保留同 key 缓存命中；仍失败再切到下一个账号。流式请求不做原地重试。
-- 其他请求级 `4xx`：直接透传上游响应给客户端，不 fallback。
-
-没有固定重试次数上限。Gateway 会一直尝试，直到没有可选账号。若所有账号都在冷却中，返回 `429` 并带上最早重置时间；若所有可用账号都因非冷却原因失败，返回 `502` 和最后一次错误。
-
-### 冷却策略
-
-每个账号有一个 `cooldown_until` 列，由 OpenCode-Go 返回 429 时填充。`gateway/limit.rs`（`parse_reset`）会解析 429 正文里的 `Resets in …`，把得到的 `Duration`（分钟 / 小时 / 天）原样写入。选择器跳过任何 `cooldown_until > now` 的账号。Gateway 只写入这类请求结果状态；查看与手动重置由 GUI 账号页负责。
-
-| 429 文案 | 冷却时长 |
-|---------|---------|
-| `5-hour usage limit reached. Resets in 13min.` | 13 分钟 |
-| `Weekly usage limit reached. Resets in 4 days.` | 4 天 |
-| `Monthly usage limit reached. Resets in 13 days.` | 13 天 |
-
-- 单次成功请求**不会**自动清掉冷却——只能在账号卡片上点 **重置冷却**，或者等计时器到期。
-- 未知 429 文案（没有 `Resets in` 或单位无法识别）会让 `cooldown_until` 保持为空，账号仍视为可用。
-
-### 用量与费用
-
-**仪表盘** 显示今日/本周/本月全账号总成本；每个账号卡片显示该账号的 5h/周/月 用量。成本根据每条响应中的 token 数量按 OpenCode-Go 价格表估算：
-
-| 模型 | 输入 $/M | 输出 $/M | 缓存读取 $/M |
-|------|---------:|---------:|-------------:|
-| glm-5.2 | 1.40 | 4.40 | 0.26 |
-| glm-5.1 | 1.40 | 4.40 | 0.26 |
-| kimi-k2.7-code | 0.95 | 4.00 | 0.19 |
-| kimi-k2.6 | 0.95 | 4.00 | 0.16 |
-| deepseek-v4-pro | 1.74 | 3.48 | 0.0145 |
-| deepseek-v4-flash | 0.14 | 0.28 | 0.0028 |
-| mimo-v2.5 | 0.14 | 0.28 | 0.0028 |
-| mimo-v2.5-pro | 1.74 | 3.48 | 0.0145 |
-
-OpenCode-Go 额度窗口供参考：**5h = $12**、**每周 = $30**、**每月 = $60**。应用会展示你的花费对照这些额度，但**不**强制限制。
-
-> ⚠️ **流式用量是 best-effort。** 非流式响应通常包含可解析的 `usage` 字段。流式响应只有在上游发出 usage chunk 时才会记录 token/费用；否则会以 `success_no_usage`、`0` token、`$0.00` 结束。若依赖精确用量，请优先使用非流式调用，或在客户端支持时启用流式 usage。
-
-### 内置浏览器
-
-在任意账号卡片上点 **打开浏览器**，会打开一个独立隔离的 WebView2 窗口访问 OpenCode-Go 控制台。每个账号使用各自的 profile 目录，cookies/会话互不干扰。同一时间只允许打开一个浏览器窗口——打开新的会自动关闭前一个。
-
-可用于登录、查看额度、充值或复制 key，无需离开应用。
-
-### 系统托盘
-
-- 应用驻留 Windows 托盘。**左键**点击托盘图标（或右键菜单 → **打开管理界面**）显示窗口。
-- 关闭窗口会**隐藏**到托盘——应用和 Gateway 继续运行。
-- 右键菜单：**打开管理界面** / **查看网关状态** / **退出**。用 **退出** 才会真正停止 Gateway 并退出。
-
-### 数据与安全
-
-- **数据目录**：`%USERPROFILE%\.ocg-mgr\`——包含 `data.sqlite`（账号、日志、冷却、设置）和 `profiles/<account-id>/`（每个账号的 WebView2 数据）。卸载程序会询问是否删除。
-- **key 存储**：API key 在写入 `data.sqlite` 前会经过机器绑定的混淆变换。这能阻止随意的明文窥探，但**并非**强加密——不能替代密钥保险库。任何能读取你的用户配置文件并获得该程序的人都能还原 key。
-- **Gateway Key**：用于访问 Gateway 的本地密钥。请妥善保管；任何拿到它（且能访问本机）的人都可消耗你的账号额度。
-- **网络**：Gateway 仅绑定 `127.0.0.1`。在未自行增加鉴权与 TLS 的情况下，请勿将其隧道暴露到公网。
-- **无遥测**。除向 OpenCode-Go 上游转发你的请求外，不向任何服务器发送数据。
-- **合规**：应用不会自动注册账号、自动充值或绕过验证码；邀请码仅用于展示/复制。
-
-### 常见问题
-
-**仪表盘显示 $0 但我一直在用。** 上游响应大概率没有带 usage 数据。流式调用请在客户端支持时启用 usage chunk；否则用非流式调用才能得到更准确的仪表盘数字。
-
-**在设置里改了端口，但客户端仍连 9042。** 请将客户端的 `base_url` 更新为新端口。端口改动需 **重启 Gateway** 后生效。
-
-**某账号卡在冷却里。** 在账号卡片上点 **重置冷却** 即可。冷却不是「本月熔断」这种状态——它就是上游 429 文案直接告诉我们的时长。
-
-**能在局域网或其他机器上用吗？** 在 headless 机器上跑 `ocg-manager-cli serve --admin-port 9091`，GUI 就会把 key 推送到这个端点。admin API 本身只绑 `127.0.0.1`，HTTPS 与任何客户端鉴权请交给前方的 caddy/traefik 反代。本地 sqlite 永远是权威；远端是被动镜像，不是控制面。
-
-### 已知限制
-
-- 已实现 `/v1/chat/completions`、`POST /v1/messages` 和 `GET /v1/models`；未实现 `/embeddings`，也不做 Gemini 协议转换。
-- 流式用量依赖上游 usage chunk；没有 usage 的流会以 `success_no_usage`、0 token、$0.00 记录。
-- 账号卡片上的 **测试** 按钮仅校验存储的 key 能否解密并显示掩码预览，**不会**向上游发送探测请求（CLI 的 `key ping` 子命令会）。
-- **开机自启**开关已保存但尚未接入操作系统。
-- 额度窗口仅展示，不强制。
-- 仅支持单个 Gateway Key（多 key 为后续规划）。
-
----
-
-## 面向维护者
-
-### 从源码构建
-
-前置要求：
-
-- **Node.js** v20+（v24 实测可用）
-- **Rust** ≥ 1.85（edition 2024，MSRV 在 `src-tauri/Cargo.toml` 中强制）
-- **Tauri CLI**——已作为开发依赖包含，`pnpm tauri ...` 无需全局安装即可使用。
-- Windows 10/11，已装 WebView2。
+## 常用命令
 
 ```bash
-# 安装前端依赖
 pnpm install
-
-# 仅前端开发服务器（http://127.0.0.1:30001）
-pnpm run dev
-
-# 完整 Tauri 应用（前端 + Rust + 桌面窗口）
-pnpm tauri dev
-
-# 类型检查 + 前端生产构建
-pnpm run build       # = vue-tsc && vite build
-
-# Rust 检查 / Release 二进制
-cd src-tauri && cargo check
-cd src-tauri && cargo build --release
-
-# Windows NSIS 安装包 → src-tauri/target/release/bundle/nsis/
-pnpm tauri build
+pnpm run build:web
+pnpm run test
+pnpm run build:gui
+pnpm run build:cli
 ```
-
-### 项目结构
-
-```
-.
-├── assets/logo/                # logo 源文件 + 生成脚本
-├── docs/{en,zh}/               # logo 使用规范 + 快速开始说明
-├── src/                        # Vue 3 + TypeScript 前端
-│   ├── api/tauri.ts            # invoke() 封装 + 共享 TS 类型
-│   ├── views/                  # 仪表盘 / 账号 / 日志 / 设置
-│   ├── App.vue                 # 外壳 + 侧边栏导航
-│   ├── main.ts                 # Vue + naive-ui 启动
-│   └── styles/main.css
-├── crates/                     # Rust workspace 成员
-│   ├── ocg-core/               # 跨平台 lib：Gateway、DB、models、crypto、state
-│   │   └── src/
-│   │       ├── lib.rs          # 重新导出：crypto/db/gateway/models/state
-│   │       ├── crypto.rs       # KeyCipher trait + MachineBound/Static 两种实现
-│   │       ├── db.rs           # SQLite 打开 + 迁移 + 查询
-│   │       ├── models.rs       # serde 结构体、AppConfig、枚举
-│   │       ├── state.rs        # CoreState、配置读写、gateway-key 生成
-│   │       └── gateway/        # Axum 路由、handler、forwarder、selector、limit、cost
-│   └── ocg-cli/                # 无头 CLI 二进制
-│       ├── Cargo.toml
-│       └── src/main.rs         # clap: serve / key（list|add|remove|enable|disable|ping）/ status
-├── src-tauri/                  # Tauri GUI 二进制（依赖 ocg-core）
-│   ├── capabilities/default.json   # 主窗口的 Tauri v2 权限
-│   ├── icons/                  # 32/128/256/512 + icon.ico
-│   ├── installer.nsh           # NSIS 钩子：卸载时询问是否删除数据目录
-│   ├── src/
-│   │   ├── commands/           # Tauri 命令处理（account/setting/gateway/log/dashboard/browser）
-│   │   ├── state.rs            # GuiState 包装 CoreState + current_browser_window
-│   │   ├── tray.rs             # 系统托盘初始化
-│   │   ├── lib.rs              # run()——串联 DB、Gateway、托盘、命令
-│   │   └── main.rs             # 可执行入口 → run()
-│   ├── Cargo.toml
-│   ├── build.rs
-│   └── tauri.conf.json
-├── Cargo.toml                  # workspace 根（members = crates/ocg-core, crates/ocg-cli, src-tauri）
-├── package.json
-├── vite.config.ts              # 开发端口 30001、@ 别名
-├── tsconfig.json
-└── index.html
-```
-
-### 架构
-
-```text
-客户端（OpenAI SDK / curl / 任意工具）
-  │  POST http://127.0.0.1:9042/v1/chat/completions
-  │  Authorization: Bearer <gateway-key>
-  ▼
-┌─────────────────────────── ocg-core（跨平台 lib）────────────────────────────┐
-│  Axum Gateway（mod/handler/forwarder/selector/limit/cost）                       │
-│    ├── 鉴权：校验 Bearer <gateway-key>（或 x-api-key）                           │
-│    ├── AccountSelector：按列表顺序选出第一个已启用且未在冷却中的账号             │
-│    ├── Forwarder：用该账号的 OCG key 将请求体转发到 {upstream}{path}            │
-│    │     ├── SSE 流式透传 ─► 客户端（字节不变）                                 │
-│    │     └── JSON 响应    ─► 解析 usage、估算成本、写日志                        │
-│    ├── 429 解析（limit.rs）：提取 `Resets in X` → 写入 cooldown_until           │
-│    ├── DB（rusqlite）：accounts、settings、logs                                 │
-│    └── KeyCipher trait：MachineBoundCipher（GUI） | StaticKeyCipher（CLI）      │
-│                                                                                 │
-│   Fallback：429 -> 写冷却并切下一个；408/5xx/网络错误 -> 同 key 重试一次再切换   │
-└─────────────────────────────────────────────────────────────────────────────┘
-  ▲                                              ▲
-  │ Tauri invoke（state.core.*）                 │ CoreState + StaticKeyCipher
-  │                                              │
-ocg-manager（Tauri GUI, Windows）         ocg-manager-cli（Linux/macOS/Win/Docker）
-├── 账号管理 UI                            ├── serve / 最小 key 存储 / status
-├── WebView2 UI（Vue 3 + naive-ui）        └── 复用 gateway + db 基础能力
-├── 系统托盘（tray.rs）
-└── MachineBoundCipher（默认）
-```
-
-### 关键实现
-
-- **Gateway 装配**——`gateway/mod.rs` 构建 Axum 路由（`/v1/chat/completions`、`/v1/messages`、`/v1/models` + 宽松 CORS），绑定 `127.0.0.1:<port>`，并以 graceful-shutdown oneshot 运行。`start_gateway` / `stop_gateway` 在 `lib.rs`（启动）和 `commands/gateway.rs`（重启）中调用。
-- **请求处理**——`gateway/handler.rs` 校验 gateway key（Bearer 或 `x-api-key`），随后循环直到没有可选账号。它会记录本次请求中已经失败的账号；非流式 `408` / `5xx` / 网络失败会在同一账号上重试 1 次；`429` / `401` / `403` 直接 fallback；普通请求级 `4xx` 直接透传。返回 `401` / `503`（无账号）/ `429`（全部在冷却中，并带最早重置时间）/ `502`（全部失败）。
-- **转发器**——`gateway/forwarder.rs` 解密账号 key，将**原始请求体** POST 到 `{upstream_base_url}{path}`（120s 超时），过滤 Gateway 私有头、逐跳头和 `accept-encoding`，用该账号的 OCG key 替换鉴权，并发送 `Accept-Encoding: identity`。随后要么按字节透传 SSE 流，要么解析 JSON `usage` 估算成本。收到 429 时，`parse_reset` 解析冷却时长并写入 `accounts.cooldown_until` 与 `last_error`。每次尝试都写入 `forward_logs`。
-- **选择器**——`gateway/selector.rs` 列出账号，过滤掉已禁用/被排除/`cooldown_until > now` 的，再返回第一个剩余账号。v1 没有随机或轮询策略。
-- **冷却解析**——`gateway/limit.rs::parse_reset`。识别上游 429 文案中的 `Resets in N min|hour|day(s)`；分钟/小时/天均支持，其他单位返回 `None`。
-- **成本**——`gateway/cost.rs` 持有价格 `HashMap`，规范化模型名（小写，分隔符→`-`），按 `cost = prompt/1e6·in + completion/1e6·out + cached/1e6·cache_read` 计算。未知模型先模糊匹配，再回退默认价。
-- **加密**——`crates/ocg-core/src/crypto.rs`。以 `USERNAME` / `COMPUTERNAME` / `APPDATA` 为种子的机器绑定 XOR 混淆。文档明确**非**密码学安全；如需真实保密请替换为 `aes-gcm` / KMS。
-- **DB**——`crates/ocg-core/src/db.rs`。SQLite 位于 `<data_dir>/data.sqlite`，通过 `schema_version` 版本化（当前 v2）。表：`accounts`、`settings`、`gateway_logs`、`forward_logs`。索引在 `forward_logs(timestamp)` 与 `forward_logs(account_id)`。v2 迁移新增了 `accounts.cooldown_until` 与 `accounts.last_error`；**没有**独立的 `circuit_states` 表。
-- **状态**——`crates/ocg-core/src/state.rs`。`CoreState`（Arc）位于 `ocg-core`，持有 `Mutex<Database>`、`Mutex<AppConfig>`、`Mutex<Option<GatewayHandle>>`、一个共享的 `reqwest::Client`（启动时构建一次，120s 超时）、`PathBuf`、`Arc<dyn KeyCipher>`。配置以 JSON 序列化到 `settings` 表的 `config` 键；gateway key 在首次启动时自动生成为 `ocg-<word>-<word>`。GUI 在 `src-tauri/src/state.rs` 用 `GuiState { core, current_browser_window }` 再包一层；Tauri 命令访问状态时走 `state.core.*`。
-- **托盘**——`src-tauri/src/tray.rs`。左键显示主窗口；右键菜单含 打开/状态/退出。`lib.rs` 拦截 `CloseRequested` 改为隐藏而非关闭。
-- **Tauri 命令**——在 `lib.rs::invoke_handler!` 中注册；类型化封装在 `src/api/tauri.ts`。新增命令需两处都改。
-
-### 数据模型
-
-`accounts(id, name, key_cipher, enabled, referral_code, recharge_date, cooldown_until, last_error, created_at, updated_at)` —— `cooldown_until` 与 `last_error` 由 schema v2 引入
-`settings(key, value)`——应用配置以 JSON 存于 `key = "config"`
-`gateway_logs(id, level, category, message, created_at)`
-`forward_logs(id, timestamp, model, account_id, account_name, status, http_status, prompt_tokens, completion_tokens, cached_tokens, cost, error_message)`
-
-### 配置
-
-`AppConfig`（`models.rs`，默认值如下）：
-
-| 字段 | 默认值 | 说明 |
-|------|--------|------|
-| `gateway_port` | `9042` | 本地 Gateway 绑定端口。 |
-| `gateway_key` | 自动 `ocg-xxxxxxxx-xxxxxxxx` | 可在设置中重新生成。 |
-| `upstream_base_url` | `https://opencode.ai/zen/go` | OpenCode-Go API 基址。转发器会拼上 path，**不要**带 `/v1`。 |
-| `auto_start` | `false` | 仅保存——尚未接入 OS 开机自启。 |
-| `remote.url` | ``（空） | 留空=纯本地。设置后，GUI 每次本地改动都会把 key 推送到该远端 admin API。 |
-| `remote.token` | `` | `remote.url` 的 Bearer token。首次启动 `ocg-manager-cli serve --admin-port` 时自动生成。 |
-
-可在应用内（设置）编辑，或直接改 `settings` 表。改端口后需重启 Gateway。`tauri.conf.json` 的 `security.csp` 硬编码了 `connect-src http://localhost:9042`；若 webview 需要连其他端口请同步修改（正常情况下 Gateway 由外部客户端访问，webview 很少直连，故此条多数时候无影响）。
-
-### 扩展指南
-
-- **新增价格表模型**——在 `gateway/cost.rs::price_table_cell()` 加条目。名称会被规范化（小写，` /_.`→`-`），故可宽松匹配上游 model id。
-- **调整冷却解析**——`gateway/limit.rs::parse_reset`：在 `match` 中加分支以识别更多 429 文案。
-- **修改默认端口/上游**——`models.rs::AppConfig::default()`。
-- **新增 Tauri 命令**——在 `src-tauri/src/commands/` 下写 `#[tauri::command]` 函数，在 `lib.rs::invoke_handler!` 注册，并在 `src/api/tauri.ts` 加类型化封装。
-
-### 测试
-
-- `cargo test --workspace`——运行 `ocg-core` 的测试：`crypto` 往返（MachineBoundCipher、StaticKeyCipher）和 `gateway::limit::parse_reset` 已知文案用例。
-- 无前端测试。建议补充：顺序选择器行为、冷却计时、成本估算，以及对接 mock 上游的集成测试。
-
-### 无头 CLI（`ocg-manager-cli`）
-
-CLI 复用 `ocg-core` 的 Gateway 与数据库基础能力，并为服务器场景提供一个最小无头 key 存储接口。它不是 GUI 账号管理界面：没有账号卡片、没有浏览器 profile、没有托盘、没有 WebView。运行形态是一份 `data.sqlite` 加一个 Axum 服务，所以可以跑在 Linux、macOS、Windows 和 Docker 里。加 `--admin-port <u16>` 会在 `127.0.0.1:<port>` 再暴露一个 Bearer 鉴权的远端同步 admin API；HTTPS 请交给前方的反代，二进制本身不做 TLS 终结。
-
-```bash
-# 构建
-cargo build --release --bin ocg-manager-cli
-
-# 启动 Gateway（默认：端口 9042，数据目录 ~/.ocg-mgr-cli）
-./target/release/ocg-manager-cli serve
-
-# 覆盖参数
-./target/release/ocg-manager-cli --data-dir /var/lib/ocg --encryption-key "$OCG_KEY" serve --port 9042
-
-# 管理 key
-ocg-manager-cli key list
-ocg-manager-cli key add main sk-ocg-xxxxxxxx
-ocg-manager-cli key remove <account-id>
-ocg-manager-cli key enable <account-id>
-ocg-manager-cli key disable <account-id>
-
-# 探测上游（真实 HTTP）—— 单个或所有已启用账号
-ocg-manager-cli key ping                        # 所有已启用账号
-ocg-manager-cli key ping <account-id>           # 单个账号
-ocg-manager-cli key ping <account-id> --model deepseek-v4-flash --message "hello"
-
-# 查看运行状态
-ocg-manager-cli status
-```
-
-**加密密钥。** CLI 使用 `StaticKeyCipher`（非机器绑定），因此可以将数据目录迁到另一台机器并解密。解析优先级：
-
-1. `--encryption-key <secret>` 参数
-2. `OCG_MANAGER_ENCRYPTION_KEY` 环境变量
-3. `<data-dir>/.encryption-key` 文件（首次启动自动生成——请妥善备份）
-
-**数据目录。** 默认 `~/.ocg-mgr-cli`，可使用 `--data-dir` 覆盖。不要与 GUI 的 `%USERPROFILE%/.ocg-mgr/data.sqlite` 共享目录——GUI 使用 `MachineBoundCipher`，两种 cipher 不可互用。
-
-### 打包与发布
-
-- `pnpm tauri build` 产出每机器级 **NSIS** 安装包，位于 `src-tauri/target/release/bundle/nsis/`。
-- Release 配置（`Cargo.toml`）：`opt-level = 3`、`lto = true`、`strip = true`、`panic = "abort"`——生成单个 stripped exe。
-- `installer.nsh` 增加卸载钩子，删除 `%USERPROFILE%\.ocg-mgr` 前会询问用户。
-- 未配置 CI/CD 或自动发布；手动切版本发布。
-
-### 已知缺口 / TODO
-
-- 除 `crypto` 往返和 `parse_reset` 外无自动化测试。
-- 流式请求日志记录 0 token/0 成本（用量统计仅覆盖非流式）。
-- `test_account` 不探测上游——仅解密并掩码展示 key（CLI 的 `key ping` 会）。
-- `auto_start` 标志未接入 OS 自启条目（未注册 `tauri-plugin-autostart`）。
-- 按充值日期自动重置月冷却未实现（仅支持手动重置）。
-- `reqwest::Client` 在 `CoreStateInner::new` 中构建一次（120s 超时），连接池是进程级、按 host 复用的——目前够用。
-- 加密是混淆，非 AEAD。
-- `tauri-plugin-store` 已在前端依赖中声明但 Rust 端被注释掉。
-
----
 
 ## 许可证
 
-SATA-2.0（SATA-2.0 License）——详见 LICENSE 文件。
+见 [LICENSE](LICENSE)。

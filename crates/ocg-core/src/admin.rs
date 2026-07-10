@@ -2,20 +2,21 @@
 //! Bearer token. Used by the Windows GUI to push account keys to a headless
 //! Linux daemon, and by the daemon to surface them to its gateway.
 //!
-//! ponytail: 4 routes, 1 middleware, no retries, no metrics, no audit log.
+//! ponytail: 4 handlers, 1 middleware, no retries, no metrics, no audit log.
 //! Reuses `state.core.encrypt_key` / `state.core.db` — never bypasses them.
 
 use crate::models::Account;
 use crate::state::CoreState;
 use axum::{
     Json, Router,
-    extract::{Path, Request, State},
+    extract::{Request, State},
     http::{StatusCode, header},
     middleware::{self, Next},
     response::{IntoResponse, Response},
-    routing::{delete, get},
+    routing::{get, post},
 };
 use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use tokio::sync::oneshot;
@@ -44,8 +45,8 @@ async fn require_bearer(
 pub fn build_admin_router(state: CoreState, token: String) -> Router {
     Router::new()
         .route("/admin/health", get(health))
-        .route("/admin/keys", get(list_keys).post(upsert_key))
-        .route("/admin/keys/{id}", delete(delete_key))
+        .route("/admin/status", get(status))
+        .route("/admin/keys", post(upsert_key))
         .route_layer(middleware::from_fn_with_state(
             AdminToken(token),
             require_bearer,
@@ -60,38 +61,99 @@ async fn health() -> impl IntoResponse {
 }
 
 #[derive(Serialize)]
-struct KeyDto {
-    id: String,
-    name: String,
-    key: String,
-    key_cipher: String,
-    enabled: bool,
-    referral_code: Option<String>,
-    recharge_date: Option<String>,
-    created_at: String,
-    updated_at: String,
+struct AdminStatus {
+    version: &'static str,
+    gateway: AdminGatewayStatus,
+    accounts: AdminAccountStatus,
+    usage: AdminUsageStatus,
+    last_error: Option<String>,
 }
 
-impl KeyDto {
-    fn from_account(state: &CoreState, a: &Account) -> anyhow::Result<Self> {
-        Ok(Self {
-            id: a.id.clone(),
-            name: a.name.clone(),
-            key: state.decrypt_key(&a.key_cipher)?,
-            key_cipher: a.key_cipher.clone(),
-            enabled: a.enabled,
-            referral_code: a.referral_code.clone(),
-            recharge_date: a.recharge_date.clone(),
-            created_at: a.created_at.to_rfc3339(),
-            updated_at: a.updated_at.to_rfc3339(),
-        })
-    }
+#[derive(Serialize)]
+struct AdminGatewayStatus {
+    running: bool,
+    port: u16,
+    upstream_base_url: String,
+    last_error: Option<String>,
+}
+
+#[derive(Serialize)]
+struct AdminAccountStatus {
+    total: usize,
+    enabled: usize,
+    disabled: usize,
+    cooldown: usize,
+    available: usize,
+}
+
+#[derive(Serialize)]
+struct AdminUsageStatus {
+    today_cost: f64,
+    week_cost: f64,
+    month_cost: f64,
+}
+
+async fn status(State(state): State<CoreState>) -> Result<Json<AdminStatus>, StatusCode> {
+    let config = state.config();
+    let running = state.gateway.lock().is_some();
+    let now = Utc::now();
+    let db = state.db.lock();
+    let accounts = db
+        .list_accounts()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let (today_cost, week_cost, month_cost) = db
+        .total_usage()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let last_gateway_error = db
+        .latest_gateway_error()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let last_error = db
+        .latest_error_summary()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    drop(db);
+
+    let enabled = accounts.iter().filter(|a| a.enabled).count();
+    let cooldown = accounts
+        .iter()
+        .filter(|a| a.enabled && a.cooldown_until.map(|until| until > now).unwrap_or(false))
+        .count();
+    let disabled = accounts.len().saturating_sub(enabled);
+    let available = accounts
+        .iter()
+        .filter(|a| a.enabled && a.cooldown_until.map(|until| until <= now).unwrap_or(true))
+        .count();
+
+    Ok(Json(AdminStatus {
+        version: env!("CARGO_PKG_VERSION"),
+        gateway: AdminGatewayStatus {
+            running,
+            port: config.gateway_port,
+            upstream_base_url: config.upstream_base_url,
+            last_error: if running { None } else { last_gateway_error },
+        },
+        accounts: AdminAccountStatus {
+            total: accounts.len(),
+            enabled,
+            disabled,
+            cooldown,
+            available,
+        },
+        usage: AdminUsageStatus {
+            today_cost,
+            week_cost,
+            month_cost,
+        },
+        last_error,
+    }))
 }
 
 #[derive(Deserialize)]
 struct UpsertKeyDto {
     id: String,
     name: String,
+    username: Option<String>,
+    password: Option<String>,
+    password_cipher: Option<String>,
     /// Preferred sync path: receiver encrypts plaintext with its local cipher.
     key: Option<String>,
     /// Legacy fallback for older peers. Existing local rows preserve their key
@@ -107,19 +169,6 @@ struct UpsertKeyDto {
 
 fn default_true() -> bool {
     true
-}
-
-async fn list_keys(State(state): State<CoreState>) -> Result<Json<Vec<KeyDto>>, StatusCode> {
-    let db = state.db.lock();
-    match db.list_accounts() {
-        Ok(accounts) => accounts
-            .iter()
-            .map(|account| KeyDto::from_account(&state, account))
-            .collect::<anyhow::Result<Vec<_>>>()
-            .map(Json)
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR),
-        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
-    }
 }
 
 async fn upsert_key(
@@ -140,9 +189,21 @@ async fn upsert_key(
         None if existing.is_none() => input.key_cipher.clone().ok_or(StatusCode::BAD_REQUEST)?,
         None => String::new(),
     };
+    let password_cipher = match input.password.as_deref() {
+        Some(password) if !password.is_empty() => Some(
+            state
+                .encrypt_key(password)
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
+        ),
+        Some(_) => None,
+        None if existing.is_none() => input.password_cipher.clone(),
+        None => Some(String::new()),
+    };
     let account = Account {
         id: input.id.clone(),
         name: input.name,
+        username: input.username,
+        password_cipher,
         key_cipher,
         enabled: input.enabled,
         referral_code: input.referral_code,
@@ -160,17 +221,6 @@ async fn upsert_key(
         db.create_account(&account)
     };
     match result {
-        Ok(()) => Ok(StatusCode::NO_CONTENT),
-        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
-    }
-}
-
-async fn delete_key(
-    State(state): State<CoreState>,
-    Path(id): Path<String>,
-) -> Result<StatusCode, StatusCode> {
-    let mut db = state.db.lock();
-    match db.delete_account(&id) {
         Ok(()) => Ok(StatusCode::NO_CONTENT),
         Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
     }

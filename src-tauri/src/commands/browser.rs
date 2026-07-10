@@ -6,7 +6,7 @@ const OCG_CONSOLE_URL: &str = "https://opencode.ai/zen/go";
 const BROWSER_WINDOW_LABEL: &str = "ocg-browser";
 
 #[tauri::command]
-pub fn open_browser(
+pub async fn open_browser(
     app: AppHandle,
     state: State<'_, AppState>,
     account_id: String,

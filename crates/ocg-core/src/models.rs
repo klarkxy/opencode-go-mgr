@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 pub struct Account {
     pub id: String,
     pub name: String,
+    pub username: Option<String>,
+    pub password_cipher: Option<String>,
     pub key_cipher: String,
     pub enabled: bool,
     pub referral_code: Option<String>,
@@ -18,6 +20,8 @@ pub struct Account {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AccountInput {
     pub name: String,
+    pub username: Option<String>,
+    pub password: Option<String>,
     pub key: String,
     pub referral_code: Option<String>,
     pub recharge_date: Option<String>,
@@ -26,6 +30,8 @@ pub struct AccountInput {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AccountUpdate {
     pub name: Option<String>,
+    pub username: Option<String>,
+    pub password: Option<String>,
     pub key: Option<String>,
     pub enabled: Option<bool>,
     pub referral_code: Option<String>,
@@ -106,6 +112,7 @@ pub struct GatewayStatus {
     pub port: u16,
     pub key: String,
     pub upstream_base_url: String,
+    pub last_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

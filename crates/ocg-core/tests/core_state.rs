@@ -36,6 +36,8 @@ fn core_state_persists_account_through_static_cipher() {
     let account = Account {
         id: "acct-1".into(),
         name: "main".into(),
+        username: None,
+        password_cipher: None,
         key_cipher: state.encrypt_key("sk-ocg-plaintext-123").unwrap(),
         enabled: true,
         referral_code: None,
@@ -69,6 +71,8 @@ fn core_state_with_wrong_cipher_cannot_decrypt_existing_account() {
         let account = Account {
             id: "acct-2".into(),
             name: "alt".into(),
+            username: None,
+            password_cipher: None,
             key_cipher: state.encrypt_key("sk-ocg-plaintext-456").unwrap(),
             enabled: true,
             referral_code: None,

@@ -21,7 +21,6 @@ const UPSTREAM_TIMEOUT: StdDuration = StdDuration::from_secs(120);
 
 pub struct ForwardResult {
     pub response: Response,
-    pub account: Account,
     pub success: bool,
     pub retryable: bool,
     pub error_message: Option<String>,
@@ -133,7 +132,6 @@ async fn forward_request_impl(
             }
             return Ok(ForwardResult {
                 response: error_response(&error_message),
-                account: account.clone(),
                 success: false,
                 retryable: true,
                 error_message: Some(error_message),
@@ -173,7 +171,6 @@ async fn forward_request_impl(
         }
         return Ok(ForwardResult {
             response: error_response(&error_message),
-            account: account.clone(),
             success: false,
             retryable: true,
             error_message: Some(error_message),
@@ -212,7 +209,6 @@ async fn forward_request_impl(
             }
             return Ok(ForwardResult {
                 response: error_response(&error_message),
-                account: account.clone(),
                 success: false,
                 retryable: false,
                 error_message: Some(error_message),
@@ -238,7 +234,6 @@ async fn forward_request_impl(
             }
             return Ok(ForwardResult {
                 response: error_response(&error_message),
-                account: account.clone(),
                 success: false,
                 retryable: true,
                 error_message: Some(error_message),
@@ -269,7 +264,6 @@ async fn forward_request_impl(
             }
             return Ok(ForwardResult {
                 response: error_response(&error_message),
-                account: account.clone(),
                 success: false,
                 retryable: false,
                 error_message: Some(error_message),
@@ -296,7 +290,6 @@ async fn forward_request_impl(
         response_headers.insert("content-type", HeaderValue::from_static("application/json"));
         return Ok(ForwardResult {
             response: (status, response_headers, text).into_response(),
-            account: account.clone(),
             success: true,
             retryable: false,
             error_message: None,
@@ -435,7 +428,6 @@ async fn forward_request_impl(
 
         Ok(ForwardResult {
             response: response_builder.body(Body::from_stream(mapped.chain(finalizer)))?,
-            account: account.clone(),
             success: true,
             retryable: false,
             error_message: None,
@@ -476,7 +468,6 @@ async fn forward_request_impl(
         response_headers.insert("content-type", HeaderValue::from_static("application/json"));
         Ok(ForwardResult {
             response: (status, response_headers, text).into_response(),
-            account: account.clone(),
             success: true,
             retryable: false,
             error_message: None,

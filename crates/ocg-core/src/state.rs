@@ -17,6 +17,8 @@ pub struct CoreStateInner {
     pub db: Mutex<Database>,
     pub config: Mutex<AppConfig>,
     pub gateway: Mutex<Option<GatewayHandle>>,
+    pub dashboard_token: String,
+    pub dashboard_dir: Mutex<Option<PathBuf>>,
     pub http_client: reqwest::Client,
     pub data_dir: PathBuf,
     pub cipher: Arc<dyn KeyCipher + Send + Sync>,
@@ -43,6 +45,8 @@ impl CoreStateInner {
             db: Mutex::new(db),
             config: Mutex::new(config),
             gateway: Mutex::new(None),
+            dashboard_token: format!("ocg-dashboard-{}", random_word()),
+            dashboard_dir: Mutex::new(None),
             http_client,
             data_dir,
             cipher,
@@ -64,6 +68,14 @@ impl CoreStateInner {
 
     pub fn data_dir(&self) -> PathBuf {
         self.data_dir.clone()
+    }
+
+    pub fn set_dashboard_dir(&self, dir: Option<PathBuf>) {
+        *self.dashboard_dir.lock() = dir;
+    }
+
+    pub fn dashboard_dir(&self) -> Option<PathBuf> {
+        self.dashboard_dir.lock().clone()
     }
 
     pub fn encrypt_key(&self, plaintext: &str) -> crate::Result<String> {

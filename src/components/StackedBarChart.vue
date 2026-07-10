@@ -122,8 +122,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onBeforeUnmount, useId } from "vue";
-import { DailyModelCost } from "../api/tauri";
+import { ref, computed, onMounted, onBeforeUnmount, useId } from "vue";
+import type { DailyModelCost } from "../api/tauri";
 
 const props = withDefaults(defineProps<{
   data: DailyModelCost[];
@@ -340,10 +340,6 @@ function updateTooltip(bi: number, e: MouseEvent) {
   };
 }
 
-// 容器尺寸变化时强制重算(计算属性会自动响应 width)
-watch(width, () => {
-  // 触发依赖 width 的计算属性刷新
-});
 </script>
 
 <style scoped>

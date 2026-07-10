@@ -12,39 +12,3 @@ html, body, #app {
 .text-muted {
   color: #888;
 }
-
-.flex {
-  display: flex;
-}
-
-.flex-col {
-  flex-direction: column;
-}
-
-.items-center {
-  align-items: center;
-}
-
-.justify-between {
-  justify-content: space-between;
-}
-
-.gap-2 {
-  gap: 8px;
-}
-
-.gap-4 {
-  gap: 16px;
-}
-
-.p-4 {
-  padding: 16px;
-}
-
-.m-4 {
-  margin: 16px;
-}
-
-.w-full {
-  width: 100%;
-}
