@@ -40,7 +40,7 @@ impl AccountSelector {
 mod tests {
     use super::*;
     use crate::crypto::{KeyCipher, StaticKeyCipher};
-    use crate::models::Account;
+    use crate::models::{Account, ForwardLog};
     use chrono::{Duration, Utc};
     use std::fs;
     use std::path::PathBuf;
@@ -95,6 +95,42 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(selected.id, "next");
+
+        drop(db);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn local_usage_does_not_exclude_account() {
+        let dir = temp_data_dir("local-usage");
+        let db = Database::open(dir.clone()).unwrap();
+        db.create_account(&account("estimated-full", true, None))
+            .unwrap();
+        db.log_forward(&ForwardLog {
+            id: 0,
+            timestamp: Utc::now(),
+            model: "test".into(),
+            account_id: "estimated-full".into(),
+            account_name: "estimated-full".into(),
+            status: "success".into(),
+            http_status: Some(200),
+            prompt_tokens: 0,
+            completion_tokens: 0,
+            cached_tokens: 0,
+            cost: 1000.0,
+            error_message: None,
+        })
+        .unwrap();
+
+        assert!(db.account_usage("estimated-full").unwrap().window_month > 60.0);
+        assert_eq!(
+            AccountSelector::new()
+                .select(&db, None)
+                .unwrap()
+                .unwrap()
+                .id,
+            "estimated-full"
+        );
 
         drop(db);
         fs::remove_dir_all(dir).unwrap();

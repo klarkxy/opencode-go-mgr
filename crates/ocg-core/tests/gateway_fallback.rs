@@ -3,7 +3,7 @@ use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::post;
-use chrono::Utc;
+use chrono::{Duration, Utc};
 use ocg_core::crypto::{KeyCipher, StaticKeyCipher};
 use ocg_core::db::Database;
 use ocg_core::gateway;
@@ -404,7 +404,8 @@ async fn dashboard_ping_marks_quota_cooldown() {
     assert!(body["error"].as_str().unwrap().contains("额度"));
 
     let stored = state.db.lock().get_account("acct-1").unwrap().unwrap();
-    assert!(stored.cooldown_until.unwrap() > Utc::now());
+    let remaining = stored.cooldown_until.unwrap() - Utc::now();
+    assert!(remaining > Duration::days(2) && remaining <= Duration::days(3));
     assert!(stored.last_error.unwrap().contains("Weekly usage limit"));
 
     let calls = calls.lock().unwrap();

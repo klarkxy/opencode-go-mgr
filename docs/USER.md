@@ -23,6 +23,14 @@ The gateway consumes your client `Authorization` header for local gateway auth. 
 
 Accounts are tried in list order. Disabled accounts, cooled-down accounts, and accounts already failed during the current request are skipped. A 429 response with a reset phrase writes `cooldown_until`; 401/403 fail over without writing cooldown; 5xx and network errors are retried once for non-streaming requests before trying the next account.
 
+### True And False Circuit Breakers
+
+The 5-hour, weekly, and monthly usage bars are local estimates. Reaching a locally calculated limit is a false circuit breaker: local accounting and upstream billing or reset boundaries may not match, so the gateway keeps sending requests with that account and does not write a cooldown. A full local bar is therefore a warning, not proof that the upstream account is blocked.
+
+A true circuit breaker starts only when the upstream returns HTTP 429. The gateway stores the upstream error, parses its reset phrase, writes `cooldown_until`, and tries the next available account. Known 5-hour, weekly, and monthly limit messages use the reset duration reported by the upstream; an unrecognized 429 falls back to a five-minute cooldown. If every enabled account is cooling down, the gateway returns 429 with the soonest reset time.
+
+During a true circuit breaker, the dashboard forces the matching 5-hour, weekly, or monthly bar to 100% and marks it as an error even when the local estimate is lower. The account becomes eligible automatically after `cooldown_until`, or immediately after its cooldown is reset manually.
+
 ## CLI
 
 ```bash

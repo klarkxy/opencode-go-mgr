@@ -80,8 +80,8 @@
           <n-progress
             type="line"
             :height="8"
-            :percentage="usagePercent(account.id, limit.key, limit.limit)"
-            :status="usageStatus(account.id, limit.key, limit.limit)"
+            :percentage="usagePercent(account, limit.key, limit.limit)"
+            :status="usageStatus(account, limit.key, limit.limit)"
             :show-indicator="false"
           />
         </div>
@@ -209,8 +209,9 @@ import {
 import { CloseOutlined, PlusOutlined, ThunderboltOutlined } from "@vicons/antd";
 import { tauriApi } from "../api/tauri";
 import type { Account, AccountInput, AccountUpdate, UsageWindow } from "../api/tauri";
+import { isCooling, isUsageLimitReached, usageProgressStatus } from "./accounts-usage";
+import type { UsageKey } from "./accounts-usage";
 
-type UsageKey = "window_5h" | "window_week" | "window_month";
 type AccountDraft = {
   name: string;
   username: string;
@@ -268,30 +269,24 @@ function usageCost(accountId: string, key: UsageKey): number {
   return getUsage(accountId)[key];
 }
 
-function usagePercent(accountId: string, key: UsageKey, limit: number): number {
-  return Math.min(100, Math.round((usageCost(accountId, key) / limit) * 1000) / 10);
+function usagePercent(account: Account, key: UsageKey, limit: number): number {
+  if (isUsageLimitReached(account, key)) return 100;
+  return Math.min(100, Math.round((usageCost(account.id, key) / limit) * 1000) / 10);
 }
 
 function usageStatus(
-  accountId: string,
+  account: Account,
   key: UsageKey,
   limit: number,
 ): "success" | "warning" | "error" {
-  const percent = usagePercent(accountId, key, limit);
-  if (percent >= 100) return "error";
-  if (percent >= 80) return "warning";
-  return "success";
+  const percent = usagePercent(account, key, limit);
+  return usageProgressStatus(account, key, percent);
 }
 
 function formatCost(value: number): string {
   if (value === 0) return "0.00";
   if (value < 0.01) return value.toFixed(4);
   return value.toFixed(2);
-}
-
-function isCooling(account: Account): boolean {
-  if (!account.cooldown_until) return false;
-  return new Date(account.cooldown_until).getTime() > Date.now();
 }
 
 function formatRemaining(account: Account): string {
