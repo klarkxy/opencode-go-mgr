@@ -4,7 +4,7 @@
   <img src="assets/logo/ocg_logo_final_transparent.png" alt="OCG Manager Logo" width="140">
 </p>
 
-OCG Manager 是一个本地 OpenCode-Go 多账号管理器，并提供 OpenAI 兼容 Gateway。它本地保存 key，通过 Gateway 托管管理面板，并由 Windows 托盘应用常驻后台。
+OCG Manager 是一个本地 OpenCode-Go 多账号管理器，并提供 OpenAI 兼容 Gateway。它本地保存 Key，通过 Gateway 托管管理面板，并由 Windows、macOS 或 Linux 托盘应用常驻后台。
 
 <p align="center">
   <img src="assets/opencode娘.png" alt="OpenCode-Go 娘" width="360">
@@ -59,37 +59,28 @@ pnpm run dev:gui
 
 Tauri 会监听 Rust workspace，执行增量编译并自动重启进程；这属于开发时重载，不是真正的运行时代码替换。只有最终验收和发版时才运行 `pnpm run build`。
 
-常用检查和单项构建：
+常用检查：
 
 ```bash
-pnpm run typecheck
 pnpm run test
 pnpm run build:web
-pnpm run build:cli
-pnpm run build:gui
+pnpm run design:lint
 pnpm run build
 ```
 
 ## 发布产物
 
-需要生成可交付版本时，请运行 `pnpm run build`。它会依次构建管理面板、CLI 和 Windows GUI，并用当前产物重建 `release/`：
+`pnpm run build` 会为当前受支持的原生平台构建 GUI 和 CLI，并原子替换 `release/`；不会在一台机器上交叉构建全部平台。
 
-```text
-release/
-├── ocg-manager.exe
-├── ocg-manager-cli.exe
-├── OCG Manager_1.0.0_x64-setup.exe
-└── dist/
-```
+| 平台 | GUI | CLI |
+| --- | --- | --- |
+| Windows 10/11 x64 | `ocg-manager_<version>_windows-x64-setup.exe` | `ocg-manager-cli_<version>_windows-x64.zip` |
+| macOS 11+ Intel 与 Apple Silicon | `ocg-manager_<version>_macos-universal.dmg` | `ocg-manager-cli_<version>_macos-universal.tar.gz` |
+| Linux x64 | `ocg-manager_<version>_linux-x64.AppImage` 和 `.deb` | `ocg-manager-cli_<version>_linux-x64.tar.gz` |
 
-- `release/ocg-manager.exe` 是便携版托盘程序，必须与 `release/dist/` 一起保留。
-- `release/OCG Manager_1.0.0_x64-setup.exe` 是 Windows 安装包。
-- `release/ocg-manager-cli.exe` 是独立 CLI。
-- `target/release/` 保存 Rust/Tauri 中间构建结果，不是最终交付目录。
+每次构建还会生成 `SHA256SUMS`。CLI 压缩包包含可执行文件、`dist/` 和 `LICENSE`；必须让 `dist/` 与可执行文件保持同级，`serve` 才能提供管理面板。
 
-`pnpm run build:gui` 只更新 `target/release`；如果各组件已经构建完成，可运行 `pnpm run artifacts`，把 GUI、CLI、安装包和管理面板重新同步到 `release/`。该命令会整体替换交付目录，因此旧的 release 文件会被清除。
-
-运行便携版 GUI 后可能生成 `ocg-manager.exe.WebView2/`。它是浏览器运行缓存，不属于发布产物；退出 OCG Manager 后可以安全删除。
+Windows GUI 只发布安装包，不发布便携版。首轮 Windows 安装包不签名，macOS 使用 ad-hoc 签名，Linux 通过 SHA-256 校验；Windows SmartScreen 可能警告，macOS 可能要求在“隐私与安全性”中手动允许。当前不支持 Windows/Linux ARM64、32 位 x86、RPM、Snap、应用商店和自动更新。
 
 ## 许可证
 

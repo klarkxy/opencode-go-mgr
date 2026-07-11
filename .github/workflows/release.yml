@@ -1,0 +1,287 @@
+name: Cross-platform release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows x64
+            os: windows-latest
+            artifact: release-windows-x64
+          - name: macOS Universal
+            os: macos-latest
+            artifact: release-macos-universal
+          - name: Linux x64
+            os: ubuntu-22.04
+            artifact: release-linux-x64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.29.2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev patchelf libfuse2 xvfb xauth xdg-utils dbus-x11
+
+      - name: Install macOS Rust targets
+        if: runner.os == 'macOS'
+        run: rustup target add x86_64-apple-darwin aarch64-apple-darwin
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run test
+      - run: pnpm run design:lint
+      - run: pnpm run build
+
+      - name: Smoke packaged CLI (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Get-Content release/SHA256SUMS | ForEach-Object {
+            if ($_ -notmatch '^([0-9a-f]{64})  (.+)$') { throw "Invalid checksum line: $_" }
+            $actual = (Get-FileHash -Algorithm SHA256 (Join-Path release $Matches[2])).Hash.ToLowerInvariant()
+            if ($actual -ne $Matches[1]) { throw "Checksum mismatch: $($Matches[2])" }
+          }
+
+          $package = Join-Path $env:RUNNER_TEMP cli-package
+          Expand-Archive (Get-Item release/*windows-x64.zip) $package
+          $cli = Join-Path $package ocg-manager-cli.exe
+          if (!(Test-Path $cli) -or !(Test-Path (Join-Path $package dist/index.html)) -or !(Test-Path (Join-Path $package LICENSE))) {
+            throw 'CLI package is incomplete'
+          }
+
+          $data = Join-Path $env:RUNNER_TEMP cli-data
+          $added = (& $cli "--data-dir=$data" key add ci-smoke sk-ci-smoke | Out-String)
+          if ($added -notmatch 'added key ([0-9a-f-]{36})') { throw "Cannot read account id: $added" }
+          $id = $Matches[1]
+          if (-not (& $cli "--data-dir=$data" key list | Select-String -SimpleMatch ci-smoke)) { throw 'Added account is missing' }
+          & $cli "--data-dir=$data" key disable $id
+          & $cli "--data-dir=$data" key enable $id
+          if (-not (& $cli "--data-dir=$data" status | Select-String -SimpleMatch '1 total, 1 enabled')) { throw 'Unexpected CLI status' }
+
+          $stdout = Join-Path $env:RUNNER_TEMP cli-serve.stdout.log
+          $stderr = Join-Path $env:RUNNER_TEMP cli-serve.stderr.log
+          $server = Start-Process $cli -ArgumentList @("--data-dir=$data", 'serve', '--port=19042') -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru -WindowStyle Hidden
+          try {
+            $ready = $false
+            foreach ($attempt in 1..30) {
+              try {
+                if ((Invoke-WebRequest http://127.0.0.1:19042/dashboard/ -UseBasicParsing).Content -match 'id="app"') { $ready = $true; break }
+              } catch {}
+              Start-Sleep 1
+            }
+            if (!$ready) { throw "Packaged CLI dashboard did not start`n$(Get-Content $stdout, $stderr -ErrorAction SilentlyContinue | Out-String)" }
+          } finally {
+            if (!$server.HasExited) { Stop-Process -Id $server.Id -Force; $server.WaitForExit() }
+          }
+
+          & $cli "--data-dir=$data" key remove $id
+          if (& $cli "--data-dir=$data" key list | Select-String -SimpleMatch ci-smoke) { throw 'Removed account is still listed' }
+
+      - name: Smoke packaged CLI (macOS and Linux)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$RUNNER_OS" = macOS ]; then
+            (cd release && shasum -a 256 -c SHA256SUMS)
+          else
+            (cd release && sha256sum -c SHA256SUMS)
+          fi
+
+          package="$RUNNER_TEMP/cli-package"
+          mkdir "$package"
+          tar -xzf release/ocg-manager-cli_*.tar.gz -C "$package"
+          cli="$package/ocg-manager-cli"
+          test -x "$cli"
+          test -f "$package/dist/index.html"
+          test -f "$package/LICENSE"
+          if [ "$RUNNER_OS" = macOS ]; then lipo -verify_arch x86_64 arm64 "$cli"; fi
+
+          data="$RUNNER_TEMP/cli-data"
+          added=$("$cli" --data-dir="$data" key add ci-smoke sk-ci-smoke)
+          id=$(printf '%s\n' "$added" | sed -n 's/^added key \([^ ]*\).*/\1/p')
+          test -n "$id"
+          "$cli" --data-dir="$data" key list | grep -q ci-smoke
+          "$cli" --data-dir="$data" key disable "$id"
+          "$cli" --data-dir="$data" key enable "$id"
+          "$cli" --data-dir="$data" status | grep -q '1 total, 1 enabled'
+
+          log="$RUNNER_TEMP/cli-serve.log"
+          "$cli" --data-dir="$data" serve --port=19042 >"$log" 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          ready=
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:19042/dashboard/ -o "$RUNNER_TEMP/dashboard.html" && grep -q 'id="app"' "$RUNNER_TEMP/dashboard.html"; then ready=1; break; fi
+            sleep 1
+          done
+          if [ -z "$ready" ]; then cat "$log"; exit 1; fi
+          kill "$server_pid"
+          wait "$server_pid" || true
+          trap - EXIT
+
+          "$cli" --data-dir="$data" key remove "$id"
+          remaining=$("$cli" --data-dir="$data" key list)
+          ! grep -q ci-smoke <<<"$remaining"
+
+      - name: Smoke installed GUI (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $installDir = Join-Path $env:RUNNER_TEMP ocg-manager-install
+          $profile = Join-Path $env:RUNNER_TEMP ocg-manager-home
+          New-Item -ItemType Directory -Force $profile | Out-Null
+          $env:USERPROFILE = $profile
+          $env:HOME = $profile
+
+          $installer = Get-Item release/*windows-x64-setup.exe
+          $install = Start-Process $installer -ArgumentList @('/S', "/D=$installDir") -Wait -PassThru -WindowStyle Hidden
+          if ($install.ExitCode -ne 0) { throw "Installer failed: $($install.ExitCode)" }
+          $gui = Get-ChildItem $installDir -Recurse -Filter ocg-manager.exe | Select-Object -First 1
+          if (!$gui) { throw 'Installed GUI executable is missing' }
+
+          $process = Start-Process $gui.FullName -ArgumentList '--startup' -PassThru -WindowStyle Hidden
+          try {
+            $ready = $false
+            foreach ($attempt in 1..45) {
+              try {
+                if ((Invoke-WebRequest http://127.0.0.1:9042/dashboard/ -UseBasicParsing).Content -match 'id="app"') { $ready = $true; break }
+              } catch {}
+              Start-Sleep 1
+            }
+            if (!$ready) { throw 'Installed Windows GUI did not start its dashboard' }
+          } finally {
+            if (!$process.HasExited) { Stop-Process -Id $process.Id -Force; $process.WaitForExit() }
+          }
+
+          $data = Join-Path $profile .ocg-mgr
+          New-Item -ItemType Directory -Force $data | Out-Null
+          Set-Content (Join-Path $data preserve-me) preserved
+          $uninstaller = Get-ChildItem $installDir -Recurse -Filter uninstall.exe | Select-Object -First 1
+          if (!$uninstaller) { throw 'Uninstaller is missing' }
+          $uninstall = Start-Process $uninstaller.FullName -ArgumentList '/S' -Wait -PassThru -WindowStyle Hidden
+          if ($uninstall.ExitCode -ne 0) { throw "Uninstaller failed: $($uninstall.ExitCode)" }
+          if (!(Test-Path (Join-Path $data preserve-me))) { throw 'Silent uninstall deleted user data' }
+
+      - name: Smoke mounted GUI (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mount="$RUNNER_TEMP/ocg-manager-dmg"
+          mkdir "$mount"
+          hdiutil attach release/ocg-manager_*_macos-universal.dmg -nobrowse -readonly -mountpoint "$mount"
+          cleanup() {
+            if [ -n "${gui_pid:-}" ]; then kill "$gui_pid" 2>/dev/null || true; fi
+            hdiutil detach "$mount" -force >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          app=$(find "$mount" -maxdepth 1 -name '*.app' -print -quit)
+          test -n "$app"
+          gui="$app/Contents/MacOS/ocg-manager"
+          test -x "$gui"
+          codesign --verify --deep --strict "$app"
+          lipo -verify_arch x86_64 arm64 "$gui"
+
+          home="$RUNNER_TEMP/ocg-manager-home"
+          mkdir "$home"
+          HOME="$home" "$gui" --startup >"$RUNNER_TEMP/gui.log" 2>&1 &
+          gui_pid=$!
+          ready=
+          for _ in $(seq 1 45); do
+            if curl -fsS http://127.0.0.1:9042/dashboard/ -o "$RUNNER_TEMP/dashboard.html" && grep -q 'id="app"' "$RUNNER_TEMP/dashboard.html"; then ready=1; break; fi
+            sleep 1
+          done
+          if [ -z "$ready" ]; then cat "$RUNNER_TEMP/gui.log"; exit 1; fi
+
+      - name: Smoke AppImage GUI (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          appimage=$(echo release/ocg-manager_*_linux-x64.AppImage)
+          deb=$(echo release/ocg-manager_*_linux-x64.deb)
+          dpkg-deb --info "$deb" >/dev/null
+          dpkg-deb --contents "$deb" >"$RUNNER_TEMP/deb-contents"
+          grep -q ocg-manager "$RUNNER_TEMP/deb-contents"
+          file "$appimage" | grep -q 'x86-64'
+          chmod +x "$appimage"
+
+          home="$RUNNER_TEMP/ocg-manager-home"
+          runtime="$RUNNER_TEMP/xdg-runtime"
+          mkdir "$home" "$runtime"
+          chmod 700 "$runtime"
+          setsid dbus-run-session -- xvfb-run -a env HOME="$home" XDG_RUNTIME_DIR="$runtime" APPIMAGE_EXTRACT_AND_RUN=1 WEBKIT_DISABLE_COMPOSITING_MODE=1 "$appimage" --startup >"$RUNNER_TEMP/gui.log" 2>&1 &
+          gui_pid=$!
+          trap 'kill -- -"$gui_pid" 2>/dev/null || true' EXIT
+          ready=
+          for _ in $(seq 1 45); do
+            if curl -fsS http://127.0.0.1:9042/dashboard/ -o "$RUNNER_TEMP/dashboard.html" && grep -q 'id="app"' "$RUNNER_TEMP/dashboard.html"; then ready=1; break; fi
+            sleep 1
+          done
+          if [ -z "$ready" ]; then cat "$RUNNER_TEMP/gui.log"; exit 1; fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: release/*
+          if-no-files-found: error
+
+  draft-release:
+    name: Draft GitHub release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: artifacts
+
+      - name: Assemble release and checksums
+        shell: bash
+        run: |
+          mkdir release
+          find artifacts -type f ! -name SHA256SUMS -exec cp {} release/ \;
+          (cd release && sha256sum * > SHA256SUMS)
+
+      - name: Create or update draft release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft 2>/dev/null)" = true ]; then
+            gh release upload "$GITHUB_REF_NAME" release/* --clobber
+          elif gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "Refusing to modify an already-published release." >&2
+            exit 1
+          else
+            gh release create "$GITHUB_REF_NAME" release/* --draft --verify-tag --title "OCG Manager $GITHUB_REF_NAME" --notes "Unsigned preview build; review platform warnings before publishing."
+          fi

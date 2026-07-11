@@ -11,8 +11,12 @@
 //! - `StaticKeyCipher`: derives a key from an arbitrary user-supplied secret,
 //!   suitable for headless / cross-platform / Docker deployments.
 
+use anyhow::Context;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use std::env;
+use std::fs::{self, OpenOptions};
+use std::io::{ErrorKind, Write};
+use std::path::Path;
 
 const NONCE_LEN: usize = 16;
 
@@ -122,6 +126,61 @@ impl StaticKeyCipher {
     }
 }
 
+/// Loads the static encryption key from `.encryption-key`, creating it when absent.
+pub fn load_or_create_static_cipher(data_dir: &Path) -> anyhow::Result<StaticKeyCipher> {
+    fs::create_dir_all(data_dir)
+        .with_context(|| format!("failed to create data directory {data_dir:?}"))?;
+    let key_path = data_dir.join(".encryption-key");
+    let secret = match fs::read_to_string(&key_path) {
+        Ok(secret) => secret,
+        Err(error) if error.kind() == ErrorKind::NotFound => {
+            let generated = uuid::Uuid::new_v4().simple().to_string();
+            let mut options = OpenOptions::new();
+            options.write(true).create_new(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.mode(0o600);
+            }
+            match options.open(&key_path) {
+                Ok(mut file) => {
+                    file.write_all(generated.as_bytes()).with_context(|| {
+                        format!("failed to write encryption key to {key_path:?}")
+                    })?;
+                    generated
+                }
+                Err(error) if error.kind() == ErrorKind::AlreadyExists => {
+                    fs::read_to_string(&key_path).with_context(|| {
+                        format!("failed to read encryption key from {key_path:?}")
+                    })?
+                }
+                Err(error) => {
+                    return Err(error).with_context(|| {
+                        format!("failed to create encryption key at {key_path:?}")
+                    });
+                }
+            }
+        }
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("failed to read encryption key from {key_path:?}"));
+        }
+    };
+
+    if secret.is_empty() {
+        anyhow::bail!("encryption key at {key_path:?} is empty");
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&key_path, fs::Permissions::from_mode(0o600))
+            .with_context(|| format!("failed to secure encryption key at {key_path:?}"))?;
+    }
+
+    Ok(StaticKeyCipher::new(&secret))
+}
+
 impl KeyCipher for StaticKeyCipher {
     fn encrypt(&self, plaintext: &str) -> anyhow::Result<String> {
         xor_encrypt(plaintext, &self.seed)
@@ -135,6 +194,10 @@ impl KeyCipher for StaticKeyCipher {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_dir(name: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!("ocg-crypto-{name}-{}", uuid::Uuid::new_v4()))
+    }
 
     #[test]
     fn machine_bound_roundtrip() {
@@ -228,5 +291,56 @@ mod tests {
         let enc = a.encrypt("payload").unwrap();
         let dec = b.decrypt(&enc).unwrap();
         assert_eq!(dec, "payload");
+    }
+
+    #[test]
+    fn static_key_file_is_created_and_reused() {
+        let dir = test_dir("reuse");
+        let first = load_or_create_static_cipher(&dir).unwrap();
+        let key_path = dir.join(".encryption-key");
+        let original = fs::read_to_string(&key_path).unwrap();
+        let second = load_or_create_static_cipher(&dir).unwrap();
+
+        assert!(!original.is_empty());
+        assert_eq!(fs::read_to_string(&key_path).unwrap(), original);
+        assert_eq!(
+            second.decrypt(&first.encrypt("payload").unwrap()).unwrap(),
+            "payload"
+        );
+
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn static_key_file_contents_are_preserved_exactly() {
+        let dir = test_dir("preserve");
+        fs::create_dir_all(&dir).unwrap();
+        let key_path = dir.join(".encryption-key");
+        fs::write(&key_path, " existing-secret\n").unwrap();
+
+        let loaded = load_or_create_static_cipher(&dir).unwrap();
+        let expected = StaticKeyCipher::new(" existing-secret\n");
+
+        assert_eq!(fs::read_to_string(&key_path).unwrap(), " existing-secret\n");
+        assert_eq!(
+            loaded
+                .decrypt(&expected.encrypt("payload").unwrap())
+                .unwrap(),
+            "payload"
+        );
+
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn static_key_file_rejects_empty_secret() {
+        let dir = test_dir("empty");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join(".encryption-key"), "").unwrap();
+
+        let error = load_or_create_static_cipher(&dir).unwrap_err();
+
+        assert!(error.to_string().contains("is empty"));
+        fs::remove_dir_all(dir).unwrap();
     }
 }

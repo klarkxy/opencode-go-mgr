@@ -8,16 +8,10 @@
     "predev": "node scripts/free-dev-port.mjs",
     "dev": "vite",
     "dev:gui": "tauri dev",
-    "build": "pnpm run build:cli && pnpm run build:gui && pnpm run artifacts",
+    "build": "node scripts/release.mjs",
     "build:web": "vue-tsc && vite build",
-    "build:cli": "cargo build --release --bin ocg-manager-cli",
-    "build:gui": "node -e \"require('node:fs').rmSync('target/release/dist', { recursive: true, force: true })\" && tauri build",
-    "artifacts": "node scripts/collect-artifacts.mjs",
-    "test": "cargo test --workspace && pnpm run test:gui",
-    "test:gui": "node --experimental-strip-types --test src/views/accounts-usage.test.ts src/views/dashboard-connection.test.ts src/views/logs.test.ts src/theme.test.ts && pnpm run typecheck",
-    "typecheck": "vue-tsc --noEmit",
-    "design:lint": "npx -y @google/design.md@0.3.0 lint DESIGN.md",
-    "clean": "node -e \"const { rmSync } = require('node:fs'); for (const p of ['dist', 'release']) rmSync(p, { recursive: true, force: true });\" && cargo clean"
+    "test": "cargo test --workspace && node --experimental-strip-types --test src/views/accounts-usage.test.ts src/views/dashboard-connection.test.ts src/views/logs.test.ts src/theme.test.ts && vue-tsc --noEmit",
+    "design:lint": "npx -y @google/design.md@0.3.0 lint DESIGN.md"
   },
   "dependencies": {
     "@tauri-apps/cli": "^2.11.4",

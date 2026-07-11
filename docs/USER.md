@@ -8,14 +8,15 @@ OCG Manager keeps OpenCode-Go account keys in a local SQLite database and expose
 
 The dashboard lets you manage accounts, view cost estimates, inspect logs, and edit gateway settings.
 
-## First Run
+## Install And First Run
 
-1. Install the Windows NSIS package.
-2. Launch **OCG Manager**.
-3. Open the dashboard from the tray icon.
-4. Add an account in **Accounts**.
-5. Copy the Gateway Key from the dashboard or settings page.
-6. Point your OpenAI-compatible client at `http://127.0.0.1:9042/v1`.
+- **Windows 10/11 x64:** run the NSIS setup. It installs for the current user without administrator rights. Windows SmartScreen may warn because the first release line is unsigned.
+- **macOS 11+ Intel/Apple Silicon:** open the Universal DMG and drag OCG Manager to Applications. The app is ad-hoc signed, so use **Privacy & Security → Open Anyway** if macOS blocks the first launch.
+- **Linux x64:** install the `.deb`, or make the AppImage executable with `chmod +x` and run it. Verify the download against `SHA256SUMS` first.
+
+Then launch **OCG Manager**, open the dashboard from its tray icon, add an account, copy the Key from the dashboard, and point your OpenAI-compatible client at `http://127.0.0.1:9042/v1`.
+
+Windows uninstallation asks whether to delete `%USERPROFILE%\.ocg-mgr`; silent upgrades and uninstalls preserve it.
 
 ## Gateway Behavior
 
@@ -33,12 +34,15 @@ During a true circuit breaker, the dashboard forces the matching 5-hour, weekly,
 
 ## CLI
 
+Download the archive for your platform and extract it as a directory. It contains the executable, `dist/`, and `LICENSE`; keep `dist/` beside the executable so `serve` can provide the dashboard.
+
 ```bash
-pnpm run build:cli
-target/release/ocg-manager-cli.exe key add main sk-...
-target/release/ocg-manager-cli.exe key list
-target/release/ocg-manager-cli.exe serve --port 9042
+./ocg-manager-cli key add main sk-...
+./ocg-manager-cli key list
+./ocg-manager-cli serve --port 9042
 ```
+
+On Windows, use `ocg-manager-cli.exe`. Linux users may need `chmod +x ocg-manager-cli` after extracting the archive.
 
 ## Docker
 
@@ -63,13 +67,13 @@ ocg.example.com {
 }
 ```
 
-After signing in, set a non-empty Gateway Key before sending API traffic. Stop the service with `docker compose down`; add `-v` only when you intentionally want to delete all stored accounts, credentials, and keys.
+After signing in, set a non-empty Key before sending API traffic. Stop the service with `docker compose down`; add `-v` only when you intentionally want to delete all stored accounts, credentials, and keys.
 
 ## Data And Security
 
-GUI data lives under `%USERPROFILE%\.ocg-mgr`. CLI data defaults to `~/.ocg-mgr-cli`.
+GUI data lives under `%USERPROFILE%\.ocg-mgr` on Windows and `~/.ocg-mgr` on macOS/Linux. CLI data defaults to `~/.ocg-mgr-cli` on every platform.
 
-Keys are obfuscated before storage, not strongly encrypted. Treat anyone with the data directory and binary as able to recover stored keys.
+Keys are obfuscated before storage, not strongly encrypted. macOS/Linux GUI data and CLI data include `.encryption-key`; back it up with the database because losing it makes stored credentials unreadable. Treat anyone with the data directory and binary as able to recover stored keys.
 
 Each node manages its own accounts through its own dashboard. OCG Manager does not synchronize account credentials between nodes.
 
@@ -79,4 +83,5 @@ Each node manages its own accounts through its own dashboard. OCG Manager does n
 - Gemini protocol conversion is not implemented.
 - Streaming cost is exact only when upstream emits usage chunks; otherwise logs end as `success_no_usage`.
 - The current HTTP dashboard does not expose the older isolated WebView browser command.
-- The current HTTP dashboard does not expose the Windows startup toggle.
+- The current HTTP dashboard does not expose the Windows startup toggle; non-Windows auto-start is not implemented.
+- Windows/Linux ARM64 and 32-bit x86 builds are not published. RPM, Snap, app-store packages, automatic updates, Windows signing, and Apple notarization are not implemented.

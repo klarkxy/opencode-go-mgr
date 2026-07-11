@@ -4,7 +4,7 @@
   <img src="assets/logo/ocg_logo_final_transparent.png" alt="OCG Manager Logo" width="140">
 </p>
 
-OCG Manager is a local OpenCode-Go account manager with an OpenAI-compatible gateway. It stores your keys locally, serves a dashboard from the gateway, and keeps a Windows tray app running in the background.
+OCG Manager is a local OpenCode-Go account manager with an OpenAI-compatible gateway. It stores your keys locally, serves a dashboard from the gateway, and keeps a Windows, macOS, or Linux tray app running in the background.
 
 <p align="center">
   <img src="assets/opencode娘.png" alt="OpenCode-Go mascot" width="360">
@@ -51,37 +51,28 @@ pnpm run dev:gui
 
 Tauri watches the Rust workspace, recompiles incrementally, and restarts the process. This is development reload, not runtime code replacement. Use `pnpm run build` only for final release validation.
 
-Useful checks and focused builds:
+Useful checks:
 
 ```bash
-pnpm run typecheck
 pnpm run test
 pnpm run build:web
-pnpm run build:cli
-pnpm run build:gui
+pnpm run design:lint
 pnpm run build
 ```
 
 ## Release artifacts
 
-Use `pnpm run build` for a distributable release. It builds the web dashboard, CLI, and Windows GUI, then replaces `release/` with the current artifacts:
+`pnpm run build` builds the GUI and CLI for the current supported native platform, then atomically replaces `release/`. It does not cross-build all platforms from one machine.
 
-```text
-release/
-├── ocg-manager.exe
-├── ocg-manager-cli.exe
-├── OCG Manager_1.0.0_x64-setup.exe
-└── dist/
-```
+| Platform | GUI | CLI |
+| --- | --- | --- |
+| Windows 10/11 x64 | `ocg-manager_<version>_windows-x64-setup.exe` | `ocg-manager-cli_<version>_windows-x64.zip` |
+| macOS 11+ Intel and Apple Silicon | `ocg-manager_<version>_macos-universal.dmg` | `ocg-manager-cli_<version>_macos-universal.tar.gz` |
+| Linux x64 | `ocg-manager_<version>_linux-x64.AppImage` and `.deb` | `ocg-manager-cli_<version>_linux-x64.tar.gz` |
 
-- `release/ocg-manager.exe` is the portable tray app and must stay beside `release/dist/`.
-- `release/OCG Manager_1.0.0_x64-setup.exe` is the Windows installer.
-- `release/ocg-manager-cli.exe` is the standalone CLI.
-- `target/release/` contains intermediate Rust/Tauri outputs and is not the delivery directory.
+Every build also writes `SHA256SUMS`. A CLI archive contains the executable, `dist/`, and `LICENSE`; keep `dist/` beside the executable so `serve` can provide the dashboard.
 
-`pnpm run build:gui` only updates `target/release`; run `pnpm run artifacts` to resync an already-built GUI, CLI, installer, and dashboard into `release/`. This command replaces the whole delivery directory, so stale release files are removed.
-
-Running the portable GUI may create `ocg-manager.exe.WebView2/`. It is runtime browser data, not a release artifact, and can be deleted after OCG Manager exits.
+The Windows GUI is installer-only; no portable Windows GUI is published. The first release line is unsigned on Windows, ad-hoc signed on macOS, and checksum-verified on Linux. Windows SmartScreen may warn, and macOS may require approval in **Privacy & Security**. Windows and Linux ARM64, 32-bit x86, RPM, Snap, app stores, and automatic updates are not currently supported.
 
 ## License
 

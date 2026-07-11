@@ -1,13 +1,13 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use chrono::Utc;
 use clap::{Parser, Subcommand};
-use ocg_core::crypto::{KeyCipher, StaticKeyCipher};
+use ocg_core::crypto::{KeyCipher, StaticKeyCipher, load_or_create_static_cipher};
 use ocg_core::db::Database;
 use ocg_core::gateway;
 use ocg_core::models::{Account, AppConfig};
-use ocg_core::state::{CoreStateInner, random_word};
+use ocg_core::state::CoreStateInner;
 use std::net::{IpAddr, SocketAddr};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 #[derive(Parser)]
@@ -129,37 +129,14 @@ fn resolve_cipher(
     data_dir: &PathBuf,
     encryption_key: Option<String>,
 ) -> Result<Arc<dyn KeyCipher + Send + Sync>> {
-    let secret = match encryption_key {
-        Some(k) => k,
+    let cipher = match encryption_key {
+        Some(secret) => StaticKeyCipher::new(&secret),
         None => match std::env::var("OCG_MANAGER_ENCRYPTION_KEY") {
-            Ok(k) => k,
-            Err(_) => load_or_create_key_file(data_dir)?,
+            Ok(secret) => StaticKeyCipher::new(&secret),
+            Err(_) => load_or_create_static_cipher(data_dir)?,
         },
     };
-    Ok(Arc::new(StaticKeyCipher::new(&secret)))
-}
-
-fn load_or_create_key_file(data_dir: &PathBuf) -> Result<String> {
-    std::fs::create_dir_all(data_dir)?;
-    let key_path = data_dir.join(".encryption-key");
-    if key_path.exists() {
-        std::fs::read_to_string(&key_path)
-            .with_context(|| format!("failed to read encryption key from {:?}", key_path))
-    } else {
-        let key = random_word();
-        std::fs::write(&key_path, &key)
-            .with_context(|| format!("failed to write encryption key to {:?}", key_path))?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600));
-        }
-        eprintln!(
-            "info: generated encryption key at {:?}. Back it up; losing it means losing access to stored API keys.",
-            key_path
-        );
-        Ok(key)
-    }
+    Ok(Arc::new(cipher))
 }
 
 fn build_state(
@@ -178,7 +155,12 @@ async fn serve(
     dashboard_dir: Option<PathBuf>,
 ) -> Result<()> {
     let state = build_state(data_dir, cipher)?;
-    state.set_dashboard_dir(dashboard_dir);
+    let executable = if dashboard_dir.is_none() {
+        std::env::current_exe().ok()
+    } else {
+        None
+    };
+    state.set_dashboard_dir(resolve_dashboard_dir(dashboard_dir, executable.as_deref()));
 
     let mut config = state.config();
     if let Some(port) = port {
@@ -220,9 +202,16 @@ async fn serve(
     Ok(())
 }
 
+fn resolve_dashboard_dir(explicit: Option<PathBuf>, executable: Option<&Path>) -> Option<PathBuf> {
+    explicit.or_else(|| {
+        let dist = executable?.parent()?.join("dist");
+        dist.is_dir().then_some(dist)
+    })
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Cli, Commands};
+    use super::{Cli, Commands, resolve_dashboard_dir};
     use clap::Parser;
 
     #[test]
@@ -232,6 +221,28 @@ mod tests {
             panic!("expected serve command");
         };
         assert!(host.is_unspecified());
+    }
+
+    #[test]
+    fn dashboard_dir_prefers_explicit_then_existing_packaged_dist() {
+        let root = std::env::temp_dir().join(format!("ocg-cli-dashboard-{}", uuid::Uuid::new_v4()));
+        let dist = root.join("dist");
+        std::fs::create_dir_all(&dist).unwrap();
+        let executable = root.join("ocg-manager-cli");
+        let explicit = root.join("custom");
+
+        assert_eq!(
+            resolve_dashboard_dir(Some(explicit.clone()), Some(&executable)),
+            Some(explicit)
+        );
+        assert_eq!(
+            resolve_dashboard_dir(None, Some(&executable)),
+            Some(dist.clone())
+        );
+        std::fs::remove_dir_all(&dist).unwrap();
+        assert_eq!(resolve_dashboard_dir(None, Some(&executable)), None);
+
+        std::fs::remove_dir_all(root).unwrap();
     }
 }
 

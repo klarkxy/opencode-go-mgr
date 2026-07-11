@@ -5,7 +5,11 @@ pub mod tray;
 
 pub type Result<T> = anyhow::Result<T>;
 
+use ocg_core::crypto::KeyCipher;
+#[cfg(windows)]
 use ocg_core::crypto::MachineBoundCipher;
+#[cfg(not(windows))]
+use ocg_core::crypto::load_or_create_static_cipher;
 use ocg_core::db::Database;
 use ocg_core::gateway;
 use ocg_core::state::CoreStateInner;
@@ -17,6 +21,13 @@ use tauri::Manager;
 
 pub fn run() {
     let data_dir = data_dir();
+    let cipher = match load_cipher(&data_dir) {
+        Ok(cipher) => cipher,
+        Err(e) => {
+            eprintln!("failed to initialize encryption: {}", e);
+            std::process::exit(1);
+        }
+    };
     let db = match Database::open(data_dir.clone()) {
         Ok(db) => db,
         Err(e) => {
@@ -25,8 +36,6 @@ pub fn run() {
         }
     };
 
-    let cipher: Arc<dyn ocg_core::crypto::KeyCipher + Send + Sync> =
-        Arc::new(MachineBoundCipher::new());
     let core_state = match CoreStateInner::new(db, data_dir.clone(), cipher) {
         Ok(s) => Arc::new(s),
         Err(e) => {
@@ -128,6 +137,18 @@ pub fn run() {
                     .log_gateway("info", "gateway", "application exiting");
             }
         });
+}
+
+fn load_cipher(data_dir: &std::path::Path) -> Result<Arc<dyn KeyCipher + Send + Sync>> {
+    #[cfg(windows)]
+    {
+        let _ = data_dir;
+        Ok(Arc::new(MachineBoundCipher::new()))
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(Arc::new(load_or_create_static_cipher(data_dir)?))
+    }
 }
 
 fn data_dir() -> PathBuf {

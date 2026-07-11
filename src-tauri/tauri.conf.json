@@ -14,20 +14,24 @@
       "icons/128x128.png",
       "icons/256x256.png",
       "icons/512x512.png",
-      "icons/icon.ico"
+      "icons/icon.ico",
+      "icons/icon.icns"
     ],
     "resources": {
       "../dist": "dist"
     },
-    "targets": "nsis",
+    "macOS": {
+      "minimumSystemVersion": "11.0",
+      "signingIdentity": "-"
+    },
     "windows": {
       "nsis": {
-        "installMode": "perMachine",
+        "installMode": "currentUser",
         "installerHooks": "installer.nsh"
       }
     }
   },
-  "identifier": "com.ocg-manager.app",
+  "identifier": "com.klarkxy.ocgmanager",
   "productName": "OCG Manager",
   "version": "1.0.0",
   "app": {
