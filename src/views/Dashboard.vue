@@ -194,7 +194,7 @@ import StackedBarChart from "../components/StackedBarChart.vue";
 import { tauriApi } from "../api/tauri";
 import type { Account, AppConfig, DailyModelCost, DashboardSummary, UsageWindow } from "../api/tauri";
 import { CHART_PALETTE } from "../theme";
-import { maskConnectionKey, writeConnectionValue } from "./dashboard-connection";
+import { connectionApiUrl, maskConnectionKey, writeConnectionValue } from "./dashboard-connection";
 
 type ConnectionTarget = "api" | "key" | "upstream";
 
@@ -231,9 +231,9 @@ const legendModels = computed(() => {
 });
 const totalChartCost = computed(() => dailyCosts.value.reduce((sum, row) => sum + row.cost, 0));
 const maskedKey = computed(() => maskConnectionKey(serviceConfig.value.gateway_key));
-const serviceApiUrl = window.location.pathname.startsWith("/dashboard")
-  ? `${window.location.origin}/v1`
-  : "http://127.0.0.1:9042/v1";
+const serviceApiUrl = computed(() =>
+  connectionApiUrl(window.location.origin, serviceConfig.value.gateway_port, import.meta.env.DEV),
+);
 
 function formatCost(value: number): string {
   if (value === 0) return "0.00";
@@ -412,9 +412,9 @@ onUnmounted(() => clearTimeout(copyTimer));
 .hero-character {
   position: absolute;
   z-index: 1;
+  top: 4px;
   right: 28px;
-  bottom: -82px;
-  height: 360px;
+  height: 380px;
   max-width: 34%;
   object-fit: contain;
   filter:
@@ -605,6 +605,7 @@ onUnmounted(() => clearTimeout(copyTimer));
   }
   .hero-character {
     z-index: 0;
+    top: auto;
     right: -50px;
     bottom: -58px;
     height: 282px;

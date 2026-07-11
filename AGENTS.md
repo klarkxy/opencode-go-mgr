@@ -31,14 +31,13 @@
 ```powershell
 pnpm install
 pnpm run dev
-pnpm run dev:gui
 pnpm run build:web
 pnpm run test
 pnpm run design:lint
 pnpm run build
 ```
 
-只修改 `src/` 时，保持 Gateway 在 `9042` 运行，执行 `pnpm run dev` 并打开 `http://127.0.0.1:30001/dashboard/`，前端由 Vite 热更新。修改 `crates/` 或 `src-tauri/` 时，先退出 release 托盘程序，再执行 `pnpm run dev:gui`；Tauri 会增量编译并重启进程。
+开发前先退出 release 托盘程序，释放单实例锁和 `9042` 端口，然后执行 `pnpm run dev`。Tauri 会启动 Vite，并在 Gateway 就绪后打开 `http://127.0.0.1:30001/dashboard/`；前端由 Vite 热更新，Rust 由 Cargo 增量编译并重启进程。
 
 `pnpm run build` 只用于当前原生平台的最终 release 构建，并在成功后原子替换 `release/`；只验证前端时用 `pnpm run build:web`。Windows 仅发布 x64 NSIS 安装包，macOS 发布 Universal DMG，Linux x64 发布 AppImage 和 deb；CLI 压缩包必须包含同级 `dist/` 与 `LICENSE`。
 

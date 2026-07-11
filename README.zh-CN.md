@@ -43,21 +43,13 @@ curl http://127.0.0.1:9042/v1/chat/completions \
 
 首次开发前运行 `pnpm install` 安装依赖。
 
-只修改 Vue、CSS 或前端 TypeScript 时，保持 Gateway 或 release 程序在 `9042` 端口运行，然后启动 Vite：
+先退出正在运行的 release 托盘程序，释放单实例锁和 `9042` 端口，然后启动完整开发环境：
 
 ```bash
 pnpm run dev
 ```
 
-打开 `http://127.0.0.1:30001/dashboard/`。Vite 会热更新前端，不需要重新编译 Rust，也不需要打 release。`9042` 端口上的管理面板来自已构建文件，不会热更新。
-
-修改 `crates/` 或 `src-tauri/` 下的 Rust 代码时，先退出正在运行的 release 托盘程序，再启动 Tauri 开发模式：
-
-```bash
-pnpm run dev:gui
-```
-
-Tauri 会监听 Rust workspace，执行增量编译并自动重启进程；这属于开发时重载，不是真正的运行时代码替换。只有最终验收和发版时才运行 `pnpm run build`。
+Tauri 会启动 Vite，并在 Gateway 就绪后打开 `http://127.0.0.1:30001/dashboard/`。Vue、CSS 和前端 TypeScript 由 Vite 热更新；Rust 代码由 Cargo 增量编译并自动重启进程。这属于开发时重载，不是真正的运行时代码替换。只有最终验收和发版时才运行 `pnpm run build`。
 
 常用检查：
 

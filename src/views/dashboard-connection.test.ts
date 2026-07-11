@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { maskConnectionKey, writeConnectionValue } from "./dashboard-connection.ts";
+import { connectionApiUrl, maskConnectionKey, writeConnectionValue } from "./dashboard-connection.ts";
 
 test("connection helpers mask display values and copy the complete value", async () => {
   assert.equal(maskConnectionKey(""), "未设置");
   assert.equal(maskConnectionKey("ocg-1234567890"), "ocg-…7890");
+  assert.equal(connectionApiUrl("http://127.0.0.1:30001", 9042, true), "http://127.0.0.1:9042/v1");
+  assert.equal(connectionApiUrl("https://ocg.example.com", 9042, false), "https://ocg.example.com/v1");
 
   let copied = "";
   await writeConnectionValue(async (value) => { copied = value; }, "ocg-secret-value");

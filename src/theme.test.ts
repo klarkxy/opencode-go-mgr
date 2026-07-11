@@ -28,6 +28,14 @@ function contrast(a: string, b: string): number {
   return (lighter + 0.05) / (darker + 0.05);
 }
 
+function mixHex(foreground: string, background: string, foregroundWeight: number): string {
+  const foregroundChannels = foreground.slice(1).match(/../g)!.map((value) => Number.parseInt(value, 16));
+  const backgroundChannels = background.slice(1).match(/../g)!.map((value) => Number.parseInt(value, 16));
+  return `#${foregroundChannels.map((value, index) => Math.round(
+    value * foregroundWeight + backgroundChannels[index] * (1 - foregroundWeight),
+  ).toString(16).padStart(2, "0")).join("")}`;
+}
+
 test("readTheme accepts current themes and migrates legacy values", () => {
   for (const { value } of THEME_OPTIONS) assert.equal(readTheme(storage(value)), value);
   assert.equal(readTheme(storage("system")), "default");
@@ -63,7 +71,8 @@ test("theme tokens drive CSS and Naive UI from the same values", () => {
       },
     } as unknown as HTMLElement;
     applyTheme(root, resolved, tokens);
-    const common = toNaiveThemeOverrides(tokens).common!;
+    const overrides = toNaiveThemeOverrides(tokens);
+    const common = overrides.common!;
 
     assert.equal(root.dataset.theme, resolved);
     const expectedProperties = {
@@ -92,21 +101,35 @@ test("theme tokens drive CSS and Naive UI from the same values", () => {
     assert.equal(common.primaryColor, tokens.primary);
     assert.equal(common.primaryColorSuppl, tokens.primaryHover);
     assert.equal(common.bodyColor, tokens.canvas);
+    assert.equal(common.inputColor, tokens.surfaceRaised);
+    assert.equal(common.actionColor, tokens.primarySoft);
+    assert.equal(common.tableHeaderColor, tokens.primarySoft);
+    assert.equal(common.hoverColor, tokens.primarySoft);
+    assert.equal(common.pressedColor, tokens.canvas);
+    assert.equal(
+      overrides.Input!.border,
+      `1px solid color-mix(in srgb, ${tokens.muted} 68%, ${tokens.surfaceRaised})`,
+    );
+    assert.ok(
+      contrast(mixHex(tokens.muted, tokens.surfaceRaised, 0.68), tokens.surfaceRaised) >= 3,
+      `${resolved} input boundary`,
+    );
   }
 });
 
 test("approved theme identities and light semantic colors stay stable", () => {
   const identities = {
-    white: ["#F7F7F8", "#FFFFFF", "#FFFFFF", "#18181B", "#18181B", "#303038", "#050506", "#ECECEF", "#E3E3E8"],
-    black: ["#000000", "#0B0B0D", "#151519", "#F5F5F7", "#F5F5F7", "#FFFFFF", "#D6D6DC", "#1D1D22", "#28272F"],
-    violet: ["#F6F6FA", "#FFFFFF", "#FFFFFF", "#181820", "#6257C8", "#6C61D0", "#4F45AD", "#ECE9FF", "#E3E1EA"],
-    azure: ["#F3F6FA", "#FFFFFF", "#FFFFFF", "#18202B", "#1456F0", "#336DF4", "#0442D2", "#F0F4FF", "#DCE3EC"],
-    celadon: ["#F2F7F8", "#FFFFFF", "#FFFFFF", "#172126", "#0F7C82", "#16747A", "#0A5F64", "#E4F4F4", "#D7E4E7"],
-    copper: ["#FAF7F4", "#FFFDFB", "#FFFFFF", "#2A211D", "#8A5A44", "#9C6950", "#6F4635", "#F3EAE5", "#E6DAD3"],
+    white: ["light", "#F7F7F8", "#FFFFFF", "#FFFFFF", "#18181B", "#18181B", "#303038", "#050506", "#ECECEF", "#E3E3E8", "#E9E9ED"],
+    black: ["dark", "#000000", "#0B0B0D", "#151519", "#F5F5F7", "#F5F5F7", "#FFFFFF", "#D6D6DC", "#1D1D22", "#28272F", "#222228"],
+    violet: ["light", "#E5DBF0", "#EEE5F6", "#F8F3FC", "#211A2D", "#5B44B4", "#6C55C7", "#49349A", "#D9CBEF", "#BFAAD5", "#D3C5E2"],
+    azure: ["light", "#D2E3F2", "#DEEBF7", "#EEF5FB", "#172435", "#0F50E5", "#2A61E6", "#043DBF", "#C9DCF3", "#A9C2DB", "#C3D5E6"],
+    celadon: ["light", "#D2E5DC", "#DDECE5", "#EEF6F2", "#172721", "#0B666B", "#127277", "#075358", "#C4DED4", "#A4C6B7", "#BFD8CD"],
+    copper: ["light", "#E9D7C8", "#F2E5DA", "#FAF2EB", "#30221B", "#8A4F34", "#9A5D41", "#6F3F2A", "#E4C6B2", "#CAA58E", "#DDC0AD"],
   } as const;
   for (const [name, expected] of Object.entries(identities) as Array<[keyof typeof identities, readonly string[]]>) {
     const tokens = THEME_TOKENS[name];
     assert.deepEqual([
+      tokens.colorScheme,
       tokens.canvas,
       tokens.surface,
       tokens.surfaceRaised,
@@ -116,6 +139,7 @@ test("approved theme identities and light semantic colors stay stable", () => {
       tokens.primaryPressed,
       tokens.primarySoft,
       tokens.border,
+      tokens.divider,
     ], expected);
   }
 
@@ -124,7 +148,7 @@ test("approved theme identities and light semantic colors stay stable", () => {
     const tokens = THEME_TOKENS[name];
     assert.deepEqual(
       [tokens.success, tokens.successSoft, tokens.warning, tokens.warningSoft, tokens.error, tokens.info],
-      ["#16845B", "#E6F4EE", "#A85F00", "#FFF1D8", "#C33B55", "#2F6FD4"],
+      ["#0B6844", "#E6F4EE", "#8A4D00", "#FFF1D8", "#A92742", "#245DB6"],
     );
   }
   const black = THEME_TOKENS.black;
@@ -134,14 +158,36 @@ test("approved theme identities and light semantic colors stay stable", () => {
   );
 });
 
+test("colored themes keep broad lightness separation from white", () => {
+  for (const name of ["violet", "azure", "celadon", "copper"] as const) {
+    const tokens = THEME_TOKENS[name];
+    assert.ok(contrast(tokens.canvas, THEME_TOKENS.white.canvas) >= 1.2, `${name} canvas`);
+    assert.ok(contrast(tokens.surface, THEME_TOKENS.white.surface) >= 1.2, `${name} surface`);
+  }
+});
+
 test("theme text and primary actions meet WCAG AA contrast", () => {
   for (const [name, tokens] of Object.entries(THEME_TOKENS)) {
     const buttonText = name === "black" ? "#000000" : "#FFFFFF";
     assert.ok(contrast(tokens.ink, tokens.canvas) >= 4.5, `${name} body text`);
+    assert.ok(contrast(tokens.muted, tokens.canvas) >= 4.5, `${name} muted text on canvas`);
+    assert.ok(contrast(tokens.muted, tokens.surface) >= 4.5, `${name} muted text on surface`);
     assert.ok(contrast(tokens.subtle, tokens.canvas) >= 4.5, `${name} subtle text on canvas`);
     assert.ok(contrast(tokens.subtle, tokens.surface) >= 4.5, `${name} subtle text on surface`);
     assert.ok(contrast(tokens.primary, buttonText) >= 4.5, `${name} primary`);
     assert.ok(contrast(tokens.primaryHover, buttonText) >= 4.5, `${name} hover`);
     assert.ok(contrast(tokens.primaryPressed, buttonText) >= 4.5, `${name} pressed`);
+    assert.ok(contrast(tokens.primary, tokens.canvas) >= 4.5, `${name} primary on canvas`);
+    for (const [status, color] of Object.entries({
+      success: tokens.success,
+      warning: tokens.warning,
+      error: tokens.error,
+      info: tokens.info,
+    })) {
+      assert.ok(contrast(color, tokens.canvas) >= 4.5, `${name} ${status} on canvas`);
+      assert.ok(contrast(color, tokens.surface) >= 4.5, `${name} ${status} on surface`);
+    }
+    assert.ok(contrast(tokens.success, tokens.successSoft) >= 4.5, `${name} success soft`);
+    assert.ok(contrast(tokens.warning, tokens.warningSoft) >= 4.5, `${name} warning soft`);
   }
 });

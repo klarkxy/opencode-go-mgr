@@ -11,21 +11,13 @@ This guide is for people changing code, building releases, or debugging the proj
 
 ## Development
 
-Frontend-only changes use Vite HMR. Keep a Gateway or release app running on port `9042`, then run:
+Exit any running release tray app so the single-instance lock and port `9042` are free, then run the complete development stack:
 
 ```bash
 pnpm run dev
 ```
 
-Open `http://127.0.0.1:30001/dashboard/`. The dashboard served directly from port `9042` uses built assets and will not hot-update.
-
-Rust changes under `crates/` or `src-tauri/` use Tauri's watcher and Cargo incremental compilation. Exit any running release tray app first so the single-instance lock and port `9042` are free:
-
-```bash
-pnpm run dev:gui
-```
-
-This recompiles and restarts the process; Rust code is not replaced inside the running process.
+Tauri starts Vite and opens `http://127.0.0.1:30001/dashboard/` after the Gateway is ready. Frontend changes use Vite HMR; Rust changes use Tauri's watcher and Cargo incremental compilation, then restart the process. Rust code is not replaced inside the running process.
 
 ## Checks and builds
 

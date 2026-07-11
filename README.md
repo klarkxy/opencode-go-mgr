@@ -35,21 +35,13 @@ curl http://127.0.0.1:9042/v1/chat/completions \
 
 Install dependencies once with `pnpm install`.
 
-For Vue, CSS, or frontend TypeScript changes, keep a Gateway or the release app running on port `9042`, then start Vite:
+Exit any running release tray app so the single-instance lock and port `9042` are free, then start the complete development stack:
 
 ```bash
 pnpm run dev
 ```
 
-Open `http://127.0.0.1:30001/dashboard/`. Vite applies frontend changes with HMR; no Rust compilation or release build is needed. The dashboard on port `9042` is served from built files and does not hot-update.
-
-For changes under `crates/` or `src-tauri/`, exit the running release tray app first, then use Tauri development mode:
-
-```bash
-pnpm run dev:gui
-```
-
-Tauri watches the Rust workspace, recompiles incrementally, and restarts the process. This is development reload, not runtime code replacement. Use `pnpm run build` only for final release validation.
+Tauri starts Vite and opens `http://127.0.0.1:30001/dashboard/` after the Gateway is ready. Vue, CSS, and frontend TypeScript changes use Vite HMR; Rust changes use Cargo incremental compilation and restart the process. This is development reload, not runtime code replacement. Use `pnpm run build` only for final release validation.
 
 Useful checks:
 

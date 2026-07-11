@@ -4,10 +4,22 @@ use tauri_plugin_shell::ShellExt;
 
 pub fn open_dashboard(app: &AppHandle) {
     let state = app.state::<crate::state::AppState>();
-    let url = format!(
-        "http://127.0.0.1:{}/dashboard/",
-        state.core.active_gateway_port()
-    );
+    let gateway_url = || {
+        format!(
+            "http://127.0.0.1:{}/dashboard/",
+            state.core.active_gateway_port()
+        )
+    };
+    let url = if cfg!(debug_assertions) {
+        app.config()
+            .build
+            .dev_url
+            .as_ref()
+            .map(ToString::to_string)
+            .unwrap_or_else(gateway_url)
+    } else {
+        gateway_url()
+    };
     #[allow(deprecated)]
     let opened = app.shell().open(url, None);
     if let Err(e) = opened {

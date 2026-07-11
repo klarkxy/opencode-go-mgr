@@ -1,8 +1,8 @@
 {
   "build": {
     "beforeBuildCommand": "pnpm run build:web",
-    "beforeDevCommand": "pnpm run dev",
-    "devUrl": "http://localhost:30001",
+    "beforeDevCommand": "pnpm exec vite",
+    "devUrl": "http://127.0.0.1:30001/dashboard/",
     "frontendDist": "../dist"
   },
   "bundle": {
