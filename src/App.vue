@@ -8,7 +8,7 @@
 
     <main v-if="authState !== 'ready'" class="auth-page">
       <section class="auth-panel">
-        <div class="auth-brand"><span>OCG</span> Co-pilot</div>
+        <div class="auth-brand"><span>OCG</span> Manager</div>
         <p class="auth-kicker">OpenCode-Go Console</p>
         <h1>{{ authState === "register" ? "创建管理员" : "管理员登录" }}</h1>
         <p v-if="authState === 'checking'" class="auth-copy">正在连接管理服务…</p>
@@ -79,7 +79,7 @@
         >
           <div class="brand" :class="{ collapsed }">
             <span class="brand-mark">OCG</span>
-            <span v-if="!collapsed" class="brand-name">Co-pilot</span>
+            <span v-if="!collapsed" class="brand-name">Manager</span>
           </div>
           <n-menu
             :collapsed="collapsed"

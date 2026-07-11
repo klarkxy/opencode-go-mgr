@@ -1,5 +1,5 @@
 ---
-name: OCG Co-pilot Console
+name: OCG Manager Console
 colors:
   canvas: "#F7F7F8"
   surface: "#FFFFFF"
@@ -28,7 +28,7 @@ rounded:
   large: 14
 ---
 
-# OCG Co-pilot Console
+# OCG Manager Console
 
 ## Overview
 
