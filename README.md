@@ -17,6 +17,8 @@ Gateway: http://127.0.0.1:9042/v1
 Auth:    Authorization: Bearer <gateway-key>
 ```
 
+The gateway accepts OpenAI Chat Completions, OpenAI Responses, and Anthropic Messages requests, then converts each request and response to the selected model's native OpenCode-Go protocol.
+
 ```bash
 curl http://127.0.0.1:9042/v1/chat/completions \
   -H "Authorization: Bearer ocg-xxxxxxxx-xxxxxxxx" \

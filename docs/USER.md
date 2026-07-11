@@ -4,7 +4,7 @@ This guide is for people running OCG Manager as a desktop app or a headless gate
 
 ## What It Does
 
-OCG Manager keeps OpenCode-Go account keys in a local SQLite database and exposes a loopback gateway at `http://127.0.0.1:9042/v1`. The gateway supports `POST /v1/chat/completions`, `POST /v1/messages`, and `GET /v1/models`.
+OCG Manager keeps OpenCode-Go account keys in a local SQLite database and exposes a loopback gateway at `http://127.0.0.1:9042/v1`. The gateway supports `POST /v1/chat/completions`, `POST /v1/responses`, `POST /v1/messages`, and `GET /v1/models`.
 
 The dashboard lets you manage accounts, view cost estimates, inspect logs, and edit gateway settings.
 
@@ -21,6 +21,8 @@ Windows uninstallation asks whether to delete `%USERPROFILE%\.ocg-mgr`; silent u
 ## Gateway Behavior
 
 The gateway consumes your client `Authorization` header for local gateway auth. It then forwards upstream with the selected OpenCode-Go account key.
+
+Chat Completions, Responses, and Anthropic Messages clients can use the same gateway. OCG Manager routes each request to the model's native OpenCode-Go protocol and converts request, non-streaming response, and SSE events when the client protocol differs. This includes text, system instructions, images, tool calls/results, reasoning content, completion status, errors, and usage fields. Unknown models keep the request's native Chat Completions or Messages protocol; an unknown model requested through Responses is rejected because selecting an upstream protocol by trial could duplicate a billed request.
 
 Accounts are tried in list order. Disabled accounts, cooled-down accounts, and accounts already failed during the current request are skipped. A 429 response with a reset phrase writes `cooldown_until`; 401/403 fail over without writing cooldown; 5xx and network errors are retried once for non-streaming requests before trying the next account.
 
@@ -81,6 +83,7 @@ Each node manages its own accounts through its own dashboard. OCG Manager does n
 
 - `/embeddings` is not implemented.
 - Gemini protocol conversion is not implemented.
+- Responses hosted tools such as `web_search`, `web_search_preview`, and `tool_search` cannot run on OpenCode-Go. Their declarations are ignored in automatic tool mode; explicitly forcing one returns a 400 error. Function, custom, and namespace tools are converted normally.
 - Streaming cost is exact only when upstream emits usage chunks; otherwise logs end as `success_no_usage`.
 - The current HTTP dashboard does not expose the older isolated WebView browser command.
 - The current HTTP dashboard does not expose the Windows startup toggle; non-Windows auto-start is not implemented.

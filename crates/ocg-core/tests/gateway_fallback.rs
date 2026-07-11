@@ -1,5 +1,5 @@
 use axum::Router;
-use axum::extract::State;
+use axum::extract::{OriginalUri, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::post;
@@ -24,6 +24,10 @@ struct MockReply {
 #[derive(Clone)]
 struct MockCall {
     key: String,
+    path: String,
+    authorization: Option<String>,
+    x_api_key: Option<String>,
+    anthropic_version: Option<String>,
     body: String,
     accept_encoding: Option<String>,
 }
@@ -36,6 +40,22 @@ struct MockState {
 
 const LIMITED_BODY: &str = r#"{"type":"error","error":{"type":"GoUsageLimitError","message":"Weekly usage limit reached. Resets in 3 days."}}"#;
 const SUCCESS_BODY: &str = r#"{"id":"ok","object":"chat.completion","model":"deepseek-v4-flash","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":2,"prompt_tokens_details":{"cached_tokens":0}}}"#;
+const MESSAGES_SUCCESS_BODY: &str = r#"{"id":"msg-ok","type":"message","role":"assistant","model":"minimax-m2.7","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":2,"cache_read_input_tokens":0}}"#;
+const CHAT_STREAM_BODY: &str = concat!(
+    "data: {\"id\":\"chat-stream\",\"model\":\"deepseek-v4-flash\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"ok\"},\"finish_reason\":null}]}\n\n",
+    "data: {\"id\":\"chat-stream\",\"model\":\"deepseek-v4-flash\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":2,\"prompt_tokens_details\":{\"cached_tokens\":0}}}\n\n",
+    "data: [DONE]\n\n"
+);
+const MESSAGES_STREAM_BODY: &str = concat!(
+    "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg-stream\",\"model\":\"minimax-m2.7\",\"usage\":{\"input_tokens\":6,\"cache_read_input_tokens\":4}}}\n\n",
+    "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+    "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"ok\"}}\n\n",
+    "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+    "event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":2}}\n\n",
+    "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+);
+const CHAT_BAD_REQUEST_BODY: &str =
+    r#"{"error":{"type":"invalid_request_error","message":"bad request"}}"#;
 
 fn temp_data_dir(label: &str) -> PathBuf {
     let mut dir = std::env::temp_dir();
@@ -67,6 +87,8 @@ async fn start_mock_upstream(
     };
     let app = Router::new()
         .route("/v1/chat/completions", post(mock_chat))
+        .route("/v1/responses", post(mock_chat))
+        .route("/v1/messages", post(mock_chat))
         .with_state(state);
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
         .await
@@ -84,13 +106,26 @@ async fn start_mock_upstream(
 
 async fn mock_chat(
     State(state): State<MockState>,
+    OriginalUri(uri): OriginalUri,
     headers: HeaderMap,
     body: String,
 ) -> impl IntoResponse {
-    let key = headers
+    let authorization = headers
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
+        .map(str::to_string);
+    let x_api_key = headers
+        .get("x-api-key")
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string);
+    let anthropic_version = headers
+        .get("anthropic-version")
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string);
+    let key = authorization
+        .as_deref()
         .and_then(|v| v.strip_prefix("Bearer "))
+        .or(x_api_key.as_deref())
         .unwrap_or("")
         .to_string();
     let accept_encoding = headers
@@ -99,6 +134,10 @@ async fn mock_chat(
         .map(str::to_string);
     state.calls.lock().unwrap().push(MockCall {
         key: key.clone(),
+        path: uri.path().to_string(),
+        authorization,
+        x_api_key,
+        anthropic_version,
         body,
         accept_encoding,
     });
@@ -118,9 +157,14 @@ async fn mock_chat(
         }
     };
 
+    let content_type = if reply.body.starts_with("data:") || reply.body.starts_with("event:") {
+        "text/event-stream"
+    } else {
+        "application/json"
+    };
     (
         StatusCode::from_u16(reply.status).unwrap(),
-        [("content-type", "application/json")],
+        [("content-type", content_type)],
         reply.body,
     )
 }
@@ -181,6 +225,395 @@ async fn chat(port: u16) -> (u16, String) {
     let status = response.status().as_u16();
     let body = response.text().await.unwrap();
     (status, body)
+}
+
+async fn protocol_call(port: u16, path: &str, model: &str) -> (StatusCode, serde_json::Value) {
+    let body = match path {
+        "/v1/chat/completions" => serde_json::json!({
+            "model": model,
+            "messages": [{"role": "user", "content": "ping"}],
+            "max_tokens": 3,
+            "stream": false
+        }),
+        "/v1/responses" => serde_json::json!({
+            "model": model,
+            "input": "ping",
+            "max_output_tokens": 3,
+            "stream": false
+        }),
+        "/v1/messages" => serde_json::json!({
+            "model": model,
+            "messages": [{"role": "user", "content": "ping"}],
+            "max_tokens": 3,
+            "stream": false
+        }),
+        _ => panic!("unsupported test path: {path}"),
+    };
+    let client = reqwest::Client::new();
+    let request = client
+        .post(format!("http://127.0.0.1:{port}{path}"))
+        .json(&body);
+    let request = if path == "/v1/messages" {
+        request
+            .header("x-api-key", "gw-test")
+            .header("anthropic-version", "2023-06-01")
+    } else {
+        request.header(reqwest::header::AUTHORIZATION, "Bearer gw-test")
+    };
+    let response = request.send().await.unwrap();
+    let status = response.status();
+    let body = response.json().await.unwrap();
+    (status, body)
+}
+
+async fn protocol_stream_call(port: u16, path: &str, model: &str) -> (StatusCode, String) {
+    let body = match path {
+        "/v1/chat/completions" => serde_json::json!({
+            "model": model,
+            "messages": [{"role": "user", "content": "ping"}],
+            "max_tokens": 3,
+            "stream": true
+        }),
+        "/v1/responses" => serde_json::json!({
+            "model": model,
+            "input": "ping",
+            "max_output_tokens": 3,
+            "stream": true
+        }),
+        "/v1/messages" => serde_json::json!({
+            "model": model,
+            "messages": [{"role": "user", "content": "ping"}],
+            "max_tokens": 3,
+            "stream": true
+        }),
+        _ => panic!("unsupported test path: {path}"),
+    };
+    let client = reqwest::Client::new();
+    let request = client
+        .post(format!("http://127.0.0.1:{port}{path}"))
+        .json(&body);
+    let request = if path == "/v1/messages" {
+        request.header("x-api-key", "gw-test")
+    } else {
+        request.header(reqwest::header::AUTHORIZATION, "Bearer gw-test")
+    };
+    let response = request.send().await.unwrap();
+    let status = response.status();
+    let body = response.text().await.unwrap();
+    (status, body)
+}
+
+#[tokio::test]
+async fn routes_all_client_formats_to_each_models_native_protocol() {
+    struct Case {
+        client_path: &'static str,
+        model: &'static str,
+        upstream_path: &'static str,
+        upstream_body: &'static str,
+    }
+
+    let cases = [
+        Case {
+            client_path: "/v1/chat/completions",
+            model: "deepseek-v4-flash",
+            upstream_path: "/v1/chat/completions",
+            upstream_body: SUCCESS_BODY,
+        },
+        Case {
+            client_path: "/v1/chat/completions",
+            model: "minimax-m2.7",
+            upstream_path: "/v1/messages",
+            upstream_body: MESSAGES_SUCCESS_BODY,
+        },
+        Case {
+            client_path: "/v1/responses",
+            model: "deepseek-v4-flash",
+            upstream_path: "/v1/chat/completions",
+            upstream_body: SUCCESS_BODY,
+        },
+        Case {
+            client_path: "/v1/responses",
+            model: "minimax-m2.7",
+            upstream_path: "/v1/messages",
+            upstream_body: MESSAGES_SUCCESS_BODY,
+        },
+        Case {
+            client_path: "/v1/messages",
+            model: "deepseek-v4-flash",
+            upstream_path: "/v1/chat/completions",
+            upstream_body: SUCCESS_BODY,
+        },
+        Case {
+            client_path: "/v1/messages",
+            model: "minimax-m2.7",
+            upstream_path: "/v1/messages",
+            upstream_body: MESSAGES_SUCCESS_BODY,
+        },
+    ];
+
+    for case in cases {
+        let replies = HashMap::from([(
+            "key-1".to_string(),
+            VecDeque::from([MockReply {
+                status: 200,
+                body: case.upstream_body,
+            }]),
+        )]);
+        let (base_url, calls, stop_mock) = start_mock_upstream(replies).await;
+        let (state, dir) = build_state(base_url, &["key-1"]);
+        let (port, gateway_handle) = start_gateway(state.clone()).await;
+
+        let (status, response) = protocol_call(port, case.client_path, case.model).await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "{} {}",
+            case.client_path,
+            case.model
+        );
+
+        let call = calls.lock().unwrap()[0].clone();
+        assert_eq!(call.path, case.upstream_path);
+        if case.upstream_path == "/v1/messages" {
+            assert_eq!(call.x_api_key.as_deref(), Some("key-1"));
+            assert!(call.authorization.is_none());
+            assert_eq!(call.anthropic_version.as_deref(), Some("2023-06-01"));
+        } else {
+            assert_eq!(call.authorization.as_deref(), Some("Bearer key-1"));
+            assert!(call.x_api_key.is_none());
+            assert!(call.anthropic_version.is_none());
+        }
+        let upstream_request: serde_json::Value = serde_json::from_str(&call.body).unwrap();
+        assert_eq!(upstream_request["model"], case.model);
+        assert!(upstream_request["messages"].is_array());
+
+        match case.client_path {
+            "/v1/chat/completions" => {
+                assert_eq!(response["object"], "chat.completion");
+                assert_eq!(response["choices"][0]["message"]["content"], "ok");
+            }
+            "/v1/responses" => {
+                assert_eq!(response["object"], "response");
+                assert_eq!(response["output"][0]["content"][0]["text"], "ok");
+            }
+            "/v1/messages" => {
+                assert_eq!(response["type"], "message");
+                assert_eq!(response["content"][0]["text"], "ok");
+            }
+            _ => unreachable!(),
+        }
+        let log = state.db.lock().list_forward_logs(1).unwrap().remove(0);
+        assert_eq!((log.prompt_tokens, log.completion_tokens), (10, 2));
+        assert_eq!(log.status, "success");
+
+        gateway::stop_gateway(gateway_handle);
+        let _ = stop_mock.send(());
+        let _ = fs::remove_dir_all(dir);
+    }
+}
+
+#[tokio::test]
+async fn converts_streams_across_chat_messages_and_responses() {
+    struct Case {
+        client_path: &'static str,
+        model: &'static str,
+        upstream_path: &'static str,
+        upstream_body: &'static str,
+        expected_events: &'static [&'static str],
+    }
+
+    let cases = [
+        Case {
+            client_path: "/v1/messages",
+            model: "deepseek-v4-flash",
+            upstream_path: "/v1/chat/completions",
+            upstream_body: CHAT_STREAM_BODY,
+            expected_events: &["event: message_start", "text_delta", "event: message_stop"],
+        },
+        Case {
+            client_path: "/v1/responses",
+            model: "deepseek-v4-flash",
+            upstream_path: "/v1/chat/completions",
+            upstream_body: CHAT_STREAM_BODY,
+            expected_events: &[
+                "event: response.created",
+                "response.output_text.delta",
+                "event: response.completed",
+            ],
+        },
+        Case {
+            client_path: "/v1/chat/completions",
+            model: "minimax-m2.7",
+            upstream_path: "/v1/messages",
+            upstream_body: MESSAGES_STREAM_BODY,
+            expected_events: &[
+                "chat.completion.chunk",
+                "\"content\":\"ok\"",
+                "data: [DONE]",
+            ],
+        },
+        Case {
+            client_path: "/v1/responses",
+            model: "minimax-m2.7",
+            upstream_path: "/v1/messages",
+            upstream_body: MESSAGES_STREAM_BODY,
+            expected_events: &[
+                "event: response.created",
+                "response.output_text.delta",
+                "event: response.completed",
+            ],
+        },
+    ];
+
+    for case in cases {
+        let replies = HashMap::from([(
+            "key-1".to_string(),
+            VecDeque::from([MockReply {
+                status: 200,
+                body: case.upstream_body,
+            }]),
+        )]);
+        let (base_url, calls, stop_mock) = start_mock_upstream(replies).await;
+        let (state, dir) = build_state(base_url, &["key-1"]);
+        let (port, gateway_handle) = start_gateway(state.clone()).await;
+
+        let (status, body) = protocol_stream_call(port, case.client_path, case.model).await;
+        assert_eq!(status, StatusCode::OK);
+        for expected in case.expected_events {
+            assert!(
+                body.contains(expected),
+                "{} {} missing {expected}: {body}",
+                case.client_path,
+                case.model
+            );
+        }
+        assert_eq!(calls.lock().unwrap()[0].path, case.upstream_path);
+        let log = state.db.lock().list_forward_logs(1).unwrap().remove(0);
+        assert_eq!((log.prompt_tokens, log.completion_tokens), (10, 2));
+        assert_eq!(log.status, "success");
+
+        gateway::stop_gateway(gateway_handle);
+        let _ = stop_mock.send(());
+        let _ = fs::remove_dir_all(dir);
+    }
+}
+
+#[tokio::test]
+async fn messages_forwards_account_key_as_x_api_key() {
+    let replies = HashMap::from([(
+        "key-1".to_string(),
+        VecDeque::from([MockReply {
+            status: 200,
+            body: MESSAGES_SUCCESS_BODY,
+        }]),
+    )]);
+    let (base_url, calls, stop_mock) = start_mock_upstream(replies).await;
+    let (state, dir) = build_state(base_url, &["key-1"]);
+    let (port, gateway_handle) = start_gateway(state).await;
+
+    let response = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{}/v1/messages", port))
+        .header("x-api-key", "gw-test")
+        .header("anthropic-version", "2023-06-01")
+        .json(&serde_json::json!({
+            "model": "minimax-m2.7",
+            "messages": [{"role": "user", "content": "ping"}],
+            "max_tokens": 3,
+            "stream": false
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let calls = calls.lock().unwrap();
+    assert_eq!(calls[0].x_api_key.as_deref(), Some("key-1"));
+    assert!(calls[0].authorization.is_none());
+
+    gateway::stop_gateway(gateway_handle);
+    let _ = stop_mock.send(());
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn converted_messages_request_keeps_retry_and_account_fallback() {
+    let replies = HashMap::from([
+        (
+            "key-1".to_string(),
+            VecDeque::from([
+                MockReply {
+                    status: 500,
+                    body: r#"{"error":"temporary"}"#,
+                },
+                MockReply {
+                    status: 500,
+                    body: r#"{"error":"still temporary"}"#,
+                },
+            ]),
+        ),
+        (
+            "key-2".to_string(),
+            VecDeque::from([MockReply {
+                status: 200,
+                body: SUCCESS_BODY,
+            }]),
+        ),
+    ]);
+    let (base_url, calls, stop_mock) = start_mock_upstream(replies).await;
+    let (state, dir) = build_state(base_url, &["key-1", "key-2"]);
+    let (port, gateway_handle) = start_gateway(state).await;
+
+    let (status, body) = protocol_call(port, "/v1/messages", "deepseek-v4-flash").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["type"], "message");
+    let calls = calls.lock().unwrap();
+    assert_eq!(
+        calls
+            .iter()
+            .map(|call| call.key.as_str())
+            .collect::<Vec<_>>(),
+        ["key-1", "key-1", "key-2"]
+    );
+    assert!(calls.iter().all(|call| call.path == "/v1/chat/completions"));
+    drop(calls);
+
+    gateway::stop_gateway(gateway_handle);
+    let _ = stop_mock.send(());
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn converted_request_error_uses_callers_envelope_without_fallback() {
+    let replies = HashMap::from([
+        (
+            "key-1".to_string(),
+            VecDeque::from([MockReply {
+                status: 400,
+                body: CHAT_BAD_REQUEST_BODY,
+            }]),
+        ),
+        (
+            "key-2".to_string(),
+            VecDeque::from([MockReply {
+                status: 200,
+                body: SUCCESS_BODY,
+            }]),
+        ),
+    ]);
+    let (base_url, calls, stop_mock) = start_mock_upstream(replies).await;
+    let (state, dir) = build_state(base_url, &["key-1", "key-2"]);
+    let (port, gateway_handle) = start_gateway(state).await;
+
+    let (status, body) = protocol_call(port, "/v1/messages", "deepseek-v4-flash").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["type"], "error");
+    assert_eq!(body["error"]["type"], "invalid_request_error");
+    assert_eq!(body["error"]["message"], "bad request");
+    assert_eq!(calls.lock().unwrap().len(), 1);
+
+    gateway::stop_gateway(gateway_handle);
+    let _ = stop_mock.send(());
+    let _ = fs::remove_dir_all(dir);
 }
 
 #[tokio::test]

@@ -507,13 +507,9 @@ onMounted(loadAccounts);
 
 .detail-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(180px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
-  align-items: end;
-}
-
-.detail-grid :deep(.n-form-item:last-child) {
-  grid-column: auto;
+  align-items: start;
 }
 
 .secret-field {

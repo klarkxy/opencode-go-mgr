@@ -1,4 +1,5 @@
 use crate::gateway::forwarder::{forward_get, forward_request};
+use crate::gateway::protocol::{ApiFormat, format_error, prepare_request};
 use crate::gateway::selector::AccountSelector;
 use crate::models::AppConfig;
 use crate::state::CoreState;
@@ -12,7 +13,15 @@ pub async fn chat_completions(
     headers: HeaderMap,
     body: Bytes,
 ) -> axum::response::Response {
-    proxy_handler(state, headers, body, "/v1/chat/completions").await
+    proxy_handler(state, headers, body, ApiFormat::ChatCompletions).await
+}
+
+pub async fn responses(
+    State(state): State<CoreState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> axum::response::Response {
+    proxy_handler(state, headers, body, ApiFormat::Responses).await
 }
 
 pub async fn messages(
@@ -20,7 +29,7 @@ pub async fn messages(
     headers: HeaderMap,
     body: Bytes,
 ) -> axum::response::Response {
-    proxy_handler(state, headers, body, "/v1/messages").await
+    proxy_handler(state, headers, body, ApiFormat::Messages).await
 }
 
 /// GET /v1/models — passthrough, any enabled account's key works.
@@ -29,14 +38,24 @@ pub async fn models(
     headers: HeaderMap,
 ) -> axum::response::Response {
     if !check_auth(&headers, &state.config()) {
-        return error_response(StatusCode::UNAUTHORIZED, "invalid gateway key");
+        return protocol_error_response(
+            ApiFormat::ChatCompletions,
+            StatusCode::UNAUTHORIZED,
+            "invalid gateway key",
+            None,
+        );
     }
 
     let config = state.config();
     let client = &state.http_client;
     match forward_get(client, &state, &config.upstream_base_url, "/v1/models").await {
         Ok(resp) => resp,
-        Err(e) => error_response(StatusCode::BAD_GATEWAY, &format!("models error: {}", e)),
+        Err(e) => protocol_error_response(
+            ApiFormat::ChatCompletions,
+            StatusCode::BAD_GATEWAY,
+            &format!("models error: {}", e),
+            None,
+        ),
     }
 }
 
@@ -44,20 +63,29 @@ async fn proxy_handler(
     state: CoreState,
     headers: HeaderMap,
     body: Bytes,
-    upstream_path: &str,
+    client_format: ApiFormat,
 ) -> axum::response::Response {
     let config = state.config();
 
     if !check_auth(&headers, &config) {
-        return error_response(StatusCode::UNAUTHORIZED, "invalid gateway key");
+        return protocol_error_response(
+            client_format,
+            StatusCode::UNAUTHORIZED,
+            "invalid gateway key",
+            None,
+        );
     }
+
+    let plan = match prepare_request(client_format, body) {
+        Ok(plan) => plan,
+        Err(error) => {
+            return protocol_error_response(client_format, error.status, &error.message, None);
+        }
+    };
 
     let client = &state.http_client;
     let selector = AccountSelector::new();
-    let is_stream_request = serde_json::from_slice::<serde_json::Value>(&body)
-        .ok()
-        .and_then(|v| v.get("stream").and_then(serde_json::Value::as_bool))
-        .unwrap_or(false);
+    let is_stream_request = plan.stream;
 
     let mut last_error: Option<String> = None;
     let mut failed_ids: Vec<String> = Vec::new();
@@ -66,25 +94,32 @@ async fn proxy_handler(
         let account = {
             let db = state.db.lock();
             let excluded = failed_ids.iter().map(String::as_str).collect::<Vec<_>>();
-            match selector.select_excluding(&*db, &excluded) {
+            match selector.select_excluding(&db, &excluded) {
                 Ok(Some(a)) => a,
                 Ok(None) => {
                     // No enabled, non-cooldown, non-excluded account left.
                     // If any enabled account is in cooldown, tell the client when the soonest resets.
                     let soonest = db.soonest_cooldown_reset().ok().flatten();
                     return match soonest {
-                        Some(until) => rate_limited_response(until),
+                        Some(until) => rate_limited_response(client_format, until),
                         None => {
                             let msg =
                                 last_error.unwrap_or_else(|| "no available accounts".to_string());
-                            error_response(StatusCode::SERVICE_UNAVAILABLE, &msg)
+                            protocol_error_response(
+                                client_format,
+                                StatusCode::SERVICE_UNAVAILABLE,
+                                &msg,
+                                None,
+                            )
                         }
                     };
                 }
                 Err(e) => {
-                    return error_response(
+                    return protocol_error_response(
+                        client_format,
                         StatusCode::INTERNAL_SERVER_ERROR,
                         &format!("failed to select account: {}", e),
+                        None,
                     );
                 }
             }
@@ -97,9 +132,8 @@ async fn proxy_handler(
                 &state,
                 &account,
                 &config.upstream_base_url,
-                upstream_path,
+                &plan,
                 headers.clone(),
-                body.clone(),
             )
             .await
             {
@@ -163,26 +197,28 @@ fn check_auth(headers: &HeaderMap, config: &AppConfig) -> bool {
         })
 }
 
-fn error_response(status: StatusCode, message: &str) -> axum::response::Response {
-    let body = serde_json::json!({
-        "error": {
-            "message": message,
-            "type": "gateway_error"
-        }
-    });
-    (status, axum::Json(body)).into_response()
+fn protocol_error_response(
+    format: ApiFormat,
+    status: StatusCode,
+    message: &str,
+    upstream: Option<&serde_json::Value>,
+) -> axum::response::Response {
+    (
+        status,
+        axum::Json(format_error(format, status, message, upstream)),
+    )
+        .into_response()
 }
 
-fn rate_limited_response(resets_at: chrono::DateTime<chrono::Utc>) -> axum::response::Response {
-    let body = serde_json::json!({
-        "error": {
-            "message": format!(
-                "all accounts rate-limited, soonest resets at {}",
-                resets_at.to_rfc3339()
-            ),
-            "type": "rate_limited",
-            "resets_at": resets_at.to_rfc3339(),
-        }
-    });
+fn rate_limited_response(
+    format: ApiFormat,
+    resets_at: chrono::DateTime<chrono::Utc>,
+) -> axum::response::Response {
+    let message = format!(
+        "all accounts rate-limited, soonest resets at {}",
+        resets_at.to_rfc3339()
+    );
+    let mut body = format_error(format, StatusCode::TOO_MANY_REQUESTS, &message, None);
+    body["error"]["resets_at"] = serde_json::json!(resets_at.to_rfc3339());
     (StatusCode::TOO_MANY_REQUESTS, axum::Json(body)).into_response()
 }

@@ -2,6 +2,8 @@ pub mod cost;
 pub mod forwarder;
 pub mod handler;
 pub mod limit;
+pub mod protocol;
+pub mod protocol_stream;
 pub mod selector;
 
 use crate::state::{CoreState, GatewayHandle};
@@ -20,6 +22,7 @@ pub fn build_router(state: CoreState) -> Router {
 
     let gateway_api = Router::new()
         .route("/v1/chat/completions", post(handler::chat_completions))
+        .route("/v1/responses", post(handler::responses))
         .route("/v1/messages", post(handler::messages))
         .route("/v1/models", get(handler::models))
         .layer(cors);
