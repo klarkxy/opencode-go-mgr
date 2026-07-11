@@ -56,6 +56,26 @@ export interface ForwardLog {
   error_message: string | null;
 }
 
+export interface ForwardLogSummary {
+  total_requests: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  cached_tokens: number;
+  cost: number;
+}
+
+export interface ForwardLogPage {
+  items: ForwardLog[];
+  summary: ForwardLogSummary;
+}
+
+export interface ForwardLogQuery {
+  limit?: number;
+  offset?: number;
+  status?: string | null;
+  account_id?: string | null;
+}
+
 export interface UsageWindow {
   account_id: string;
   window_5h: number;
@@ -184,7 +204,15 @@ export const tauriApi = {
     return result.key;
   },
   getGatewayLogs: (limit?: number) => request<GatewayLog[]>(`/logs/gateway?limit=${limit ?? 100}`),
-  getForwardLogs: (limit?: number) => request<ForwardLog[]>(`/logs/forward?limit=${limit ?? 100}`),
+  getForwardLogs: (query: ForwardLogQuery = {}) => {
+    const params = new URLSearchParams({
+      limit: String(query.limit ?? 20),
+      offset: String(query.offset ?? 0),
+    });
+    if (query.status) params.set("status", query.status);
+    if (query.account_id) params.set("account_id", query.account_id);
+    return request<ForwardLogPage>(`/logs/forward?${params}`);
+  },
 
   getDashboardSummary: () => request<DashboardSummary>("/dashboard/summary"),
   getDailyCostByModel: (days?: number) =>

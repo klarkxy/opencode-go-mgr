@@ -28,7 +28,7 @@ const dashboardDist = existsSync("dist")
     : null;
 
 if (files.length < 3 || !dashboardDist || missing.length > 0) {
-  console.error("Missing release artifacts. Run `pnpm run build:all` first.");
+  console.error("Missing release artifacts. Run `pnpm run build` first.");
   for (const file of missing) {
     console.error(`  ${file}`);
   }

@@ -16,7 +16,10 @@
       :height="height"
       preserveAspectRatio="xMidYMid meet"
       class="chart-svg"
+      role="img"
+      :aria-labelledby="`chart-title-${gid}`"
     >
+      <title :id="`chart-title-${gid}`">最近 30 天按模型分段的每日消耗</title>
       <defs>
         <linearGradient
           v-for="(c, idx) in palette"
@@ -166,14 +169,14 @@ onBeforeUnmount(() => {
 // 选取一组现代克制的颜色。第 0 个用 naive-ui 主题强调绿;后续顺色 + 两个补色
 // 区分模型。颜色数量固定,数据里出现更多模型时自动循环复用。
 const palette = [
-  "#18a058", // green (naive primary)
-  "#2080f0", // blue
-  "#f0a020", // amber
-  "#d03050", // rose
-  "#7a4df0", // violet
-  "#0fb5a8", // teal
-  "#909399", // grey
-  "#e08040", // orange
+  "#6257c8",
+  "#2f6fd4",
+  "#16845b",
+  "#a85f00",
+  "#c33b55",
+  "#0f8c91",
+  "#7b7987",
+  "#a454b8",
 ];
 
 function modelColor(model: string, models: string[]): string {

@@ -9,20 +9,37 @@ This guide is for people changing code, building releases, or debugging the proj
 - `crates/ocg-cli`: Headless CLI and gateway entrypoint.
 - `src-tauri`: Windows tray app, single-instance behavior, Tauri commands, and NSIS packaging.
 
-## Commands
+## Development
+
+Frontend-only changes use Vite HMR. Keep a Gateway or release app running on port `9042`, then run:
+
+```bash
+pnpm run dev
+```
+
+Open `http://127.0.0.1:30001/dashboard/`. The dashboard served directly from port `9042` uses built assets and will not hot-update.
+
+Rust changes under `crates/` or `src-tauri/` use Tauri's watcher and Cargo incremental compilation. Exit any running release tray app first so the single-instance lock and port `9042` are free:
+
+```bash
+pnpm run dev:gui
+```
+
+This recompiles and restarts the process; Rust code is not replaced inside the running process.
+
+## Checks and builds
 
 ```bash
 pnpm install
-pnpm run dev
 pnpm run typecheck
-pnpm run build:web
 pnpm run test
+pnpm run build:web
 pnpm run build:cli
 pnpm run build:gui
 pnpm run build
 ```
 
-`pnpm run build:web` is the frontend build. `pnpm run build` is the full release path and copies artifacts to `release/`.
+`pnpm run build:web` is the frontend-only production build. `pnpm run build` is reserved for release validation and replaces `release/` with current artifacts.
 
 ## Rust Checks
 

@@ -83,6 +83,21 @@ pub struct ForwardLog {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ForwardLogSummary {
+    pub total_requests: i64,
+    pub prompt_tokens: i64,
+    pub completion_tokens: i64,
+    pub cached_tokens: i64,
+    pub cost: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ForwardLogPage {
+    pub items: Vec<ForwardLog>,
+    pub summary: ForwardLogSummary,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UsageWindow {
     pub account_id: String,
     pub window_5h: f64,

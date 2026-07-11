@@ -36,35 +36,65 @@
       </template>
       <template #header-extra>
         <n-space align="center" :size="8">
-          <n-button
-            secondary
-            size="small"
-            :loading="pinging[account.id]"
-            @click="pingAccount(account.id)"
-          >
-            <template #icon>
-              <n-icon :component="ThunderboltOutlined" />
+          <n-tooltip trigger="hover">
+            <template #trigger>
+              <n-button
+                circle
+                quaternary
+                size="small"
+                :aria-label="`测试账号 ${account.name}`"
+                :loading="pinging[account.id]"
+                @click="pingAccount(account.id)"
+              >
+                <template #icon><n-icon :component="ThunderboltOutlined" /></template>
+              </n-button>
             </template>
-            Ping
-          </n-button>
-          <n-switch :value="account.enabled" @update:value="toggleAccount(account.id)">
+            测试连接
+          </n-tooltip>
+          <n-switch
+            :value="account.enabled"
+            :aria-label="`${account.enabled ? '禁用' : '启用'}账号 ${account.name}`"
+            @update:value="toggleAccount(account.id)"
+          >
             <template #checked>启用</template>
             <template #unchecked>禁用</template>
           </n-switch>
-          <n-button quaternary size="small" @click="toggleExpanded(account.id)">
+          <n-tooltip trigger="hover">
+            <template #trigger>
+              <n-button
+                circle
+                quaternary
+                size="small"
+                :aria-label="`${expanded[account.id] ? '收起' : '展开'}账号 ${account.name}`"
+                @click="toggleExpanded(account.id)"
+              >
+                <template #icon>
+                  <n-icon :component="expanded[account.id] ? UpOutlined : DownOutlined" />
+                </template>
+              </n-button>
+            </template>
             {{ expanded[account.id] ? "收起" : "展开" }}
-          </n-button>
+          </n-tooltip>
           <n-popconfirm
             positive-text="删除"
             negative-text="取消"
             @positive-click="deleteAccount(account.id)"
           >
             <template #trigger>
-              <n-button circle quaternary size="small" type="error" title="删除账号">
-                <template #icon>
-                  <n-icon :component="CloseOutlined" />
+              <n-tooltip trigger="hover">
+                <template #trigger>
+                  <n-button
+                    circle
+                    quaternary
+                    size="small"
+                    type="error"
+                    :aria-label="`删除账号 ${account.name}`"
+                  >
+                    <template #icon><n-icon :component="DeleteOutlined" /></template>
+                  </n-button>
                 </template>
-              </n-button>
+                删除账号
+              </n-tooltip>
             </template>
             确定删除账号 {{ account.name }} 吗？
           </n-popconfirm>
@@ -91,15 +121,23 @@
         <n-form :model="drafts[account.id]" label-placement="top" :show-feedback="false">
           <div class="detail-grid">
             <n-form-item label="名称">
-              <n-input v-model:value="drafts[account.id].name" />
+              <n-input
+                v-model:value="drafts[account.id].name"
+                :input-props="{ 'aria-label': `${account.name} 名称` }"
+              />
             </n-form-item>
             <n-form-item label="账号">
-              <n-input v-model:value="drafts[account.id].username" placeholder="OpenCode-Go 账号" />
+              <n-input
+                v-model:value="drafts[account.id].username"
+                :input-props="{ 'aria-label': `${account.name} 登录账号` }"
+                placeholder="OpenCode-Go 账号"
+              />
             </n-form-item>
             <n-form-item label="密码">
               <div class="secret-field">
                 <n-input
                   v-model:value="drafts[account.id].password"
+                  :input-props="{ 'aria-label': `${account.name} 密码` }"
                   type="password"
                   show-password-on="click"
                   placeholder="留空不修改"
@@ -118,6 +156,7 @@
             <n-form-item label="API Key">
               <n-input
                 v-model:value="drafts[account.id].key"
+                :input-props="{ 'aria-label': `${account.name} API Key` }"
                 type="password"
                 show-password-on="click"
                 placeholder="留空不修改"
@@ -153,14 +192,23 @@
     <n-form :model="newAccount" label-placement="top" :show-feedback="false">
       <div class="modal-grid">
         <n-form-item label="名称">
-          <n-input v-model:value="newAccount.name" placeholder="主号" />
+          <n-input
+            v-model:value="newAccount.name"
+            :input-props="{ 'aria-label': '名称' }"
+            placeholder="主号"
+          />
         </n-form-item>
         <n-form-item label="账号">
-          <n-input v-model:value="newAccount.username" placeholder="OpenCode-Go 账号" />
+          <n-input
+            v-model:value="newAccount.username"
+            :input-props="{ 'aria-label': '登录账号' }"
+            placeholder="OpenCode-Go 账号"
+          />
         </n-form-item>
         <n-form-item label="密码">
           <n-input
             v-model:value="newAccount.password"
+            :input-props="{ 'aria-label': '密码' }"
             type="password"
             show-password-on="click"
             placeholder="OpenCode-Go 密码"
@@ -169,6 +217,7 @@
         <n-form-item label="API Key">
           <n-input
             v-model:value="newAccount.key"
+            :input-props="{ 'aria-label': 'API Key' }"
             type="password"
             show-password-on="click"
             placeholder="sk-..."
@@ -206,7 +255,13 @@ import {
   NTooltip,
   useMessage,
 } from "naive-ui";
-import { CloseOutlined, PlusOutlined, ThunderboltOutlined } from "@vicons/antd";
+import {
+  DeleteOutlined,
+  DownOutlined,
+  PlusOutlined,
+  ThunderboltOutlined,
+  UpOutlined,
+} from "@vicons/antd";
 import { tauriApi } from "../api/tauri";
 import type { Account, AccountInput, AccountUpdate, UsageWindow } from "../api/tauri";
 import { isCooling, isUsageLimitReached, usageProgressStatus } from "./accounts-usage";
@@ -437,6 +492,8 @@ onMounted(loadAccounts);
 <style scoped>
 .accounts-view {
   position: relative;
+  max-width: 1280px;
+  margin: 0 auto;
 }
 
 .accounts-content {
@@ -472,6 +529,11 @@ onMounted(loadAccounts);
 
 .account-card :deep(.n-card-header) {
   align-items: center;
+}
+
+.account-card {
+  border-radius: 14px;
+  box-shadow: var(--ocg-shadow-sm);
 }
 
 .account-card--cooling {
@@ -531,6 +593,14 @@ onMounted(loadAccounts);
   .detail-grid,
   .usage-strip {
     grid-template-columns: 1fr;
+  }
+
+  .account-card :deep(.n-card-header) {
+    align-items: flex-start;
+  }
+
+  .account-card :deep(.n-card-header__extra) {
+    margin-left: 8px;
   }
 }
 </style>

@@ -664,6 +664,14 @@ struct LimitQuery {
     days: Option<i64>,
 }
 
+#[derive(Deserialize)]
+struct ForwardLogQuery {
+    limit: Option<i64>,
+    offset: Option<i64>,
+    status: Option<String>,
+    account_id: Option<String>,
+}
+
 async fn gateway_logs(
     State(state): State<CoreState>,
     Query(q): Query<LimitQuery>,
@@ -678,12 +686,17 @@ async fn gateway_logs(
 
 async fn forward_logs(
     State(state): State<CoreState>,
-    Query(q): Query<LimitQuery>,
-) -> Result<Json<Vec<ForwardLog>>, ApiError> {
+    Query(q): Query<ForwardLogQuery>,
+) -> Result<Json<ForwardLogPage>, ApiError> {
     state
         .db
         .lock()
-        .list_forward_logs(q.limit.unwrap_or(100))
+        .query_forward_logs(
+            q.limit.unwrap_or(100),
+            q.offset.unwrap_or(0),
+            q.status.as_deref(),
+            q.account_id.as_deref(),
+        )
         .map(Json)
         .map_err(ApiError::internal)
 }

@@ -1,7 +1,7 @@
 use crate::models::*;
 use anyhow::Result;
 use chrono::{DateTime, Duration, Utc};
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, params, params_from_iter, types::Value};
 use std::path::PathBuf;
 
 pub struct Database {
@@ -365,23 +365,57 @@ impl Database {
             "SELECT id, timestamp, model, account_id, account_name, status, http_status, prompt_tokens, completion_tokens, cached_tokens, cost, error_message
              FROM forward_logs ORDER BY id DESC LIMIT ?1"
         )?;
-        let rows = stmt.query_map([limit], |row| {
-            Ok(ForwardLog {
-                id: row.get(0)?,
-                timestamp: parse_datetime(row.get::<_, String>(1)?),
-                model: row.get(2)?,
-                account_id: row.get(3)?,
-                account_name: row.get(4)?,
-                status: row.get(5)?,
-                http_status: row.get(6)?,
-                prompt_tokens: row.get(7)?,
-                completion_tokens: row.get(8)?,
-                cached_tokens: row.get(9)?,
-                cost: row.get(10)?,
-                error_message: row.get(11)?,
-            })
-        })?;
+        let rows = stmt.query_map([limit], forward_log_from_row)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.into())
+    }
+
+    pub fn query_forward_logs(
+        &self,
+        limit: i64,
+        offset: i64,
+        status: Option<&str>,
+        account_id: Option<&str>,
+    ) -> Result<ForwardLogPage> {
+        let limit = limit.clamp(1, 200);
+        let offset = offset.max(0);
+        let (filter, filter_params) = forward_log_filter(status, account_id);
+        let summary_sql = format!(
+            "SELECT COUNT(*),
+                    COALESCE(SUM(prompt_tokens), 0),
+                    COALESCE(SUM(completion_tokens), 0),
+                    COALESCE(SUM(cached_tokens), 0),
+                    COALESCE(SUM(cost), 0.0)
+             FROM forward_logs{filter}"
+        );
+        let summary = self.conn.query_row(
+            &summary_sql,
+            params_from_iter(filter_params.iter()),
+            |row| {
+                Ok(ForwardLogSummary {
+                    total_requests: row.get(0)?,
+                    prompt_tokens: row.get(1)?,
+                    completion_tokens: row.get(2)?,
+                    cached_tokens: row.get(3)?,
+                    cost: row.get(4)?,
+                })
+            },
+        )?;
+
+        let items_sql = format!(
+            "SELECT id, timestamp, model, account_id, account_name, status, http_status, prompt_tokens, completion_tokens, cached_tokens, cost, error_message
+             FROM forward_logs{filter}
+             ORDER BY id DESC
+             LIMIT ? OFFSET ?"
+        );
+        let mut item_params = filter_params;
+        item_params.push(Value::Integer(limit));
+        item_params.push(Value::Integer(offset));
+        let mut stmt = self.conn.prepare(&items_sql)?;
+        let items = stmt
+            .query_map(params_from_iter(item_params.iter()), forward_log_from_row)?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(ForwardLogPage { items, summary })
     }
 
     // Cooldown
@@ -525,6 +559,40 @@ impl Database {
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.into())
     }
+}
+
+fn forward_log_filter(status: Option<&str>, account_id: Option<&str>) -> (String, Vec<Value>) {
+    let mut filter = String::new();
+    let mut params = Vec::new();
+    for (clause, value) in [("status = ?", status), ("account_id = ?", account_id)] {
+        if let Some(value) = value {
+            filter.push_str(if params.is_empty() {
+                " WHERE "
+            } else {
+                " AND "
+            });
+            filter.push_str(clause);
+            params.push(Value::Text(value.to_owned()));
+        }
+    }
+    (filter, params)
+}
+
+fn forward_log_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ForwardLog> {
+    Ok(ForwardLog {
+        id: row.get(0)?,
+        timestamp: parse_datetime(row.get::<_, String>(1)?),
+        model: row.get(2)?,
+        account_id: row.get(3)?,
+        account_name: row.get(4)?,
+        status: row.get(5)?,
+        http_status: row.get(6)?,
+        prompt_tokens: row.get(7)?,
+        completion_tokens: row.get(8)?,
+        cached_tokens: row.get(9)?,
+        cost: row.get(10)?,
+        error_message: row.get(11)?,
+    })
 }
 
 fn parse_datetime(s: String) -> DateTime<Utc> {

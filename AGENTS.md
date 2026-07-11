@@ -31,6 +31,7 @@
 ```powershell
 pnpm install
 pnpm run dev
+pnpm run dev:gui
 pnpm run build:web
 pnpm run typecheck
 pnpm run test
@@ -40,7 +41,9 @@ cargo check --workspace --all-targets
 cargo test --workspace
 ```
 
-`pnpm run build` 是完整 release 构建并复制产物到 `release/`；只验证前端时用 `pnpm run build:web`。
+只修改 `src/` 时，保持 Gateway 在 `9042` 运行，执行 `pnpm run dev` 并打开 `http://127.0.0.1:30001/dashboard/`，前端由 Vite 热更新。修改 `crates/` 或 `src-tauri/` 时，先退出 release 托盘程序，再执行 `pnpm run dev:gui`；Tauri 会增量编译并重启进程。
+
+`pnpm run build` 只用于最终 release 构建并复制产物到 `release/`；只验证前端时用 `pnpm run build:web`。
 
 ## 开发约束
 

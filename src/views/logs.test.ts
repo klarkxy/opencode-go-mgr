@@ -1,0 +1,59 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+import { tauriApi } from "../api/tauri.ts";
+
+test("forward log API sends remote paging and filter parameters", async () => {
+  let requested = "";
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {
+      location: { pathname: "/dashboard" },
+      dispatchEvent() {},
+    },
+  });
+  Object.defineProperty(globalThis, "fetch", {
+    configurable: true,
+    value: async (input: string) => {
+      requested = input;
+      return new Response(JSON.stringify({
+        items: [],
+        summary: {
+          total_requests: 0,
+          prompt_tokens: 0,
+          completion_tokens: 0,
+          cached_tokens: 0,
+          cost: 0,
+        },
+      }), { headers: { "Content-Type": "application/json" } });
+    },
+  });
+
+  await tauriApi.getForwardLogs({
+    limit: 20,
+    offset: 40,
+    status: "success",
+    account_id: "account 117",
+  });
+
+  const query = new URL(requested, "http://localhost").searchParams;
+  assert.equal(query.get("limit"), "20");
+  assert.equal(query.get("offset"), "40");
+  assert.equal(query.get("status"), "success");
+  assert.equal(query.get("account_id"), "account 117");
+});
+
+test("logs view uses remote totals, refresh controls, loading, and a useful empty state", async () => {
+  const source = await readFile(new URL("./Logs.vue", import.meta.url), "utf8");
+  const template = source.slice(source.indexOf("<template>"), source.indexOf("<script setup"));
+
+  assert.match(template, /:summary="forwardSummary"/);
+  assert.match(template, /summary-placement="bottom"/);
+  assert.match(template, /\bremote\b/);
+  assert.match(template, /aria-label="刷新运行日志"/);
+  assert.match(template, /aria-label="刷新请求日志"/);
+  assert.match(template, /仅记录经本机 API 转发的请求，账号 Ping 见运行日志/);
+  assert.match(template, /:loading="gatewayLoading"/);
+  assert.match(template, /:loading="forwardLoading"/);
+  assert.doesNotMatch(source, /getForwardLogs\(200\)|filteredForwardLogs/);
+});

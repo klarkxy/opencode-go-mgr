@@ -1,6 +1,8 @@
+use chrono::Utc;
 use ocg_core::crypto::{KeyCipher, StaticKeyCipher};
 use ocg_core::db::Database;
 use ocg_core::gateway;
+use ocg_core::models::ForwardLog;
 use ocg_core::state::CoreStateInner;
 use reqwest::StatusCode;
 use serde_json::json;
@@ -155,6 +157,53 @@ async fn loopback_dashboard_skips_login() {
             .status(),
         StatusCode::UNAUTHORIZED
     );
+
+    gateway::stop_gateway(handle);
+}
+
+#[tokio::test]
+async fn loopback_forward_logs_apply_filters_before_pagination() {
+    let state = state("forward-logs");
+    for (account_id, prompt_tokens) in [("selected", 10), ("other", 100)] {
+        state
+            .db
+            .lock()
+            .log_forward(&ForwardLog {
+                id: 0,
+                timestamp: Utc::now(),
+                model: "glm-5.2".into(),
+                account_id: account_id.into(),
+                account_name: account_id.into(),
+                status: "success".into(),
+                http_status: Some(200),
+                prompt_tokens,
+                completion_tokens: prompt_tokens * 2,
+                cached_tokens: 0,
+                cost: prompt_tokens as f64 / 100.0,
+                error_message: None,
+            })
+            .unwrap();
+    }
+
+    let handle = gateway::start_gateway_on(state, SocketAddr::from(([127, 0, 0, 1], 0)))
+        .await
+        .unwrap();
+    let response = reqwest::Client::new()
+        .get(format!(
+            "http://127.0.0.1:{}/dashboard/api/logs/forward?limit=1&offset=0&status=success&account_id=selected",
+            handle.port
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(body["items"].as_array().unwrap().len(), 1);
+    assert_eq!(body["items"][0]["account_id"], "selected");
+    assert_eq!(body["summary"]["total_requests"], 1);
+    assert_eq!(body["summary"]["prompt_tokens"], 10);
+    assert_eq!(body["summary"]["completion_tokens"], 20);
+    assert_eq!(body["summary"]["cost"], 0.1);
 
     gateway::stop_gateway(handle);
 }

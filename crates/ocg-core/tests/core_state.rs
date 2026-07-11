@@ -192,6 +192,75 @@ fn list_forward_logs_binds_limit_parameter() {
 }
 
 #[test]
+fn query_forward_logs_filters_before_limit_and_summarizes_all_matches() {
+    let dir = temp_data_dir("filtered-logs");
+    let db = Database::open(dir).unwrap();
+
+    for (status, prompt, completion, cached, cost) in [
+        ("success", 10, 20, 3, 1.0),
+        ("success", 30, 40, 5, 2.0),
+        ("error", 90, 90, 90, 9.0),
+    ] {
+        db.log_forward(&ForwardLog {
+            id: 0,
+            timestamp: Utc::now(),
+            model: "glm-5.2".into(),
+            account_id: "selected".into(),
+            account_name: "selected".into(),
+            status: status.into(),
+            http_status: Some(200),
+            prompt_tokens: prompt,
+            completion_tokens: completion,
+            cached_tokens: cached,
+            cost,
+            error_message: None,
+        })
+        .unwrap();
+    }
+
+    // Push every matching row beyond the old global top-200 window.
+    for index in 0..200 {
+        db.log_forward(&ForwardLog {
+            id: 0,
+            timestamp: Utc::now(),
+            model: "other".into(),
+            account_id: "busy".into(),
+            account_name: format!("busy-{index}"),
+            status: "success".into(),
+            http_status: Some(200),
+            prompt_tokens: 1_000,
+            completion_tokens: 1_000,
+            cached_tokens: 1_000,
+            cost: 100.0,
+            error_message: None,
+        })
+        .unwrap();
+    }
+
+    let first = db
+        .query_forward_logs(1, 0, Some("success"), Some("selected"))
+        .unwrap();
+    assert_eq!(first.items.len(), 1);
+    assert_eq!(first.items[0].prompt_tokens, 30);
+    assert_eq!(first.summary.total_requests, 2);
+    assert_eq!(first.summary.prompt_tokens, 40);
+    assert_eq!(first.summary.completion_tokens, 60);
+    assert_eq!(first.summary.cached_tokens, 8);
+    assert!((first.summary.cost - 3.0).abs() < f64::EPSILON);
+
+    let second = db
+        .query_forward_logs(1, 1, Some("success"), Some("selected"))
+        .unwrap();
+    assert_eq!(second.items.len(), 1);
+    assert_eq!(second.items[0].prompt_tokens, 10);
+    assert_eq!(second.summary.total_requests, 2);
+
+    let bounded = db.query_forward_logs(999, -1, None, None).unwrap();
+    assert_eq!(bounded.items.len(), 200);
+    assert_eq!(bounded.summary.total_requests, 203);
+}
+
+#[test]
 fn daily_cost_by_model_groups_success_rows_only() {
     let dir = temp_data_dir("daily");
     let db = Database::open(dir).unwrap();
