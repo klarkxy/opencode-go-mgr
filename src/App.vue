@@ -105,18 +105,30 @@
               />
             </div>
             <div class="header-actions">
-              <n-tooltip trigger="hover">
+              <n-tooltip trigger="hover" :disabled="themeMenuShown">
                 <template #trigger>
-                  <n-button
-                    circle
-                    quaternary
-                    :aria-label="`主题：${themeModeLabel}`"
-                    @click="cycleThemeMode"
+                  <n-dropdown
+                    trigger="click"
+                    :keyboard="false"
+                    :show="themeMenuShown"
+                    :options="themeMenuOptions"
+                    :menu-props="themeMenuProps"
+                    @select="selectTheme"
+                    @update:show="updateThemeMenuShown"
                   >
-                    <template #icon><n-icon :component="themeIcon" /></template>
-                  </n-button>
+                    <n-button
+                      circle
+                      quaternary
+                      aria-controls="theme-menu"
+                      aria-haspopup="menu"
+                      :aria-expanded="themeMenuShown"
+                      :aria-label="`主题：${themeLabel}`"
+                    >
+                      <template #icon><n-icon :component="BgColorsOutlined" /></template>
+                    </n-button>
+                  </n-dropdown>
                 </template>
-                主题：{{ themeModeLabel }} · 点击切换
+                主题：{{ themeLabel }}
               </n-tooltip>
               <n-tooltip v-if="!localMode" trigger="hover">
                 <template #trigger>
@@ -135,8 +147,9 @@
             <Logs v-else-if="activeKey === 'logs'" />
             <Settings
               v-else-if="activeKey === 'settings'"
-              :theme-mode="themeMode"
-              @update:theme-mode="themeMode = $event"
+              :theme-name="themeName"
+              :resolved-theme="resolvedTheme"
+              @update:theme-name="themeName = $event"
             />
           </n-layout-content>
         </n-layout>
@@ -146,11 +159,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, h, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import type { Component } from "vue";
 import {
   NButton,
   NConfigProvider,
+  NDropdown,
   NForm,
   NFormItem,
   NGlobalStyle,
@@ -166,24 +180,32 @@ import {
   darkTheme,
   useOsTheme,
 } from "naive-ui";
-import type { GlobalThemeOverrides } from "naive-ui";
+import type { DropdownMenuProps, DropdownOption } from "naive-ui";
 import {
-  BulbOutlined,
+  BgColorsOutlined,
+  CheckOutlined,
   DashboardOutlined,
-  DesktopOutlined,
   FileTextOutlined,
   KeyOutlined,
   LogoutOutlined,
   SettingOutlined,
-  StarOutlined,
 } from "@vicons/antd";
 import Dashboard from "./views/Dashboard.vue";
 import Accounts from "./views/Accounts.vue";
 import Logs from "./views/Logs.vue";
 import Settings from "./views/Settings.vue";
 import { DASHBOARD_AUTH_REQUIRED_EVENT, tauriApi } from "./api/tauri";
-import { readThemeMode, THEME_STORAGE_KEY } from "./theme";
-import type { ThemeMode } from "./theme";
+import {
+  applyTheme,
+  getThemeStorage,
+  getThemeTokens,
+  readTheme,
+  resolveTheme,
+  THEME_OPTIONS,
+  toNaiveThemeOverrides,
+  writeTheme,
+} from "./theme";
+import type { ThemeName } from "./theme";
 
 type ViewKey = "dashboard" | "accounts" | "logs" | "settings";
 
@@ -191,7 +213,9 @@ const views = new Set<ViewKey>(["dashboard", "accounts", "logs", "settings"]);
 const osTheme = useOsTheme();
 const collapsed = ref(false);
 const activeKey = ref<ViewKey>(readView());
-const themeMode = ref<ThemeMode>(readThemeMode(window.localStorage));
+const themeStorage = getThemeStorage();
+const themeName = ref<ThemeName>(readTheme(themeStorage));
+const themeMenuShown = ref(false);
 const characterImage = new URL("../assets/opencode-mascot.png", import.meta.url).href;
 const authUsername = ref("");
 const authPassword = ref("");
@@ -206,65 +230,10 @@ const authFormModel = computed(() => ({
   passwordConfirm: authPasswordConfirm.value,
 }));
 
-const resolvedTheme = computed<"light" | "dark">(() => {
-  if (themeMode.value !== "system") return themeMode.value;
-  return osTheme.value === "dark" ? "dark" : "light";
-});
-const naiveTheme = computed(() => resolvedTheme.value === "dark" ? darkTheme : null);
-
-const lightOverrides: GlobalThemeOverrides = {
-  common: {
-    bodyColor: "#F6F6FA",
-    cardColor: "#FFFFFF",
-    modalColor: "#FFFFFF",
-    popoverColor: "#FFFFFF",
-    tableColor: "#FFFFFF",
-    primaryColor: "#6257C8",
-    primaryColorHover: "#756ADB",
-    primaryColorPressed: "#4F45AD",
-    primaryColorSuppl: "#756ADB",
-    textColorBase: "#181820",
-    textColor1: "#181820",
-    textColor2: "#5E5D6A",
-    textColor3: "#7B7987",
-    successColor: "#16845B",
-    warningColor: "#A85F00",
-    errorColor: "#C33B55",
-    infoColor: "#2F6FD4",
-    borderColor: "#E3E1EA",
-    dividerColor: "#E9E7EE",
-    borderRadius: "10px",
-    fontFamily: '"Segoe UI Variable Text", "Noto Sans SC", "Microsoft YaHei UI", sans-serif',
-    fontFamilyMono: '"Cascadia Mono", Consolas, monospace',
-  },
-};
-const darkOverrides: GlobalThemeOverrides = {
-  common: {
-    bodyColor: "#111116",
-    cardColor: "#1A1A22",
-    modalColor: "#1A1A22",
-    popoverColor: "#23232D",
-    tableColor: "#1A1A22",
-    primaryColor: "#A99CFF",
-    primaryColorHover: "#BCB2FF",
-    primaryColorPressed: "#8F81E8",
-    primaryColorSuppl: "#BCB2FF",
-    textColorBase: "#F4F2FA",
-    textColor1: "#F4F2FA",
-    textColor2: "#C7C3D0",
-    textColor3: "#9994A6",
-    successColor: "#56C596",
-    warningColor: "#E7AE55",
-    errorColor: "#F08095",
-    infoColor: "#74A6F6",
-    borderColor: "#32313C",
-    dividerColor: "#2D2C36",
-    borderRadius: "10px",
-    fontFamily: '"Segoe UI Variable Text", "Noto Sans SC", "Microsoft YaHei UI", sans-serif',
-    fontFamilyMono: '"Cascadia Mono", Consolas, monospace',
-  },
-};
-const themeOverrides = computed(() => resolvedTheme.value === "dark" ? darkOverrides : lightOverrides);
+const resolvedTheme = computed(() => resolveTheme(themeName.value, osTheme.value));
+const themeTokens = computed(() => getThemeTokens(themeName.value, osTheme.value));
+const naiveTheme = computed(() => resolvedTheme.value === "black" ? darkTheme : null);
+const themeOverrides = computed(() => toNaiveThemeOverrides(themeTokens.value));
 
 function renderIcon(icon: Component) {
   return () => h(icon);
@@ -283,12 +252,43 @@ const titleMap: Record<ViewKey, string> = {
   settings: "设置",
 };
 const currentTitle = computed(() => titleMap[activeKey.value]);
-const themeModeLabel = computed(() => ({ system: "跟随系统", light: "浅色", dark: "深色" })[themeMode.value]);
-const themeIcon = computed<Component>(() => ({
-  system: DesktopOutlined,
-  light: BulbOutlined,
-  dark: StarOutlined,
-})[themeMode.value]);
+const themeNames = new Set<ThemeName>(THEME_OPTIONS.map(({ value }) => value));
+const themeLabel = computed(() => {
+  const selected = THEME_OPTIONS.find(({ value }) => value === themeName.value)?.label ?? "默认";
+  if (themeName.value !== "default") return selected;
+  const resolved = THEME_OPTIONS.find(({ value }) => value === resolvedTheme.value)?.label;
+  return `默认 · ${resolved ?? "皓白"}`;
+});
+const themeMenuOptions = computed<DropdownOption[]>(() => THEME_OPTIONS.map((option) => ({
+  key: option.value,
+  label: option.label,
+  icon: () => h("span", {
+    "aria-hidden": "true",
+    style: {
+      display: "inline-block",
+      width: "16px",
+      height: "16px",
+      borderRadius: "50%",
+      background: option.swatch,
+      boxShadow: "inset 0 0 0 1px rgba(128, 128, 140, 0.45)",
+    },
+  }),
+  extra: themeName.value === option.value
+    ? () => h(NIcon, { component: CheckOutlined, size: 14, "aria-hidden": true })
+    : undefined,
+  props: {
+    id: `theme-menu-option-${option.value}`,
+    role: "menuitemradio",
+    tabindex: -1,
+    "aria-checked": themeName.value === option.value ? "true" : "false",
+    onKeydown: (event: KeyboardEvent) => handleThemeMenuKeydown(event, option.value),
+  },
+})));
+const themeMenuProps: DropdownMenuProps = () => ({
+  id: "theme-menu",
+  role: "menu",
+  "aria-label": "选择主题",
+});
 
 function readView(): ViewKey {
   const value = new URLSearchParams(window.location.search).get("view");
@@ -309,9 +309,59 @@ function onPopState() {
   activeKey.value = readView();
 }
 
-function cycleThemeMode() {
-  const order: ThemeMode[] = ["system", "light", "dark"];
-  themeMode.value = order[(order.indexOf(themeMode.value) + 1) % order.length];
+function selectTheme(key: string | number) {
+  if (typeof key === "string" && themeNames.has(key as ThemeName)) {
+    themeName.value = key as ThemeName;
+    if (themeMenuShown.value) {
+      themeMenuShown.value = false;
+      void nextTick(focusThemeTrigger);
+    }
+  }
+}
+
+async function updateThemeMenuShown(show: boolean) {
+  themeMenuShown.value = show;
+  if (!show) return;
+  await nextTick();
+  focusThemeMenuOption(themeName.value);
+}
+
+function focusThemeMenuOption(theme: ThemeName) {
+  document.querySelector<HTMLElement>(`#theme-menu-option-${theme}`)?.focus();
+}
+
+function focusThemeTrigger() {
+  document.querySelector<HTMLElement>('[aria-controls="theme-menu"]')?.focus();
+}
+
+function handleThemeMenuKeydown(event: KeyboardEvent, current: ThemeName) {
+  const index = THEME_OPTIONS.findIndex(({ value }) => value === current);
+  let nextIndex: number | undefined;
+  if (event.key === "ArrowDown" || event.key === "ArrowRight") {
+    nextIndex = (index + 1) % THEME_OPTIONS.length;
+  } else if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
+    nextIndex = (index - 1 + THEME_OPTIONS.length) % THEME_OPTIONS.length;
+  } else if (event.key === "Home") {
+    nextIndex = 0;
+  } else if (event.key === "End") {
+    nextIndex = THEME_OPTIONS.length - 1;
+  } else if (event.key === "Enter" || event.key === " ") {
+    event.preventDefault();
+    event.stopPropagation();
+    selectTheme(current);
+    return;
+  } else if (event.key === "Escape") {
+    event.preventDefault();
+    event.stopPropagation();
+    themeMenuShown.value = false;
+    void nextTick(focusThemeTrigger);
+    return;
+  } else {
+    return;
+  }
+  event.preventDefault();
+  event.stopPropagation();
+  focusThemeMenuOption(THEME_OPTIONS[nextIndex].value);
 }
 
 function onAuthRequired(event: Event) {
@@ -367,8 +417,10 @@ async function logout() {
 }
 
 watch(activeKey, syncView);
-watch(themeMode, (value) => window.localStorage.setItem(THEME_STORAGE_KEY, value));
-watch(resolvedTheme, (value) => { document.documentElement.dataset.theme = value; }, { immediate: true });
+watch(themeName, (value) => writeTheme(themeStorage, value));
+watch([resolvedTheme, themeTokens], ([resolved, tokens]) => {
+  applyTheme(document.documentElement, resolved, tokens);
+}, { immediate: true });
 
 onMounted(() => {
   window.addEventListener(DASHBOARD_AUTH_REQUIRED_EVENT, onAuthRequired);
@@ -398,6 +450,7 @@ onUnmounted(() => {
   padding: clamp(24px, 7vw, 96px);
   background:
     radial-gradient(circle at 22% 18%, var(--ocg-primary-soft), transparent 34%),
+    radial-gradient(circle at 82% 52%, var(--ocg-mascot-halo), transparent 34%),
     var(--ocg-canvas);
 }
 .auth-panel {
@@ -454,7 +507,9 @@ onUnmounted(() => {
   height: min(94vh, 980px);
   max-width: 60vw;
   object-fit: contain;
-  filter: drop-shadow(0 24px 30px rgba(27, 23, 52, 0.16));
+  filter:
+    drop-shadow(0 0 1px var(--ocg-mascot-rim))
+    drop-shadow(0 24px 30px rgba(27, 23, 52, 0.16));
   pointer-events: none;
   user-select: none;
 }

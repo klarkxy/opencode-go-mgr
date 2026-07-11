@@ -75,32 +75,42 @@
           <p>当前：{{ themeLabel }}</p>
         </div>
       </div>
-      <n-button-group>
-        <n-tooltip v-for="option in themeOptions" :key="option.value" trigger="hover">
-          <template #trigger>
-            <n-button
-              :type="themeMode === option.value ? 'primary' : 'default'"
-              :secondary="themeMode === option.value"
-              :aria-label="option.label"
-              :aria-pressed="themeMode === option.value"
-              @click="$emit('update:themeMode', option.value)"
-            >
-              <template #icon><n-icon :component="option.icon" /></template>
-            </n-button>
-          </template>
-          {{ option.label }}
-        </n-tooltip>
-      </n-button-group>
+      <div class="theme-grid" role="group" aria-label="选择主题">
+        <button
+          v-for="option in THEME_OPTIONS"
+          :key="option.value"
+          type="button"
+          class="theme-option"
+          :class="{ 'theme-option--selected': themeName === option.value }"
+          :aria-pressed="themeName === option.value"
+          @click="emit('update:themeName', option.value)"
+        >
+          <span
+            class="theme-swatch"
+            :class="{
+              'theme-swatch--default': option.value === 'default',
+              'theme-swatch--white': option.value === 'white',
+            }"
+            :style="{ background: option.swatch }"
+            aria-hidden="true"
+          />
+          <span>{{ option.label }}</span>
+          <n-icon
+            v-if="themeName === option.value"
+            class="theme-check"
+            :component="CheckOutlined"
+            aria-hidden="true"
+          />
+        </button>
+      </div>
     </section>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import type { Component } from "vue";
 import {
   NButton,
-  NButtonGroup,
   NForm,
   NFormItem,
   NIcon,
@@ -110,20 +120,21 @@ import {
   useMessage,
 } from "naive-ui";
 import {
-  BulbOutlined,
   CheckOutlined,
   CopyOutlined,
-  DesktopOutlined,
   ReloadOutlined,
-  StarOutlined,
 } from "@vicons/antd";
 import { tauriApi } from "../api/tauri";
 import type { AppConfig } from "../api/tauri";
-import type { ThemeMode } from "../theme";
+import { THEME_OPTIONS } from "../theme";
+import type { ResolvedTheme, ThemeName } from "../theme";
 import { writeConnectionValue } from "./dashboard-connection";
 
-const props = defineProps<{ themeMode: ThemeMode }>();
-defineEmits<{ (event: "update:themeMode", value: ThemeMode): void }>();
+const { themeName, resolvedTheme } = defineProps<{
+  themeName: ThemeName;
+  resolvedTheme: ResolvedTheme;
+}>();
+const emit = defineEmits<{ "update:themeName": [value: ThemeName] }>();
 
 const message = useMessage();
 const saving = ref(false);
@@ -139,12 +150,12 @@ const config = ref<AppConfig>({
   auto_start: false,
 });
 
-const themeOptions: Array<{ value: ThemeMode; label: string; icon: Component }> = [
-  { value: "system", label: "跟随系统", icon: DesktopOutlined },
-  { value: "light", label: "浅色", icon: BulbOutlined },
-  { value: "dark", label: "深色", icon: StarOutlined },
-];
-const themeLabel = computed(() => themeOptions.find((option) => option.value === props.themeMode)?.label ?? "跟随系统");
+const themeLabel = computed(() => {
+  const selected = THEME_OPTIONS.find((option) => option.value === themeName)?.label ?? "默认";
+  if (themeName !== "default") return selected;
+  const resolved = THEME_OPTIONS.find((option) => option.value === resolvedTheme)?.label;
+  return `默认 · ${resolved ?? "皓白"}`;
+});
 
 async function loadSettings() {
   try {
@@ -235,6 +246,61 @@ onUnmounted(() => clearTimeout(copyTimer));
 }
 .appearance-card {
   align-self: start;
+}
+.theme-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
+  gap: 8px;
+}
+.theme-option {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 64px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--ocg-border);
+  border-radius: 10px;
+  color: var(--ocg-muted);
+  background: var(--ocg-canvas);
+  font: 600 13px/1 "Segoe UI Variable Text", "Microsoft YaHei UI", sans-serif;
+  cursor: pointer;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, color 0.16s ease;
+}
+.theme-option:hover {
+  border-color: var(--ocg-primary);
+  color: var(--ocg-ink);
+}
+.theme-option:focus-visible {
+  outline: 2px solid var(--ocg-primary);
+  outline-offset: 2px;
+}
+.theme-option--selected {
+  border-color: var(--ocg-primary);
+  color: var(--ocg-primary);
+  box-shadow: 0 0 0 1px var(--ocg-primary);
+}
+.theme-swatch {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 12%);
+}
+.theme-swatch--default {
+  background: linear-gradient(135deg, #fff 0 50%, #000 50%) !important;
+  box-shadow: inset 0 0 0 1px #8c8994;
+}
+.theme-swatch--white {
+  box-shadow: inset 0 0 0 1px #8c8994;
+}
+.theme-check {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  font-size: 12px;
 }
 
 @media (max-width: 800px) {

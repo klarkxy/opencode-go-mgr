@@ -1,12 +1,12 @@
 ---
 name: OCG Co-pilot Console
 colors:
-  canvas: "#F6F6FA"
+  canvas: "#F7F7F8"
   surface: "#FFFFFF"
-  ink: "#181820"
-  muted: "#5E5D6A"
-  primary: "#6257C8"
-  primary-soft: "#ECE9FF"
+  ink: "#18181B"
+  muted: "#5F6068"
+  primary: "#18181B"
+  primary-soft: "#ECECEF"
   success: "#16845B"
   warning: "#A85F00"
   error: "#C33B55"
@@ -36,7 +36,7 @@ OCG Manager is a local multi-account operations console. Its signature is a firs
 
 ## Colors
 
-Use `{colors.primary}` for active navigation, focus, and primary actions. Use `{colors.success}` only for successful or available states. Dark mode maps canvas, surface, ink, muted, and primary to `#111116`, `#1A1A22`, `#F4F2FA`, `#C7C3D0`, and `#A99CFF` in code.
+The selector contains seven two-character themes: 默认, 皓白, 曜黑, 藤紫, 霁蓝, 青瓷, and 暖铜. 默认 follows the operating system and resolves to 皓白 or 曜黑; every other theme is fixed. 曜黑 uses `#000000` canvas, `#0B0B0D` surface, `#151519` raised surface, and `#F5F5F7` ink. Use each theme's primary color for active navigation, focus, primary actions, and the first chart series. Use success only for successful or available states; semantic status colors never change meaning between themes.
 
 ## Typography
 
@@ -60,7 +60,9 @@ Utility actions are circular quaternary icon buttons with a Tooltip and an expli
 - Do keep API, Key, and upstream copy actions adjacent to their values.
 - Do use icons to reduce repeated labels, while retaining screen-reader labels.
 - Do preserve visible keyboard focus and reduced-motion preferences.
-- Don't use green as a brand primary color.
+- Do keep theme names to two Chinese characters and expose all seven choices in one selector.
+- Do give the mascot a subtle light rim only in 曜黑; other themes use the normal shadow.
+- Don't reuse the success green as a brand primary color.
 - Don't repeat a card title when structure and icons already provide context.
 - Don't hide primary connection actions behind menus or secondary navigation.
 - Don't use icon-only controls for ambiguous commit or irreversible actions.

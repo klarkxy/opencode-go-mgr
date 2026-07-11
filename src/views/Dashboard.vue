@@ -193,6 +193,7 @@ import {
 import StackedBarChart from "../components/StackedBarChart.vue";
 import { tauriApi } from "../api/tauri";
 import type { Account, AppConfig, DailyModelCost, DashboardSummary, UsageWindow } from "../api/tauri";
+import { CHART_PALETTE } from "../theme";
 import { maskConnectionKey, writeConnectionValue } from "./dashboard-connection";
 
 type ConnectionTarget = "api" | "key" | "upstream";
@@ -221,13 +222,12 @@ const summary = ref<DashboardSummary>({
   month_cost: 0,
 });
 
-const palette = ["#6257C8", "#2F6FD4", "#16845B", "#A85F00", "#C33B55", "#0F8C91", "#7B7987", "#A454B8"];
 const legendModels = computed(() => {
   const totals = new Map<string, number>();
   for (const row of dailyCosts.value) totals.set(row.model, (totals.get(row.model) ?? 0) + row.cost);
   return [...totals.keys()]
     .sort((a, b) => totals.get(b)! - totals.get(a)!)
-    .map((model, index) => ({ model, color: palette[index % palette.length] }));
+    .map((model, index) => ({ model, color: CHART_PALETTE[index % CHART_PALETTE.length] }));
 });
 const totalChartCost = computed(() => dailyCosts.value.reduce((sum, row) => sum + row.cost, 0));
 const maskedKey = computed(() => maskConnectionKey(serviceConfig.value.gateway_key));
@@ -335,6 +335,17 @@ onUnmounted(() => clearTimeout(copyTimer));
   background-size: 24px 24px;
   mask-image: linear-gradient(90deg, transparent, #000 35%);
 }
+.connection-hero::after {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  right: -12px;
+  bottom: -28px;
+  width: 390px;
+  height: 300px;
+  background: radial-gradient(ellipse at center, var(--ocg-mascot-halo, transparent), transparent 70%);
+  pointer-events: none;
+}
 .connection-content {
   position: relative;
   z-index: 2;
@@ -406,7 +417,9 @@ onUnmounted(() => clearTimeout(copyTimer));
   height: 360px;
   max-width: 34%;
   object-fit: contain;
-  filter: drop-shadow(0 18px 20px rgba(31, 27, 56, 0.14));
+  filter:
+    drop-shadow(0 0 1px var(--ocg-mascot-rim, transparent))
+    drop-shadow(0 18px 20px rgba(31, 27, 56, 0.14));
   pointer-events: none;
   user-select: none;
 }
@@ -597,6 +610,12 @@ onUnmounted(() => clearTimeout(copyTimer));
     height: 282px;
     max-width: 58%;
     opacity: 0.12;
+  }
+  .connection-hero::after {
+    right: -48px;
+    bottom: -34px;
+    width: 300px;
+    height: 250px;
   }
   .connection-hero::before {
     inset: 0;

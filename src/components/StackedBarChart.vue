@@ -5,8 +5,7 @@
     - 圆角柱条、垂直渐变填充
     - hover 显示当日各模型明细 tooltip
     - 图例使用小圆点 + 模型名,颜色按模型稳定分配
-  颜色直接用 CSS 变量,与 naive-ui 主题色板保持克制(顺色为主、一个强调色),
-  这样 dark / light 主题切换时不需要 JS 介入。
+  颜色使用共享色板；第一系列跟随当前主题强调色，其余系列保持固定。
 -->
 <template>
   <div ref="rootRef" class="stacked-bar-chart">
@@ -22,7 +21,7 @@
       <title :id="`chart-title-${gid}`">最近 30 天按模型分段的每日消耗</title>
       <defs>
         <linearGradient
-          v-for="(c, idx) in palette"
+          v-for="(c, idx) in CHART_PALETTE"
           :id="`bar-grad-${idx}-${gid}`"
           :key="idx"
           x1="0"
@@ -31,7 +30,7 @@
           y2="1"
         >
           <stop offset="0%" :stop-color="c" stop-opacity="0.95" />
-          <stop offset="100%" :stop-color="c" stop-opacity="0.65" />
+          <stop offset="100%" :stop-color="c" stop-opacity="0.85" />
         </linearGradient>
       </defs>
 
@@ -127,6 +126,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, useId } from "vue";
 import type { DailyModelCost } from "../api/tauri";
+import { CHART_PALETTE } from "../theme";
 
 const props = withDefaults(defineProps<{
   data: DailyModelCost[];
@@ -165,23 +165,9 @@ onBeforeUnmount(() => {
   ro?.disconnect();
 });
 
-// --- 颜色板 ---
-// 选取一组现代克制的颜色。第 0 个用 naive-ui 主题强调绿;后续顺色 + 两个补色
-// 区分模型。颜色数量固定,数据里出现更多模型时自动循环复用。
-const palette = [
-  "#6257c8",
-  "#2f6fd4",
-  "#16845b",
-  "#a85f00",
-  "#c33b55",
-  "#0f8c91",
-  "#7b7987",
-  "#a454b8",
-];
-
 function modelColor(model: string, models: string[]): string {
   const idx = models.indexOf(model);
-  return palette[idx % palette.length];
+  return CHART_PALETTE[idx % CHART_PALETTE.length];
 }
 
 // --- 数据处理:按日期补零,得到连续的日期序列 ---
