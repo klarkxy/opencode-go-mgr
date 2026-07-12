@@ -194,7 +194,7 @@ jobs:
           set -euo pipefail
           mount="$RUNNER_TEMP/ocg-manager-dmg"
           mkdir "$mount"
-          hdiutil attach release/ocg-manager_*_macos-universal.dmg -nobrowse -readonly -mountpoint "$mount"
+          hdiutil attach release/ocg-manager_*_macos-universal.dmg -acceptlicense -nobrowse -readonly -mountpoint "$mount"
           cleanup() {
             if [ -n "${gui_pid:-}" ]; then kill "$gui_pid" 2>/dev/null || true; fi
             hdiutil detach "$mount" -force >/dev/null 2>&1 || true
