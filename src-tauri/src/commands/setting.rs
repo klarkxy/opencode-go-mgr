@@ -13,6 +13,7 @@ pub fn update_settings(
     state: State<'_, AppState>,
     config: AppConfig,
 ) -> Result<GatewayStatus, String> {
+    config.validate_timeouts()?;
     validate_upstream_url(&config.upstream_base_url)?;
     // ponytail: only restart if the port actually changed. Gateway key and
     // upstream URL are already live

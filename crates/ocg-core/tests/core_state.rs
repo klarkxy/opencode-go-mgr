@@ -128,13 +128,20 @@ fn core_state_set_config_persists() {
 
     let mut cfg = state.config();
     cfg.gateway_port = 9999;
+    cfg.connect_timeout_secs = 12;
+    cfg.non_stream_timeout_secs = 345;
+    cfg.stream_idle_timeout_secs = 678;
     state.set_config(cfg).unwrap();
 
     // Reopen and verify.
     let db2 = Database::open(dir).unwrap();
     let cipher2: Arc<dyn KeyCipher + Send + Sync> = Arc::new(StaticKeyCipher::new("k"));
     let state2 = Arc::new(CoreStateInner::new(db2, PathBuf::from("."), cipher2).unwrap());
-    assert_eq!(state2.config().gateway_port, 9999);
+    let persisted = state2.config();
+    assert_eq!(persisted.gateway_port, 9999);
+    assert_eq!(persisted.connect_timeout_secs, 12);
+    assert_eq!(persisted.non_stream_timeout_secs, 345);
+    assert_eq!(persisted.stream_idle_timeout_secs, 678);
 }
 
 #[test]
@@ -149,9 +156,18 @@ fn core_state_scrubs_removed_config_fields() {
     let cipher: Arc<dyn KeyCipher + Send + Sync> = Arc::new(StaticKeyCipher::new("k"));
     let state = Arc::new(CoreStateInner::new(db, dir, cipher).unwrap());
 
+    let config = state.config();
+    assert_eq!(config.connect_timeout_secs, 30);
+    assert_eq!(config.non_stream_timeout_secs, 120);
+    assert_eq!(config.stream_idle_timeout_secs, 300);
+
     let persisted = state.db.lock().get_setting("config").unwrap().unwrap();
     assert!(!persisted.contains("remote"));
     assert!(!persisted.contains("remote-secret"));
+    let persisted: serde_json::Value = serde_json::from_str(&persisted).unwrap();
+    assert_eq!(persisted["connect_timeout_secs"], 30);
+    assert_eq!(persisted["non_stream_timeout_secs"], 120);
+    assert_eq!(persisted["stream_idle_timeout_secs"], 300);
 }
 
 #[test]

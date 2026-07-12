@@ -172,6 +172,9 @@ async fn loopback_settings_trim_and_require_gateway_key() {
 
     let mut config = state.config();
     config.gateway_key = "  trimmed-key  ".into();
+    config.connect_timeout_secs = 12;
+    config.non_stream_timeout_secs = 345;
+    config.stream_idle_timeout_secs = 678;
     assert_eq!(
         client
             .post(&url)
@@ -182,7 +185,22 @@ async fn loopback_settings_trim_and_require_gateway_key() {
             .status(),
         StatusCode::OK
     );
-    assert_eq!(state.config().gateway_key, "trimmed-key");
+    let saved = state.config();
+    assert_eq!(saved.gateway_key, "trimmed-key");
+    assert_eq!(saved.connect_timeout_secs, 12);
+    assert_eq!(saved.non_stream_timeout_secs, 345);
+    assert_eq!(saved.stream_idle_timeout_secs, 678);
+    let roundtrip = client
+        .get(&url)
+        .send()
+        .await
+        .unwrap()
+        .json::<serde_json::Value>()
+        .await
+        .unwrap();
+    assert_eq!(roundtrip["connect_timeout_secs"], 12);
+    assert_eq!(roundtrip["non_stream_timeout_secs"], 345);
+    assert_eq!(roundtrip["stream_idle_timeout_secs"], 678);
 
     config.gateway_key = "   ".into();
     assert_eq!(
@@ -196,6 +214,38 @@ async fn loopback_settings_trim_and_require_gateway_key() {
         StatusCode::BAD_REQUEST
     );
     assert_eq!(state.config().gateway_key, "trimmed-key");
+
+    for (field, value) in [
+        ("connect_timeout_secs", 0),
+        ("connect_timeout_secs", 301),
+        ("non_stream_timeout_secs", 0),
+        ("non_stream_timeout_secs", 3_601),
+        ("stream_idle_timeout_secs", 0),
+        ("stream_idle_timeout_secs", 3_601),
+    ] {
+        let mut invalid = state.config();
+        match field {
+            "connect_timeout_secs" => invalid.connect_timeout_secs = value,
+            "non_stream_timeout_secs" => invalid.non_stream_timeout_secs = value,
+            "stream_idle_timeout_secs" => invalid.stream_idle_timeout_secs = value,
+            _ => unreachable!(),
+        }
+        assert_eq!(
+            client
+                .post(&url)
+                .json(&invalid)
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::BAD_REQUEST,
+            "{field}={value}"
+        );
+        let unchanged = state.config();
+        assert_eq!(unchanged.connect_timeout_secs, 12);
+        assert_eq!(unchanged.non_stream_timeout_secs, 345);
+        assert_eq!(unchanged.stream_idle_timeout_secs, 678);
+    }
 
     gateway::stop_gateway(handle);
 }

@@ -64,6 +64,43 @@
             </n-popconfirm>
           </div>
         </n-form-item>
+        <div class="settings-subsection" aria-labelledby="request-timeout-title">
+          <h3 id="request-timeout-title">请求超时</h3>
+          <p>分别控制连接建立、非流式响应完成和流式数据停顿的等待上限。</p>
+          <n-form-item label="连接超时">
+            <n-input-number
+              v-model:value="config.connect_timeout_secs"
+              :min="1"
+              :max="300"
+              :precision="0"
+              :input-props="{ 'aria-label': '连接超时（秒）' }"
+            >
+              <template #suffix>秒</template>
+            </n-input-number>
+          </n-form-item>
+          <n-form-item label="非流式总超时">
+            <n-input-number
+              v-model:value="config.non_stream_timeout_secs"
+              :min="1"
+              :max="3600"
+              :precision="0"
+              :input-props="{ 'aria-label': '非流式总超时（秒）' }"
+            >
+              <template #suffix>秒</template>
+            </n-input-number>
+          </n-form-item>
+          <n-form-item label="流式空闲超时">
+            <n-input-number
+              v-model:value="config.stream_idle_timeout_secs"
+              :min="1"
+              :max="3600"
+              :precision="0"
+              :input-props="{ 'aria-label': '流式空闲超时（秒）' }"
+            >
+              <template #suffix>秒</template>
+            </n-input-number>
+          </n-form-item>
+        </div>
       </n-form>
       <n-button type="primary" :loading="saving" :disabled="!loaded" @click="saveSettings">保存设置</n-button>
     </section>
@@ -115,6 +152,7 @@ import {
   NFormItem,
   NIcon,
   NInput,
+  NInputNumber,
   NPopconfirm,
   NTooltip,
   useMessage,
@@ -149,6 +187,9 @@ const config = ref<AppConfig>({
   gateway_key: "",
   upstream_base_url: "https://opencode.ai/zen/go",
   auto_start: false,
+  connect_timeout_secs: 30,
+  non_stream_timeout_secs: 120,
+  stream_idle_timeout_secs: 300,
 });
 
 const themeLabel = computed(() => {
@@ -169,6 +210,10 @@ async function loadSettings() {
 
 async function saveSettings() {
   if (!loaded.value) return;
+  if (!timeoutsValid()) {
+    message.error("请求超时必须为整数：连接 1–300 秒，其余 1–3600 秒");
+    return;
+  }
   saving.value = true;
   try {
     await tauriApi.updateSettings(config.value);
@@ -178,6 +223,14 @@ async function saveSettings() {
   } finally {
     saving.value = false;
   }
+}
+
+function timeoutsValid(): boolean {
+  return [
+    [config.value.connect_timeout_secs, 300],
+    [config.value.non_stream_timeout_secs, 3600],
+    [config.value.stream_idle_timeout_secs, 3600],
+  ].every(([value, max]) => Number.isInteger(value) && value >= 1 && value <= max);
 }
 
 async function copyKey() {
@@ -246,6 +299,21 @@ onUnmounted(() => clearTimeout(copyTimer));
   align-items: center;
   gap: 4px;
   width: 100%;
+}
+.settings-subsection {
+  margin-top: 8px;
+  padding-top: 18px;
+  border-top: 1px solid var(--ocg-border);
+}
+.settings-subsection h3 {
+  margin: 0;
+  color: var(--ocg-ink);
+  font: 700 15px/1.3 "Bahnschrift", "Segoe UI Variable Display", sans-serif;
+}
+.settings-subsection > p {
+  margin: 4px 0 14px;
+  color: var(--ocg-subtle);
+  font-size: 11px;
 }
 .appearance-card {
   align-self: start;

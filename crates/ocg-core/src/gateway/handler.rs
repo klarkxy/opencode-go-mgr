@@ -46,9 +46,8 @@ pub async fn models(
         );
     }
 
-    let config = state.config();
-    let client = &state.http_client;
-    match forward_get(client, &state, &config.upstream_base_url, "/v1/models").await {
+    let (config, client) = state.upstream_context();
+    match forward_get(&client, &state, &config, "/v1/models").await {
         Ok(resp) => resp,
         Err(e) => protocol_error_response(
             ApiFormat::ChatCompletions,
@@ -65,7 +64,7 @@ async fn proxy_handler(
     body: Bytes,
     client_format: ApiFormat,
 ) -> axum::response::Response {
-    let config = state.config();
+    let (config, client) = state.upstream_context();
 
     if !check_auth(&headers, &config) {
         return protocol_error_response(
@@ -83,7 +82,6 @@ async fn proxy_handler(
         }
     };
 
-    let client = &state.http_client;
     let selector = AccountSelector::new();
     let is_stream_request = plan.stream;
 
@@ -127,15 +125,7 @@ async fn proxy_handler(
 
         let mut retried_same_account = false;
         loop {
-            match forward_request(
-                client,
-                &state,
-                &account,
-                &config.upstream_base_url,
-                &plan,
-                headers.clone(),
-            )
-            .await
+            match forward_request(&client, &state, &account, &config, &plan, headers.clone()).await
             {
                 Ok(result) => {
                     if result.success {

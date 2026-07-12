@@ -192,7 +192,7 @@ import {
 } from "@vicons/antd";
 import StackedBarChart from "../components/StackedBarChart.vue";
 import { tauriApi } from "../api/tauri";
-import type { Account, AppConfig, DailyModelCost, DashboardSummary, UsageWindow } from "../api/tauri";
+import type { Account, DailyModelCost, DashboardSummary, UsageWindow } from "../api/tauri";
 import { CHART_PALETTE } from "../theme";
 import { connectionApiUrl, maskConnectionKey, writeConnectionValue } from "./dashboard-connection";
 
@@ -208,11 +208,10 @@ const refreshingKey = ref(false);
 const copiedTarget = ref<ConnectionTarget | null>(null);
 let copyTimer: ReturnType<typeof setTimeout> | undefined;
 
-const serviceConfig = ref<AppConfig>({
+const serviceConfig = ref({
   gateway_port: 9042,
   gateway_key: "",
   upstream_base_url: "",
-  auto_start: false,
 });
 const summary = ref<DashboardSummary>({
   total_accounts: 0,

@@ -7,6 +7,7 @@ use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
 };
+use std::time::Duration;
 
 pub struct GatewayHandle {
     pub port: u16,
@@ -14,7 +15,7 @@ pub struct GatewayHandle {
     pub task: tokio::task::JoinHandle<()>,
 }
 
-// Note: Mutex lock ordering is (1) db, (2) config, (3) gateway.
+// Note: Mutex lock ordering is (1) db, (2) config, (3) http_client, (4) gateway.
 // Never acquire in reverse order; always drop one before acquiring another where possible.
 pub struct CoreStateInner {
     pub db: Mutex<Database>,
@@ -23,7 +24,7 @@ pub struct CoreStateInner {
     pub dashboard_session_token: String,
     dashboard_local_mode: AtomicBool,
     pub dashboard_dir: Mutex<Option<PathBuf>>,
-    pub http_client: reqwest::Client,
+    http_client: Mutex<reqwest::Client>,
     pub data_dir: PathBuf,
     pub cipher: Arc<dyn KeyCipher + Send + Sync>,
 }
@@ -38,13 +39,12 @@ impl CoreStateInner {
     ) -> crate::Result<Self> {
         crate::auth::bootstrap_admin_from_env(&db)?;
         let (config, needs_persist) = load_config(&db)?;
+        config.validate_timeouts().map_err(anyhow::Error::msg)?;
         if needs_persist {
             // Persist generated defaults and drop fields removed from AppConfig.
             save_config(&db, &config)?;
         }
-        let http_client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(120))
-            .build()?;
+        let http_client = build_http_client(&config)?;
         Ok(Self {
             db: Mutex::new(db),
             config: Mutex::new(config),
@@ -52,7 +52,7 @@ impl CoreStateInner {
             dashboard_session_token: uuid::Uuid::new_v4().simple().to_string(),
             dashboard_local_mode: AtomicBool::new(false),
             dashboard_dir: Mutex::new(None),
-            http_client,
+            http_client: Mutex::new(http_client),
             data_dir,
             cipher,
         })
@@ -60,6 +60,12 @@ impl CoreStateInner {
 
     pub fn config(&self) -> AppConfig {
         self.config.lock().clone()
+    }
+
+    pub fn upstream_context(&self) -> (AppConfig, reqwest::Client) {
+        let config = self.config.lock();
+        let client = self.http_client.lock();
+        (config.clone(), client.clone())
     }
 
     pub fn active_gateway_port(&self) -> u16 {
@@ -80,11 +86,16 @@ impl CoreStateInner {
     }
 
     pub fn set_config(&self, config: AppConfig) -> crate::Result<()> {
+        config.validate_timeouts().map_err(anyhow::Error::msg)?;
+        let http_client = build_http_client(&config)?;
         {
             let db = self.db.lock();
             save_config(&*db, &config)?;
         }
-        *self.config.lock() = config;
+        let mut current_config = self.config.lock();
+        let mut current_client = self.http_client.lock();
+        *current_config = config;
+        *current_client = http_client;
         Ok(())
     }
 
@@ -127,6 +138,13 @@ fn load_config(db: &Database) -> crate::Result<(AppConfig, bool)> {
 fn save_config(db: &Database, config: &AppConfig) -> crate::Result<()> {
     db.set_setting("config", &serde_json::to_string(config)?)?;
     Ok(())
+}
+
+fn build_http_client(config: &AppConfig) -> crate::Result<reqwest::Client> {
+    Ok(reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(config.connect_timeout_secs))
+        .read_timeout(Duration::from_secs(config.stream_idle_timeout_secs))
+        .build()?)
 }
 
 fn generate_gateway_key() -> String {

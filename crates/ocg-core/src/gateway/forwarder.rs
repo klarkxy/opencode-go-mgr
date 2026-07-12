@@ -7,7 +7,7 @@ use crate::gateway::protocol::{
 };
 use crate::gateway::protocol_stream::StreamConverter;
 use crate::gateway::selector::AccountSelector;
-use crate::models::{Account, ForwardLog};
+use crate::models::{Account, AppConfig, ForwardLog};
 use crate::state::CoreState;
 use anyhow::Result;
 use axum::body::Body;
@@ -22,8 +22,6 @@ use serde_json::Value;
 use std::sync::Arc;
 use std::time::Duration as StdDuration;
 
-const UPSTREAM_TIMEOUT: StdDuration = StdDuration::from_secs(120);
-
 pub struct ForwardResult {
     pub response: Response,
     pub success: bool,
@@ -35,22 +33,22 @@ pub async fn forward_request(
     client: &Client,
     state: &CoreState,
     account: &Account,
-    upstream_base_url: &str,
+    config: &AppConfig,
     plan: &RequestPlan,
     headers: HeaderMap,
 ) -> Result<ForwardResult> {
-    forward_request_impl(client, state, account, upstream_base_url, plan, headers).await
+    forward_request_impl(client, state, account, config, plan, headers).await
 }
 
 async fn forward_request_impl(
     client: &Client,
     state: &CoreState,
     account: &Account,
-    upstream_base_url: &str,
+    config: &AppConfig,
     plan: &RequestPlan,
     headers: HeaderMap,
 ) -> Result<ForwardResult> {
-    ensure_safe_upstream_base_url(upstream_base_url)?;
+    ensure_safe_upstream_base_url(&config.upstream_base_url)?;
     let key = state.decrypt_key(&account.key_cipher)?;
     let mut upstream_headers = reqwest::header::HeaderMap::new();
 
@@ -101,7 +99,7 @@ async fn forward_request_impl(
 
     let url = format!(
         "{}{}",
-        upstream_base_url.trim_end_matches('/'),
+        config.upstream_base_url.trim_end_matches('/'),
         plan.upstream.path()
     );
 
@@ -111,6 +109,11 @@ async fn forward_request_impl(
         .post(&url)
         .headers(upstream_headers)
         .body(plan.body.clone());
+    let upstream_req = if plan.stream {
+        upstream_req
+    } else {
+        upstream_req.timeout(StdDuration::from_secs(config.non_stream_timeout_secs))
+    };
 
     let upstream_resp = match upstream_req.send().await {
         Ok(resp) => resp,
@@ -149,7 +152,10 @@ async fn forward_request_impl(
         .unwrap_or(false);
 
     if status.is_server_error() {
-        let text = upstream_resp.text().await.unwrap_or_default();
+        let text = upstream_resp
+            .text()
+            .await
+            .unwrap_or_else(|error| response_body_error(&error));
         let error_message = format!(
             "upstream error {}: {}",
             status.as_u16(),
@@ -179,7 +185,10 @@ async fn forward_request_impl(
     }
 
     if status.is_client_error() {
-        let text = upstream_resp.text().await.unwrap_or_default();
+        let text = upstream_resp
+            .text()
+            .await
+            .unwrap_or_else(|error| response_body_error(&error));
 
         if status.as_u16() == 429 {
             // 429 from opencode-go carries the exact reset window ("Resets in 13 days" / "4 days" / "13min").
@@ -335,6 +344,7 @@ async fn forward_request_impl(
         let st = Arc::new(Mutex::new(StreamState::default()));
         let converter = Arc::new(Mutex::new(StreamConverter::new(plan)));
         let upstream_format = plan.upstream;
+        let stream_idle_timeout_secs = config.stream_idle_timeout_secs;
 
         let st_map = st.clone();
         let converter_map = converter.clone();
@@ -383,7 +393,14 @@ async fn forward_request_impl(
                     }
                     // Update the streaming row to "error" rather than inserting a new
                     // row, then report the failure in the caller's SSE protocol.
-                    let msg = format!("stream error: {}", e);
+                    let msg = if e.is_timeout() {
+                        format!(
+                            "stream error: upstream stream idle timeout after {}s",
+                            stream_idle_timeout_secs
+                        )
+                    } else {
+                        format!("stream error: {e}")
+                    };
                     {
                         let mut state = st_map.lock();
                         state.error = true;
@@ -505,7 +522,33 @@ async fn forward_request_impl(
             error_message: None,
         })
     } else {
-        let text = upstream_resp.text().await.unwrap_or_default();
+        let text = match upstream_resp.text().await {
+            Ok(text) => text,
+            Err(error) => {
+                let error_message = response_body_error(&error);
+                {
+                    let db = state.db.lock();
+                    log_forward(
+                        &db,
+                        account,
+                        &model,
+                        "error",
+                        Some(status.as_u16() as i32),
+                        0,
+                        0,
+                        0,
+                        0.0,
+                        Some(&error_message),
+                    )?;
+                }
+                return Ok(ForwardResult {
+                    response: error_response(plan.client, &error_message, None),
+                    success: false,
+                    retryable: true,
+                    error_message: Some(error_message),
+                });
+            }
+        };
         let upstream_json = match serde_json::from_str::<Value>(&text) {
             Ok(value) => value,
             Err(_) => {
@@ -613,10 +656,10 @@ fn join_chunks(chunks: Vec<bytes::Bytes>) -> bytes::Bytes {
 pub async fn forward_get(
     client: &Client,
     state: &CoreState,
-    upstream_base_url: &str,
+    config: &AppConfig,
     upstream_path: &str,
 ) -> Result<Response> {
-    ensure_safe_upstream_base_url(upstream_base_url)?;
+    ensure_safe_upstream_base_url(&config.upstream_base_url)?;
     let selector = AccountSelector::new();
     let account = {
         let db = state.db.lock();
@@ -628,14 +671,14 @@ pub async fn forward_get(
     let key = state.decrypt_key(&account.key_cipher)?;
     let url = format!(
         "{}{}",
-        upstream_base_url.trim_end_matches('/'),
+        config.upstream_base_url.trim_end_matches('/'),
         upstream_path
     );
 
     let resp = match client
         .get(&url)
         .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", key))
-        .timeout(UPSTREAM_TIMEOUT)
+        .timeout(StdDuration::from_secs(config.non_stream_timeout_secs))
         .send()
         .await
     {
@@ -644,7 +687,10 @@ pub async fn forward_get(
     };
 
     let status = resp.status();
-    let body = resp.text().await.unwrap_or_default();
+    let body = resp
+        .text()
+        .await
+        .map_err(|error| anyhow::anyhow!(response_body_error(&error)))?;
 
     {
         let db = state.db.lock();
@@ -707,6 +753,14 @@ fn sanitize_upstream_error(text: &str) -> String {
         }
     }
     out.trim_end().chars().take(500).collect()
+}
+
+fn response_body_error(error: &reqwest::Error) -> String {
+    if error.is_timeout() {
+        "upstream response body timed out".to_string()
+    } else {
+        format!("upstream response body failed: {error}")
+    }
 }
 
 fn error_response(format: ApiFormat, message: &str, upstream: Option<&Value>) -> Response {

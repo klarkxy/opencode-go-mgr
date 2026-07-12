@@ -36,3 +36,22 @@ test("dashboard and settings keep partial data safe", async () => {
   assert.match(settings, /if \(!loaded\.value\) return/);
   assert.match(app, /mode === "register"[\s\S]*getAuthStatus\(\)[\s\S]*status\?\.initialized/);
 });
+
+test("settings expose bounded request timeouts", async () => {
+  const settings = await readFile(new URL("./Settings.vue", import.meta.url), "utf8");
+  const api = await readFile(new URL("../api/tauri.ts", import.meta.url), "utf8");
+  const dashboard = await readFile(new URL("./Dashboard.vue", import.meta.url), "utf8");
+
+  assert.match(settings, /请求超时/);
+  assert.match(settings, /config\.connect_timeout_secs"\s+:min="1"\s+:max="300"\s+:precision="0"/);
+  assert.match(settings, /config\.non_stream_timeout_secs"\s+:min="1"\s+:max="3600"\s+:precision="0"/);
+  assert.match(settings, /config\.stream_idle_timeout_secs"\s+:min="1"\s+:max="3600"\s+:precision="0"/);
+  assert.match(settings, /connect_timeout_secs: 30/);
+  assert.match(settings, /non_stream_timeout_secs: 120/);
+  assert.match(settings, /stream_idle_timeout_secs: 300/);
+  assert.match(settings, /if \(!timeoutsValid\(\)\)/);
+  assert.match(api, /connect_timeout_secs: number/);
+  assert.match(api, /non_stream_timeout_secs: number/);
+  assert.match(api, /stream_idle_timeout_secs: number/);
+  assert.doesNotMatch(dashboard, /ref<AppConfig>/);
+});

@@ -524,21 +524,29 @@ async fn test_account(
     let key = state
         .decrypt_key(&account.key_cipher)
         .map_err(ApiError::internal)?;
-    let config = state.config();
+    let (config, client) = state.upstream_context();
     validate_upstream_url(&config.upstream_base_url)?;
-    let response = state
-        .http_client
+    let response = client
         .post(format!(
             "{}/v1/chat/completions",
             config.upstream_base_url.trim_end_matches('/')
         ))
         .bearer_auth(&key)
         .json(&account_ping_payload())
+        .timeout(std::time::Duration::from_secs(
+            config.non_stream_timeout_secs,
+        ))
         .send()
         .await
         .map_err(ApiError::internal)?;
     let status = response.status();
-    let body = response.text().await.unwrap_or_default();
+    let body = response.text().await.map_err(|error| {
+        if error.is_timeout() {
+            ApiError::internal("upstream response body timed out")
+        } else {
+            ApiError::internal(error)
+        }
+    })?;
     if status == StatusCode::TOO_MANY_REQUESTS {
         let cooldown = parse_reset(&body).unwrap_or_else(|| Duration::minutes(5));
         let until = Utc::now() + cooldown;
@@ -638,6 +646,7 @@ async fn update_settings(
     if config.gateway_key.is_empty() {
         return Err(ApiError::bad_request("gateway key is required"));
     }
+    config.validate_timeouts().map_err(ApiError::bad_request)?;
     validate_upstream_url(&config.upstream_base_url)?;
     state.set_config(config).map_err(ApiError::internal)?;
     Ok(Json(status_from_state(&state)))

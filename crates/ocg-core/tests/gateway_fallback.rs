@@ -1,7 +1,8 @@
 use axum::Router;
+use axum::body::Body;
 use axum::extract::{OriginalUri, State};
 use axum::http::{HeaderMap, StatusCode};
-use axum::response::IntoResponse;
+use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use chrono::{Duration, Utc};
 use ocg_core::crypto::{KeyCipher, StaticKeyCipher};
@@ -10,10 +11,13 @@ use ocg_core::gateway;
 use ocg_core::models::Account;
 use ocg_core::state::{CoreStateInner, GatewayHandle};
 use std::collections::{HashMap, VecDeque};
+use std::convert::Infallible;
 use std::fs;
 use std::net::TcpListener as StdTcpListener;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration as StdDuration;
 
 #[derive(Clone)]
 struct MockReply {
@@ -38,6 +42,13 @@ struct MockState {
     calls: Arc<Mutex<Vec<MockCall>>>,
 }
 
+#[derive(Clone)]
+struct DelayedReply {
+    content_type: &'static str,
+    chunks: Vec<(StdDuration, &'static str)>,
+    calls: Arc<AtomicUsize>,
+}
+
 const LIMITED_BODY: &str = r#"{"type":"error","error":{"type":"GoUsageLimitError","message":"Weekly usage limit reached. Resets in 3 days."}}"#;
 const SUCCESS_BODY: &str = r#"{"id":"ok","object":"chat.completion","model":"deepseek-v4-flash","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":2,"prompt_tokens_details":{"cached_tokens":0}}}"#;
 const MESSAGES_SUCCESS_BODY: &str = r#"{"id":"msg-ok","type":"message","role":"assistant","model":"minimax-m2.7","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":2,"cache_read_input_tokens":0}}"#;
@@ -50,6 +61,16 @@ const MESSAGES_STREAM_BODY: &str = concat!(
     "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg-stream\",\"model\":\"minimax-m2.7\",\"usage\":{\"input_tokens\":6,\"cache_read_input_tokens\":4}}}\n\n",
     "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
     "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"ok\"}}\n\n",
+    "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+    "event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":2}}\n\n",
+    "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+);
+const MESSAGES_STREAM_HEAD: &str = concat!(
+    "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg-stream\",\"model\":\"minimax-m2.7\",\"usage\":{\"input_tokens\":6,\"cache_read_input_tokens\":4}}}\n\n",
+    "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+    "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"ok\"}}\n\n"
+);
+const MESSAGES_STREAM_TAIL: &str = concat!(
     "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
     "event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":2}}\n\n",
     "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
@@ -102,6 +123,50 @@ async fn start_mock_upstream(
         let _ = server.await;
     });
     (format!("http://{}", addr), calls, shutdown_tx)
+}
+
+async fn start_delayed_messages_upstream(
+    content_type: &'static str,
+    chunks: Vec<(StdDuration, &'static str)>,
+) -> (String, Arc<AtomicUsize>, tokio::sync::oneshot::Sender<()>) {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let app = Router::new()
+        .route("/v1/messages", post(delayed_reply))
+        .with_state(DelayedReply {
+            content_type,
+            chunks,
+            calls: calls.clone(),
+        });
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+    tokio::spawn(async move {
+        let server = axum::serve(listener, app).with_graceful_shutdown(async move {
+            let _ = shutdown_rx.await;
+        });
+        let _ = server.await;
+    });
+    (format!("http://{}", addr), calls, shutdown_tx)
+}
+
+async fn delayed_reply(State(state): State<DelayedReply>) -> Response {
+    state.calls.fetch_add(1, Ordering::Relaxed);
+    let stream =
+        futures_util::stream::unfold(VecDeque::from(state.chunks), |mut chunks| async move {
+            let (delay, chunk) = chunks.pop_front()?;
+            tokio::time::sleep(delay).await;
+            Some((
+                Ok::<_, Infallible>(bytes::Bytes::from_static(chunk.as_bytes())),
+                chunks,
+            ))
+        });
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", state.content_type)
+        .body(Body::from_stream(stream))
+        .unwrap()
 }
 
 async fn mock_chat(
@@ -498,6 +563,110 @@ async fn converts_streams_across_chat_messages_and_responses() {
         let _ = stop_mock.send(());
         let _ = fs::remove_dir_all(dir);
     }
+}
+
+#[tokio::test]
+async fn stream_can_outlive_non_stream_timeout() {
+    let (base_url, calls, stop_mock) = start_delayed_messages_upstream(
+        "text/event-stream",
+        vec![
+            (StdDuration::ZERO, MESSAGES_STREAM_HEAD),
+            (StdDuration::from_millis(1_200), MESSAGES_STREAM_TAIL),
+        ],
+    )
+    .await;
+    let (state, dir) = build_state(base_url, &["key-1"]);
+    let mut config = state.config();
+    config.non_stream_timeout_secs = 1;
+    config.stream_idle_timeout_secs = 2;
+    state.set_config(config).unwrap();
+    let (port, gateway_handle) = start_gateway(state.clone()).await;
+
+    let (status, body) = tokio::time::timeout(
+        StdDuration::from_secs(4),
+        protocol_stream_call(port, "/v1/messages", "minimax-m2.7"),
+    )
+    .await
+    .expect("stream should finish before the test watchdog");
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains("event: message_stop"), "{body}");
+    assert_eq!(calls.load(Ordering::Relaxed), 1);
+    let log = state.db.lock().list_forward_logs(1).unwrap().remove(0);
+    assert_eq!(log.status, "success");
+    assert_eq!((log.prompt_tokens, log.completion_tokens), (10, 2));
+
+    gateway::stop_gateway(gateway_handle);
+    let _ = stop_mock.send(());
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn stream_idle_timeout_emits_protocol_error_and_updates_log() {
+    let (base_url, calls, stop_mock) = start_delayed_messages_upstream(
+        "text/event-stream",
+        vec![
+            (StdDuration::ZERO, MESSAGES_STREAM_HEAD),
+            (StdDuration::from_millis(1_200), MESSAGES_STREAM_TAIL),
+        ],
+    )
+    .await;
+    let (state, dir) = build_state(base_url, &["key-1"]);
+    let mut config = state.config();
+    config.stream_idle_timeout_secs = 1;
+    state.set_config(config).unwrap();
+    let (port, gateway_handle) = start_gateway(state.clone()).await;
+
+    let (status, body) = tokio::time::timeout(
+        StdDuration::from_secs(4),
+        protocol_stream_call(port, "/v1/messages", "minimax-m2.7"),
+    )
+    .await
+    .expect("idle timeout should finish before the test watchdog");
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains("event: error"), "{body}");
+    assert_eq!(calls.load(Ordering::Relaxed), 1);
+    let log = state.db.lock().list_forward_logs(1).unwrap().remove(0);
+    assert_eq!(log.status, "error");
+    assert!(log.error_message.is_some());
+
+    gateway::stop_gateway(gateway_handle);
+    let _ = stop_mock.send(());
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn non_stream_body_timeout_is_retryable() {
+    let (base_url, calls, stop_mock) = start_delayed_messages_upstream(
+        "application/json",
+        vec![(StdDuration::from_millis(1_200), MESSAGES_SUCCESS_BODY)],
+    )
+    .await;
+    let (state, dir) = build_state(base_url, &["key-1"]);
+    let mut config = state.config();
+    config.non_stream_timeout_secs = 1;
+    state.set_config(config).unwrap();
+    let (port, gateway_handle) = start_gateway(state.clone()).await;
+
+    let (status, body) = tokio::time::timeout(
+        StdDuration::from_secs(5),
+        protocol_call(port, "/v1/messages", "minimax-m2.7"),
+    )
+    .await
+    .expect("non-stream timeout should finish before the test watchdog");
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
+    let message = body["error"]["message"].as_str().unwrap_or_default();
+    let message = message.to_ascii_lowercase();
+    assert!(
+        message.contains("timeout") || message.contains("timed out"),
+        "{body}"
+    );
+    assert_eq!(calls.load(Ordering::Relaxed), 2);
+    let log = state.db.lock().list_forward_logs(1).unwrap().remove(0);
+    assert_eq!(log.status, "error");
+
+    gateway::stop_gateway(gateway_handle);
+    let _ = stop_mock.send(());
+    let _ = fs::remove_dir_all(dir);
 }
 
 #[tokio::test]

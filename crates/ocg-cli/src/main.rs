@@ -412,8 +412,11 @@ async fn ping_one(
         Ok(k) => k,
         Err(e) => return (0, format!("decrypt failed: {}", e)),
     };
-    let base = state.config().upstream_base_url;
-    let url = format!("{}/v1/chat/completions", base.trim_end_matches('/'));
+    let (config, client) = state.upstream_context();
+    let url = format!(
+        "{}/v1/chat/completions",
+        config.upstream_base_url.trim_end_matches('/')
+    );
     let body = serde_json::json!({
         "model": model,
         "messages": [{"role": "user", "content": message}],
@@ -421,21 +424,37 @@ async fn ping_one(
         "stream": false,
     });
     let started = std::time::Instant::now();
-    let resp = state
-        .http_client
+    let resp = client
         .post(&url)
         .header("Authorization", format!("Bearer {}", key))
         .header("Content-Type", "application/json")
         .json(&body)
+        .timeout(std::time::Duration::from_secs(
+            config.non_stream_timeout_secs,
+        ))
         .send()
         .await;
     let elapsed = started.elapsed();
     match resp {
         Ok(r) => {
             let status = r.status().as_u16();
-            let text = r.text().await.unwrap_or_default();
-            let trimmed = text.chars().take(200).collect::<String>();
-            (status, format!("{}ms {}", elapsed.as_millis(), trimmed))
+            match r.text().await {
+                Ok(text) => {
+                    let trimmed = text.chars().take(200).collect::<String>();
+                    (status, format!("{}ms {}", elapsed.as_millis(), trimmed))
+                }
+                Err(error) => {
+                    let error = if error.is_timeout() {
+                        "response body timed out".to_string()
+                    } else {
+                        format!("response body failed: {error}")
+                    };
+                    (
+                        0,
+                        format!("{}ms {} after HTTP {}", elapsed.as_millis(), error, status),
+                    )
+                }
+            }
         }
         Err(e) => (
             0,

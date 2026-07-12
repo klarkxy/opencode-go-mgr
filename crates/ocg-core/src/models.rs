@@ -39,11 +39,15 @@ pub struct AccountUpdate {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct AppConfig {
     pub gateway_port: u16,
     pub gateway_key: String,
     pub upstream_base_url: String,
     pub auto_start: bool,
+    pub connect_timeout_secs: u64,
+    pub non_stream_timeout_secs: u64,
+    pub stream_idle_timeout_secs: u64,
 }
 
 impl Default for AppConfig {
@@ -53,7 +57,33 @@ impl Default for AppConfig {
             gateway_key: String::new(),
             upstream_base_url: "https://opencode.ai/zen/go".to_string(),
             auto_start: false,
+            connect_timeout_secs: 30,
+            non_stream_timeout_secs: 120,
+            stream_idle_timeout_secs: 300,
         }
+    }
+}
+
+impl AppConfig {
+    pub fn validate_timeouts(&self) -> Result<(), String> {
+        for (name, value, max) in [
+            ("connect_timeout_secs", self.connect_timeout_secs, 300),
+            (
+                "non_stream_timeout_secs",
+                self.non_stream_timeout_secs,
+                3600,
+            ),
+            (
+                "stream_idle_timeout_secs",
+                self.stream_idle_timeout_secs,
+                3600,
+            ),
+        ] {
+            if !(1..=max).contains(&value) {
+                return Err(format!("{name} must be between 1 and {max}"));
+            }
+        }
+        Ok(())
     }
 }
 
