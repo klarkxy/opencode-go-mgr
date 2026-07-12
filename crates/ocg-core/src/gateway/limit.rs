@@ -10,33 +10,36 @@ use chrono::Duration;
 /// 返回冷却时长；无法识别返回 `None`（调用方退默认值）。
 pub fn parse_reset(text: &str) -> Option<Duration> {
     let idx = text.find("Resets in")?;
-    let rest = text[idx + "Resets in".len()..].trim_start();
-    // 提取开头的数字
-    let digit_end = rest
-        .char_indices()
-        .take_while(|(_, c)| c.is_ascii_digit())
-        .last()
-        .map(|(i, c)| i + c.len_utf8())
-        .unwrap_or(0);
-    if digit_end == 0 {
-        return None;
+    let mut total = Duration::zero();
+    let mut pending = None;
+    let mut found = false;
+
+    for token in text[idx + "Resets in".len()..].split_whitespace() {
+        let digit_end = token
+            .find(|c: char| !c.is_ascii_digit())
+            .unwrap_or(token.len());
+        let (n, unit) = if digit_end > 0 {
+            (token[..digit_end].parse().ok(), &token[digit_end..])
+        } else {
+            (pending.take(), token)
+        };
+        let Some(n) = n else { continue };
+        let unit = unit.trim_matches(|c: char| !c.is_ascii_alphabetic());
+        let duration = match unit.to_ascii_lowercase().as_str() {
+            u if u.starts_with("min") => Duration::minutes(n),
+            u if u.starts_with("hr") || u.starts_with("hour") || u == "h" => Duration::hours(n),
+            u if u.starts_with("day") => Duration::days(n),
+            "" => {
+                pending = Some(n);
+                continue;
+            }
+            _ => continue,
+        };
+        total += duration;
+        found = true;
     }
-    let n: i64 = rest[..digit_end].parse().ok()?;
-    // 单位部分：跳过数字与单位之间的空白，截到第一个非字母为止
-    let unit = rest[digit_end..].trim_start();
-    let end = unit
-        .char_indices()
-        .take_while(|(_, c)| c.is_ascii_alphabetic())
-        .last()
-        .map(|(i, c)| i + c.len_utf8())
-        .unwrap_or(0);
-    let unit = unit[..end].to_lowercase();
-    match unit.as_str() {
-        u if u.starts_with("min") => Some(Duration::minutes(n)),
-        u if u.starts_with("hour") || u == "h" => Some(Duration::hours(n)),
-        u if u.starts_with("day") => Some(Duration::days(n)),
-        _ => None,
-    }
+
+    found.then_some(total)
 }
 
 #[cfg(test)]
@@ -56,6 +59,12 @@ mod tests {
         assert_eq!(
             parse_reset("5-hour usage limit reached. Resets in 13min."),
             Some(Duration::minutes(13))
+        );
+        assert_eq!(
+            parse_reset(
+                r#"{"type":"GoUsageLimitError","message":"Weekly usage limit reached. Resets in 21hr 10min."}"#
+            ),
+            Some(Duration::hours(21) + Duration::minutes(10))
         );
     }
 
