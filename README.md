@@ -4,20 +4,20 @@
   <img src="assets/logo/ocg_logo_final_transparent.png" alt="OCG Manager Logo" width="140">
 </p>
 
-OCG Manager is a local OpenCode-Go account manager with an OpenAI-compatible gateway. It stores your keys locally, serves a dashboard from the gateway, and keeps a Windows, macOS, or Linux tray app running in the background.
+OCG Manager is a local OpenCode-Go multi-account manager with an OpenAI-compatible gateway. It stores your keys locally, serves a dashboard from the gateway, and keeps a Windows, macOS, or Linux tray app running in the background.
 
 <p align="center">
   <img src="assets/opencode娘.png" alt="OpenCode-Go mascot" width="360">
 </p>
 
-## Start
+## Quick Start
 
 ```text
 Gateway: http://127.0.0.1:9042/v1
-Auth:    Authorization: Bearer <gateway-key>
+Auth:    Authorization: Bearer <key>
 ```
 
-The gateway accepts OpenAI Chat Completions, OpenAI Responses, and Anthropic Messages requests, then converts each request and response to the selected model's native OpenCode-Go protocol.
+The gateway accepts OpenAI Chat Completions, OpenAI Responses, and Anthropic Messages requests, then converts each request to the selected model's native OpenCode-Go protocol and converts each response back to the client's protocol.
 
 ```bash
 curl http://127.0.0.1:9042/v1/chat/completions \
@@ -25,6 +25,14 @@ curl http://127.0.0.1:9042/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{"model":"glm-5.2","messages":[{"role":"user","content":"hello"}],"stream":true}'
 ```
+
+## True and False Breakers
+
+The 5-hour, weekly, and monthly usage bars are local estimates. Reaching a locally calculated limit is a false circuit breaker: local accounting and upstream billing or reset boundaries may not match, so the gateway keeps sending requests with that account and does not write a cooldown. A full local bar is only a warning, not proof that the upstream account is blocked.
+
+A true circuit breaker starts only when the upstream returns HTTP 429. The gateway stores the upstream error, parses its reset phrase, writes `cooldown_until`, and switches to the next available account. Known 5-hour, weekly, and monthly limit messages use the reset duration reported by the upstream; an unrecognized 429 falls back to a five-minute cooldown. If every enabled account is cooling down, the gateway returns 429 with the soonest reset time.
+
+During a true circuit breaker, the dashboard forces the matching 5-hour, weekly, or monthly bar to 100% and marks it as an error even when the local estimate is lower. The account becomes eligible automatically after `cooldown_until`, or immediately after its cooldown is reset manually.
 
 ## Docs
 
@@ -35,28 +43,17 @@ curl http://127.0.0.1:9042/v1/chat/completions \
 
 ## Development
 
-Install dependencies once with `pnpm install`.
-
-Exit any running release tray app so the single-instance lock and port `9042` are free, then start the complete development stack:
+Install dependencies once with `pnpm install`. Exit any running release tray app so the single-instance lock and port `9042` are free, then:
 
 ```bash
 pnpm run dev
 ```
 
-Tauri starts Vite and opens `http://127.0.0.1:30001/dashboard/` after the Gateway is ready. Vue, CSS, and frontend TypeScript changes use Vite HMR; Rust changes use Cargo incremental compilation and restart the process. This is development reload, not runtime code replacement. Use `pnpm run build` only for final release validation.
-
-Useful checks:
-
-```bash
-pnpm run test
-pnpm run build:web
-pnpm run design:lint
-pnpm run build
-```
+Tauri starts Vite and opens `http://127.0.0.1:30001/dashboard/` once the Gateway is ready; Vue, CSS, and TypeScript changes use Vite HMR and Rust changes restart the process. See the [Maintainer guide](docs/MAINTAINER.md) for checks, builds, release validation, and platform coverage.
 
 ## Release artifacts
 
-`pnpm run build` builds the GUI and CLI for the current supported native platform, then atomically replaces `release/`. It does not cross-build all platforms from one machine.
+`pnpm run build` builds the GUI and CLI for the current supported native platform, then atomically replaces `release/` — no cross-building from one machine.
 
 | Platform | GUI | CLI |
 | --- | --- | --- |
@@ -64,9 +61,7 @@ pnpm run build
 | macOS 11+ Intel and Apple Silicon | `ocg-manager_<version>_macos-universal.dmg` | `ocg-manager-cli_<version>_macos-universal.tar.gz` |
 | Linux x64 | `ocg-manager_<version>_linux-x64.AppImage` and `.deb` | `ocg-manager-cli_<version>_linux-x64.tar.gz` |
 
-Every build also writes `SHA256SUMS`. A CLI archive contains the executable, `dist/`, and `LICENSE`; keep `dist/` beside the executable so `serve` can provide the dashboard.
-
-The Windows GUI is installer-only; no portable Windows GUI is published. The first release line is unsigned on Windows, ad-hoc signed on macOS, and checksum-verified on Linux. Windows SmartScreen may warn, and macOS may require approval in **Privacy & Security**. Windows and Linux ARM64, 32-bit x86, RPM, Snap, app stores, and automatic updates are not currently supported.
+A CLI archive needs `dist/` beside the executable so `serve` can provide the dashboard. For `SHA256SUMS`, signing and SmartScreen/Gatekeeper caveats, and the unsupported list (ARM64, 32-bit x86, RPM, Snap, app stores, auto-update), see the [Maintainer guide](docs/MAINTAINER.md).
 
 ## License
 

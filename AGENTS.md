@@ -13,7 +13,7 @@
 - 桌面端：Tauri v2 跨平台托盘应用，主窗口默认隐藏；托盘/单实例逻辑用系统浏览器打开 `http://127.0.0.1:<port>/dashboard/`，回环监听自动跳过登录。
 - Tauri commands 仍注册在 `src-tauri/src/commands/`，但不是当前 Vue dashboard 的主调用路径。
 - 每个节点都由自己的 dashboard 管理；项目不提供远端同步或 Admin API。
-- 非回环监听使用单管理员登录；Docker 可通过 `OCG_ADMIN_USERNAME` 和 `OCG_ADMIN_PASSWORD` 首次初始化，未提供时由首个注册者创建管理员。
+- 非回环监听使用单管理员登录；Docker 可通过 `OCG_ADMIN_USERNAME` 和 `OCG_ADMIN_PASSWORD` 首次初始化（两个必须同时设置，只设一个会启动报错），未提供时由首个注册者创建管理员。
 
 ## 关键文件
 
@@ -53,7 +53,7 @@ pnpm run build
 ## 测试策略
 
 - Rust 逻辑优先跑 `cargo test -p ocg-core`。
-- CLI 改动跑 `cargo test -p ocg-manager-cli`，必要时用临时 data dir 做真实 `key add/list/status`。
+- CLI 改动跑 `cargo test -p ocg-manager-cli`，必要时用临时 data dir 做真实 `key add/list`、`status`。
 - 前端改动跑 `pnpm run build:web`。
 - Rust 和前端回归跑 `pnpm run test`；GUI/打包改动跑当前平台的 `pnpm run build`。需要声明真实桌面可用时，要实际启动安装包、DMG 或 AppImage 并验证 dashboard/gateway 行为。
 
