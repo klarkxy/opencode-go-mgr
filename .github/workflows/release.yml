@@ -119,7 +119,7 @@ jobs:
           test -x "$cli"
           test -f "$package/dist/index.html"
           test -f "$package/LICENSE"
-          if [ "$RUNNER_OS" = macOS ]; then lipo -verify_arch x86_64 arm64 "$cli"; fi
+          if [ "$RUNNER_OS" = macOS ]; then archs=$(lipo -archs "$cli"); grep -qw x86_64 <<<"$archs"; grep -qw arm64 <<<"$archs"; fi
 
           data="$RUNNER_TEMP/cli-data"
           added=$("$cli" --data-dir="$data" key add ci-smoke sk-ci-smoke)
@@ -206,7 +206,9 @@ jobs:
           gui="$app/Contents/MacOS/ocg-manager"
           test -x "$gui"
           codesign --verify --deep --strict "$app"
-          lipo -verify_arch x86_64 arm64 "$gui"
+          archs=$(lipo -archs "$gui")
+          grep -qw x86_64 <<<"$archs"
+          grep -qw arm64 <<<"$archs"
 
           home="$RUNNER_TEMP/ocg-manager-home"
           mkdir "$home"
