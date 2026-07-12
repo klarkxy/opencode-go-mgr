@@ -227,7 +227,10 @@ async function loadGatewayLogs() {
   }
 }
 
+let forwardRequest = 0;
+
 async function loadForwardLogs() {
+  const request = ++forwardRequest;
   forwardLoading.value = true;
   try {
     const result = await tauriApi.getForwardLogs({
@@ -236,12 +239,13 @@ async function loadForwardLogs() {
       status: statusFilter.value,
       account_id: accountFilter.value,
     });
+    if (request !== forwardRequest) return;
     forwardLogs.value = result.items;
     forwardTotals.value = result.summary;
   } catch (e) {
-    message.error(`加载请求日志失败: ${e}`);
+    if (request === forwardRequest) message.error(`加载请求日志失败: ${e}`);
   } finally {
-    forwardLoading.value = false;
+    if (request === forwardRequest) forwardLoading.value = false;
   }
 }
 

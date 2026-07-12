@@ -632,8 +632,12 @@ async fn get_settings(State(state): State<CoreState>) -> Json<AppConfig> {
 
 async fn update_settings(
     State(state): State<CoreState>,
-    Json(config): Json<AppConfig>,
+    Json(mut config): Json<AppConfig>,
 ) -> Result<Json<GatewayStatus>, ApiError> {
+    config.gateway_key = config.gateway_key.trim().to_string();
+    if config.gateway_key.is_empty() {
+        return Err(ApiError::bad_request("gateway key is required"));
+    }
     validate_upstream_url(&config.upstream_base_url)?;
     state.set_config(config).map_err(ApiError::internal)?;
     Ok(Json(status_from_state(&state)))

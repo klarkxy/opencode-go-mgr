@@ -386,14 +386,19 @@ async function loadAccounts() {
   try {
     const loaded = await tauriApi.getAccounts();
     const nextDrafts: Record<string, AccountDraft> = {};
-    const nextUsage: Record<string, UsageWindow> = {};
     for (const account of loaded) {
       nextDrafts[account.id] = drafts.value[account.id] || draftFromAccount(account);
-      nextUsage[account.id] = await tauriApi.getAccountUsage(account.id);
     }
     accounts.value = loaded;
     drafts.value = nextDrafts;
-    usageMap.value = nextUsage;
+    const usage = await Promise.all(loaded.map(async (account) => {
+      try {
+        return [account.id, await tauriApi.getAccountUsage(account.id)] as const;
+      } catch {
+        return [account.id, blankUsage(account.id)] as const;
+      }
+    }));
+    usageMap.value = Object.fromEntries(usage);
   } catch (e) {
     message.error(`加载账号失败: ${e}`);
   }

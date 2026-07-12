@@ -238,6 +238,7 @@ async fn protocol_call(port: u16, path: &str, model: &str) -> (StatusCode, serde
         "/v1/responses" => serde_json::json!({
             "model": model,
             "input": "ping",
+            "store": false,
             "max_output_tokens": 3,
             "stream": false
         }),
@@ -277,6 +278,7 @@ async fn protocol_stream_call(port: u16, path: &str, model: &str) -> (StatusCode
         "/v1/responses" => serde_json::json!({
             "model": model,
             "input": "ping",
+            "store": false,
             "max_output_tokens": 3,
             "stream": true
         }),

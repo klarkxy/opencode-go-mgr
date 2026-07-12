@@ -403,7 +403,17 @@ async function submitAuth() {
   } catch (e) {
     authPassword.value = "";
     authPasswordConfirm.value = "";
-    authError.value = e instanceof Error ? e.message : String(e);
+    const error = e instanceof Error ? e.message : String(e);
+    if (mode === "register") {
+      const status = await tauriApi.getAuthStatus().catch(() => null);
+      if (status?.initialized) {
+        localMode.value = status.local;
+        authError.value = error;
+        authState.value = status.authenticated ? "ready" : "login";
+        return;
+      }
+    }
+    authError.value = error;
     authState.value = mode;
   }
 }

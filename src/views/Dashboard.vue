@@ -283,24 +283,24 @@ async function regenerateKey() {
 }
 
 onMounted(async () => {
-  try {
-    const [loadedAccounts, settings, loadedSummary, costs] = await Promise.all([
+  const [loadedAccounts, settings, loadedSummary, costs] = await Promise.allSettled([
       tauriApi.getAccounts(),
       tauriApi.getSettings(),
       tauriApi.getDashboardSummary(),
       tauriApi.getDailyCostByModel(30),
-    ]);
-    accounts.value = loadedAccounts;
-    serviceConfig.value = settings;
-    summary.value = loadedSummary;
-    dailyCosts.value = costs;
-    const usage = await Promise.all(loadedAccounts.map(async (account) => [account.id, await tauriApi.getAccountUsage(account.id)] as const));
-    usageMap.value = Object.fromEntries(usage);
-  } catch (e) {
-    message.error(`加载仪表盘失败: ${e}`);
-  } finally {
-    loading.value = false;
+  ]);
+  if (loadedAccounts.status === "fulfilled") {
+    accounts.value = loadedAccounts.value;
+    const usage = await Promise.allSettled(loadedAccounts.value.map(async (account) => [account.id, await tauriApi.getAccountUsage(account.id)] as const));
+    usageMap.value = Object.fromEntries(usage.flatMap((result) => result.status === "fulfilled" ? [result.value] : []));
   }
+  if (settings.status === "fulfilled") serviceConfig.value = settings.value;
+  if (loadedSummary.status === "fulfilled") summary.value = loadedSummary.value;
+  if (costs.status === "fulfilled") dailyCosts.value = costs.value;
+  if ([loadedAccounts, settings, loadedSummary, costs].some((result) => result.status === "rejected")) {
+    message.error("部分仪表盘数据加载失败");
+  }
+  loading.value = false;
 });
 
 onUnmounted(() => clearTimeout(copyTimer));

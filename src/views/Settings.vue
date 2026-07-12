@@ -65,7 +65,7 @@
           </div>
         </n-form-item>
       </n-form>
-      <n-button type="primary" :loading="saving" @click="saveSettings">保存设置</n-button>
+      <n-button type="primary" :loading="saving" :disabled="!loaded" @click="saveSettings">保存设置</n-button>
     </section>
 
     <section class="settings-card appearance-card" aria-labelledby="appearance-title">
@@ -140,6 +140,7 @@ const message = useMessage();
 const saving = ref(false);
 const regenerating = ref(false);
 const keyCopied = ref(false);
+const loaded = ref(false);
 let copyTimer: ReturnType<typeof setTimeout> | undefined;
 
 // ponytail: keep this pre-load fallback in sync with AppConfig::default().
@@ -160,12 +161,14 @@ const themeLabel = computed(() => {
 async function loadSettings() {
   try {
     config.value = await tauriApi.getSettings();
+    loaded.value = true;
   } catch (e) {
     message.error(`加载设置失败: ${e}`);
   }
 }
 
 async function saveSettings() {
+  if (!loaded.value) return;
   saving.value = true;
   try {
     await tauriApi.updateSettings(config.value);

@@ -3,6 +3,8 @@ use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use bytes::Bytes;
 use serde_json::{Map, Value, json};
 use std::fmt;
+use std::time::{SystemTime, UNIX_EPOCH};
+use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ApiFormat {
@@ -30,6 +32,9 @@ pub struct RequestPlan {
     pub body: Bytes,
     pub(crate) custom_tools: Vec<String>,
     pub(crate) namespace_tools: Vec<NamespaceToolMapping>,
+    pub(crate) response_parallel_tool_calls: bool,
+    pub(crate) response_tool_choice: Value,
+    pub(crate) response_tools: Vec<Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -113,6 +118,7 @@ pub fn prepare_request(client: ApiFormat, body: Bytes) -> Result<RequestPlan, Pr
             "unknown model `{model}` cannot be routed from the Responses endpoint"
         )));
     }
+    validate_request_features(client, upstream, &parsed)?;
     let stream = parsed
         .get("stream")
         .and_then(Value::as_bool)
@@ -122,6 +128,15 @@ pub fn prepare_request(client: ApiFormat, body: Bytes) -> Result<RequestPlan, Pr
     } else {
         ResponsesToolContext::default()
     };
+    let response_parallel_tool_calls = parsed
+        .get("parallel_tool_calls")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    let response_tool_choice = parsed
+        .get("tool_choice")
+        .cloned()
+        .unwrap_or_else(|| json!("auto"));
+    let response_tools = array(&parsed, "tools").to_vec();
     let converted = convert_request(client, upstream, parsed, &tool_context.namespace_tools)?;
     let body = serde_json::to_vec(&converted)
         .map(Bytes::from)
@@ -134,17 +149,115 @@ pub fn prepare_request(client: ApiFormat, body: Bytes) -> Result<RequestPlan, Pr
         body,
         custom_tools: tool_context.custom_tools,
         namespace_tools: tool_context.namespace_tools,
+        response_parallel_tool_calls,
+        response_tool_choice,
+        response_tools,
     })
 }
 
+fn validate_request_features(
+    client: ApiFormat,
+    upstream: ApiFormat,
+    body: &Value,
+) -> Result<(), ProtocolError> {
+    if client == ApiFormat::Responses {
+        for field in ["previous_response_id", "conversation"] {
+            if body.get(field).is_some_and(|value| !value.is_null()) {
+                return Err(ProtocolError::new(format!(
+                    "Responses {field} is not supported by this stateless gateway"
+                )));
+            }
+        }
+        if body.get("store") != Some(&Value::Bool(false)) {
+            return Err(ProtocolError::new(
+                "this stateless gateway requires Responses store=false",
+            ));
+        }
+        match body.get("background") {
+            None | Some(Value::Null | Value::Bool(false)) => {}
+            Some(Value::Bool(true)) => {
+                return Err(ProtocolError::new(
+                    "Responses background=true is not supported by this stateless gateway",
+                ));
+            }
+            Some(_) => {
+                return Err(ProtocolError::new("Responses background must be a boolean"));
+            }
+        }
+        if contains_input_image_file_id(body.get("input").unwrap_or(&Value::Null)) {
+            return Err(ProtocolError::new(
+                "Responses input_image.file_id is not supported; use image_url",
+            ));
+        }
+    }
+
+    if client == upstream {
+        return Ok(());
+    }
+    let unsupported_format = match client {
+        ApiFormat::Responses => unsupported_output_format(body.pointer("/text/format")),
+        ApiFormat::ChatCompletions => unsupported_output_format(body.get("response_format")),
+        ApiFormat::Messages => unsupported_output_format(body.pointer("/output_config/format")),
+    };
+    if unsupported_format {
+        let field = match client {
+            ApiFormat::Responses => "Responses text.format",
+            ApiFormat::ChatCompletions => "Chat Completions response_format",
+            ApiFormat::Messages => "Messages output_config.format",
+        };
+        return Err(ProtocolError::new(format!(
+            "{field} cannot be preserved by protocol conversion"
+        )));
+    }
+    if client == ApiFormat::Responses && array(body, "tools").iter().any(has_custom_tool_format) {
+        return Err(ProtocolError::new(
+            "Responses custom tool grammar format cannot be preserved by protocol conversion",
+        ));
+    }
+    Ok(())
+}
+
+fn unsupported_output_format(format: Option<&Value>) -> bool {
+    match format {
+        None | Some(Value::Null) => false,
+        Some(format) => format.get("type").and_then(Value::as_str) != Some("text"),
+    }
+}
+
+fn has_custom_tool_format(tool: &Value) -> bool {
+    match tool.get("type").and_then(Value::as_str) {
+        Some("custom") => unsupported_output_format(tool.get("format")),
+        Some("namespace") => array(tool, "tools").iter().any(has_custom_tool_format),
+        _ => false,
+    }
+}
+
+fn contains_input_image_file_id(value: &Value) -> bool {
+    match value {
+        Value::Array(values) => values.iter().any(contains_input_image_file_id),
+        Value::Object(object) => {
+            (object.get("type").and_then(Value::as_str) == Some("input_image")
+                && object.get("file_id").is_some_and(|value| !value.is_null()))
+                || object.values().any(contains_input_image_file_id)
+        }
+        _ => false,
+    }
+}
+
 pub fn transform_response(plan: &RequestPlan, body: &Value) -> Result<Value, ProtocolError> {
-    transform_between_with_tools(
+    let mut transformed = transform_between_with_tools(
         plan.upstream,
         plan.client,
         body,
         &plan.custom_tools,
         &plan.namespace_tools,
-    )
+    )?;
+    if plan.client == ApiFormat::Responses && plan.upstream != ApiFormat::Responses {
+        transformed["parallel_tool_calls"] = json!(plan.response_parallel_tool_calls);
+        transformed["tool_choice"] = plan.response_tool_choice.clone();
+        transformed["tools"] = Value::Array(plan.response_tools.clone());
+    }
+    Ok(transformed)
 }
 
 pub fn transform_between(
@@ -1242,15 +1355,34 @@ fn messages_response_to_responses(
         Some("refusal") => ("incomplete", json!({"reason":"content_filter"})),
         _ => ("completed", Value::Null),
     };
+    let created_at = unix_seconds();
     Ok(json!({
-        "id": body.get("id").cloned().unwrap_or_else(|| json!("")),
+        "id": responses_id(response_id),
         "object": "response",
-        "created_at": 0,
+        "created_at": created_at,
         "status": status,
+        "background": false,
+        "completed_at": if status == "completed" { json!(created_at) } else { Value::Null },
+        "error": null,
         "incomplete_details": incomplete_details,
+        "instructions": null,
+        "max_output_tokens": null,
+        "max_tool_calls": null,
         "model": body.get("model").cloned().unwrap_or_else(|| json!("")),
         "output": output,
-        "usage": anthropic_usage_to_responses(body.get("usage"))
+        "parallel_tool_calls": true,
+        "previous_response_id": null,
+        "reasoning": { "effort": null, "summary": null },
+        "store": false,
+        "temperature": null,
+        "text": { "format": { "type": "text" } },
+        "tool_choice": "auto",
+        "tools": [],
+        "top_p": null,
+        "truncation": "disabled",
+        "usage": anthropic_usage_to_responses(body.get("usage")),
+        "user": null,
+        "metadata": {}
     }))
 }
 
@@ -1498,6 +1630,22 @@ fn responses_image_url(part: &Value) -> Option<String> {
         .as_str()
         .map(str::to_string)
         .or_else(|| image.get("url").and_then(Value::as_str).map(str::to_string))
+}
+
+pub(crate) fn responses_id(id: &str) -> String {
+    if id.starts_with("resp_") {
+        id.to_string()
+    } else if id.is_empty() {
+        format!("resp_{}", Uuid::new_v4().simple())
+    } else {
+        format!("resp_{id}")
+    }
+}
+
+pub(crate) fn unix_seconds() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_secs())
 }
 
 fn copy(source: &Value, target: &mut Map<String, Value>, from: &str, to: &str) {
@@ -2028,6 +2176,9 @@ mod tests {
             body: Bytes::new(),
             custom_tools: Vec::new(),
             namespace_tools: Vec::new(),
+            response_parallel_tool_calls: true,
+            response_tool_choice: json!("auto"),
+            response_tools: Vec::new(),
         }
     }
 
@@ -2077,6 +2228,7 @@ mod tests {
             bytes(json!({
                 "model":"deepseek-v4-flash",
                 "input":"hello",
+                "store":false,
                 "reasoning":{"effort":"none"}
             })),
         )
@@ -2084,6 +2236,107 @@ mod tests {
         let body: Value = serde_json::from_slice(&plan.body).unwrap();
         assert_eq!(body["thinking"]["type"], "disabled");
         assert!(body.get("reasoning_effort").is_none());
+    }
+
+    #[test]
+    fn responses_requires_explicit_store_false_and_rejects_stateful_async_fields() {
+        for store in [None, Some(Value::Null), Some(json!(true))] {
+            let mut request = json!({"model":"minimax-m2.7","input":"hi"});
+            if let Some(store) = store {
+                request["store"] = store;
+            }
+            let error = prepare_request(ApiFormat::Responses, bytes(request))
+                .expect_err("store must be explicitly false");
+            assert!(error.message.contains("requires Responses store=false"));
+        }
+
+        for (field, value) in [
+            ("previous_response_id", json!("resp_previous")),
+            ("conversation", json!("conv_1")),
+            ("background", json!(true)),
+        ] {
+            let mut request = json!({"model":"minimax-m2.7","input":"hi","store":false});
+            request[field] = value;
+            let error = prepare_request(ApiFormat::Responses, bytes(request))
+                .expect_err("unsupported Responses state must fail");
+            assert_eq!(error.status, StatusCode::BAD_REQUEST);
+            assert!(error.message.contains(field), "{}", error.message);
+        }
+
+        prepare_request(
+            ApiFormat::Responses,
+            bytes(json!({
+                "model":"minimax-m2.7","input":"hi","store":false,"background":false
+            })),
+        )
+        .expect("explicit stateless flags are supported");
+    }
+
+    #[test]
+    fn cross_protocol_structured_formats_are_rejected() {
+        let cases = [
+            (
+                ApiFormat::Responses,
+                json!({
+                    "model":"minimax-m2.7","input":"hi","store":false,
+                    "text":{"format":{"type":"json_schema","name":"answer","schema":{"type":"object"}}}
+                }),
+                "text.format",
+            ),
+            (
+                ApiFormat::ChatCompletions,
+                json!({
+                    "model":"minimax-m2.7","messages":[{"role":"user","content":"hi"}],
+                    "response_format":{"type":"json_schema","json_schema":{"name":"answer","schema":{"type":"object"}}}
+                }),
+                "response_format",
+            ),
+            (
+                ApiFormat::Messages,
+                json!({
+                    "model":"deepseek-v4-flash","messages":[{"role":"user","content":"hi"}],
+                    "output_config":{"format":{"type":"json_schema","schema":{"type":"object"}}}
+                }),
+                "output_config.format",
+            ),
+            (
+                ApiFormat::Responses,
+                json!({
+                    "model":"minimax-m2.7","input":"hi","store":false,
+                    "tools":[{"type":"custom","name":"patch","format":{"type":"grammar","syntax":"lark","definition":"start: /.+/"}}]
+                }),
+                "grammar format",
+            ),
+        ];
+        for (format, request, field) in cases {
+            let error = prepare_request(format, bytes(request))
+                .expect_err("structured conversion must not silently downgrade");
+            assert!(error.message.contains(field), "{}", error.message);
+        }
+
+        prepare_request(
+            ApiFormat::Responses,
+            bytes(json!({
+                "model":"minimax-m2.7","input":"hi","store":false,
+                "text":{"format":{"type":"text"}}
+            })),
+        )
+        .expect("explicit plain text remains convertible");
+    }
+
+    #[test]
+    fn responses_input_image_file_id_is_rejected() {
+        let error = prepare_request(
+            ApiFormat::Responses,
+            bytes(json!({
+                "model":"minimax-m2.7",
+                "store":false,
+                "input":[{"role":"user","content":[{"type":"input_image","file_id":"file_1"}]}]
+            })),
+        )
+        .expect_err("file-backed images require Files API support");
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert!(error.message.contains("input_image.file_id"));
     }
 
     #[test]
@@ -2103,6 +2356,7 @@ mod tests {
                 ApiFormat::Responses,
                 json!({
                     "model":"deepseek-v4-flash",
+                    "store":false,
                     "input":[
                         {"type":"function_call","call_id":"c1","name":"f","arguments":"{}"},
                         {"type":"function_call_output","call_id":"c1","output":"ok"}
@@ -2167,6 +2421,7 @@ mod tests {
     fn responses_request_routes_known_model_and_unknown_is_rejected() {
         let request = json!({
             "model":"deepseek-v4-pro",
+            "store":false,
             "instructions":"system",
             "input":[
                 {"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]},
@@ -2188,7 +2443,7 @@ mod tests {
 
         let error = prepare_request(
             ApiFormat::Responses,
-            bytes(json!({"model":"unknown","input":"hi"})),
+            bytes(json!({"model":"unknown","input":"hi","store":false})),
         )
         .expect_err("unknown Responses model must not guess a protocol");
         assert_eq!(error.status, StatusCode::BAD_REQUEST);
@@ -2243,6 +2498,7 @@ mod tests {
             ApiFormat::Responses,
             bytes(json!({
                 "model":"minimax-m2.7",
+                "store":false,
                 "instructions":"instructions",
                 "input":[
                     {"type":"message","role":"developer","content":[{"type":"input_text","text":"dev"}]},
@@ -2371,6 +2627,7 @@ mod tests {
         let output = converted["output"].as_array().unwrap();
         let request = json!({
             "model":"minimax-m2.7",
+            "store":false,
             "max_output_tokens":4096,
             "input":[
                 {"type":"message","role":"user","content":[{"type":"input_text","text":"start"}]},
@@ -2462,6 +2719,16 @@ mod tests {
             "max_output_tokens"
         );
         assert_eq!(converted["output"][0]["content"][0]["text"], "ok");
+        assert_eq!(converted["id"], "resp_c");
+        assert!(
+            converted["created_at"]
+                .as_u64()
+                .is_some_and(|value| value > 0)
+        );
+        for field in ["parallel_tool_calls", "tool_choice", "tools"] {
+            assert!(converted.get(field).is_some(), "missing {field}");
+        }
+        assert_eq!(converted["store"], false);
     }
 
     #[test]
@@ -2497,7 +2764,7 @@ mod tests {
         ]);
         let chat = prepare_request(
             ApiFormat::Responses,
-            bytes(json!({"model":"deepseek-v4-flash","input":input})),
+            bytes(json!({"model":"deepseek-v4-flash","input":input,"store":false})),
         )
         .expect("Chat-native history converts");
         let chat_body: Value = serde_json::from_slice(&chat.body).unwrap();
@@ -2505,7 +2772,7 @@ mod tests {
 
         let messages = prepare_request(
             ApiFormat::Responses,
-            bytes(json!({"model":"minimax-m2.7","input":input})),
+            bytes(json!({"model":"minimax-m2.7","input":input,"store":false})),
         )
         .expect("Messages-native history ignores Chat opaque reasoning");
         let messages_body: Value = serde_json::from_slice(&messages.body).unwrap();
@@ -2519,9 +2786,10 @@ mod tests {
     }
 
     #[test]
-    fn responses_custom_tool_and_structured_output_convert_both_ways() {
+    fn responses_custom_tool_converts_both_ways() {
         let request = json!({
             "model":"minimax-m2.7",
+            "store":false,
             "input":[
                 {"type":"message","role":"user","content":[{"type":"input_text","text":"edit"}]},
                 {"type":"custom_tool_call","call_id":"c1","name":"apply_patch","input":"*** Begin Patch"},
@@ -2530,14 +2798,15 @@ mod tests {
                     {"type":"input_image","image_url":"data:image/png;base64,abc"}
                 ]}
             ],
-            "tools":[{"type":"custom","name":"apply_patch","description":"patch","format":{"type":"grammar","syntax":"lark","definition":"start: /.+/"}}],
-            "tool_choice":"auto",
+            "tools":[{"type":"custom","name":"apply_patch","description":"patch"}],
+            "tool_choice":"required",
             "parallel_tool_calls":false
         });
         let plan = prepare_request(ApiFormat::Responses, bytes(request)).expect("custom converts");
         assert_eq!(plan.custom_tools, vec!["apply_patch"]);
         let body: Value = serde_json::from_slice(&plan.body).unwrap();
         assert_eq!(body["tools"][0]["input_schema"]["required"][0], "input");
+        assert_eq!(body["tool_choice"]["type"], "any");
         assert_eq!(body["tool_choice"]["disable_parallel_tool_use"], true);
         assert_eq!(
             body["messages"][1]["content"][0]["input"]["input"],
@@ -2563,12 +2832,15 @@ mod tests {
         .expect("custom response converts");
         assert_eq!(converted["output"][0]["type"], "custom_tool_call");
         assert_eq!(converted["output"][0]["input"], "patch text");
+        assert_eq!(converted["parallel_tool_calls"], false);
+        assert_eq!(converted["tool_choice"], "required");
+        assert_eq!(converted["tools"][0]["name"], "apply_patch");
     }
 
     #[test]
     fn responses_thinking_is_bounded_and_forced_tools_disable_it() {
         let base = json!({
-            "model":"minimax-m2.7","input":"hi","max_output_tokens":8192,
+            "model":"minimax-m2.7","input":"hi","store":false,"max_output_tokens":8192,
             "temperature":0.5,"top_p":0.9,
             "tools":[{"type":"function","name":"f","parameters":{"type":"object"}}],
             "tool_choice":"auto","parallel_tool_calls":false,
@@ -2619,6 +2891,7 @@ mod tests {
     fn responses_namespace_tools_flatten_history_and_restore_response_names() {
         let request = json!({
             "model":"minimax-m2.7",
+            "store":false,
             "input":[
                 {"type":"message","role":"user","content":[{"type":"input_text","text":"delegate"}]},
                 {"type":"function_call","call_id":"c1","namespace":"multi_agent_v1","name":"spawn_agent","arguments":"{\"task\":\"x\"}"},
@@ -2674,6 +2947,7 @@ mod tests {
     fn responses_hosted_tools_and_history_are_ignored_unless_forced() {
         let request = json!({
             "model":"minimax-m2.7",
+            "store":false,
             "input":[
                 {"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]},
                 {"type":"tool_search_call","call_id":"ts1","execution":"client","arguments":{}},
@@ -2701,7 +2975,7 @@ mod tests {
             json!("required"),
         ] {
             let request = json!({
-                "model":"minimax-m2.7","input":"hi",
+                "model":"minimax-m2.7","input":"hi","store":false,
                 "tools":[{"type":"web_search"}],
                 "tool_choice":choice
             });
@@ -2715,6 +2989,7 @@ mod tests {
             ApiFormat::Responses,
             bytes(json!({
                 "model":"minimax-m2.7",
+                "store":false,
                 "input":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"continued"}]}]
             })),
         )
@@ -2726,7 +3001,7 @@ mod tests {
         assert!(
             prepare_request(
                 ApiFormat::Responses,
-                bytes(json!({"model":"minimax-m2.7","input":[]})),
+                bytes(json!({"model":"minimax-m2.7","input":[],"store":false})),
             )
             .is_err()
         );

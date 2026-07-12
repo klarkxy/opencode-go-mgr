@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { isUsageLimitReached, usageProgressStatus } from "./accounts-usage.ts";
 import type { UsageKey } from "./accounts-usage.ts";
@@ -54,4 +55,12 @@ test("shows local estimated saturation as a warning, not a real breaker", () => 
     ),
     "error",
   );
+});
+
+test("accounts render before per-account usage and tolerate usage failures", async () => {
+  const source = await readFile(new URL("./Accounts.vue", import.meta.url), "utf8");
+  const load = source.slice(source.indexOf("async function loadAccounts"), source.indexOf("async function createAccount"));
+
+  assert.ok(load.indexOf("accounts.value = loaded") < load.indexOf("getAccountUsage"));
+  assert.match(load, /catch \{[\s\S]*blankUsage\(account\.id\)/);
 });

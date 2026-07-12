@@ -83,6 +83,9 @@ Each node manages its own accounts through its own dashboard. OCG Manager does n
 
 - `/embeddings` is not implemented.
 - Gemini protocol conversion is not implemented.
+- Responses is stateless: requests must set `store: false`. `previous_response_id`, `conversation`, `store: true`, and `background: true` return 400 instead of being silently ignored.
+- Responses image URLs and data URLs are supported; `input_image.file_id` returns 400 because the gateway has no Files API.
+- Structured output and custom-tool grammar formats return 400 when cross-protocol conversion cannot preserve their constraints.
 - Responses hosted tools such as `web_search`, `web_search_preview`, and `tool_search` cannot run on OpenCode-Go. Their declarations are ignored in automatic tool mode; explicitly forcing one returns a 400 error. Function, custom, and namespace tools are converted normally.
 - Streaming cost is exact only when upstream emits usage chunks; otherwise logs end as `success_no_usage`.
 - The current HTTP dashboard does not expose the older isolated WebView browser command.

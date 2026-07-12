@@ -162,6 +162,45 @@ async fn loopback_dashboard_skips_login() {
 }
 
 #[tokio::test]
+async fn loopback_settings_trim_and_require_gateway_key() {
+    let state = state("settings-key");
+    let handle = gateway::start_gateway_on(state.clone(), SocketAddr::from(([127, 0, 0, 1], 0)))
+        .await
+        .unwrap();
+    let url = format!("http://127.0.0.1:{}/dashboard/api/settings", handle.port);
+    let client = reqwest::Client::new();
+
+    let mut config = state.config();
+    config.gateway_key = "  trimmed-key  ".into();
+    assert_eq!(
+        client
+            .post(&url)
+            .json(&config)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK
+    );
+    assert_eq!(state.config().gateway_key, "trimmed-key");
+
+    config.gateway_key = "   ".into();
+    assert_eq!(
+        client
+            .post(&url)
+            .json(&config)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(state.config().gateway_key, "trimmed-key");
+
+    gateway::stop_gateway(handle);
+}
+
+#[tokio::test]
 async fn loopback_forward_logs_apply_filters_before_pagination() {
     let state = state("forward-logs");
     for (account_id, prompt_tokens) in [("selected", 10), ("other", 100)] {

@@ -1,9 +1,12 @@
 .git
 .github
 .learnings
+.codegraph
 node_modules
+.pnpm-store
 target
 dist
 release
 *.log
 .env*
+ocg-key.local.txt

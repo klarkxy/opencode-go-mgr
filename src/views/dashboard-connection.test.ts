@@ -25,3 +25,14 @@ test("dashboard keeps the connection center first and protects key regeneration"
   assert.match(template, /aria-label="刷新 Key"/);
   assert.doesNotMatch(template, /Gateway Key/);
 });
+
+test("dashboard and settings keep partial data safe", async () => {
+  const dashboard = await readFile(new URL("./Dashboard.vue", import.meta.url), "utf8");
+  const settings = await readFile(new URL("./Settings.vue", import.meta.url), "utf8");
+  const app = await readFile(new URL("../App.vue", import.meta.url), "utf8");
+
+  assert.match(dashboard, /Promise\.allSettled/);
+  assert.match(settings, /:disabled="!loaded"/);
+  assert.match(settings, /if \(!loaded\.value\) return/);
+  assert.match(app, /mode === "register"[\s\S]*getAuthStatus\(\)[\s\S]*status\?\.initialized/);
+});

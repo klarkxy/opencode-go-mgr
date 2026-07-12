@@ -17,8 +17,10 @@
       "icons/icon.ico",
       "icons/icon.icns"
     ],
+    "licenseFile": "../LICENSE",
     "resources": {
-      "../dist": "dist"
+      "../dist": "dist",
+      "../LICENSE": "LICENSE"
     },
     "macOS": {
       "minimumSystemVersion": "11.0",

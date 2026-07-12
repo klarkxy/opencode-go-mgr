@@ -56,4 +56,6 @@ test("logs view uses remote totals, refresh controls, loading, and a useful empt
   assert.match(template, /:loading="gatewayLoading"/);
   assert.match(template, /:loading="forwardLoading"/);
   assert.doesNotMatch(source, /getForwardLogs\(200\)|filteredForwardLogs/);
+  assert.match(source, /const request = \+\+forwardRequest/);
+  assert.match(source, /request !== forwardRequest/);
 });

@@ -1,11 +1,10 @@
 use super::protocol::{
     ApiFormat, NamespaceToolMapping, ProtocolError, RequestPlan, encode_anthropic_thinking_block,
-    encode_chat_reasoning,
+    encode_chat_reasoning, responses_id, unix_seconds,
 };
 use bytes::{Bytes, BytesMut};
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, BTreeSet};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 const MAX_PENDING_SSE_BYTES: usize = 8 * 1024 * 1024;
 
@@ -15,6 +14,9 @@ pub(crate) struct StreamConverter {
     model: String,
     custom_tools: BTreeSet<String>,
     namespace_tools: BTreeMap<String, NamespaceToolMapping>,
+    response_parallel_tool_calls: bool,
+    response_tool_choice: Value,
+    response_tools: Vec<Value>,
     pending: BytesMut,
     input: InputState,
     output: OutputState,
@@ -44,6 +46,7 @@ struct OutputState {
     terminal: bool,
     id: String,
     model: String,
+    created_at: u64,
     usage: Usage,
     stop_reason: Option<String>,
     finish_emitted: bool,
@@ -89,6 +92,7 @@ struct OutputBlock {
     content: String,
     tool_index: Option<u64>,
     output_index: Option<u64>,
+    custom_input_emitted: usize,
     closed: bool,
 }
 
@@ -145,6 +149,9 @@ impl StreamConverter {
                 .cloned()
                 .map(|mapping| (mapping.flattened.clone(), mapping))
                 .collect(),
+            response_parallel_tool_calls: plan.response_parallel_tool_calls,
+            response_tool_choice: plan.response_tool_choice.clone(),
+            response_tools: plan.response_tools.clone(),
             pending: BytesMut::new(),
             input: InputState::default(),
             output: OutputState::default(),
@@ -970,6 +977,7 @@ impl StreamConverter {
                         content: String::new(),
                         tool_index,
                         output_index: None,
+                        custom_input_emitted: 0,
                         closed: false,
                     },
                 );
@@ -1072,6 +1080,7 @@ impl StreamConverter {
             PivotEvent::Start { id, model, usage } => {
                 self.output.id = responses_id(&id);
                 self.output.model = model;
+                self.output.created_at = unix_seconds();
                 self.output.usage.merge(usage);
                 let response = self.response_object("in_progress", Value::Null, Vec::new());
                 vec![self.responses_event("response.created", json!({"response":response}))]
@@ -1122,6 +1131,7 @@ impl StreamConverter {
                         content: String::new(),
                         tool_index: None,
                         output_index: Some(output_index),
+                        custom_input_emitted: 0,
                         closed: false,
                     },
                 );
@@ -1160,7 +1170,21 @@ impl StreamConverter {
                     &block.kind,
                     BlockKind::Tool { name, .. } if self.custom_tools.contains(name)
                 ) {
-                    return Vec::new();
+                    let Some(input) = custom_tool_input_prefix(&block.content) else {
+                        return Vec::new();
+                    };
+                    let Some(delta) = input.get(block.custom_input_emitted..) else {
+                        return Vec::new();
+                    };
+                    let delta = delta.to_string();
+                    block.custom_input_emitted = input.len();
+                    if delta.is_empty() {
+                        return Vec::new();
+                    }
+                    return vec![self.responses_event(
+                        "response.custom_tool_call_input.delta",
+                        json!({"item_id":format!("ctc_{output_index}"),"output_index":output_index,"delta":delta}),
+                    )];
                 }
                 vec![self.responses_event(
                     "response.function_call_arguments.delta",
@@ -1349,31 +1373,30 @@ impl StreamConverter {
         incomplete_details: Value,
         output: Vec<Value>,
     ) -> Value {
+        let created_at = if self.output.created_at == 0 {
+            unix_seconds()
+        } else {
+            self.output.created_at
+        };
         json!({
             "id":if self.output.id.is_empty() { "resp_ocg" } else { &self.output.id },
-            "object":"response","created_at":unix_seconds(),"status":status,"error":null,
+            "object":"response","created_at":created_at,"status":status,"background":false,
+            "completed_at":if status == "completed" { json!(unix_seconds()) } else { Value::Null },"error":null,
             "incomplete_details":incomplete_details,"instructions":null,"max_output_tokens":null,
+            "max_tool_calls":null,
             "model":if self.output.model.is_empty() { &self.model } else { &self.output.model },
-            "output":output,"parallel_tool_calls":true,"previous_response_id":null,
+            "output":output,"parallel_tool_calls":self.response_parallel_tool_calls,"previous_response_id":null,
             "reasoning":{"effort":null,"summary":null},"store":false,"temperature":null,
-            "text":{"format":{"type":"text"}},"tool_choice":"auto","tools":[],"top_p":null,
+            "text":{"format":{"type":"text"}},"tool_choice":self.response_tool_choice,"tools":self.response_tools,"top_p":null,
             "truncation":"disabled","usage":if self.output.usage.seen { responses_usage_json(&self.output.usage) } else { Value::Null },
             "user":null,"metadata":{}
         })
     }
 
     fn failed_response_object(&self, code: &str, message: &str) -> Value {
-        json!({
-            "id":if self.output.id.is_empty() { "resp_ocg" } else { &self.output.id },
-            "object":"response",
-            "created_at":unix_seconds(),
-            "status":"failed",
-            "error":{"code":code,"message":message},
-            "incomplete_details":null,
-            "model":if self.output.model.is_empty() { &self.model } else { &self.output.model },
-            "output":[],
-            "usage":null
-        })
+        let mut response = self.response_object("failed", Value::Null, Vec::new());
+        response["error"] = json!({"code":code,"message":message});
+        response
     }
 
     fn responses_event(&mut self, event_type: &str, fields: Value) -> Bytes {
@@ -1482,6 +1505,39 @@ fn custom_tool_input(arguments: &str) -> String {
                 .or_else(|| value.as_str().map(str::to_string))
         })
         .unwrap_or_else(|| arguments.to_string())
+}
+
+fn custom_tool_input_prefix(arguments: &str) -> Option<String> {
+    if let Ok(value) = serde_json::from_str::<Value>(arguments) {
+        return value
+            .get("input")
+            .and_then(Value::as_str)
+            .or_else(|| value.as_str())
+            .map(str::to_string);
+    }
+    let encoded = if let Some(offset) = arguments.find("\"input\"") {
+        let after_key = &arguments[offset + "\"input\"".len()..];
+        after_key
+            .split_once(':')?
+            .1
+            .trim_start()
+            .strip_prefix('"')?
+    } else {
+        arguments.trim_start().strip_prefix('"')?
+    };
+    let mut escaped = false;
+    let mut end = encoded.len();
+    for (index, character) in encoded.char_indices() {
+        if escaped {
+            escaped = false;
+        } else if character == '\\' {
+            escaped = true;
+        } else if character == '"' {
+            end = index;
+            break;
+        }
+    }
+    serde_json::from_str(&format!("\"{}\"", &encoded[..end])).ok()
 }
 
 fn string_at(value: &Value, pointer: &str, fallback: &str) -> String {
@@ -1630,20 +1686,6 @@ fn chat_id(id: &str) -> String {
     }
 }
 
-fn responses_id(id: &str) -> String {
-    if id.starts_with("resp_") {
-        id.to_string()
-    } else {
-        format!("resp_{id}")
-    }
-}
-
-fn unix_seconds() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |duration| duration.as_secs())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1657,6 +1699,9 @@ mod tests {
             body: Bytes::new(),
             custom_tools: Vec::new(),
             namespace_tools: Vec::new(),
+            response_parallel_tool_calls: true,
+            response_tool_choice: json!("auto"),
+            response_tools: Vec::new(),
         }
     }
 
@@ -1820,6 +1865,22 @@ mod tests {
             assert!(output.contains("response.output_item.added"));
             assert!(output.contains("response.output_text.delta"));
             assert!(output.contains("response.completed"));
+            let timestamps = output
+                .split("\n\n")
+                .filter(|frame| {
+                    frame.starts_with("event: response.created")
+                        || frame.starts_with("event: response.completed")
+                })
+                .filter_map(|frame| frame.lines().find_map(|line| line.strip_prefix("data: ")))
+                .map(|payload| {
+                    serde_json::from_str::<Value>(payload).unwrap()["response"]["created_at"]
+                        .as_u64()
+                        .unwrap()
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(timestamps.len(), 2);
+            assert!(timestamps[0] > 0);
+            assert_eq!(timestamps[0], timestamps[1]);
         }
     }
 
@@ -1846,11 +1907,15 @@ mod tests {
     fn responses_restores_custom_tool_call_shape() {
         let mut custom_plan = plan(ApiFormat::Responses, ApiFormat::Messages);
         custom_plan.custom_tools = vec!["apply_patch".to_string()];
+        custom_plan.response_parallel_tool_calls = false;
+        custom_plan.response_tool_choice = json!("required");
+        custom_plan.response_tools = vec![json!({"type":"custom","name":"apply_patch"})];
         let mut converter = StreamConverter::new(&custom_plan);
         let source = concat!(
             "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"model\":\"m\"}}\n\n",
             "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"call_1\",\"name\":\"apply_patch\",\"input\":{}}}\n\n",
-            "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"input\\\":\\\"*** Begin Patch\\\"}\"}}\n\n",
+            "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"input\\\":\\\"*** Begin\"}}\n\n",
+            "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\" Patch\\\"}\"}}\n\n",
             "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
             "event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"},\"usage\":{\"output_tokens\":1}}\n\n",
             "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
@@ -1862,6 +1927,22 @@ mod tests {
         assert!(output.contains("\"name\":\"apply_patch\""));
         assert!(output.contains("\"input\":\"*** Begin Patch\""));
         assert!(!output.contains("response.function_call_arguments.delta"));
+        let created = output
+            .split("\n\n")
+            .find(|frame| frame.starts_with("event: response.created"))
+            .and_then(|frame| frame.lines().find_map(|line| line.strip_prefix("data: ")))
+            .map(|payload| serde_json::from_str::<Value>(payload).unwrap())
+            .unwrap();
+        assert_eq!(created["response"]["parallel_tool_calls"], false);
+        assert_eq!(created["response"]["tool_choice"], "required");
+        assert_eq!(created["response"]["tools"][0]["name"], "apply_patch");
+        let deltas = output
+            .split("\n\n")
+            .filter(|frame| frame.contains("response.custom_tool_call_input.delta"))
+            .filter_map(|frame| frame.lines().find_map(|line| line.strip_prefix("data: ")))
+            .map(|payload| serde_json::from_str::<Value>(payload).unwrap()["delta"].clone())
+            .collect::<Vec<_>>();
+        assert_eq!(deltas, [json!("*** Begin"), json!(" Patch")]);
     }
 
     #[test]
