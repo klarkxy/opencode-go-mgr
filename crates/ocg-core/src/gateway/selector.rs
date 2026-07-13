@@ -41,7 +41,7 @@ impl AccountSelector {
 mod tests {
     use super::*;
     use crate::crypto::{KeyCipher, StaticKeyCipher};
-    use crate::models::{Account, ForwardLog};
+    use crate::models::{Account, ForwardLog, UsageWindowKind};
     use chrono::{Duration, Utc};
     use std::fs;
     use std::path::PathBuf;
@@ -102,7 +102,7 @@ mod tests {
     }
 
     #[test]
-    fn local_usage_does_not_exclude_account() {
+    fn local_and_manual_usage_do_not_exclude_account() {
         let dir = temp_data_dir("local-usage");
         let db = Database::open(dir.clone()).unwrap();
         db.create_account(&account("estimated-full", true, None))
@@ -124,6 +124,21 @@ mod tests {
         .unwrap();
 
         assert!(db.account_usage("estimated-full").unwrap().window_month > 60.0);
+        assert_eq!(
+            AccountSelector::new()
+                .select(&db, None)
+                .unwrap()
+                .unwrap()
+                .id,
+            "estimated-full"
+        );
+
+        db.set_account_usage_baseline("estimated-full", UsageWindowKind::Month, 100.0)
+            .unwrap();
+        assert_eq!(
+            db.account_usage("estimated-full").unwrap().window_month,
+            60.0
+        );
         assert_eq!(
             AccountSelector::new()
                 .select(&db, None)

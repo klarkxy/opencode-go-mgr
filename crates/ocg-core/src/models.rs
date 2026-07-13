@@ -191,6 +191,13 @@ pub struct UsageWindow {
     pub window_month: f64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UsageWindowKind {
+    FiveHours,
+    Week,
+    Month,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GatewayStatus {
     pub running: bool,

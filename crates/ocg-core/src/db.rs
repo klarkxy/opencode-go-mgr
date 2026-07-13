@@ -97,6 +97,18 @@ impl Database {
             )?;
         }
 
+        if version < 4 {
+            self.conn.execute_batch(
+                "ALTER TABLE accounts ADD COLUMN usage_5h_baseline_percent REAL CHECK (usage_5h_baseline_percent BETWEEN 0 AND 100);
+                ALTER TABLE accounts ADD COLUMN usage_5h_anchor_success_cost REAL CHECK (usage_5h_anchor_success_cost >= 0);
+                ALTER TABLE accounts ADD COLUMN usage_week_baseline_percent REAL CHECK (usage_week_baseline_percent BETWEEN 0 AND 100);
+                ALTER TABLE accounts ADD COLUMN usage_week_anchor_success_cost REAL CHECK (usage_week_anchor_success_cost >= 0);
+                ALTER TABLE accounts ADD COLUMN usage_month_baseline_percent REAL CHECK (usage_month_baseline_percent BETWEEN 0 AND 100);
+                ALTER TABLE accounts ADD COLUMN usage_month_anchor_success_cost REAL CHECK (usage_month_anchor_success_cost >= 0);
+                INSERT OR REPLACE INTO schema_version (version) VALUES (4);",
+            )?;
+        }
+
         Ok(())
     }
 
@@ -440,6 +452,29 @@ impl Database {
         self.set_account_cooldown(id, None, None)
     }
 
+    /// Record a real upstream 429 and reset only the identified manual usage window.
+    pub fn set_account_rate_limit(
+        &self,
+        id: &str,
+        until: DateTime<Utc>,
+        err: &str,
+        window: Option<UsageWindowKind>,
+    ) -> Result<()> {
+        let now = Utc::now().to_rfc3339();
+        let tx = self.conn.unchecked_transaction()?;
+        let changed = tx.execute(
+            "UPDATE accounts SET cooldown_until = ?2, last_error = ?3, updated_at = ?4 WHERE id = ?1",
+            params![id, until.to_rfc3339(), err, now],
+        )?;
+        if changed > 0 {
+            if let Some(window) = window {
+                tx.execute(usage_baseline_update_sql(window), params![id, 0.0, now])?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     /// Among all enabled accounts, return the earliest `cooldown_until` in the future.
     /// `None` means no account is in cooldown.
     pub fn soonest_cooldown_reset(&self) -> Result<Option<DateTime<Utc>>> {
@@ -461,11 +496,55 @@ impl Database {
     }
 
     // Usage
+    /// Calibrate one usage window and atomically snapshot all successful cost so far.
+    /// Returns `false` when the account no longer exists.
+    pub fn set_account_usage_baseline(
+        &self,
+        account_id: &str,
+        window: UsageWindowKind,
+        percent: f64,
+    ) -> Result<bool> {
+        let changed = self.conn.execute(
+            usage_baseline_update_sql(window),
+            params![account_id, percent, Utc::now().to_rfc3339()],
+        )?;
+        Ok(changed > 0)
+    }
+
     pub fn account_usage(&self, account_id: &str) -> Result<UsageWindow> {
         let now = Utc::now();
         let five_hours_ago = (now - Duration::hours(5)).to_rfc3339();
         let week_ago = (now - Duration::days(7)).to_rfc3339();
         let month_ago = (now - Duration::days(30)).to_rfc3339();
+
+        let baselines: [Option<(f64, f64)>; 3] = self
+            .conn
+            .query_row(
+                "SELECT usage_5h_baseline_percent, usage_5h_anchor_success_cost,
+                        usage_week_baseline_percent, usage_week_anchor_success_cost,
+                        usage_month_baseline_percent, usage_month_anchor_success_cost
+                 FROM accounts WHERE id = ?1",
+                [account_id],
+                |row| {
+                    Ok([
+                        row.get::<_, Option<f64>>(0)?.zip(row.get(1)?),
+                        row.get::<_, Option<f64>>(2)?.zip(row.get(3)?),
+                        row.get::<_, Option<f64>>(4)?.zip(row.get(5)?),
+                    ])
+                },
+            )
+            .optional()?
+            .unwrap_or([None; 3]);
+
+        let total_success_cost = if baselines.iter().any(Option::is_some) {
+            self.conn.query_row(
+                "SELECT COALESCE(SUM(cost), 0) FROM forward_logs WHERE account_id = ?1 AND status = 'success'",
+                [account_id],
+                |row| row.get(0),
+            )?
+        } else {
+            0.0
+        };
 
         let window_5h: f64 = self
             .conn
@@ -491,9 +570,9 @@ impl Database {
 
         Ok(UsageWindow {
             account_id: account_id.to_string(),
-            window_5h,
-            window_week,
-            window_month,
+            window_5h: effective_usage(window_5h, baselines[0], total_success_cost, 12.0),
+            window_week: effective_usage(window_week, baselines[1], total_success_cost, 30.0),
+            window_month: effective_usage(window_month, baselines[2], total_success_cost, 60.0),
         })
     }
 
@@ -558,6 +637,43 @@ impl Database {
     }
 }
 
+fn usage_baseline_update_sql(window: UsageWindowKind) -> &'static str {
+    match window {
+        UsageWindowKind::FiveHours => {
+            "UPDATE accounts
+             SET usage_5h_baseline_percent = ?2,
+                 usage_5h_anchor_success_cost = (SELECT COALESCE(SUM(cost), 0) FROM forward_logs WHERE account_id = ?1 AND status = 'success'),
+                 updated_at = ?3
+             WHERE id = ?1"
+        }
+        UsageWindowKind::Week => {
+            "UPDATE accounts
+             SET usage_week_baseline_percent = ?2,
+                 usage_week_anchor_success_cost = (SELECT COALESCE(SUM(cost), 0) FROM forward_logs WHERE account_id = ?1 AND status = 'success'),
+                 updated_at = ?3
+             WHERE id = ?1"
+        }
+        UsageWindowKind::Month => {
+            "UPDATE accounts
+             SET usage_month_baseline_percent = ?2,
+                 usage_month_anchor_success_cost = (SELECT COALESCE(SUM(cost), 0) FROM forward_logs WHERE account_id = ?1 AND status = 'success'),
+                 updated_at = ?3
+             WHERE id = ?1"
+        }
+    }
+}
+
+fn effective_usage(
+    local_window_cost: f64,
+    baseline: Option<(f64, f64)>,
+    total_success_cost: f64,
+    limit: f64,
+) -> f64 {
+    baseline.map_or(local_window_cost, |(percent, anchor)| {
+        (limit * percent / 100.0 + (total_success_cost - anchor).max(0.0)).min(limit)
+    })
+}
+
 fn forward_log_filter(status: Option<&str>, account_id: Option<&str>) -> (String, Vec<Value>) {
     let mut filter = String::new();
     let mut params = Vec::new();
@@ -599,4 +715,223 @@ fn parse_datetime(s: String) -> DateTime<Utc> {
             eprintln!("error: failed to parse datetime '{}': {}, using now", s, e);
             Utc::now()
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn temp_data_dir(label: &str) -> PathBuf {
+        let mut dir = std::env::temp_dir();
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock should be after epoch")
+            .as_nanos();
+        dir.push(format!("ocg-db-test-{label}-{nanos}"));
+        fs::create_dir_all(&dir).expect("test data dir should be created");
+        dir
+    }
+
+    fn account(id: &str) -> Account {
+        Account {
+            id: id.into(),
+            name: id.into(),
+            username: None,
+            password_cipher: None,
+            key_cipher: "cipher".into(),
+            enabled: true,
+            referral_code: None,
+            recharge_date: None,
+            cooldown_until: None,
+            last_error: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }
+    }
+
+    fn forward_log(account_id: &str, status: &str, cost: f64) -> ForwardLog {
+        ForwardLog {
+            id: 0,
+            timestamp: Utc::now(),
+            model: "test".into(),
+            account_id: account_id.into(),
+            account_name: account_id.into(),
+            status: status.into(),
+            http_status: Some(200),
+            prompt_tokens: 0,
+            completion_tokens: 0,
+            cached_tokens: 0,
+            cost,
+            error_message: None,
+        }
+    }
+
+    fn assert_cost(actual: f64, expected: f64) {
+        assert!(
+            (actual - expected).abs() < 1e-9,
+            "expected {expected}, got {actual}"
+        );
+    }
+
+    #[test]
+    fn v4_migration_preserves_uncalibrated_usage() {
+        let dir = temp_data_dir("v4-migration");
+        let conn = Connection::open(dir.join("data.sqlite")).expect("v3 db should open");
+        conn.execute_batch(
+            "CREATE TABLE schema_version (version INTEGER PRIMARY KEY);
+             INSERT INTO schema_version (version) VALUES (3);
+             CREATE TABLE accounts (
+                 id TEXT PRIMARY KEY,
+                 name TEXT NOT NULL,
+                 key_cipher TEXT NOT NULL,
+                 enabled INTEGER NOT NULL DEFAULT 1,
+                 referral_code TEXT,
+                 recharge_date TEXT,
+                 created_at TEXT NOT NULL,
+                 updated_at TEXT NOT NULL,
+                 cooldown_until TEXT,
+                 last_error TEXT,
+                 username TEXT,
+                 password_cipher TEXT
+             );
+             CREATE TABLE forward_logs (
+                 timestamp TEXT NOT NULL,
+                 account_id TEXT NOT NULL,
+                 status TEXT NOT NULL,
+                 cost REAL NOT NULL DEFAULT 0
+             );",
+        )
+        .expect("v3 schema should be created");
+        let now = Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT INTO accounts (id, name, key_cipher, created_at, updated_at) VALUES (?1, ?1, 'cipher', ?2, ?2)",
+            params!["old", now],
+        )
+        .expect("v3 account should be inserted");
+        conn.execute(
+            "INSERT INTO forward_logs (timestamp, account_id, status, cost) VALUES (?1, 'old', 'success', 2.5)",
+            [Utc::now().to_rfc3339()],
+        )
+        .expect("v3 usage should be inserted");
+        drop(conn);
+
+        let db = Database::open(dir.clone()).expect("v3 db should migrate");
+        let version: i32 = db
+            .conn
+            .query_row("SELECT MAX(version) FROM schema_version", [], |row| {
+                row.get(0)
+            })
+            .expect("schema version should be readable");
+        let usage = db.account_usage("old").expect("usage should load");
+        assert_eq!(version, 4);
+        assert_cost(usage.window_5h, 2.5);
+        assert_cost(usage.window_week, 2.5);
+        assert_cost(usage.window_month, 2.5);
+
+        drop(db);
+        fs::remove_dir_all(dir).expect("test data dir should be removed");
+    }
+
+    #[test]
+    fn manual_baselines_add_only_later_success_cost_per_window() {
+        let dir = temp_data_dir("manual-baseline");
+        let db = Database::open(dir.clone()).expect("db should open");
+        db.create_account(&account("manual"))
+            .expect("account should be created");
+        db.log_forward(&forward_log("manual", "success", 2.0))
+            .expect("initial cost should be logged");
+        let streaming_id = db
+            .log_forward(&forward_log("manual", "streaming", 0.0))
+            .expect("stream should be logged");
+
+        assert!(
+            db.set_account_usage_baseline("manual", UsageWindowKind::FiveHours, 50.0)
+                .expect("5h baseline should save")
+        );
+        assert!(
+            db.set_account_usage_baseline("manual", UsageWindowKind::Week, 25.0)
+                .expect("week baseline should save")
+        );
+        db.update_forward_log(
+            streaming_id,
+            "success",
+            None,
+            ForwardMetrics {
+                cost: 1.0,
+                ..ForwardMetrics::default()
+            },
+            None,
+        )
+        .expect("stream should finalize");
+
+        let usage = db.account_usage("manual").expect("usage should load");
+        assert_cost(usage.window_5h, 7.0);
+        assert_cost(usage.window_week, 8.5);
+        assert_cost(usage.window_month, 3.0);
+
+        db.set_account_usage_baseline("manual", UsageWindowKind::FiveHours, 100.0)
+            .expect("5h baseline should update");
+        db.log_forward(&forward_log("manual", "success", 5.0))
+            .expect("later cost should be logged");
+        let usage = db.account_usage("manual").expect("usage should reload");
+        assert_cost(usage.window_5h, 12.0);
+        assert_cost(usage.window_week, 13.5);
+        assert_cost(usage.window_month, 8.0);
+        assert!(
+            !db.set_account_usage_baseline("missing", UsageWindowKind::Month, 50.0)
+                .expect("missing account should not be an SQL error")
+        );
+
+        drop(db);
+        fs::remove_dir_all(dir).expect("test data dir should be removed");
+    }
+
+    #[test]
+    fn known_rate_limit_resets_only_its_window() {
+        let dir = temp_data_dir("rate-limit-window");
+        let db = Database::open(dir.clone()).expect("db should open");
+        db.create_account(&account("limited"))
+            .expect("account should be created");
+        db.set_account_usage_baseline("limited", UsageWindowKind::FiveHours, 40.0)
+            .expect("5h baseline should save");
+        db.set_account_usage_baseline("limited", UsageWindowKind::Week, 70.0)
+            .expect("week baseline should save");
+
+        db.set_account_rate_limit(
+            "limited",
+            Utc::now() + Duration::hours(1),
+            "weekly quota",
+            Some(UsageWindowKind::Week),
+        )
+        .expect("known rate limit should save");
+        let usage = db.account_usage("limited").expect("usage should load");
+        assert_cost(usage.window_5h, 4.8);
+        assert_cost(usage.window_week, 0.0);
+
+        db.set_account_usage_baseline("limited", UsageWindowKind::Month, 50.0)
+            .expect("month baseline should save");
+        let before = db.account_usage("limited").expect("usage should load");
+        db.set_account_rate_limit(
+            "limited",
+            Utc::now() + Duration::minutes(5),
+            "unknown rate limit",
+            None,
+        )
+        .expect("unknown rate limit should still save cooldown");
+        let after = db.account_usage("limited").expect("usage should reload");
+        assert_cost(after.window_5h, before.window_5h);
+        assert_cost(after.window_week, before.window_week);
+        assert_cost(after.window_month, before.window_month);
+        assert!(
+            db.get_account("limited")
+                .expect("account should load")
+                .expect("account should exist")
+                .cooldown_until
+                .is_some()
+        );
+
+        drop(db);
+        fs::remove_dir_all(dir).expect("test data dir should be removed");
+    }
 }

@@ -1,4 +1,19 @@
+use crate::models::UsageWindowKind;
 use chrono::Duration;
+
+/// 识别 opencode-go 429 对应的额度窗口。未知限流返回 `None`，避免误清手动用量。
+pub fn parse_usage_limit_window(text: &str) -> Option<UsageWindowKind> {
+    let text = text.to_ascii_lowercase();
+    if text.contains("5-hour usage limit") || text.contains("5 hour usage limit") {
+        Some(UsageWindowKind::FiveHours)
+    } else if text.contains("weekly usage limit") {
+        Some(UsageWindowKind::Week)
+    } else if text.contains("monthly usage limit") {
+        Some(UsageWindowKind::Month)
+    } else {
+        None
+    }
+}
 
 /// 解析 opencode-go 429 消息中的重置时长。
 ///
@@ -78,5 +93,24 @@ mod tests {
         assert_eq!(parse_reset(""), None);
         assert_eq!(parse_reset("rate limit exceeded"), None);
         assert_eq!(parse_reset("Resets in sometime"), None);
+    }
+
+    #[test]
+    fn identifies_only_known_usage_windows() {
+        assert_eq!(
+            parse_usage_limit_window("5-hour usage limit reached. Resets in 13min."),
+            Some(UsageWindowKind::FiveHours)
+        );
+        assert_eq!(
+            parse_usage_limit_window(
+                r#"{"type":"GoUsageLimitError","message":"Weekly usage limit reached. Resets in 21hr 10min."}"#
+            ),
+            Some(UsageWindowKind::Week)
+        );
+        assert_eq!(
+            parse_usage_limit_window("Monthly usage limit reached. Resets in 13 days."),
+            Some(UsageWindowKind::Month)
+        );
+        assert_eq!(parse_usage_limit_window("rate limit exceeded"), None);
     }
 }

@@ -191,10 +191,14 @@ Cline, Roo Code, Continue). VS Code Copilot Chat needs the full
 The **Accounts** view lets you create, edit, enable, disable, and remove
 OpenCode‑Go accounts. Each account card shows the account name, the
 cooldown state, and the 5‑hour / weekly / monthly usage bars driven by
-local accounting. You can paste an OpenCode‑Go `username` and `password`
-alongside the key; both the key and saved password are only obfuscated on
-disk. The gateway uses the password to refresh upstream sessions when
-needed.
+local accounting. Type a percentage or drag a bar to set its current
+real-world usage baseline. After the value is saved, successful request
+cost recorded by OCG Manager continues to accumulate above that baseline.
+Reaching 100% is still only a warning; it does not stop the gateway from
+selecting the account. You can paste an OpenCode‑Go `username` and
+`password` alongside the key; both the key and saved password are only
+obfuscated on disk. The gateway uses the password to refresh upstream
+sessions when needed.
 
 You can also reset a cooldown manually from this view. The bar snaps back
 to its local estimate as soon as the cooldown is cleared.
@@ -343,7 +347,9 @@ by the requests the gateway actually forwards, not by the upstream's
 authoritative billing. An upstream usage chunk provides accurate streaming
 token counts, but cost always remains an estimate calculated from the
 local model price table. Without a usage chunk, the log row ends with
-`success_no_usage`.
+`success_no_usage`. A manually saved percentage becomes the baseline for
+that window; successful costs recorded after the save are added to it until
+the next manual change or a recognized upstream limit reset.
 
 The dashboard always pairs a bar with the account's cooldown state. While
 a true circuit breaker is active, the matching bar is forced to 100% and
@@ -360,9 +366,11 @@ marked as an error — see the next section.
 - **True circuit breaker (upstream 429).** The gateway stores the upstream
   error, parses the `Resets in …` phrase from the response, writes
   `cooldown_until`, and tries the next available account. The known
-  5‑hour, weekly, and monthly limit messages use the reset duration
-  reported by the upstream; an unrecognized 429 falls back to a
-  five‑minute cooldown.
+  5‑hour, weekly, and monthly limit messages use the reset duration reported
+  by the upstream and reset the matching usage baseline. During cooldown the
+  matching bar remains at 100%; after cooldown it starts at 0% and accumulates
+  new successful local cost. An unrecognized 429 falls back to a five‑minute
+  cooldown without clearing any manually maintained usage value.
 - **No account available.** If every enabled account is cooling down, the
   gateway returns `429` with the soonest reset time.
 - **Dashboard display.** While a true circuit breaker is active, the

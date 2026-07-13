@@ -18,7 +18,7 @@
       :key="account.id"
       size="small"
       class="account-card"
-      :class="{ 'account-card--cooling': isCooling(account) }"
+      :class="{ 'account-card--cooling': accountIsCooling(account) }"
     >
       <template #header>
         <div class="account-title">
@@ -26,7 +26,7 @@
           <n-tag :type="account.enabled ? 'success' : 'default'" size="small">
             {{ account.enabled ? t("已启用") : t("已禁用") }}
           </n-tag>
-          <n-tooltip v-if="isCooling(account)" :disabled="!account.last_error">
+          <n-tooltip v-if="accountIsCooling(account)" :disabled="!account.last_error">
             <template #trigger>
               <n-tag type="error" size="small">{{ t("熔断 · 剩 {time}", { time: formatRemaining(account) }) }}</n-tag>
             </template>
@@ -101,21 +101,97 @@
         </n-space>
       </template>
 
-      <div class="usage-strip">
+      <div v-if="usageLoadErrors[account.id]" class="usage-load-error" role="alert">
+        <span>{{ t("用量加载失败") }}</span>
+        <n-button
+          text
+          size="tiny"
+          type="primary"
+          :loading="usageLoading[account.id]"
+          @click="loadAccountUsage(account.id)"
+        >
+          {{ t("重试") }}
+        </n-button>
+      </div>
+      <div v-else class="usage-strip">
         <div v-for="limit in usageLimits" :key="limit.key" class="usage-segment">
           <div class="usage-meta">
             <span>{{ limit.label }}</span>
-            <strong>{{ formatCost(usageCost(account.id, limit.key)) }} / {{ formatCost(limit.limit) }}</strong>
+            <strong v-if="usageEdits[account.id]">
+              {{ formatCost(usageCost(account.id, limit.key)) }} / {{ formatCost(limit.limit) }}
+            </strong>
           </div>
           <n-progress
+            v-if="accountUsageLimitReached(account, limit.key)"
             type="line"
             :height="8"
-            :percentage="usagePercent(account, limit.key, limit.limit)"
-            :status="usageStatus(account, limit.key, limit.limit)"
+            :percentage="100"
+            status="error"
+            :show-indicator="false"
+          />
+          <template v-else-if="usageEdits[account.id]">
+            <div class="usage-editor">
+              <n-input-number
+                :value="usageEdits[account.id][limit.key].draft"
+                :min="0"
+                :max="100"
+                :step="0.1"
+                :precision="1"
+                size="tiny"
+                :show-button="false"
+                :loading="usageEdits[account.id][limit.key].saving"
+                :disabled="usageLoading[account.id] || usageEdits[account.id][limit.key].saving"
+                :status="usageEdits[account.id][limit.key].error ? 'error' : undefined"
+                :input-props="{
+                  'aria-label': t('{name} {period} 当前用量百分比', {
+                    name: account.name,
+                    period: limit.label,
+                  }),
+                }"
+                @update:value="updateUsageDraft(account.id, limit.key, $event)"
+                @blur="saveUsage(account.id, limit.key)"
+                @keydown.enter.prevent="saveUsage(account.id, limit.key)"
+              >
+                <template #suffix>%</template>
+              </n-input-number>
+              <n-slider
+                v-usage-slider-label="t('{name} {period} 当前用量百分比', {
+                  name: account.name,
+                  period: limit.label,
+                })"
+                :value="usageEdits[account.id][limit.key].draft"
+                :min="0"
+                :max="100"
+                :step="0.1"
+                :disabled="usageLoading[account.id] || usageEdits[account.id][limit.key].saving"
+                @update:value="updateUsageDraft(account.id, limit.key, $event)"
+                @dragend="saveUsage(account.id, limit.key)"
+                @focusout="saveUsage(account.id, limit.key)"
+              />
+            </div>
+            <span
+              v-if="usageEdits[account.id][limit.key].error"
+              class="usage-save-error"
+              role="alert"
+            >
+              {{ t("用量保存失败: {error}", {
+                error: usageEdits[account.id][limit.key].error || "",
+              }) }}
+            </span>
+          </template>
+          <n-progress
+            v-else
+            type="line"
+            :height="8"
+            :percentage="0"
+            processing
             :show-indicator="false"
           />
         </div>
       </div>
+      <p class="usage-hint">
+        {{ t("手动值保存后会继续累加本机用量；100% 仅为提示，收到真实 429 后才会熔断。") }}
+      </p>
 
       <div v-if="expanded[account.id]" class="account-detail">
         <n-form :model="drafts[account.id]" label-placement="top" :show-feedback="false">
@@ -166,7 +242,7 @@
         </n-form>
         <n-space justify="end" align="center">
           <n-button
-            v-if="isCooling(account)"
+            v-if="accountIsCooling(account)"
             size="small"
             type="warning"
             @click="resetCooldown(account.id)"
@@ -236,7 +312,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import {
   NButton,
   NCard,
@@ -246,9 +322,11 @@ import {
   NH3,
   NIcon,
   NInput,
+  NInputNumber,
   NModal,
   NPopconfirm,
   NProgress,
+  NSlider,
   NSpace,
   NSwitch,
   NTag,
@@ -264,8 +342,14 @@ import {
 } from "@vicons/antd";
 import { DashboardRequestError, tauriApi } from "../api/tauri";
 import type { Account, AccountInput, AccountUpdate, UsageWindow } from "../api/tauri";
-import { isCooling, isUsageLimitReached, usageProgressStatus } from "./accounts-usage";
-import type { UsageKey } from "./accounts-usage";
+import {
+  isCooling,
+  isUsageLimitReached,
+  mergeUsageEdit,
+  normalizeUsagePercent,
+  usagePercentFromCost,
+} from "./accounts-usage";
+import type { UsageEditState, UsageKey } from "./accounts-usage";
 import { locale, t } from "../i18n/index.ts";
 
 type AccountDraft = {
@@ -274,6 +358,17 @@ type AccountDraft = {
   password: string;
   key: string;
   clearPassword: boolean;
+};
+
+type AccountUsageEdits = Record<UsageKey, UsageEditState>;
+
+function setUsageSliderLabel(el: HTMLElement, label: string) {
+  el.querySelector<HTMLElement>("[role='slider']")?.setAttribute("aria-label", label);
+}
+
+const vUsageSliderLabel = {
+  mounted: (el: HTMLElement, { value }: { value: string }) => setUsageSliderLabel(el, value),
+  updated: (el: HTMLElement, { value }: { value: string }) => setUsageSliderLabel(el, value),
 };
 
 const usageLimits = computed<Array<{ key: UsageKey; label: string; limit: number }>>(() => [
@@ -285,11 +380,15 @@ const usageLimits = computed<Array<{ key: UsageKey; label: string; limit: number
 const message = useMessage();
 const accounts = ref<Account[]>([]);
 const usageMap = ref<Record<string, UsageWindow>>({});
+const usageEdits = ref<Record<string, AccountUsageEdits>>({});
+const usageLoading = ref<Record<string, boolean>>({});
+const usageLoadErrors = ref<Record<string, string | null>>({});
 const drafts = ref<Record<string, AccountDraft>>({});
 const expanded = ref<Record<string, boolean>>({});
 const pinging = ref<Record<string, boolean>>({});
 const showCreateModal = ref(false);
 const busy = ref(false);
+const now = ref(Date.now());
 const newAccount = ref<AccountDraft>({
   name: "",
   username: "",
@@ -325,18 +424,68 @@ function usageCost(accountId: string, key: UsageKey): number {
   return getUsage(accountId)[key];
 }
 
-function usagePercent(account: Account, key: UsageKey, limit: number): number {
-  if (isUsageLimitReached(account, key)) return 100;
-  return Math.min(100, Math.round((usageCost(account.id, key) / limit) * 1000) / 10);
+function usageLimit(key: UsageKey): number {
+  return usageLimits.value.find((limit) => limit.key === key)?.limit ?? 0;
 }
 
-function usageStatus(
-  account: Account,
-  key: UsageKey,
-  limit: number,
-): "success" | "warning" | "error" {
-  const percent = usagePercent(account, key, limit);
-  return usageProgressStatus(account, key, percent);
+function usageEditsFromWindow(usage: UsageWindow): AccountUsageEdits {
+  return Object.fromEntries(usageLimits.value.map(({ key, limit }) => {
+    const percent = usagePercentFromCost(usage[key], limit);
+    return [key, { draft: percent, saved: percent, saving: false, error: null }];
+  })) as AccountUsageEdits;
+}
+
+function syncUsageEdits(accountId: string, usage: UsageWindow) {
+  const existing = usageEdits.value[accountId];
+  if (!existing) {
+    usageEdits.value[accountId] = usageEditsFromWindow(usage);
+    return;
+  }
+  const account = accounts.value.find(({ id }) => id === accountId);
+  for (const { key, limit } of usageLimits.value) {
+    const saved = usagePercentFromCost(usage[key], limit);
+    const edit = existing[key];
+    const wasActuallyReset = account && isUsageLimitReached(account, key, now.value);
+    Object.assign(edit, mergeUsageEdit(edit, saved, Boolean(wasActuallyReset)));
+  }
+}
+
+function updateUsageDraft(accountId: string, key: UsageKey, value: number | null) {
+  const edit = usageEdits.value[accountId]?.[key];
+  if (!edit || edit.saving || value === null) return;
+  edit.draft = normalizeUsagePercent(value);
+}
+
+async function saveUsage(accountId: string, key: UsageKey) {
+  const edit = usageEdits.value[accountId]?.[key];
+  if (!edit || edit.saving) return;
+  const percent = normalizeUsagePercent(edit.draft);
+  edit.draft = percent;
+  if (percent === edit.saved && !edit.error) return;
+  edit.saving = true;
+  edit.error = null;
+  try {
+    const usage = await tauriApi.updateAccountUsage(accountId, key, percent);
+    usageMap.value[accountId] = {
+      ...getUsage(accountId),
+      [key]: usage[key],
+    };
+    const saved = usagePercentFromCost(usage[key], usageLimit(key));
+    edit.draft = saved;
+    edit.saved = saved;
+  } catch (error) {
+    edit.error = String(error);
+  } finally {
+    edit.saving = false;
+  }
+}
+
+function accountIsCooling(account: Account): boolean {
+  return isCooling(account, now.value);
+}
+
+function accountUsageLimitReached(account: Account, key: UsageKey): boolean {
+  return isUsageLimitReached(account, key, now.value);
 }
 
 function formatCost(value: number): string {
@@ -351,7 +500,7 @@ function formatCost(value: number): string {
 
 function formatRemaining(account: Account): string {
   if (!account.cooldown_until) return "";
-  const ms = new Date(account.cooldown_until).getTime() - Date.now();
+  const ms = new Date(account.cooldown_until).getTime() - now.value;
   if (ms <= 0) return t("{seconds}秒", { seconds: 0 });
   const min = Math.floor(ms / 60000);
   if (min < 60) return t("{minutes}分钟", { minutes: min });
@@ -396,16 +545,23 @@ async function loadAccounts() {
     }
     accounts.value = loaded;
     drafts.value = nextDrafts;
-    const usage = await Promise.all(loaded.map(async (account) => {
-      try {
-        return [account.id, await tauriApi.getAccountUsage(account.id)] as const;
-      } catch {
-        return [account.id, blankUsage(account.id)] as const;
-      }
-    }));
-    usageMap.value = Object.fromEntries(usage);
+    await Promise.all(loaded.map((account) => loadAccountUsage(account.id)));
   } catch (e) {
     message.error(t("加载账号失败: {error}", { error: String(e) }));
+  }
+}
+
+async function loadAccountUsage(accountId: string) {
+  usageLoading.value[accountId] = true;
+  usageLoadErrors.value[accountId] = null;
+  try {
+    const usage = await tauriApi.getAccountUsage(accountId);
+    usageMap.value[accountId] = usage;
+    syncUsageEdits(accountId, usage);
+  } catch (error) {
+    usageLoadErrors.value[accountId] = String(error);
+  } finally {
+    usageLoading.value[accountId] = false;
   }
 }
 
@@ -499,7 +655,14 @@ async function resetCooldown(id: string) {
   }
 }
 
-onMounted(loadAccounts);
+let clock: number | undefined;
+onMounted(() => {
+  clock = window.setInterval(() => {
+    now.value = Date.now();
+  }, 1000);
+  void loadAccounts();
+});
+onUnmounted(() => window.clearInterval(clock));
 </script>
 
 <style scoped>
@@ -570,8 +733,39 @@ onMounted(loadAccounts);
 
 .usage-segment {
   display: grid;
-  gap: 4px;
+  gap: 6px;
   min-width: 0;
+}
+
+.usage-editor {
+  display: grid;
+  grid-template-columns: 78px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.usage-editor :deep(.n-input-number) {
+  width: 78px;
+}
+
+.usage-load-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 42px;
+  color: var(--n-error-color);
+}
+
+.usage-save-error {
+  color: var(--n-error-color);
+  font-size: 11px;
+}
+
+.usage-hint {
+  margin: 8px 0 0;
+  color: var(--n-text-color-3);
+  font-size: 11px;
 }
 
 .usage-meta {

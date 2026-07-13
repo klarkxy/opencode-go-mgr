@@ -1,5 +1,5 @@
 use crate::auth;
-use crate::gateway::limit::parse_reset;
+use crate::gateway::limit::{parse_reset, parse_usage_limit_window};
 use crate::models::*;
 use crate::state::CoreState;
 use axum::{
@@ -24,7 +24,10 @@ pub fn api_router(state: CoreState) -> Router<CoreState> {
         )
         .route("/accounts/{id}/toggle", post(toggle_account))
         .route("/accounts/{id}/test", post(test_account))
-        .route("/accounts/{id}/usage", get(account_usage))
+        .route(
+            "/accounts/{id}/usage",
+            get(account_usage).patch(update_account_usage),
+        )
         .route(
             "/accounts/{id}/reset-cooldown",
             post(reset_account_cooldown),
@@ -553,7 +556,7 @@ async fn test_account(
         let until = Utc::now() + cooldown;
         {
             let db = state.db.lock();
-            db.set_account_cooldown(&account.id, Some(until), Some(&body))
+            db.set_account_rate_limit(&account.id, until, &body, parse_usage_limit_window(&body))
                 .map_err(ApiError::internal)?;
             let _ = db.log_gateway(
                 "warn",
@@ -616,6 +619,40 @@ async fn account_usage(
         .account_usage(&id)
         .map(Json)
         .map_err(ApiError::internal)
+}
+
+#[derive(Deserialize)]
+struct AccountUsageUpdate {
+    window: String,
+    percent: f64,
+}
+
+async fn update_account_usage(
+    State(state): State<CoreState>,
+    Path(id): Path<String>,
+    Json(update): Json<AccountUsageUpdate>,
+) -> Result<Json<UsageWindow>, ApiError> {
+    let window = match update.window.as_str() {
+        "window_5h" => UsageWindowKind::FiveHours,
+        "window_week" => UsageWindowKind::Week,
+        "window_month" => UsageWindowKind::Month,
+        _ => return Err(ApiError::bad_request("invalid usage window")),
+    };
+    if !update.percent.is_finite() || !(0.0..=100.0).contains(&update.percent) {
+        return Err(ApiError::bad_request(
+            "usage percent must be between 0 and 100",
+        ));
+    }
+    let percent = (update.percent * 10.0).round() / 10.0;
+
+    let db = state.db.lock();
+    if !db
+        .set_account_usage_baseline(&id, window, percent)
+        .map_err(ApiError::internal)?
+    {
+        return Err(ApiError::not_found("account not found"));
+    }
+    db.account_usage(&id).map(Json).map_err(ApiError::internal)
 }
 
 async fn reset_account_cooldown(
@@ -917,11 +954,17 @@ fn is_loopback(url: &reqwest::Url) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{asset_path, dashboard_account, is_update_available, parse_stable_version};
+    use super::{
+        AccountUsageUpdate, asset_path, dashboard_account, dashboard_summary, is_update_available,
+        parse_stable_version, update_account_usage,
+    };
     use crate::crypto::{KeyCipher, StaticKeyCipher};
     use crate::db::Database;
     use crate::models::Account;
     use crate::state::CoreStateInner;
+    use axum::Json;
+    use axum::extract::{Path as AxumPath, State};
+    use axum::http::StatusCode;
     use chrono::Utc;
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -984,6 +1027,96 @@ mod tests {
         assert!(dto.password.is_empty());
         assert!(dto.key.is_empty());
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn manual_usage_update_validates_persists_and_keeps_account_available() {
+        let dir = temp_data_dir("manual-usage");
+        let cipher: Arc<dyn KeyCipher + Send + Sync> = Arc::new(StaticKeyCipher::new("test"));
+        let db = Database::open(dir.clone()).unwrap();
+        db.create_account(&Account {
+            id: "acct-usage".into(),
+            name: "usage".into(),
+            username: None,
+            password_cipher: None,
+            key_cipher: cipher.encrypt("sk-test").unwrap(),
+            enabled: true,
+            referral_code: None,
+            recharge_date: None,
+            cooldown_until: None,
+            last_error: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        })
+        .unwrap();
+        let state = Arc::new(CoreStateInner::new(db, dir.clone(), cipher).unwrap());
+
+        let invalid = update_account_usage(
+            State(state.clone()),
+            AxumPath("acct-usage".into()),
+            Json(AccountUsageUpdate {
+                window: "invalid".into(),
+                percent: 50.0,
+            }),
+        )
+        .await
+        .expect_err("invalid window should fail");
+        assert_eq!(invalid.status, StatusCode::BAD_REQUEST);
+
+        let invalid = update_account_usage(
+            State(state.clone()),
+            AxumPath("acct-usage".into()),
+            Json(AccountUsageUpdate {
+                window: "window_5h".into(),
+                percent: -0.1,
+            }),
+        )
+        .await
+        .expect_err("invalid percent should fail");
+        assert_eq!(invalid.status, StatusCode::BAD_REQUEST);
+
+        let missing = update_account_usage(
+            State(state.clone()),
+            AxumPath("missing".into()),
+            Json(AccountUsageUpdate {
+                window: "window_5h".into(),
+                percent: 50.0,
+            }),
+        )
+        .await
+        .expect_err("missing account should fail");
+        assert_eq!(missing.status, StatusCode::NOT_FOUND);
+
+        let usage = update_account_usage(
+            State(state.clone()),
+            AxumPath("acct-usage".into()),
+            Json(AccountUsageUpdate {
+                window: "window_5h".into(),
+                percent: 50.04,
+            }),
+        )
+        .await
+        .expect("valid baseline should save")
+        .0;
+        assert!((usage.window_5h - 6.0).abs() < 1e-9);
+
+        let _ = update_account_usage(
+            State(state.clone()),
+            AxumPath("acct-usage".into()),
+            Json(AccountUsageUpdate {
+                window: "window_month".into(),
+                percent: 100.0,
+            }),
+        )
+        .await
+        .expect("100 percent baseline should save");
+        let summary = dashboard_summary(State(state))
+            .await
+            .expect("summary should load")
+            .0;
+        assert_eq!(summary.available_accounts, 1);
+
+        fs::remove_dir_all(dir).unwrap();
     }
 
     fn version_parts(version: &str) -> [u64; 3] {

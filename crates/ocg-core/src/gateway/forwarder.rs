@@ -1,6 +1,6 @@
 use crate::db::Database;
 use crate::gateway::cost::cost_from_counts;
-use crate::gateway::limit::parse_reset;
+use crate::gateway::limit::{parse_reset, parse_usage_limit_window};
 use crate::gateway::protocol::{
     ApiFormat, RequestPlan, UsageCounts, extract_usage, format_error, merge_stream_usage,
     transform_response,
@@ -206,7 +206,12 @@ async fn forward_request_impl(
                     ForwardMetrics::default(),
                     Some(&text),
                 )?;
-                db.set_account_cooldown(&account.id, Some(until), Some(&text))?;
+                db.set_account_rate_limit(
+                    &account.id,
+                    until,
+                    &text,
+                    parse_usage_limit_window(&text),
+                )?;
             }
             return Ok(ForwardResult {
                 response: error_response(plan.client, &error_message, None),
@@ -694,7 +699,12 @@ pub async fn forward_get(
         if status.as_u16() == 429 {
             // 429 cooldown: parse the reset window so the next request skips this account.
             let cooldown = parse_reset(&body).unwrap_or_else(|| Duration::minutes(5));
-            db.set_account_cooldown(&account.id, Some(Utc::now() + cooldown), Some(&body))?;
+            db.set_account_rate_limit(
+                &account.id,
+                Utc::now() + cooldown,
+                &body,
+                parse_usage_limit_window(&body),
+            )?;
         }
     }
 

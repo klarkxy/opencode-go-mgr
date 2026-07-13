@@ -214,6 +214,14 @@ export const tauriApi = {
     return result.message;
   },
   getAccountUsage: (id: string) => request<UsageWindow>(`/accounts/${id}/usage`),
+  updateAccountUsage: (
+    id: string,
+    window: "window_5h" | "window_week" | "window_month",
+    percent: number,
+  ) => request<UsageWindow>(`/accounts/${id}/usage`, {
+    method: "PATCH",
+    body: jsonBody({ window, percent }),
+  }),
   resetAccountCooldown: (id: string) =>
     request<Account>(`/accounts/${id}/reset-cooldown`, { method: "POST" }),
 
