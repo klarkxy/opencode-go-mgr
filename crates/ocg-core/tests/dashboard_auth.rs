@@ -186,6 +186,7 @@ async fn loopback_settings_trim_and_require_gateway_key() {
 
     let mut config = state.config();
     config.gateway_key = "  trimmed-key  ".into();
+    config.client_root_url = "  http://192.168.1.20:9042/proxy/v1/  ".into();
     config.connect_timeout_secs = 12;
     config.non_stream_timeout_secs = 345;
     config.stream_idle_timeout_secs = 678;
@@ -201,6 +202,7 @@ async fn loopback_settings_trim_and_require_gateway_key() {
     );
     let saved = state.config();
     assert_eq!(saved.gateway_key, "trimmed-key");
+    assert_eq!(saved.client_root_url, "http://192.168.1.20:9042/proxy");
     assert_eq!(saved.connect_timeout_secs, 12);
     assert_eq!(saved.non_stream_timeout_secs, 345);
     assert_eq!(saved.stream_idle_timeout_secs, 678);
@@ -215,6 +217,10 @@ async fn loopback_settings_trim_and_require_gateway_key() {
     assert_eq!(roundtrip["connect_timeout_secs"], 12);
     assert_eq!(roundtrip["non_stream_timeout_secs"], 345);
     assert_eq!(roundtrip["stream_idle_timeout_secs"], 678);
+    assert_eq!(
+        roundtrip["client_root_url"],
+        "http://192.168.1.20:9042/proxy"
+    );
     assert_eq!(roundtrip["auto_start_supported"], false);
 
     config.gateway_key = "   ".into();
@@ -229,6 +235,33 @@ async fn loopback_settings_trim_and_require_gateway_key() {
         StatusCode::BAD_REQUEST
     );
     assert_eq!(state.config().gateway_key, "trimmed-key");
+
+    for client_root_url in [
+        "ocg.example.com",
+        "ftp://ocg.example.com",
+        "https://user:secret@ocg.example.com",
+        "https://ocg.example.com?node=one",
+        "https://ocg.example.com#settings",
+        "https://ocg.example.com/v1/chat/completions",
+    ] {
+        let mut invalid = state.config();
+        invalid.client_root_url = client_root_url.into();
+        assert_eq!(
+            client
+                .post(&url)
+                .json(&invalid)
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::BAD_REQUEST,
+            "{client_root_url}"
+        );
+        assert_eq!(
+            state.config().client_root_url,
+            "http://192.168.1.20:9042/proxy"
+        );
+    }
 
     for (field, value) in [
         ("connect_timeout_secs", 0),

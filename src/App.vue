@@ -144,6 +144,7 @@
           <n-layout-content class="app-content">
             <Dashboard v-if="activeKey === 'dashboard'" />
             <Accounts v-else-if="activeKey === 'accounts'" />
+            <Applications v-else-if="activeKey === 'apps'" />
             <Logs v-else-if="activeKey === 'logs'" />
             <Settings
               v-else-if="activeKey === 'settings'"
@@ -182,6 +183,7 @@ import {
 } from "naive-ui";
 import type { DropdownMenuProps, DropdownOption } from "naive-ui";
 import {
+  AppstoreOutlined,
   BgColorsOutlined,
   CheckOutlined,
   DashboardOutlined,
@@ -192,6 +194,7 @@ import {
 } from "@vicons/antd";
 import Dashboard from "./views/Dashboard.vue";
 import Accounts from "./views/Accounts.vue";
+import Applications from "./views/Applications.vue";
 import Logs from "./views/Logs.vue";
 import Settings from "./views/Settings.vue";
 import { DASHBOARD_AUTH_REQUIRED_EVENT, tauriApi } from "./api/tauri";
@@ -207,9 +210,9 @@ import {
 } from "./theme";
 import type { ThemeName } from "./theme";
 
-type ViewKey = "dashboard" | "accounts" | "logs" | "settings";
+type ViewKey = "dashboard" | "accounts" | "apps" | "logs" | "settings";
 
-const views = new Set<ViewKey>(["dashboard", "accounts", "logs", "settings"]);
+const views = new Set<ViewKey>(["dashboard", "accounts", "apps", "logs", "settings"]);
 const osTheme = useOsTheme();
 const collapsed = ref(false);
 const activeKey = ref<ViewKey>(readView());
@@ -242,12 +245,14 @@ function renderIcon(icon: Component) {
 const menuOptions = [
   { label: "仪表盘", key: "dashboard", icon: renderIcon(DashboardOutlined) },
   { label: "账号", key: "accounts", icon: renderIcon(KeyOutlined) },
+  { label: "应用", key: "apps", icon: renderIcon(AppstoreOutlined) },
   { label: "日志", key: "logs", icon: renderIcon(FileTextOutlined) },
   { label: "设置", key: "settings", icon: renderIcon(SettingOutlined) },
 ];
 const titleMap: Record<ViewKey, string> = {
   dashboard: "仪表盘",
   accounts: "账号管理",
+  apps: "应用教程",
   logs: "日志",
   settings: "设置",
 };

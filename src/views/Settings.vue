@@ -8,6 +8,29 @@
         </div>
       </div>
       <n-form :model="config" label-placement="top" :show-feedback="false">
+        <n-form-item
+          label="下游访问根地址（可选）"
+          :show-feedback="true"
+          :validation-status="clientRootPreview.status"
+          :feedback="clientRootPreview.feedback"
+        >
+          <div class="client-root-field">
+            <n-input
+              v-model:value="config.client_root_url"
+              clearable
+              class="mono"
+              :input-props="{
+                'aria-label': '下游访问根地址（可选）',
+                'aria-describedby': 'client-root-help',
+              }"
+              placeholder="https://ocg.example.com"
+              @blur="normalizeClientRootInput"
+            />
+            <p id="client-root-help">
+              仅用于下游教程、展示和复制；不会修改 Gateway 监听、DNS 或反向代理。
+            </p>
+          </div>
+        </n-form-item>
         <n-form-item label="上游地址">
           <n-input
             v-model:value="config.upstream_base_url"
@@ -16,53 +39,76 @@
           />
         </n-form-item>
         <n-form-item label="Key">
-          <div class="key-field">
-            <n-input
-              v-model:value="config.gateway_key"
-              :input-props="{ 'aria-label': 'Key' }"
-              type="password"
-              show-password-on="click"
-              class="mono"
-            />
-            <n-tooltip trigger="hover">
-              <template #trigger>
-                <n-button
-                  circle
-                  quaternary
-                  aria-label="复制 Key"
-                  :disabled="!config.gateway_key"
-                  @click="copyKey"
-                >
-                  <template #icon>
-                    <n-icon :component="keyCopied ? CheckOutlined : CopyOutlined" />
-                  </template>
-                </n-button>
-              </template>
-              复制 Key
-            </n-tooltip>
-            <n-popconfirm
-              positive-text="生成新 Key"
-              negative-text="取消"
-              @positive-click="regenerateKey"
-            >
-              <template #trigger>
-                <n-tooltip trigger="hover">
-                  <template #trigger>
-                    <n-button
-                      circle
-                      quaternary
-                      aria-label="刷新 Key"
-                      :loading="regenerating"
-                      :disabled="saving"
-                    >
-                      <template #icon><n-icon :component="ReloadOutlined" /></template>
-                    </n-button>
-                  </template>
-                  刷新 Key
-                </n-tooltip>
-              </template>
-              旧 Key 将立即失效，继续生成新 Key？
-            </n-popconfirm>
+          <div class="key-stack">
+            <div class="key-field">
+              <div class="key-display" aria-label="已脱敏 Key">
+                <code>{{ maskedSettingsKey }}</code>
+              </div>
+              <n-tooltip trigger="hover">
+                <template #trigger>
+                  <n-button
+                    circle
+                    quaternary
+                    aria-label="复制 Key"
+                    :disabled="!config.gateway_key"
+                    @click="copyKey"
+                  >
+                    <template #icon>
+                      <n-icon :component="keyCopied ? CheckOutlined : CopyOutlined" />
+                    </template>
+                  </n-button>
+                </template>
+                复制 Key
+              </n-tooltip>
+              <n-tooltip trigger="hover">
+                <template #trigger>
+                  <n-button
+                    circle
+                    quaternary
+                    aria-label="设置自定义 Key"
+                    :disabled="saving || regenerating"
+                    @click="startGatewayKeyEdit"
+                  >
+                    <template #icon><n-icon :component="EditOutlined" /></template>
+                  </n-button>
+                </template>
+                设置自定义 Key
+              </n-tooltip>
+              <n-popconfirm
+                positive-text="生成新 Key"
+                negative-text="取消"
+                @positive-click="regenerateKey"
+              >
+                <template #trigger>
+                  <n-tooltip trigger="hover">
+                    <template #trigger>
+                      <n-button
+                        circle
+                        quaternary
+                        aria-label="刷新 Key"
+                        :loading="regenerating"
+                        :disabled="saving"
+                      >
+                        <template #icon><n-icon :component="ReloadOutlined" /></template>
+                      </n-button>
+                    </template>
+                    刷新 Key
+                  </n-tooltip>
+                </template>
+                旧 Key 将立即失效，继续生成新 Key？
+              </n-popconfirm>
+            </div>
+            <div v-if="editingGatewayKey" class="key-editor">
+              <n-input
+                v-model:value="gatewayKeyDraft"
+                type="password"
+                class="mono"
+                :input-props="{ 'aria-label': '新 Key' }"
+                placeholder="输入新 Key，然后保存设置"
+              />
+              <n-button size="small" secondary @click="cancelGatewayKeyEdit">取消</n-button>
+            </div>
+            <p>已保存的 Key 只脱敏显示；复制或复制教程配置时才会使用完整值。</p>
           </div>
         </n-form-item>
         <div
@@ -121,7 +167,12 @@
           </n-form-item>
         </div>
       </n-form>
-      <n-button type="primary" :loading="saving" :disabled="!loaded || regenerating" @click="saveSettings">保存设置</n-button>
+      <n-button
+        type="primary"
+        :loading="saving"
+        :disabled="!loaded || regenerating || clientRootPreview.status === 'error'"
+        @click="saveSettings"
+      >保存设置</n-button>
     </section>
 
     <section class="settings-card appearance-card" aria-labelledby="appearance-title">
@@ -180,13 +231,19 @@ import {
 import {
   CheckOutlined,
   CopyOutlined,
+  EditOutlined,
   ReloadOutlined,
 } from "@vicons/antd";
 import { tauriApi } from "../api/tauri";
 import type { AppConfig } from "../api/tauri";
 import { THEME_OPTIONS } from "../theme";
 import type { ResolvedTheme, ThemeName } from "../theme";
-import { writeConnectionValue } from "./dashboard-connection";
+import {
+  maskConnectionKey,
+  normalizeClientRootUrl,
+  resolveConnectionUrls,
+  writeConnectionValue,
+} from "./dashboard-connection";
 
 const { themeName, resolvedTheme } = defineProps<{
   themeName: ThemeName;
@@ -199,6 +256,8 @@ const saving = ref(false);
 const regenerating = ref(false);
 const keyCopied = ref(false);
 const loaded = ref(false);
+const editingGatewayKey = ref(false);
+const gatewayKeyDraft = ref("");
 let copyTimer: ReturnType<typeof setTimeout> | undefined;
 let persistedAutoStart = false;
 
@@ -207,6 +266,7 @@ const config = ref<AppConfig>({
   gateway_port: 9042,
   gateway_key: "",
   upstream_base_url: "https://opencode.ai/zen/go",
+  client_root_url: "",
   auto_start: false,
   auto_start_supported: false,
   connect_timeout_secs: 30,
@@ -219,6 +279,36 @@ const themeLabel = computed(() => {
   if (themeName !== "default") return selected;
   const resolved = THEME_OPTIONS.find((option) => option.value === resolvedTheme)?.label;
   return `默认 · ${resolved ?? "皓白"}`;
+});
+const maskedSettingsKey = computed(() => maskConnectionKey(config.value.gateway_key));
+
+const clientRootPreview = computed<{
+  status?: "error" | "warning";
+  feedback: string;
+}>(() => {
+  try {
+    const urls = resolveConnectionUrls(
+      config.value.client_root_url,
+      window.location.origin,
+      config.value.gateway_port,
+      import.meta.env.DEV,
+    );
+    if (urls.insecureHttp) {
+      return {
+        status: "warning",
+        feedback: `API Base URL：${urls.apiBaseUrl}。警告：非本机 HTTP 会明文传输 Gateway Key 与请求内容。`,
+      };
+    }
+    if (!config.value.client_root_url.trim()) {
+      return { feedback: `留空时自动使用：${urls.rootUrl}（API Base URL：${urls.apiBaseUrl}）` };
+    }
+    return { feedback: `API Base URL：${urls.apiBaseUrl}` };
+  } catch (error) {
+    return {
+      status: "error",
+      feedback: error instanceof Error ? error.message : "地址格式无效",
+    };
+  }
 });
 
 async function loadSettings() {
@@ -233,20 +323,51 @@ async function loadSettings() {
 
 async function saveSettings() {
   if (!loaded.value) return;
+  if (!normalizeClientRootInput()) return;
+  const nextGatewayKey = gatewayKeyDraft.value.trim();
+  if (editingGatewayKey.value && !nextGatewayKey) {
+    message.error("新 Key 不能为空");
+    return;
+  }
   if (!timeoutsValid()) {
     message.error("请求超时必须为整数：连接 1–300 秒，其余 1–3600 秒");
     return;
   }
+  const previousGatewayKey = config.value.gateway_key;
+  if (editingGatewayKey.value) config.value.gateway_key = nextGatewayKey;
   saving.value = true;
   try {
     await tauriApi.updateSettings(config.value);
     persistedAutoStart = config.value.auto_start;
+    editingGatewayKey.value = false;
+    gatewayKeyDraft.value = "";
     message.success("设置已保存");
   } catch (e) {
     config.value.auto_start = persistedAutoStart;
+    config.value.gateway_key = previousGatewayKey;
     message.error(`保存失败: ${e}`);
   } finally {
     saving.value = false;
+  }
+}
+
+function startGatewayKeyEdit() {
+  gatewayKeyDraft.value = "";
+  editingGatewayKey.value = true;
+}
+
+function cancelGatewayKeyEdit() {
+  gatewayKeyDraft.value = "";
+  editingGatewayKey.value = false;
+}
+
+function normalizeClientRootInput(): boolean {
+  try {
+    config.value.client_root_url = normalizeClientRootUrl(config.value.client_root_url);
+    return true;
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : "下游访问根地址无效");
+    return false;
   }
 }
 
@@ -275,6 +396,7 @@ async function regenerateKey() {
   regenerating.value = true;
   try {
     config.value.gateway_key = await tauriApi.regenerateGatewayKey();
+    cancelGatewayKeyEdit();
     message.success("Key 已重新生成");
   } catch (e) {
     message.error(`生成失败: ${e}`);
@@ -320,10 +442,53 @@ onUnmounted(() => clearTimeout(copyTimer));
 }
 .key-field {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
   align-items: center;
   gap: 4px;
   width: 100%;
+}
+.key-stack {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+}
+.key-stack > p {
+  margin: 0;
+  color: var(--ocg-subtle);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.key-display {
+  display: flex;
+  min-width: 0;
+  min-height: 34px;
+  align-items: center;
+  padding: 0 10px;
+  border: 1px solid var(--ocg-border);
+  border-radius: 3px;
+  background: var(--ocg-canvas);
+}
+.key-display code {
+  overflow: hidden;
+  color: var(--ocg-ink);
+  font: 12px/1.4 "Cascadia Mono", Consolas, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.key-editor {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+}
+.client-root-field {
+  width: 100%;
+}
+.client-root-field > p {
+  margin: 6px 0 0;
+  color: var(--ocg-subtle);
+  font-size: 11px;
+  line-height: 1.5;
 }
 .settings-subsection {
   margin-top: 8px;

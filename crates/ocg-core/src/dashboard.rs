@@ -660,6 +660,8 @@ async fn update_settings(
     }
     config.validate_timeouts().map_err(ApiError::bad_request)?;
     validate_upstream_url(&config.upstream_base_url)?;
+    config.client_root_url =
+        normalize_client_root_url(&config.client_root_url).map_err(ApiError::bad_request)?;
     let previous_config = state.config();
     let next_auto_start = config.auto_start;
     let auto_start_supported = state.auto_start_supported();

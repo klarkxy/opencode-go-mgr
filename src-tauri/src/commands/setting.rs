@@ -1,5 +1,5 @@
 use crate::state::AppState;
-use ocg_core::models::{AppConfig, GatewayStatus};
+use ocg_core::models::{AppConfig, GatewayStatus, normalize_client_root_url};
 use ocg_core::state::random_word;
 use tauri::State;
 
@@ -11,11 +11,12 @@ pub fn get_settings(state: State<'_, AppState>) -> Result<AppConfig, String> {
 #[tauri::command]
 pub fn update_settings(
     state: State<'_, AppState>,
-    config: AppConfig,
+    mut config: AppConfig,
 ) -> Result<GatewayStatus, String> {
     let _settings_update = state.core.settings_update.lock();
     config.validate_timeouts()?;
     validate_upstream_url(&config.upstream_base_url)?;
+    config.client_root_url = normalize_client_root_url(&config.client_root_url)?;
     // ponytail: only restart if the port actually changed. Gateway key and
     // upstream URL are already live
     // — handler.rs reads state.config() per request. Restarting on every save

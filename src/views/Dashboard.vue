@@ -11,7 +11,7 @@
           <div class="connection-row">
             <n-icon size="18" aria-hidden="true"><ApiOutlined /></n-icon>
             <div class="connection-value">
-              <span class="sr-only">API 地址</span>
+              <span class="sr-only">API Base URL</span>
               <code>{{ serviceApiUrl }}</code>
             </div>
             <n-tooltip trigger="hover" :delay="200">
@@ -20,15 +20,15 @@
                   circle
                   quaternary
                   size="small"
-                  aria-label="复制 API 地址"
-                  @click="copyConnection('api', serviceApiUrl, 'API 地址')"
+                  aria-label="复制 API Base URL"
+                  @click="copyConnection('api', serviceApiUrl, 'API Base URL')"
                 >
                   <template #icon>
                     <n-icon :component="copiedTarget === 'api' ? CheckOutlined : CopyOutlined" />
                   </template>
                 </n-button>
               </template>
-              复制 API 地址
+              复制 API Base URL
             </n-tooltip>
           </div>
 
@@ -107,6 +107,9 @@
             </n-tooltip>
           </div>
         </div>
+        <p v-if="connectionUrls.insecureHttp" class="connection-warning" role="status">
+          非本机 HTTP 会明文传输 Gateway Key 与请求内容，请仅在可信网络中使用。
+        </p>
       </div>
       <img :src="characterImage" alt="" class="hero-character" aria-hidden="true" />
     </section>
@@ -194,7 +197,7 @@ import StackedBarChart from "../components/StackedBarChart.vue";
 import { tauriApi } from "../api/tauri";
 import type { Account, DailyModelCost, DashboardSummary, UsageWindow } from "../api/tauri";
 import { CHART_PALETTE } from "../theme";
-import { connectionApiUrl, maskConnectionKey, writeConnectionValue } from "./dashboard-connection";
+import { maskConnectionKey, resolveConnectionUrls, writeConnectionValue } from "./dashboard-connection";
 
 type ConnectionTarget = "api" | "key" | "upstream";
 
@@ -212,6 +215,7 @@ const serviceConfig = ref({
   gateway_port: 9042,
   gateway_key: "",
   upstream_base_url: "",
+  client_root_url: "",
 });
 const summary = ref<DashboardSummary>({
   total_accounts: 0,
@@ -230,9 +234,13 @@ const legendModels = computed(() => {
 });
 const totalChartCost = computed(() => dailyCosts.value.reduce((sum, row) => sum + row.cost, 0));
 const maskedKey = computed(() => maskConnectionKey(serviceConfig.value.gateway_key));
-const serviceApiUrl = computed(() =>
-  connectionApiUrl(window.location.origin, serviceConfig.value.gateway_port, import.meta.env.DEV),
-);
+const connectionUrls = computed(() => resolveConnectionUrls(
+  serviceConfig.value.client_root_url,
+  window.location.origin,
+  serviceConfig.value.gateway_port,
+  import.meta.env.DEV,
+));
+const serviceApiUrl = computed(() => connectionUrls.value.apiBaseUrl);
 
 function formatCost(value: number): string {
   if (value === 0) return "0.00";
@@ -407,6 +415,12 @@ onUnmounted(() => clearTimeout(copyTimer));
   display: flex;
   align-items: center;
   gap: 2px;
+}
+.connection-warning {
+  margin: 10px 2px 0;
+  color: var(--ocg-warning);
+  font-size: 11px;
+  line-height: 1.5;
 }
 .hero-character {
   position: absolute;

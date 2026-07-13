@@ -30,6 +30,7 @@ export interface AppConfig {
   gateway_port: number;
   gateway_key: string;
   upstream_base_url: string;
+  client_root_url: string;
   auto_start: boolean;
   auto_start_supported: boolean;
   connect_timeout_secs: number;

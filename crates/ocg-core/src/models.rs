@@ -44,6 +44,7 @@ pub struct AppConfig {
     pub gateway_port: u16,
     pub gateway_key: String,
     pub upstream_base_url: String,
+    pub client_root_url: String,
     pub auto_start: bool,
     pub connect_timeout_secs: u64,
     pub non_stream_timeout_secs: u64,
@@ -56,12 +57,59 @@ impl Default for AppConfig {
             gateway_port: 9042,
             gateway_key: String::new(),
             upstream_base_url: "https://opencode.ai/zen/go".to_string(),
+            client_root_url: String::new(),
             auto_start: false,
             connect_timeout_secs: 30,
             non_stream_timeout_secs: 120,
             stream_idle_timeout_secs: 300,
         }
     }
+}
+
+/// Validates and canonicalizes the optional URL shown to downstream clients.
+pub fn normalize_client_root_url(value: &str) -> Result<String, String> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Ok(String::new());
+    }
+    let lower = value.to_ascii_lowercase();
+    if !lower.starts_with("http://") && !lower.starts_with("https://") {
+        return Err("client root URL must be an absolute http:// or https:// URL".to_string());
+    }
+
+    let mut url =
+        reqwest::Url::parse(value).map_err(|error| format!("invalid client root URL: {error}"))?;
+    if !matches!(url.scheme(), "http" | "https") {
+        return Err("client root URL must use http or https".to_string());
+    }
+    if url.host_str().is_none() {
+        return Err("client root URL must include a host".to_string());
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err("client root URL must not include credentials".to_string());
+    }
+    if url.query().is_some() || url.fragment().is_some() {
+        return Err("client root URL must not include a query or fragment".to_string());
+    }
+
+    let mut path = url.path().trim_end_matches('/').to_string();
+    let segments = path
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .collect::<Vec<_>>();
+    if let Some(index) = segments
+        .iter()
+        .position(|segment| segment.eq_ignore_ascii_case("v1"))
+    {
+        if index + 1 != segments.len() {
+            return Err("client root URL must not include an endpoint after /v1".to_string());
+        }
+        path.truncate(path.len() - "/v1".len());
+        path.truncate(path.trim_end_matches('/').len());
+    }
+
+    url.set_path(if path.is_empty() { "/" } else { &path });
+    Ok(url.as_str().trim_end_matches('/').to_string())
 }
 
 impl AppConfig {

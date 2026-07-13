@@ -9,7 +9,7 @@
 use chrono::{Duration, Utc};
 use ocg_core::crypto::{KeyCipher, MachineBoundCipher, StaticKeyCipher};
 use ocg_core::db::Database;
-use ocg_core::models::{Account, ForwardLog};
+use ocg_core::models::{Account, ForwardLog, normalize_client_root_url};
 use ocg_core::state::CoreStateInner;
 use std::fs;
 use std::path::PathBuf;
@@ -128,6 +128,7 @@ fn core_state_set_config_persists() {
 
     let mut cfg = state.config();
     cfg.gateway_port = 9999;
+    cfg.client_root_url = "https://gateway.example.com/ocg".into();
     cfg.connect_timeout_secs = 12;
     cfg.non_stream_timeout_secs = 345;
     cfg.stream_idle_timeout_secs = 678;
@@ -139,6 +140,7 @@ fn core_state_set_config_persists() {
     let state2 = Arc::new(CoreStateInner::new(db2, PathBuf::from("."), cipher2).unwrap());
     let persisted = state2.config();
     assert_eq!(persisted.gateway_port, 9999);
+    assert_eq!(persisted.client_root_url, "https://gateway.example.com/ocg");
     assert_eq!(persisted.connect_timeout_secs, 12);
     assert_eq!(persisted.non_stream_timeout_secs, 345);
     assert_eq!(persisted.stream_idle_timeout_secs, 678);
@@ -157,6 +159,7 @@ fn core_state_scrubs_removed_config_fields() {
     let state = Arc::new(CoreStateInner::new(db, dir, cipher).unwrap());
 
     let config = state.config();
+    assert_eq!(config.client_root_url, "");
     assert_eq!(config.connect_timeout_secs, 30);
     assert_eq!(config.non_stream_timeout_secs, 120);
     assert_eq!(config.stream_idle_timeout_secs, 300);
@@ -165,9 +168,49 @@ fn core_state_scrubs_removed_config_fields() {
     assert!(!persisted.contains("remote"));
     assert!(!persisted.contains("remote-secret"));
     let persisted: serde_json::Value = serde_json::from_str(&persisted).unwrap();
+    assert_eq!(persisted["client_root_url"], "");
     assert_eq!(persisted["connect_timeout_secs"], 30);
     assert_eq!(persisted["non_stream_timeout_secs"], 120);
     assert_eq!(persisted["stream_idle_timeout_secs"], 300);
+}
+
+#[test]
+fn client_root_url_normalizes_and_rejects_endpoints() {
+    for (input, expected) in [
+        ("", ""),
+        ("  https://ocg.example.com///  ", "https://ocg.example.com"),
+        (
+            "http://192.168.1.20:9042/proxy/v1/",
+            "http://192.168.1.20:9042/proxy",
+        ),
+        (
+            "https://ocg.example.com/proxy/V1",
+            "https://ocg.example.com/proxy",
+        ),
+        (
+            "https://ocg.example.com/reverse/proxy",
+            "https://ocg.example.com/reverse/proxy",
+        ),
+    ] {
+        assert_eq!(normalize_client_root_url(input).unwrap(), expected);
+    }
+
+    for input in [
+        "ocg.example.com",
+        "http:example.com/",
+        "http:/example.com/",
+        "ftp://ocg.example.com",
+        "https://user:secret@ocg.example.com",
+        "https://ocg.example.com?node=one",
+        "https://ocg.example.com#settings",
+        "https://ocg.example.com/v1/chat/completions",
+        "https://ocg.example.com/proxy/v1/responses",
+    ] {
+        assert!(
+            normalize_client_root_url(input).is_err(),
+            "expected {input:?} to be rejected"
+        );
+    }
 }
 
 #[test]
