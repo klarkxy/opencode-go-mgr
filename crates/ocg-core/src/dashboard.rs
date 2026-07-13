@@ -640,13 +640,15 @@ struct SettingsResponse {
     #[serde(flatten)]
     config: AppConfig,
     auto_start_supported: bool,
+    client_root_url_from_env: bool,
 }
 
 async fn get_settings(State(state): State<CoreState>) -> Json<SettingsResponse> {
     let auto_start_supported = state.auto_start_supported();
     Json(SettingsResponse {
-        config: state.config(),
+        config: state.settings_config(),
         auto_start_supported,
+        client_root_url_from_env: state.client_root_url_from_env(),
     })
 }
 

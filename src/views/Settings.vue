@@ -16,17 +16,23 @@
         >
           <div class="client-root-field">
             <n-input
-              v-model:value="config.client_root_url"
-              clearable
+              v-model:value="clientRootInputValue"
+              :readonly="config.client_root_url_from_env"
+              :clearable="!config.client_root_url_from_env && !!config.client_root_url"
               class="mono"
               :input-props="{
                 'aria-label': t('下游访问根地址（可选）'),
                 'aria-describedby': 'client-root-help',
               }"
-              placeholder="https://ocg.example.com"
               @blur="normalizeClientRootInput"
             />
             <p id="client-root-help">
+              <template v-if="config.client_root_url_from_env">
+                {{ t("由环境变量 OCG_CLIENT_ROOT_URL 管理；修改环境变量并重启后生效。") }}<br />
+              </template>
+              <span v-else-if="!config.client_root_url.trim()" class="sr-only">
+                {{ automaticClientRootFeedback }}
+              </span>
               {{ t("仅用于下游教程、展示和复制；不会修改 Gateway 监听、DNS 或反向代理。") }}
             </p>
           </div>
@@ -321,6 +327,7 @@ const config = ref<AppConfig>({
   gateway_key: "",
   upstream_base_url: "https://opencode.ai/zen/go",
   client_root_url: "",
+  client_root_url_from_env: false,
   auto_start: false,
   auto_start_supported: false,
   connect_timeout_secs: 30,
@@ -335,6 +342,27 @@ const themeLabel = computed(() => {
   return t("默认 · {theme}", { theme: resolved });
 });
 const maskedSettingsKey = computed(() => maskConnectionKey(config.value.gateway_key));
+
+const automaticClientRootUrls = computed(() => resolveConnectionUrls(
+  "",
+  window.location.origin,
+  config.value.gateway_port,
+  import.meta.env.DEV,
+));
+const automaticClientRootFeedback = computed(() => t(
+  "未配置时自动使用：{root}（API Base URL：{api}）；自动值不会写入设置。",
+  {
+    root: automaticClientRootUrls.value.rootUrl,
+    api: automaticClientRootUrls.value.apiBaseUrl,
+  },
+));
+
+const clientRootInputValue = computed({
+  get: () => config.value.client_root_url || automaticClientRootUrls.value.rootUrl,
+  set: (value: string) => {
+    if (!config.value.client_root_url_from_env) config.value.client_root_url = value;
+  },
+});
 
 const clientRootPreview = computed<{
   status?: "error" | "warning";
@@ -354,7 +382,7 @@ const clientRootPreview = computed<{
       };
     }
     if (!config.value.client_root_url.trim()) {
-      return { feedback: t("留空时自动使用：{root}（API Base URL：{api}）", { root: urls.rootUrl, api: urls.apiBaseUrl }) };
+      return { feedback: automaticClientRootFeedback.value };
     }
     return { feedback: t("API Base URL：{url}", { url: urls.apiBaseUrl }) };
   } catch (error) {
@@ -416,6 +444,7 @@ function cancelGatewayKeyEdit() {
 }
 
 function normalizeClientRootInput(): boolean {
+  if (config.value.client_root_url_from_env) return true;
   try {
     config.value.client_root_url = normalizeClientRootUrl(config.value.client_root_url);
     return true;

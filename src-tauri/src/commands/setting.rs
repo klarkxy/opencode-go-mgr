@@ -5,7 +5,7 @@ use tauri::State;
 
 #[tauri::command]
 pub fn get_settings(state: State<'_, AppState>) -> Result<AppConfig, String> {
-    Ok(state.core.config())
+    Ok(state.core.settings_config())
 }
 
 #[tauri::command]

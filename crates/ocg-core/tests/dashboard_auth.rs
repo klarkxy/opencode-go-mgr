@@ -230,6 +230,7 @@ async fn loopback_settings_trim_and_require_gateway_key() {
         "http://192.168.1.20:9042/proxy"
     );
     assert_eq!(roundtrip["auto_start_supported"], false);
+    assert_eq!(roundtrip["client_root_url_from_env"], false);
 
     config.gateway_key = "   ".into();
     assert_eq!(

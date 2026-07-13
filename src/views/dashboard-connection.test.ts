@@ -154,8 +154,16 @@ test("settings expose the downstream display root and bounded request timeouts",
   const dashboard = await readFile(new URL("./Dashboard.vue", import.meta.url), "utf8");
 
   assert.match(settings, /下游访问根地址（可选）/);
-  assert.match(settings, /placeholder="https:\/\/ocg\.example\.com"/);
+  assert.match(settings, /v-model:value="clientRootInputValue"/);
+  assert.match(settings, /:readonly="config\.client_root_url_from_env"/);
+  assert.match(settings, /:clearable="!config\.client_root_url_from_env && !!config\.client_root_url"/);
+  assert.match(settings, /由环境变量 OCG_CLIENT_ROOT_URL 管理/);
+  assert.match(settings, /v-else-if="!config\.client_root_url\.trim\(\)" class="sr-only"/);
+  assert.match(settings, /\{\{ automaticClientRootFeedback \}\}/);
   assert.match(settings, /config\.client_root_url/);
+  assert.match(settings, /client_root_url_from_env: false/);
+  assert.match(settings, /get: \(\) => config\.value\.client_root_url \|\| automaticClientRootUrls\.value\.rootUrl/);
+  assert.doesNotMatch(settings, /config\.value\.client_root_url = resolveConnectionUrls/);
   assert.match(settings, /非本机 HTTP 会明文传输 Gateway Key 与请求内容/);
   assert.match(settings, /不会修改 Gateway 监听、DNS 或反向代理/);
   assert.match(settings, /请求超时/);
@@ -167,6 +175,7 @@ test("settings expose the downstream display root and bounded request timeouts",
   assert.match(settings, /stream_idle_timeout_secs: 300/);
   assert.match(settings, /if \(!timeoutsValid\(\)\)/);
   assert.match(api, /client_root_url: string/);
+  assert.match(api, /client_root_url_from_env: boolean/);
   assert.match(api, /connect_timeout_secs: number/);
   assert.match(api, /non_stream_timeout_secs: number/);
   assert.match(api, /stream_idle_timeout_secs: number/);
