@@ -3,15 +3,20 @@
     class="app-provider"
     :theme="naiveTheme"
     :theme-overrides="themeOverrides"
+    :locale="naiveLocale"
+    :date-locale="naiveDateLocale"
   >
     <n-global-style />
 
     <main v-if="authState !== 'ready'" class="auth-page">
       <section class="auth-panel">
-        <div class="auth-brand"><span>OCG</span> Manager</div>
+        <div class="auth-panel-head">
+          <div class="auth-brand"><span>OCG</span> Manager</div>
+          <LocaleSwitcher />
+        </div>
         <p class="auth-kicker">OpenCode-Go Console</p>
-        <h1>{{ authState === "register" ? "创建管理员" : "管理员登录" }}</h1>
-        <p v-if="authState === 'checking'" class="auth-copy">正在连接管理服务…</p>
+        <h1>{{ authState === "register" ? t("创建管理员") : t("管理员登录") }}</h1>
+        <p v-if="authState === 'checking'" class="auth-copy">{{ t("正在连接管理服务…") }}</p>
         <n-form
           v-else
           class="auth-form"
@@ -20,32 +25,32 @@
           :show-feedback="false"
           @submit.prevent="submitAuth"
         >
-          <n-form-item label="用户名">
+          <n-form-item :label="t('用户名')">
             <n-input
               v-model:value="authUsername"
-              :input-props="{ 'aria-label': '用户名' }"
+              :input-props="{ 'aria-label': t('用户名') }"
               autocomplete="username"
               placeholder="admin"
               autofocus
             />
           </n-form-item>
-          <n-form-item label="密码">
+          <n-form-item :label="t('密码')">
             <n-input
               v-model:value="authPassword"
-              :input-props="{ 'aria-label': '密码' }"
+              :input-props="{ 'aria-label': t('密码') }"
               type="password"
               :autocomplete="authState === 'register' ? 'new-password' : 'current-password'"
-              placeholder="至少 8 个字符"
+              :placeholder="t('至少 8 个字符')"
               show-password-on="click"
             />
           </n-form-item>
-          <n-form-item v-if="authState === 'register'" label="确认密码">
+          <n-form-item v-if="authState === 'register'" :label="t('确认密码')">
             <n-input
               v-model:value="authPasswordConfirm"
-              :input-props="{ 'aria-label': '确认密码' }"
+              :input-props="{ 'aria-label': t('确认密码') }"
               type="password"
               autocomplete="new-password"
-              placeholder="再次输入密码"
+              :placeholder="t('再次输入密码')"
               show-password-on="click"
             />
           </n-form-item>
@@ -56,7 +61,7 @@
             block
             :disabled="!authUsername.trim() || !authPassword"
           >
-            {{ authState === "register" ? "创建并进入" : "登录" }}
+            {{ authState === "register" ? t("创建并进入") : t("登录") }}
           </n-button>
         </n-form>
       </section>
@@ -105,6 +110,7 @@
               />
             </div>
             <div class="header-actions">
+              <LocaleSwitcher />
               <n-tooltip trigger="hover" :disabled="themeMenuShown">
                 <template #trigger>
                   <n-dropdown
@@ -122,21 +128,21 @@
                       aria-controls="theme-menu"
                       aria-haspopup="menu"
                       :aria-expanded="themeMenuShown"
-                      :aria-label="`主题：${themeLabel}`"
+                      :aria-label="t('主题：{theme}', { theme: themeLabel })"
                     >
                       <template #icon><n-icon :component="BgColorsOutlined" /></template>
                     </n-button>
                   </n-dropdown>
                 </template>
-                主题：{{ themeLabel }}
+                {{ t("主题：{theme}", { theme: themeLabel }) }}
               </n-tooltip>
               <n-tooltip v-if="!localMode" trigger="hover">
                 <template #trigger>
-                  <n-button circle quaternary aria-label="退出登录" @click="logout">
+                  <n-button circle quaternary :aria-label="t('退出登录')" @click="logout">
                     <template #icon><n-icon :component="LogoutOutlined" /></template>
                   </n-button>
                 </template>
-                退出登录
+                {{ t("退出登录") }}
               </n-tooltip>
             </div>
           </n-layout-header>
@@ -197,7 +203,10 @@ import Accounts from "./views/Accounts.vue";
 import Applications from "./views/Applications.vue";
 import Logs from "./views/Logs.vue";
 import Settings from "./views/Settings.vue";
-import { DASHBOARD_AUTH_REQUIRED_EVENT, tauriApi } from "./api/tauri";
+import LocaleSwitcher from "./components/LocaleSwitcher.vue";
+import { locale, naiveDateLocale, naiveLocale, t } from "./i18n/index.ts";
+import type { MessageKey } from "./i18n/index.ts";
+import { DASHBOARD_AUTH_REQUIRED_EVENT, DashboardRequestError, tauriApi } from "./api/tauri";
 import {
   applyTheme,
   getThemeStorage,
@@ -242,31 +251,31 @@ function renderIcon(icon: Component) {
   return () => h(icon);
 }
 
-const menuOptions = [
-  { label: "仪表盘", key: "dashboard", icon: renderIcon(DashboardOutlined) },
-  { label: "账号", key: "accounts", icon: renderIcon(KeyOutlined) },
-  { label: "应用", key: "apps", icon: renderIcon(AppstoreOutlined) },
-  { label: "日志", key: "logs", icon: renderIcon(FileTextOutlined) },
-  { label: "设置", key: "settings", icon: renderIcon(SettingOutlined) },
-];
-const titleMap: Record<ViewKey, string> = {
+const menuOptions = computed(() => [
+  { label: t("仪表盘"), key: "dashboard", icon: renderIcon(DashboardOutlined) },
+  { label: t("账号"), key: "accounts", icon: renderIcon(KeyOutlined) },
+  { label: t("应用"), key: "apps", icon: renderIcon(AppstoreOutlined) },
+  { label: t("日志"), key: "logs", icon: renderIcon(FileTextOutlined) },
+  { label: t("设置"), key: "settings", icon: renderIcon(SettingOutlined) },
+]);
+const titleMap: Record<ViewKey, MessageKey> = {
   dashboard: "仪表盘",
   accounts: "账号管理",
   apps: "应用教程",
   logs: "日志",
   settings: "设置",
 };
-const currentTitle = computed(() => titleMap[activeKey.value]);
+const currentTitle = computed(() => t(titleMap[activeKey.value]));
 const themeNames = new Set<ThemeName>(THEME_OPTIONS.map(({ value }) => value));
 const themeLabel = computed(() => {
-  const selected = THEME_OPTIONS.find(({ value }) => value === themeName.value)?.label ?? "默认";
+  const selected = t((THEME_OPTIONS.find(({ value }) => value === themeName.value)?.label ?? "默认") as MessageKey);
   if (themeName.value !== "default") return selected;
-  const resolved = THEME_OPTIONS.find(({ value }) => value === resolvedTheme.value)?.label;
-  return `默认 · ${resolved ?? "皓白"}`;
+  const resolved = t((THEME_OPTIONS.find(({ value }) => value === resolvedTheme.value)?.label ?? "皓白") as MessageKey);
+  return t("默认 · {theme}", { theme: resolved });
 });
 const themeMenuOptions = computed<DropdownOption[]>(() => THEME_OPTIONS.map((option) => ({
   key: option.value,
-  label: option.label,
+  label: t(option.label as MessageKey),
   icon: () => h("span", {
     "aria-hidden": "true",
     style: {
@@ -292,7 +301,7 @@ const themeMenuOptions = computed<DropdownOption[]>(() => THEME_OPTIONS.map((opt
 const themeMenuProps: DropdownMenuProps = () => ({
   id: "theme-menu",
   role: "menu",
-  "aria-label": "选择主题",
+  "aria-label": t("选择主题"),
 });
 
 function readView(): ViewKey {
@@ -373,7 +382,7 @@ function onAuthRequired(event: Event) {
   authState.value = "login";
   authPassword.value = "";
   authPasswordConfirm.value = "";
-  authError.value = (event as CustomEvent<string>).detail || "请重新登录";
+  authError.value = (event as CustomEvent<string>).detail || t("请重新登录");
 }
 
 async function loadAuthStatus() {
@@ -385,7 +394,7 @@ async function loadAuthStatus() {
     authState.value = status.authenticated ? "ready" : status.initialized ? "login" : "register";
   } catch (e) {
     authState.value = "login";
-    authError.value = `连接失败: ${e}`;
+    authError.value = t("连接失败: {error}", { error: String(e) });
   }
 }
 
@@ -393,8 +402,17 @@ async function submitAuth() {
   const mode = authState.value;
   const username = authUsername.value.trim();
   if (!username || !authPassword.value) return;
+  if (mode === "register" && [...username].length > 64) {
+    authError.value = t("用户名需为 1 至 64 个字符");
+    return;
+  }
+  const passwordLength = [...authPassword.value].length;
+  if (mode === "register" && (passwordLength < 8 || passwordLength > 256)) {
+    authError.value = t("密码需为 8 至 256 个字符");
+    return;
+  }
   if (mode === "register" && authPassword.value !== authPasswordConfirm.value) {
-    authError.value = "两次输入的密码不一致";
+    authError.value = t("两次输入的密码不一致");
     return;
   }
   authState.value = "checking";
@@ -408,7 +426,11 @@ async function submitAuth() {
   } catch (e) {
     authPassword.value = "";
     authPasswordConfirm.value = "";
-    const error = e instanceof Error ? e.message : String(e);
+    let error = e instanceof Error ? e.message : String(e);
+    if (e instanceof DashboardRequestError) {
+      if (mode === "login" && e.status === 401) error = t("用户名或密码错误");
+      if (mode === "register" && e.status === 409) error = t("管理员已经创建，请直接登录");
+    }
     if (mode === "register") {
       const status = await tauriApi.getAuthStatus().catch(() => null);
       if (status?.initialized) {
@@ -432,6 +454,7 @@ async function logout() {
 }
 
 watch(activeKey, syncView);
+watch(locale, () => { authError.value = ""; });
 watch(themeName, (value) => writeTheme(themeStorage, value));
 watch([resolvedTheme, themeTokens], ([resolved, tokens]) => {
   applyTheme(document.documentElement, resolved, tokens);
@@ -486,6 +509,11 @@ onUnmounted(() => {
 .auth-brand {
   font-size: 19px;
   font-weight: 700;
+}
+.auth-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 .auth-brand span,
 .brand-mark {

@@ -1,5 +1,7 @@
+import { t } from "../i18n/index.ts";
+
 export function maskConnectionKey(key: string): string {
-  if (!key) return "未设置";
+  if (!key) return t("未设置");
   if (key.length <= 4) return "••••";
   if (key.length <= 8) return `${key.slice(0, 2)}…${key.slice(-2)}`;
   return `${key.slice(0, 4)}…${key.slice(-4)}`;
@@ -18,22 +20,22 @@ export function normalizeClientRootUrl(value: string): string {
   const input = value.trim();
   if (!input) return "";
   if (!/^https?:\/\//i.test(input)) {
-    throw new Error("请输入完整的 http:// 或 https:// 地址");
+    throw new Error(t("请输入完整的 http:// 或 https:// 地址"));
   }
 
   let url: URL;
   try {
     url = new URL(input);
   } catch {
-    throw new Error("请输入有效的绝对 URL");
+    throw new Error(t("请输入有效的绝对 URL"));
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new Error("仅支持 HTTP 或 HTTPS 地址");
+    throw new Error(t("仅支持 HTTP 或 HTTPS 地址"));
   }
-  if (!url.hostname) throw new Error("地址必须包含主机名");
-  if (url.username || url.password) throw new Error("地址不能包含用户名或密码");
+  if (!url.hostname) throw new Error(t("地址必须包含主机名"));
+  if (url.username || url.password) throw new Error(t("地址不能包含用户名或密码"));
   if (input.includes("?") || input.includes("#")) {
-    throw new Error("地址不能包含查询参数或 #片段");
+    throw new Error(t("地址不能包含查询参数或 #片段"));
   }
 
   let path = url.pathname.replace(/\/+$/, "");
@@ -41,7 +43,7 @@ export function normalizeClientRootUrl(value: string): string {
   const v1Index = segments.findIndex((segment) => segment.toLowerCase() === "v1");
   if (v1Index >= 0) {
     if (v1Index + 1 !== segments.length) {
-      throw new Error("请填写根地址，不要包含 /v1 后的接口路径");
+      throw new Error(t("请填写根地址，不要包含 /v1 后的接口路径"));
     }
     path = path.slice(0, path.length - 3).replace(/\/+$/, "");
   }
@@ -83,7 +85,7 @@ export async function writeConnectionValue(
   writeText: ((value: string) => Promise<void>) | undefined,
   value: string,
 ): Promise<void> {
-  if (!value) throw new Error("没有可复制的内容");
-  if (!writeText) throw new Error("当前环境不支持剪贴板");
+  if (!value) throw new Error(t("没有可复制的内容"));
+  if (!writeText) throw new Error(t("当前环境不支持剪贴板"));
   await writeText(value);
 }

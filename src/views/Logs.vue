@@ -1,7 +1,7 @@
 <template>
   <section class="logs-card">
     <n-tabs v-model:value="activeTab" type="line" animated>
-      <n-tab-pane name="gateway" tab="运行日志">
+      <n-tab-pane name="gateway" :tab="t('运行日志')">
         <div class="log-toolbar">
           <n-tooltip trigger="hover">
             <template #trigger>
@@ -9,13 +9,13 @@
                 circle
                 quaternary
                 :loading="gatewayLoading"
-                aria-label="刷新运行日志"
+                :aria-label="t('刷新运行日志')"
                 @click="loadGatewayLogs"
               >
                 <template #icon><n-icon :component="ReloadOutlined" /></template>
               </n-button>
             </template>
-            刷新运行日志
+            {{ t("刷新运行日志") }}
           </n-tooltip>
         </div>
         <n-data-table
@@ -27,28 +27,28 @@
           size="small"
         />
       </n-tab-pane>
-      <n-tab-pane name="forward" tab="请求日志">
+      <n-tab-pane name="forward" :tab="t('请求日志')">
         <div class="filter-bar">
           <n-select
             v-model:value="statusFilter"
             :options="statusOptions"
-            placeholder="状态"
+            :placeholder="t('状态')"
             clearable
           />
           <n-select
             v-model:value="accountFilter"
             :options="accountOptions"
-            placeholder="账号"
+            :placeholder="t('账号')"
             clearable
           />
           <div class="filter-actions">
             <n-tooltip v-if="statusFilter || accountFilter" trigger="hover">
               <template #trigger>
-                <n-button circle quaternary aria-label="清除筛选" @click="clearFilters">
+                <n-button circle quaternary :aria-label="t('清除筛选')" @click="clearFilters">
                   <template #icon><n-icon :component="ClearOutlined" /></template>
                 </n-button>
               </template>
-              清除筛选
+              {{ t("清除筛选") }}
             </n-tooltip>
             <n-tooltip trigger="hover">
               <template #trigger>
@@ -56,13 +56,13 @@
                   circle
                   quaternary
                   :loading="forwardLoading"
-                  aria-label="刷新请求日志"
+                  :aria-label="t('刷新请求日志')"
                   @click="loadForwardLogs"
                 >
                   <template #icon><n-icon :component="ReloadOutlined" /></template>
                 </n-button>
               </template>
-              刷新请求日志
+              {{ t("刷新请求日志") }}
             </n-tooltip>
           </div>
         </div>
@@ -79,7 +79,7 @@
           @update:page="changeForwardPage"
         >
           <template #empty>
-            <n-empty description="仅记录经本机 API 转发的请求，账号 Ping 见运行日志" />
+            <n-empty :description="t('仅记录经本机 API 转发的请求，账号 Ping 见运行日志')" />
           </template>
         </n-data-table>
       </n-tab-pane>
@@ -105,6 +105,7 @@ import type { DataTableCreateSummary } from "naive-ui";
 import { ClearOutlined, ReloadOutlined } from "@vicons/antd";
 import { tauriApi } from "../api/tauri";
 import type { Account, ForwardLog, ForwardLogSummary, GatewayLog } from "../api/tauri";
+import { locale, t } from "../i18n/index.ts";
 
 type LogTab = "gateway" | "forward";
 
@@ -135,69 +136,69 @@ const forwardPagination = computed(() => ({
   itemCount: forwardTotals.value.total_requests,
 }));
 
-const dateFormatter = new Intl.DateTimeFormat("zh-CN", {
+const dateFormatter = computed(() => new Intl.DateTimeFormat(locale.value, {
   month: "2-digit",
   day: "2-digit",
   hour: "2-digit",
   minute: "2-digit",
   second: "2-digit",
-});
-const numberFormatter = new Intl.NumberFormat("zh-CN");
-const costFormatter = new Intl.NumberFormat("en-US", {
+}));
+const numberFormatter = computed(() => new Intl.NumberFormat(locale.value));
+const costFormatter = computed(() => new Intl.NumberFormat(locale.value, {
   style: "currency",
   currency: "USD",
   minimumFractionDigits: 5,
   maximumFractionDigits: 5,
-});
+}));
 
-const statusMeta: Record<string, { label: string; type: "success" | "warning" | "error" | "default" }> = {
-  success: { label: "成功", type: "success" },
-  success_no_usage: { label: "成功·无用量", type: "success" },
-  streaming: { label: "进行中", type: "warning" },
-  client_error: { label: "客户端错误", type: "error" },
-  error: { label: "错误", type: "error" },
-};
-const statusOptions = Object.entries(statusMeta).map(([value, meta]) => ({ label: meta.label, value }));
+const statusMeta = computed<Record<string, { label: string; type: "success" | "warning" | "error" | "default" }>>(() => ({
+  success: { label: t("成功"), type: "success" },
+  success_no_usage: { label: t("成功·无用量"), type: "success" },
+  streaming: { label: t("进行中"), type: "warning" },
+  client_error: { label: t("客户端错误"), type: "error" },
+  error: { label: t("错误"), type: "error" },
+}));
+const statusOptions = computed(() => Object.entries(statusMeta.value).map(([value, meta]) => ({ label: meta.label, value })));
 const accountOptions = computed(() => accounts.value.map((account) => ({ label: account.name, value: account.id })));
 
 function formatDate(value: string): string {
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : dateFormatter.format(date);
+  return Number.isNaN(date.getTime()) ? value : dateFormatter.value.format(date);
 }
 
-const gatewayColumns = [
-  { title: "时间", key: "created_at", width: 150, render: (row: GatewayLog) => formatDate(row.created_at) },
-  { title: "级别", key: "level", width: 80 },
-  { title: "分类", key: "category", width: 100 },
-  { title: "消息", key: "message", minWidth: 480, ellipsis: { tooltip: true } },
-];
-const forwardColumns = [
-  { title: "时间", key: "timestamp", width: 150, render: (row: ForwardLog) => formatDate(row.timestamp) },
-  { title: "模型", key: "model", width: 160, ellipsis: { tooltip: true } },
-  { title: "账号", key: "account_name", width: 120, ellipsis: { tooltip: true } },
+const gatewayColumns = computed(() => [
+  { title: t("时间"), key: "created_at", width: 150, render: (row: GatewayLog) => formatDate(row.created_at) },
+  { title: t("级别"), key: "level", width: 80 },
+  { title: t("分类"), key: "category", width: 100 },
+  { title: t("消息"), key: "message", minWidth: 480, ellipsis: { tooltip: true } },
+]);
+const forwardColumns = computed(() => [
+  { title: t("时间"), key: "timestamp", width: 150, render: (row: ForwardLog) => formatDate(row.timestamp) },
+  { title: t("模型"), key: "model", width: 160, ellipsis: { tooltip: true } },
+  { title: t("账号"), key: "account_name", width: 120, ellipsis: { tooltip: true } },
   {
-    title: "状态",
+    title: t("状态"),
     key: "status",
     width: 112,
     render: (row: ForwardLog) => {
-      const meta = statusMeta[row.status] ?? { label: row.status, type: "default" as const };
+      const meta = statusMeta.value[row.status] ?? { label: row.status, type: "default" as const };
       return h(NTag, { type: meta.type, size: "small", bordered: false }, { default: () => meta.label });
     },
   },
   { title: "HTTP", key: "http_status", width: 72 },
-  { title: "输入", key: "prompt_tokens", width: 92, align: "right" as const, render: (row: ForwardLog) => numberFormatter.format(row.prompt_tokens) },
-  { title: "输出", key: "completion_tokens", width: 92, align: "right" as const, render: (row: ForwardLog) => numberFormatter.format(row.completion_tokens) },
-  { title: "缓存", key: "cached_tokens", width: 92, align: "right" as const, render: (row: ForwardLog) => numberFormatter.format(row.cached_tokens) },
-  { title: "成本", key: "cost", width: 112, align: "right" as const, render: (row: ForwardLog) => costFormatter.format(row.cost) },
-  { title: "错误", key: "error_message", minWidth: 220, ellipsis: { tooltip: true } },
-];
+  { title: t("输入"), key: "prompt_tokens", width: 92, align: "right" as const, render: (row: ForwardLog) => numberFormatter.value.format(row.prompt_tokens) },
+  { title: t("输出"), key: "completion_tokens", width: 92, align: "right" as const, render: (row: ForwardLog) => numberFormatter.value.format(row.completion_tokens) },
+  { title: t("缓存"), key: "cached_tokens", width: 92, align: "right" as const, render: (row: ForwardLog) => numberFormatter.value.format(row.cached_tokens) },
+  { title: t("成本"), key: "cost", width: 112, align: "right" as const, render: (row: ForwardLog) => costFormatter.value.format(row.cost) },
+  { title: t("错误"), key: "error_message", minWidth: 220, ellipsis: { tooltip: true } },
+]);
 
 const forwardSummary: DataTableCreateSummary<ForwardLog> = () => ({
-  timestamp: { value: `Σ ${numberFormatter.format(forwardTotals.value.total_requests)} 条`, colSpan: 5 },
-  prompt_tokens: { value: numberFormatter.format(forwardTotals.value.prompt_tokens) },
-  completion_tokens: { value: numberFormatter.format(forwardTotals.value.completion_tokens) },
-  cached_tokens: { value: numberFormatter.format(forwardTotals.value.cached_tokens) },
-  cost: { value: costFormatter.format(forwardTotals.value.cost) },
+  timestamp: { value: t("请求数：{count}", { count: numberFormatter.value.format(forwardTotals.value.total_requests) }), colSpan: 5 },
+  prompt_tokens: { value: numberFormatter.value.format(forwardTotals.value.prompt_tokens) },
+  completion_tokens: { value: numberFormatter.value.format(forwardTotals.value.completion_tokens) },
+  cached_tokens: { value: numberFormatter.value.format(forwardTotals.value.cached_tokens) },
+  cost: { value: costFormatter.value.format(forwardTotals.value.cost) },
   error_message: { value: "" },
 });
 
@@ -221,7 +222,7 @@ async function loadGatewayLogs() {
   try {
     gatewayLogs.value = await tauriApi.getGatewayLogs(200);
   } catch (e) {
-    message.error(`加载运行日志失败: ${e}`);
+    message.error(t("加载运行日志失败: {error}", { error: String(e) }));
   } finally {
     gatewayLoading.value = false;
   }
@@ -243,7 +244,7 @@ async function loadForwardLogs() {
     forwardLogs.value = result.items;
     forwardTotals.value = result.summary;
   } catch (e) {
-    if (request === forwardRequest) message.error(`加载请求日志失败: ${e}`);
+    if (request === forwardRequest) message.error(t("加载请求日志失败: {error}", { error: String(e) }));
   } finally {
     if (request === forwardRequest) forwardLoading.value = false;
   }
@@ -253,7 +254,7 @@ async function loadAccounts() {
   try {
     accounts.value = await tauriApi.getAccounts();
   } catch (e) {
-    message.error(`加载账号筛选失败: ${e}`);
+    message.error(t("加载账号筛选失败: {error}", { error: String(e) }));
   }
 }
 

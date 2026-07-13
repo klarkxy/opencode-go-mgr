@@ -1,3 +1,5 @@
+import { t } from "../i18n/index.ts";
+
 export interface Account {
   id: string;
   name: string;
@@ -117,6 +119,16 @@ export class DashboardAuthError extends Error {
   }
 }
 
+export class DashboardRequestError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "DashboardRequestError";
+    this.status = status;
+  }
+}
+
 function dashboardAuthError(message: string): DashboardAuthError {
   const error = new DashboardAuthError(message);
   window.dispatchEvent(new CustomEvent(DASHBOARD_AUTH_REQUIRED_EVENT, { detail: message }));
@@ -146,17 +158,17 @@ async function request<T>(
   });
   if (!response.ok) {
     if (response.status === 401 && notifyAuthRequired) {
-      throw dashboardAuthError("登录已失效，请重新登录");
+      throw dashboardAuthError(t("登录已失效，请重新登录"));
     }
     let message = `${response.status} ${response.statusText}`;
     try {
-      const body = await response.json();
-      if (body?.error) message = body.error;
+      const body = await response.json() as { error?: unknown };
+      if (typeof body.error === "string") message = body.error;
     } catch {
       const text = await response.text().catch(() => "");
       if (text) message = text;
     }
-    throw new Error(message);
+    throw new DashboardRequestError(message, response.status);
   }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;

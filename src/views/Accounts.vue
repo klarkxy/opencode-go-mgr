@@ -2,16 +2,16 @@
   <div class="accounts-view">
   <n-space vertical :size="16" class="accounts-content">
     <n-space justify="space-between" align="center" class="accounts-toolbar">
-      <n-h3 style="margin: 0">账号管理</n-h3>
+      <n-h3 style="margin: 0">{{ t("账号管理") }}</n-h3>
       <n-button type="primary" @click="showCreateModal = true">
         <template #icon>
           <n-icon :component="PlusOutlined" />
         </template>
-        新增账号
+        {{ t("新增账号") }}
       </n-button>
     </n-space>
 
-    <n-empty v-if="accounts.length === 0" description="暂无账号" />
+    <n-empty v-if="accounts.length === 0" :description="t('暂无账号')" />
 
     <n-card
       v-for="account in accounts"
@@ -24,11 +24,11 @@
         <div class="account-title">
           <span>{{ account.name }}</span>
           <n-tag :type="account.enabled ? 'success' : 'default'" size="small">
-            {{ account.enabled ? "已启用" : "已禁用" }}
+            {{ account.enabled ? t("已启用") : t("已禁用") }}
           </n-tag>
           <n-tooltip v-if="isCooling(account)" :disabled="!account.last_error">
             <template #trigger>
-              <n-tag type="error" size="small">熔断 · 剩 {{ formatRemaining(account) }}</n-tag>
+              <n-tag type="error" size="small">{{ t("熔断 · 剩 {time}", { time: formatRemaining(account) }) }}</n-tag>
             </template>
             {{ account.last_error }}
           </n-tooltip>
@@ -42,22 +42,22 @@
                 circle
                 quaternary
                 size="small"
-                :aria-label="`测试账号 ${account.name}`"
+                :aria-label="t('测试账号 {name}', { name: account.name })"
                 :loading="pinging[account.id]"
                 @click="pingAccount(account.id)"
               >
                 <template #icon><n-icon :component="ThunderboltOutlined" /></template>
               </n-button>
             </template>
-            测试连接
+            {{ t("测试连接") }}
           </n-tooltip>
           <n-switch
             :value="account.enabled"
-            :aria-label="`${account.enabled ? '禁用' : '启用'}账号 ${account.name}`"
+            :aria-label="account.enabled ? t('禁用账号 {name}', { name: account.name }) : t('启用账号 {name}', { name: account.name })"
             @update:value="toggleAccount(account.id)"
           >
-            <template #checked>启用</template>
-            <template #unchecked>禁用</template>
+            <template #checked>{{ t("启用") }}</template>
+            <template #unchecked>{{ t("禁用") }}</template>
           </n-switch>
           <n-tooltip trigger="hover">
             <template #trigger>
@@ -65,7 +65,7 @@
                 circle
                 quaternary
                 size="small"
-                :aria-label="`${expanded[account.id] ? '收起' : '展开'}账号 ${account.name}`"
+                :aria-label="expanded[account.id] ? t('收起账号 {name}', { name: account.name }) : t('展开账号 {name}', { name: account.name })"
                 @click="toggleExpanded(account.id)"
               >
                 <template #icon>
@@ -73,11 +73,11 @@
                 </template>
               </n-button>
             </template>
-            {{ expanded[account.id] ? "收起" : "展开" }}
+            {{ expanded[account.id] ? t("收起") : t("展开") }}
           </n-tooltip>
           <n-popconfirm
-            positive-text="删除"
-            negative-text="取消"
+            :positive-text="t('删除')"
+            :negative-text="t('取消')"
             @positive-click="deleteAccount(account.id)"
           >
             <template #trigger>
@@ -88,15 +88,15 @@
                     quaternary
                     size="small"
                     type="error"
-                    :aria-label="`删除账号 ${account.name}`"
+                    :aria-label="t('删除账号 {name}', { name: account.name })"
                   >
                     <template #icon><n-icon :component="DeleteOutlined" /></template>
                   </n-button>
                 </template>
-                删除账号
+                {{ t("删除账号") }}
               </n-tooltip>
             </template>
-            确定删除账号 {{ account.name }} 吗？
+            {{ t("确定删除账号 {name} 吗？", { name: account.name }) }}
           </n-popconfirm>
         </n-space>
       </template>
@@ -105,7 +105,7 @@
         <div v-for="limit in usageLimits" :key="limit.key" class="usage-segment">
           <div class="usage-meta">
             <span>{{ limit.label }}</span>
-            <strong>${{ formatCost(usageCost(account.id, limit.key)) }} / ${{ limit.limit }}</strong>
+            <strong>{{ formatCost(usageCost(account.id, limit.key)) }} / {{ formatCost(limit.limit) }}</strong>
           </div>
           <n-progress
             type="line"
@@ -120,27 +120,27 @@
       <div v-if="expanded[account.id]" class="account-detail">
         <n-form :model="drafts[account.id]" label-placement="top" :show-feedback="false">
           <div class="detail-grid">
-            <n-form-item label="名称">
+            <n-form-item :label="t('名称')">
               <n-input
                 v-model:value="drafts[account.id].name"
-                :input-props="{ 'aria-label': `${account.name} 名称` }"
+                :input-props="{ 'aria-label': t('{name} 名称', { name: account.name }) }"
               />
             </n-form-item>
-            <n-form-item label="账号">
+            <n-form-item :label="t('账号')">
               <n-input
                 v-model:value="drafts[account.id].username"
-                :input-props="{ 'aria-label': `${account.name} 登录账号` }"
-                placeholder="OpenCode-Go 账号"
+                :input-props="{ 'aria-label': t('{name} 登录账号', { name: account.name }) }"
+                :placeholder="t('OpenCode-Go 账号')"
               />
             </n-form-item>
-            <n-form-item label="密码">
+            <n-form-item :label="t('密码')">
               <div class="secret-field">
                 <n-input
                   v-model:value="drafts[account.id].password"
-                  :input-props="{ 'aria-label': `${account.name} 密码` }"
+                  :input-props="{ 'aria-label': t('{name} 密码', { name: account.name }) }"
                   type="password"
                   show-password-on="click"
-                  placeholder="留空不修改"
+                  :placeholder="t('留空不修改')"
                   :disabled="drafts[account.id].clearPassword"
                 />
                 <n-button
@@ -149,17 +149,17 @@
                   type="warning"
                   @click="drafts[account.id].clearPassword = !drafts[account.id].clearPassword"
                 >
-                  {{ drafts[account.id].clearPassword ? "取消清除密码" : "清除已存密码" }}
+                  {{ drafts[account.id].clearPassword ? t("取消清除密码") : t("清除已存密码") }}
                 </n-button>
               </div>
             </n-form-item>
             <n-form-item label="API Key">
               <n-input
                 v-model:value="drafts[account.id].key"
-                :input-props="{ 'aria-label': `${account.name} API Key` }"
+                :input-props="{ 'aria-label': t('{name} API Key', { name: account.name }) }"
                 type="password"
                 show-password-on="click"
-                placeholder="留空不修改"
+                :placeholder="t('留空不修改')"
               />
             </n-form-item>
           </div>
@@ -171,10 +171,10 @@
             type="warning"
             @click="resetCooldown(account.id)"
           >
-            重置冷却
+            {{ t("重置冷却") }}
           </n-button>
           <n-button size="small" type="primary" :loading="busy" @click="saveAccount(account)">
-            保存
+            {{ t("保存") }}
           </n-button>
         </n-space>
       </div>
@@ -184,34 +184,34 @@
   <n-modal
     v-model:show="showCreateModal"
     preset="card"
-    title="新增账号"
+    :title="t('新增账号')"
     class="account-modal"
     style="width: 560px; max-width: calc(100vw - 32px)"
     :mask-closable="false"
   >
     <n-form :model="newAccount" label-placement="top" :show-feedback="false">
       <div class="modal-grid">
-        <n-form-item label="名称">
+        <n-form-item :label="t('名称')">
           <n-input
             v-model:value="newAccount.name"
-            :input-props="{ 'aria-label': '名称' }"
-            placeholder="主号"
+            :input-props="{ 'aria-label': t('名称') }"
+            :placeholder="t('主号')"
           />
         </n-form-item>
-        <n-form-item label="账号">
+        <n-form-item :label="t('账号')">
           <n-input
             v-model:value="newAccount.username"
-            :input-props="{ 'aria-label': '登录账号' }"
-            placeholder="OpenCode-Go 账号"
+            :input-props="{ 'aria-label': t('登录账号') }"
+            :placeholder="t('OpenCode-Go 账号')"
           />
         </n-form-item>
-        <n-form-item label="密码">
+        <n-form-item :label="t('密码')">
           <n-input
             v-model:value="newAccount.password"
-            :input-props="{ 'aria-label': '密码' }"
+            :input-props="{ 'aria-label': t('密码') }"
             type="password"
             show-password-on="click"
-            placeholder="OpenCode-Go 密码"
+            :placeholder="t('OpenCode-Go 密码')"
           />
         </n-form-item>
         <n-form-item label="API Key">
@@ -227,8 +227,8 @@
     </n-form>
     <template #footer>
       <n-space justify="end">
-        <n-button @click="showCreateModal = false">取消</n-button>
-        <n-button type="primary" :loading="busy" @click="createAccount">保存</n-button>
+        <n-button @click="showCreateModal = false">{{ t("取消") }}</n-button>
+        <n-button type="primary" :loading="busy" @click="createAccount">{{ t("保存") }}</n-button>
       </n-space>
     </template>
   </n-modal>
@@ -236,7 +236,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import {
   NButton,
   NCard,
@@ -262,10 +262,11 @@ import {
   ThunderboltOutlined,
   UpOutlined,
 } from "@vicons/antd";
-import { tauriApi } from "../api/tauri";
+import { DashboardRequestError, tauriApi } from "../api/tauri";
 import type { Account, AccountInput, AccountUpdate, UsageWindow } from "../api/tauri";
 import { isCooling, isUsageLimitReached, usageProgressStatus } from "./accounts-usage";
 import type { UsageKey } from "./accounts-usage";
+import { locale, t } from "../i18n/index.ts";
 
 type AccountDraft = {
   name: string;
@@ -275,11 +276,11 @@ type AccountDraft = {
   clearPassword: boolean;
 };
 
-const usageLimits: Array<{ key: UsageKey; label: string; limit: number }> = [
+const usageLimits = computed<Array<{ key: UsageKey; label: string; limit: number }>>(() => [
   { key: "window_5h", label: "5h", limit: 12 },
-  { key: "window_week", label: "本周", limit: 30 },
-  { key: "window_month", label: "本月", limit: 60 },
-];
+  { key: "window_week", label: t("本周"), limit: 30 },
+  { key: "window_month", label: t("本月"), limit: 60 },
+]);
 
 const message = useMessage();
 const accounts = ref<Account[]>([]);
@@ -339,21 +340,25 @@ function usageStatus(
 }
 
 function formatCost(value: number): string {
-  if (value === 0) return "0.00";
-  if (value < 0.01) return value.toFixed(4);
-  return value.toFixed(2);
+  const digits = value !== 0 && value < 0.01 ? 4 : 2;
+  return new Intl.NumberFormat(locale.value, {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  }).format(value);
 }
 
 function formatRemaining(account: Account): string {
   if (!account.cooldown_until) return "";
   const ms = new Date(account.cooldown_until).getTime() - Date.now();
-  if (ms <= 0) return "0s";
+  if (ms <= 0) return t("{seconds}秒", { seconds: 0 });
   const min = Math.floor(ms / 60000);
-  if (min < 60) return `${min}min`;
+  if (min < 60) return t("{minutes}分钟", { minutes: min });
   const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h${min % 60}m`;
+  if (hr < 24) return t("{hours}小时{minutes}分钟", { hours: hr, minutes: min % 60 });
   const day = Math.floor(hr / 24);
-  return `${day}天${hr % 24}h`;
+  return t("{days}天{hours}小时", { days: day, hours: hr % 24 });
 }
 
 function toggleExpanded(id: string) {
@@ -400,14 +405,14 @@ async function loadAccounts() {
     }));
     usageMap.value = Object.fromEntries(usage);
   } catch (e) {
-    message.error(`加载账号失败: ${e}`);
+    message.error(t("加载账号失败: {error}", { error: String(e) }));
   }
 }
 
 async function createAccount() {
   const input = trimmedDraft(newAccount.value);
   if (!input.name || !input.key) {
-    message.warning("请填写名称和 API Key");
+    message.warning(t("请填写名称和 API Key"));
     return;
   }
   busy.value = true;
@@ -421,10 +426,10 @@ async function createAccount() {
       clearPassword: false,
     };
     showCreateModal.value = false;
-    message.success("账号已添加");
+    message.success(t("账号已添加"));
     await loadAccounts();
   } catch (e) {
-    message.error(`保存失败: ${e}`);
+    message.error(t("保存失败: {error}", { error: String(e) }));
   } finally {
     busy.value = false;
   }
@@ -434,17 +439,17 @@ async function saveAccount(account: Account) {
   const draft = drafts.value[account.id];
   const update = trimmedUpdate(draft);
   if (!update.name) {
-    message.warning("名称不能为空");
+    message.warning(t("名称不能为空"));
     return;
   }
   busy.value = true;
   try {
     const saved = await tauriApi.updateAccount(account.id, update);
     drafts.value[account.id] = draftFromAccount(saved);
-    message.success("账号已更新");
+    message.success(t("账号已更新"));
     await loadAccounts();
   } catch (e) {
-    message.error(`保存失败: ${e}`);
+    message.error(t("保存失败: {error}", { error: String(e) }));
   } finally {
     busy.value = false;
   }
@@ -453,9 +458,12 @@ async function saveAccount(account: Account) {
 async function pingAccount(id: string) {
   pinging.value[id] = true;
   try {
-    message.success(await tauriApi.testAccount(id));
+    await tauriApi.testAccount(id);
+    message.success(t("账号连接成功"));
   } catch (e) {
-    message.error(`Ping 失败: ${e}`);
+    message.error(e instanceof DashboardRequestError && e.status === 429
+      ? t("账号达到额度或限流，已进入冷却")
+      : t("Ping 失败: {error}", { error: String(e) }));
   } finally {
     pinging.value[id] = false;
     await loadAccounts();
@@ -467,27 +475,27 @@ async function toggleAccount(id: string) {
     await tauriApi.toggleAccount(id);
     await loadAccounts();
   } catch (e) {
-    message.error(`切换失败: ${e}`);
+    message.error(t("切换失败: {error}", { error: String(e) }));
   }
 }
 
 async function deleteAccount(id: string) {
   try {
     await tauriApi.deleteAccount(id);
-    message.success("账号已删除");
+    message.success(t("账号已删除"));
     await loadAccounts();
   } catch (e) {
-    message.error(`删除失败: ${e}`);
+    message.error(t("删除失败: {error}", { error: String(e) }));
   }
 }
 
 async function resetCooldown(id: string) {
   try {
     await tauriApi.resetAccountCooldown(id);
-    message.success("已重置冷却");
+    message.success(t("已重置冷却"));
     await loadAccounts();
   } catch (e) {
-    message.error(`重置失败: ${e}`);
+    message.error(t("重置失败: {error}", { error: String(e) }));
   }
 }
 

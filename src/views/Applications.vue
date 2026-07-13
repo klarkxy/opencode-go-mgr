@@ -2,22 +2,21 @@
   <div class="applications">
     <header class="page-head">
       <div>
-        <p class="page-kicker">CLIENT PLAYBOOKS</p>
-        <h1>应用接入教程</h1>
-        <p class="page-copy">选择常用客户端，复制当前节点配置并完成一次请求验证。</p>
+        <h1>{{ t("应用接入教程") }}</h1>
+        <p class="page-copy">{{ t("选择常用客户端，复制当前节点配置并完成一次请求验证。") }}</p>
       </div>
-      <n-tag type="info" :bordered="false" round>{{ APPLICATION_GUIDES.length }} 个客户端</n-tag>
+      <n-tag type="info" :bordered="false" round>{{ t("客户端数：{count}", { count: applicationGuides.length }) }}</n-tag>
     </header>
 
     <section class="connection-panel" aria-labelledby="connection-panel-title">
       <div class="connection-head">
         <div>
-          <h2 id="connection-panel-title">当前节点接入轨</h2>
-          <p>地址随设置实时生成；Key 始终脱敏展示。</p>
+          <h2 id="connection-panel-title">{{ t("当前节点接入轨") }}</h2>
+          <p>{{ t("地址随设置实时生成；Key 始终脱敏展示。") }}</p>
         </div>
-        <n-tag v-if="settingsLoaded" type="success" :bordered="false" size="small">已同步设置</n-tag>
-        <n-tag v-else-if="settingsLoading" :bordered="false" size="small">正在读取设置</n-tag>
-        <n-tag v-else type="error" :bordered="false" size="small">读取失败</n-tag>
+        <n-tag v-if="settingsLoaded" type="success" :bordered="false" size="small">{{ t("已同步设置") }}</n-tag>
+        <n-tag v-else-if="settingsLoading" :bordered="false" size="small">{{ t("正在读取设置") }}</n-tag>
+        <n-tag v-else type="error" :bordered="false" size="small">{{ t("读取失败") }}</n-tag>
       </div>
 
       <div class="connection-track">
@@ -29,9 +28,9 @@
               circle
               quaternary
               size="small"
-              aria-label="复制根地址"
+              :aria-label="t('复制根地址')"
               :disabled="!settingsLoaded"
-              @click="copyValue('root', connectionUrls.rootUrl, '根地址')"
+              @click="copyValue('root', connectionUrls.rootUrl, t('根地址'))"
             >
               <template #icon>
                 <n-icon :component="copiedTarget === 'root' ? CheckOutlined : CopyOutlined" />
@@ -47,7 +46,7 @@
               circle
               quaternary
               size="small"
-              aria-label="复制 API Base URL"
+              :aria-label="t('复制 API Base URL')"
               :disabled="!settingsLoaded"
               @click="copyValue('api', connectionUrls.apiBaseUrl, 'API Base URL')"
             >
@@ -65,7 +64,7 @@
               circle
               quaternary
               size="small"
-              :aria-label="`复制 ${activeEndpoint.label}`"
+              :aria-label="t('复制 {label}', { label: activeEndpoint.label })"
               :disabled="!settingsLoaded"
               @click="copyValue('endpoint', activeEndpoint.url, activeEndpoint.label)"
             >
@@ -84,7 +83,7 @@
           circle
           quaternary
           size="small"
-          aria-label="复制 Gateway Key"
+          :aria-label="t('复制 Gateway Key')"
           :disabled="!settingsLoaded || !serviceConfig.gateway_key"
           @click="copyValue('key', serviceConfig.gateway_key, 'Gateway Key')"
         >
@@ -95,29 +94,29 @@
       </div>
     </section>
 
-    <n-alert v-if="settingsError" type="error" title="节点设置加载失败">
-      {{ settingsError }}。教程正文仍可阅读，但为避免复制错误地址，动态配置复制已禁用。
+    <n-alert v-if="settingsError" type="error" :title="t('节点设置加载失败')">
+      {{ t("{error}。教程正文仍可阅读，但为避免复制错误地址，动态配置复制已禁用。", { error: settingsError }) }}
     </n-alert>
     <n-alert
       v-if="connectionUrls.insecureHttp"
       type="warning"
-      title="当前使用非本机 HTTP 地址"
+      :title="t('当前使用非本机 HTTP 地址')"
     >
-      Gateway Key 与请求内容会以明文传输。仅在可信局域网内使用，公网接入请配置 HTTPS。
+      {{ t("Gateway Key 与请求内容会以明文传输。仅在可信局域网内使用，公网接入请配置 HTTPS。") }}
     </n-alert>
 
-    <section class="guide-card" aria-label="下游应用教程">
+    <section class="guide-card" :aria-label="t('下游应用教程')">
       <n-tabs
         class="guide-tabs"
         type="line"
         size="small"
         role="tablist"
-        aria-label="选择下游应用"
+        :aria-label="t('选择下游应用')"
         :value="currentApplication"
         @update:value="selectApplication"
       >
         <n-tab-pane
-          v-for="guide in APPLICATION_GUIDES"
+          v-for="guide in applicationGuides"
           :key="guide.id"
           :name="guide.id"
           :tab="guide.name"
@@ -148,20 +147,20 @@
                 <p>{{ guide.summary }}</p>
               </div>
               <a :href="guide.officialUrl" target="_blank" rel="noopener noreferrer">
-                官方文档
+                {{ t("官方文档") }}
                 <n-icon :component="ExportOutlined" aria-hidden="true" />
               </a>
             </header>
 
             <section class="guide-section" :aria-labelledby="`${guide.id}-steps`">
-              <h3 :id="`${guide.id}-steps`">配置步骤</h3>
+              <h3 :id="`${guide.id}-steps`">{{ t("配置步骤") }}</h3>
               <ol>
                 <li v-for="step in guide.steps" :key="step">{{ step }}</li>
               </ol>
             </section>
 
             <section class="guide-section" :aria-labelledby="`${guide.id}-snippets`">
-              <h3 :id="`${guide.id}-snippets`">配置示例</h3>
+              <h3 :id="`${guide.id}-snippets`">{{ t("配置示例") }}</h3>
               <div class="snippet-grid">
                 <article
                   v-for="(snippet, index) in guide.snippets(guideContext)"
@@ -175,7 +174,7 @@
                       size="small"
                       secondary
                       :disabled="!settingsLoaded || !serviceConfig.gateway_key"
-                      :aria-label="`复制 ${snippet.label}`"
+                      :aria-label="t('复制 {label}', { label: snippet.label })"
                       @click="copyValue(`${guide.id}:${index}`, snippet.copy, snippet.label)"
                     >
                       <template #icon>
@@ -183,7 +182,7 @@
                           :component="copiedTarget === `${guide.id}:${index}` ? CheckOutlined : CopyOutlined"
                         />
                       </template>
-                      {{ copiedTarget === `${guide.id}:${index}` ? "已复制" : "复制配置" }}
+                      {{ copiedTarget === `${guide.id}:${index}` ? t("已复制") : t("复制配置") }}
                     </n-button>
                   </header>
                   <pre><code>{{ snippet.display }}</code></pre>
@@ -192,12 +191,12 @@
             </section>
 
             <section class="guide-section verification" :aria-labelledby="`${guide.id}-verify`">
-              <h3 :id="`${guide.id}-verify`">验证方法</h3>
-              <p>在客户端发送一次测试消息，再到 OCG Manager 的“请求日志”确认模型、账号和成功状态。</p>
+              <h3 :id="`${guide.id}-verify`">{{ t("验证方法") }}</h3>
+              <p>{{ t("在客户端发送一次测试消息，再到 OCG Manager 的“请求日志”确认模型、账号和成功状态。") }}</p>
             </section>
 
             <section class="guide-section" :aria-labelledby="`${guide.id}-notes`">
-              <h3 :id="`${guide.id}-notes`">注意事项</h3>
+              <h3 :id="`${guide.id}-notes`">{{ t("注意事项") }}</h3>
               <ul>
                 <li v-for="note in guide.notes" :key="note">{{ note }}</li>
               </ul>
@@ -232,6 +231,7 @@ import {
   isApplicationId,
 } from "./application-guides";
 import type { ApplicationId, GuideContext } from "./application-guides";
+import { t } from "../i18n/index.ts";
 
 const DEFAULT_APPLICATION: ApplicationId = "claude-code";
 const message = useMessage();
@@ -247,6 +247,14 @@ const serviceConfig = ref({
   gateway_key: "",
   client_root_url: "",
 });
+
+const applicationGuides = computed(() => APPLICATION_GUIDES.map((guide) => ({
+  ...guide,
+  badge: guide.badge === "版本相关" ? t("版本相关") : guide.badge,
+  summary: t(guide.summary),
+  steps: guide.steps.map((step) => t(step)),
+  notes: guide.notes.map((note) => t(note)),
+})));
 
 const connectionUrls = computed(() => resolveConnectionUrls(
   serviceConfig.value.client_root_url,
@@ -348,9 +356,9 @@ async function copyValue(target: string, value: string, label: string) {
     copiedTarget.value = target;
     clearTimeout(copyTimer);
     copyTimer = setTimeout(() => { copiedTarget.value = ""; }, 1500);
-    message.success(`已复制 ${label}`);
+    message.success(t("已复制 {label}", { label }));
   } catch (error) {
-    message.error(error instanceof Error ? error.message : "复制失败");
+    message.error(error instanceof Error ? error.message : t("复制失败"));
   }
 }
 

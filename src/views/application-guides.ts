@@ -1,3 +1,6 @@
+import { t } from '../i18n/index.ts';
+import type { MessageKey } from '../i18n/index.ts';
+
 const APPLICATION_IDS = [
   'claude-code',
   'codex',
@@ -36,9 +39,9 @@ export interface ApplicationGuide {
   protocol: string;
   officialUrl: string;
   badge?: string;
-  summary: string;
-  steps: readonly string[];
-  notes: readonly string[];
+  summary: MessageKey;
+  steps: readonly MessageKey[];
+  notes: readonly MessageKey[];
   snippets: (context: GuideContext) => GuideSnippet[];
 }
 
@@ -113,7 +116,7 @@ export const APPLICATION_GUIDES: readonly ApplicationGuide[] = [
       },
       keyedSnippet(
         context,
-        '当前 PowerShell 会话',
+        t('当前 PowerShell 会话'),
         'powershell',
         (key) => `$env:OCG_API_KEY = ${JSON.stringify(key)}`,
       ),
@@ -167,10 +170,14 @@ export const APPLICATION_GUIDES: readonly ApplicationGuide[] = [
     snippets: (context) => [
       keyedSnippet(
         context,
-        '服务商参数',
+        t('服务商参数'),
         'text',
         (key) =>
-          `服务商类型: OpenAI\nAPI 地址: ${context.rootUrl}\nAPI Key: ${key}\n模型 ID: minimax-m3`,
+          t('服务商类型: OpenAI\nAPI 地址: {url}\nAPI Key: {key}\n模型 ID: {model}', {
+            url: context.rootUrl,
+            key,
+            model: 'minimax-m3',
+          }),
       ),
     ],
   },
@@ -192,7 +199,7 @@ export const APPLICATION_GUIDES: readonly ApplicationGuide[] = [
     snippets: (context) => [
       keyedSnippet(
         context,
-        'Custom Endpoint 参数',
+        t('Custom Endpoint 参数'),
         'text',
         (key) =>
           `Endpoint: ${context.chatCompletionsUrl}\nAPI Key: ${key}\nModel ID: minimax-m3`,
@@ -218,7 +225,7 @@ export const APPLICATION_GUIDES: readonly ApplicationGuide[] = [
     snippets: (context) => [
       keyedSnippet(
         context,
-        '自定义模型参数',
+        t('自定义模型参数'),
         'text',
         (key) => `Base URL: ${context.apiBaseUrl}\nAPI Key: ${key}\nModel ID: minimax-m3`,
       ),
@@ -239,7 +246,7 @@ export const APPLICATION_GUIDES: readonly ApplicationGuide[] = [
     snippets: (context) => [
       keyedSnippet(
         context,
-        'Provider 参数',
+        t('Provider 参数'),
         'text',
         (key) => `Base URL: ${context.apiBaseUrl}\nAPI Key: ${key}\nModel ID: minimax-m3`,
       ),
@@ -260,7 +267,7 @@ export const APPLICATION_GUIDES: readonly ApplicationGuide[] = [
     snippets: (context) => [
       keyedSnippet(
         context,
-        'Provider 参数',
+        t('Provider 参数'),
         'text',
         (key) => `Base URL: ${context.apiBaseUrl}\nAPI Key: ${key}\nModel ID: minimax-m3`,
       ),
@@ -303,7 +310,7 @@ export const APPLICATION_GUIDES: readonly ApplicationGuide[] = [
     snippets: (context) => [
       keyedSnippet(
         context,
-        'Provider 参数',
+        t('Provider 参数'),
         'text',
         (key) => `API Host: ${context.rootUrl}\nAPI Key: ${key}\nModel ID: minimax-m3`,
       ),

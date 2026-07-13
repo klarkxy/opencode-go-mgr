@@ -3,8 +3,8 @@
     <section class="connection-hero" aria-labelledby="connection-title">
       <div class="connection-content">
         <div class="connection-head">
-          <h2 id="connection-title">⚡ 接入中心</h2>
-          <span class="ready-mark"><span aria-hidden="true" /> READY</span>
+          <h2 id="connection-title">⚡ {{ t("接入中心") }}</h2>
+          <span class="ready-mark"><span aria-hidden="true" /> {{ t("就绪") }}</span>
         </div>
 
         <div class="connection-rows">
@@ -20,7 +20,7 @@
                   circle
                   quaternary
                   size="small"
-                  aria-label="复制 API Base URL"
+                  :aria-label="t('复制 API Base URL')"
                   @click="copyConnection('api', serviceApiUrl, 'API Base URL')"
                 >
                   <template #icon>
@@ -28,7 +28,7 @@
                   </template>
                 </n-button>
               </template>
-              复制 API Base URL
+              {{ t("复制 API Base URL") }}
             </n-tooltip>
           </div>
 
@@ -40,8 +40,8 @@
             </div>
             <div class="row-actions">
               <n-popconfirm
-                positive-text="生成新 Key"
-                negative-text="取消"
+                :positive-text="t('生成新 Key')"
+                :negative-text="t('取消')"
                 @positive-click="regenerateKey"
               >
                 <template #trigger>
@@ -51,16 +51,16 @@
                         circle
                         quaternary
                         size="small"
-                        aria-label="刷新 Key"
+                        :aria-label="t('刷新 Key')"
                         :loading="refreshingKey"
                       >
                         <template #icon><n-icon :component="ReloadOutlined" /></template>
                       </n-button>
                     </template>
-                    刷新 Key
+                    {{ t("刷新 Key") }}
                   </n-tooltip>
                 </template>
-                旧 Key 将立即失效，继续生成新 Key？
+                {{ t("旧 Key 将立即失效，继续生成新 Key？") }}
               </n-popconfirm>
               <n-tooltip trigger="hover" :delay="200">
                 <template #trigger>
@@ -68,7 +68,7 @@
                     circle
                     quaternary
                     size="small"
-                    aria-label="复制 Key"
+                    :aria-label="t('复制 Key')"
                     :disabled="!serviceConfig.gateway_key"
                     @click="copyConnection('key', serviceConfig.gateway_key, 'Key')"
                   >
@@ -77,7 +77,7 @@
                     </template>
                   </n-button>
                 </template>
-                复制 Key
+                {{ t("复制 Key") }}
               </n-tooltip>
             </div>
           </div>
@@ -85,8 +85,8 @@
           <div class="connection-row">
             <n-icon size="18" aria-hidden="true"><CloudServerOutlined /></n-icon>
             <div class="connection-value">
-              <span class="sr-only">上游地址</span>
-              <code>{{ serviceConfig.upstream_base_url || "未设置" }}</code>
+              <span class="sr-only">{{ t("上游地址") }}</span>
+              <code>{{ serviceConfig.upstream_base_url || t("未设置") }}</code>
             </div>
             <n-tooltip trigger="hover" :delay="200">
               <template #trigger>
@@ -94,75 +94,75 @@
                   circle
                   quaternary
                   size="small"
-                  aria-label="复制上游地址"
+                  :aria-label="t('复制上游地址')"
                   :disabled="!serviceConfig.upstream_base_url"
-                  @click="copyConnection('upstream', serviceConfig.upstream_base_url, '上游地址')"
+                  @click="copyConnection('upstream', serviceConfig.upstream_base_url, t('上游地址'))"
                 >
                   <template #icon>
                     <n-icon :component="copiedTarget === 'upstream' ? CheckOutlined : CopyOutlined" />
                   </template>
                 </n-button>
               </template>
-              复制上游地址
+              {{ t("复制上游地址") }}
             </n-tooltip>
           </div>
         </div>
         <p v-if="connectionUrls.insecureHttp" class="connection-warning" role="status">
-          非本机 HTTP 会明文传输 Gateway Key 与请求内容，请仅在可信网络中使用。
+          {{ t("非本机 HTTP 会明文传输 Gateway Key 与请求内容，请仅在可信网络中使用。") }}
         </p>
       </div>
       <img :src="characterImage" alt="" class="hero-character" aria-hidden="true" />
     </section>
 
-    <section class="kpi-row" aria-label="用量摘要">
+    <section class="kpi-row" :aria-label="t('用量摘要')">
       <article class="kpi-card">
         <span class="kpi-badge success"><n-icon aria-hidden="true"><KeyOutlined /></n-icon></span>
-        <div><strong>{{ summary.available_accounts }}<small>/{{ summary.total_accounts }}</small></strong><span>可用账号</span></div>
+        <div><strong>{{ formatNumber(summary.available_accounts) }}<small>/{{ formatNumber(summary.total_accounts) }}</small></strong><span>{{ t("可用账号") }}</span></div>
       </article>
       <article class="kpi-card">
         <span class="kpi-badge info"><n-icon aria-hidden="true"><CalendarOutlined /></n-icon></span>
-        <div><strong>${{ formatCost(summary.today_cost) }}</strong><span>今日</span></div>
+        <div><strong>{{ formatCost(summary.today_cost) }}</strong><span>{{ t("今日") }}</span></div>
       </article>
       <article class="kpi-card">
         <span class="kpi-badge warning"><n-icon aria-hidden="true"><ClockCircleOutlined /></n-icon></span>
-        <div><strong>${{ formatCost(summary.week_cost) }}</strong><span>本周</span></div>
+        <div><strong>{{ formatCost(summary.week_cost) }}</strong><span>{{ t("本周") }}</span></div>
       </article>
       <article class="kpi-card">
         <span class="kpi-badge primary"><n-icon aria-hidden="true"><WalletOutlined /></n-icon></span>
-        <div><strong>${{ formatCost(summary.month_cost) }}</strong><span>本月</span></div>
+        <div><strong>{{ formatCost(summary.month_cost) }}</strong><span>{{ t("本月") }}</span></div>
       </article>
     </section>
 
     <section class="card chart-card">
       <div class="card-head chart-head">
         <div>
-          <h3 class="card-title">每日消耗</h3>
-          <p class="card-desc">最近 30 天 · 成功请求</p>
+          <h3 class="card-title">{{ t("每日消耗") }}</h3>
+          <p class="card-desc">{{ t("最近 {days} 天 · 成功请求", { days: 30 }) }}</p>
         </div>
-        <div class="chart-stats" aria-label="图表摘要">
-          <span><b>{{ legendModels.length }}</b> 模型</span>
-          <span><b>${{ formatCost(totalChartCost) }}</b> 30天</span>
-          <span><b>${{ formatCost(totalChartCost / 30) }}</b> 日均</span>
+        <div class="chart-stats" :aria-label="t('图表摘要')">
+          <span>{{ t("模型：{count}", { count: formatNumber(legendModels.length) }) }}</span>
+          <span><b>{{ formatCost(totalChartCost) }}</b> {{ t("{days} 天合计", { days: 30 }) }}</span>
+          <span><b>{{ formatCost(totalChartCost / 30) }}</b> {{ t("日均") }}</span>
         </div>
       </div>
-      <div class="legend" aria-label="模型图例">
+      <div class="legend" :aria-label="t('模型图例')">
         <span v-for="model in legendModels" :key="model.model" class="legend-item">
           <span class="legend-dot" :style="{ background: model.color }" aria-hidden="true" />
           {{ model.model }}
         </span>
       </div>
       <n-spin :show="loading">
-        <n-empty v-if="!loading && totalChartCost === 0" description="暂无消耗数据" />
+        <n-empty v-if="!loading && totalChartCost === 0" :description="t('暂无消耗数据')" />
         <StackedBarChart v-else :data="dailyCosts" :days="30" />
       </n-spin>
     </section>
 
     <section class="card accounts-card">
       <div class="card-head">
-        <h3 class="card-title">账号概览</h3>
-        <span class="card-desc">{{ accounts.length }} 个</span>
+        <h3 class="card-title">{{ t("账号概览") }}</h3>
+        <span class="card-desc">{{ t("账号数：{count}", { count: formatNumber(accounts.length) }) }}</span>
       </div>
-      <n-empty v-if="accounts.length === 0" description="暂无账号，请前往账号页添加" />
+      <n-empty v-if="accounts.length === 0" :description="t('暂无账号，请前往账号页添加')" />
       <div v-else class="account-grid">
         <article v-for="account in accounts" :key="account.id" class="account-cell">
           <div class="account-top">
@@ -197,6 +197,7 @@ import StackedBarChart from "../components/StackedBarChart.vue";
 import { tauriApi } from "../api/tauri";
 import type { Account, DailyModelCost, DashboardSummary, UsageWindow } from "../api/tauri";
 import { CHART_PALETTE } from "../theme";
+import { locale, t } from "../i18n/index.ts";
 import { maskConnectionKey, resolveConnectionUrls, writeConnectionValue } from "./dashboard-connection";
 
 type ConnectionTarget = "api" | "key" | "upstream";
@@ -243,8 +244,17 @@ const connectionUrls = computed(() => resolveConnectionUrls(
 const serviceApiUrl = computed(() => connectionUrls.value.apiBaseUrl);
 
 function formatCost(value: number): string {
-  if (value === 0) return "0.00";
-  return value < 0.01 ? value.toFixed(4) : value.toFixed(2);
+  const digits = value !== 0 && value < 0.01 ? 4 : 2;
+  return new Intl.NumberFormat(locale.value, {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  }).format(value);
+}
+
+function formatNumber(value: number): string {
+  return new Intl.NumberFormat(locale.value).format(value);
 }
 
 function isCoolingDown(account: Account): boolean {
@@ -254,14 +264,18 @@ function isCoolingDown(account: Account): boolean {
 }
 
 function statusLabel(account: Account): string {
-  if (!account.enabled) return "已禁用";
-  return isCoolingDown(account) ? "冷却中" : "可用";
+  if (!account.enabled) return t("已禁用");
+  return isCoolingDown(account) ? t("冷却中") : t("可用");
 }
 
 function getUsageText(accountId: string): string {
   const usage = usageMap.value[accountId];
-  if (!usage) return "暂无用量";
-  return `5h $${usage.window_5h.toFixed(3)} · 周 $${usage.window_week.toFixed(3)} · 月 $${usage.window_month.toFixed(3)}`;
+  if (!usage) return t("暂无用量");
+  return t("5h {five} · 周 {week} · 月 {month}", {
+    five: formatCost(usage.window_5h),
+    week: formatCost(usage.window_week),
+    month: formatCost(usage.window_month),
+  });
 }
 
 async function copyConnection(target: ConnectionTarget, value: string, label: string) {
@@ -271,9 +285,9 @@ async function copyConnection(target: ConnectionTarget, value: string, label: st
     copiedTarget.value = target;
     clearTimeout(copyTimer);
     copyTimer = setTimeout(() => { copiedTarget.value = null; }, 1500);
-    message.success(`已复制 ${label}`);
+    message.success(t("已复制 {label}", { label }));
   } catch (e) {
-    message.error(e instanceof Error ? e.message : "复制失败");
+    message.error(e instanceof Error ? e.message : t("复制失败"));
   }
 }
 
@@ -281,9 +295,9 @@ async function regenerateKey() {
   refreshingKey.value = true;
   try {
     serviceConfig.value.gateway_key = await tauriApi.regenerateGatewayKey();
-    message.success("Key 已刷新");
+    message.success(t("Key 已刷新"));
   } catch (e) {
-    message.error(`刷新 Key 失败: ${e}`);
+    message.error(t("刷新 Key 失败: {error}", { error: String(e) }));
   } finally {
     refreshingKey.value = false;
   }
@@ -305,7 +319,7 @@ onMounted(async () => {
   if (loadedSummary.status === "fulfilled") summary.value = loadedSummary.value;
   if (costs.status === "fulfilled") dailyCosts.value = costs.value;
   if ([loadedAccounts, settings, loadedSummary, costs].some((result) => result.status === "rejected")) {
-    message.error("部分仪表盘数据加载失败");
+    message.error(t("部分仪表盘数据加载失败"));
   }
   loading.value = false;
 });

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { tauriApi } from "../api/tauri.ts";
+import { DashboardRequestError, tauriApi } from "../api/tauri.ts";
 
 test("forward log API sends remote paging and filter parameters", async () => {
   let requested = "";
@@ -43,6 +43,27 @@ test("forward log API sends remote paging and filter parameters", async () => {
   assert.equal(query.get("account_id"), "account 117");
 });
 
+test("dashboard request errors preserve status for localized handling", async () => {
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { location: { pathname: "/dashboard" }, dispatchEvent() {} },
+  });
+  Object.defineProperty(globalThis, "fetch", {
+    configurable: true,
+    value: async () => new Response(JSON.stringify({ error: "raw fallback" }), {
+      status: 409,
+      headers: { "Content-Type": "application/json" },
+    }),
+  });
+
+  await assert.rejects(
+    () => tauriApi.registerAdmin("admin", "password123"),
+    (error) => error instanceof DashboardRequestError
+      && error.status === 409
+      && error.message === "raw fallback",
+  );
+});
+
 test("logs view uses remote totals, refresh controls, loading, and a useful empty state", async () => {
   const source = await readFile(new URL("./Logs.vue", import.meta.url), "utf8");
   const template = source.slice(source.indexOf("<template>"), source.indexOf("<script setup"));
@@ -50,9 +71,9 @@ test("logs view uses remote totals, refresh controls, loading, and a useful empt
   assert.match(template, /:summary="forwardSummary"/);
   assert.match(template, /summary-placement="bottom"/);
   assert.match(template, /\bremote\b/);
-  assert.match(template, /aria-label="刷新运行日志"/);
-  assert.match(template, /aria-label="刷新请求日志"/);
-  assert.match(template, /仅记录经本机 API 转发的请求，账号 Ping 见运行日志/);
+  assert.match(template, /:aria-label="t\('刷新运行日志'\)"/);
+  assert.match(template, /:aria-label="t\('刷新请求日志'\)"/);
+  assert.match(template, /t\('仅记录经本机 API 转发的请求，账号 Ping 见运行日志'\)/);
   assert.match(template, /:loading="gatewayLoading"/);
   assert.match(template, /:loading="forwardLoading"/);
   assert.doesNotMatch(source, /getForwardLogs\(200\)|filteredForwardLogs/);

@@ -3,13 +3,13 @@
     <section class="settings-card" aria-labelledby="forwarding-title">
       <div class="settings-head">
         <div>
-          <h2 id="forwarding-title">↗ 转发</h2>
-          <p>上游连接与访问凭据</p>
+          <h2 id="forwarding-title">↗ {{ t("转发") }}</h2>
+          <p>{{ t("上游连接与访问凭据") }}</p>
         </div>
       </div>
       <n-form :model="config" label-placement="top" :show-feedback="false">
         <n-form-item
-          label="下游访问根地址（可选）"
+          :label="t('下游访问根地址（可选）')"
           :show-feedback="true"
           :validation-status="clientRootPreview.status"
           :feedback="clientRootPreview.feedback"
@@ -20,28 +20,28 @@
               clearable
               class="mono"
               :input-props="{
-                'aria-label': '下游访问根地址（可选）',
+                'aria-label': t('下游访问根地址（可选）'),
                 'aria-describedby': 'client-root-help',
               }"
               placeholder="https://ocg.example.com"
               @blur="normalizeClientRootInput"
             />
             <p id="client-root-help">
-              仅用于下游教程、展示和复制；不会修改 Gateway 监听、DNS 或反向代理。
+              {{ t("仅用于下游教程、展示和复制；不会修改 Gateway 监听、DNS 或反向代理。") }}
             </p>
           </div>
         </n-form-item>
-        <n-form-item label="上游地址">
+        <n-form-item :label="t('上游地址')">
           <n-input
             v-model:value="config.upstream_base_url"
-            :input-props="{ 'aria-label': '上游地址' }"
+            :input-props="{ 'aria-label': t('上游地址') }"
             placeholder="https://opencode.ai/zen/go"
           />
         </n-form-item>
         <n-form-item label="Key">
           <div class="key-stack">
             <div class="key-field">
-              <div class="key-display" aria-label="已脱敏 Key">
+              <div class="key-display" :aria-label="t('已脱敏 Key')">
                 <code>{{ maskedSettingsKey }}</code>
               </div>
               <n-tooltip trigger="hover">
@@ -49,7 +49,7 @@
                   <n-button
                     circle
                     quaternary
-                    aria-label="复制 Key"
+                    :aria-label="t('复制 Key')"
                     :disabled="!config.gateway_key"
                     @click="copyKey"
                   >
@@ -58,25 +58,25 @@
                     </template>
                   </n-button>
                 </template>
-                复制 Key
+                {{ t("复制 Key") }}
               </n-tooltip>
               <n-tooltip trigger="hover">
                 <template #trigger>
                   <n-button
                     circle
                     quaternary
-                    aria-label="设置自定义 Key"
+                    :aria-label="t('设置自定义 Key')"
                     :disabled="saving || regenerating"
                     @click="startGatewayKeyEdit"
                   >
                     <template #icon><n-icon :component="EditOutlined" /></template>
                   </n-button>
                 </template>
-                设置自定义 Key
+                {{ t("设置自定义 Key") }}
               </n-tooltip>
               <n-popconfirm
-                positive-text="生成新 Key"
-                negative-text="取消"
+                :positive-text="t('生成新 Key')"
+                :negative-text="t('取消')"
                 @positive-click="regenerateKey"
               >
                 <template #trigger>
@@ -85,17 +85,17 @@
                       <n-button
                         circle
                         quaternary
-                        aria-label="刷新 Key"
+                        :aria-label="t('刷新 Key')"
                         :loading="regenerating"
                         :disabled="saving"
                       >
                         <template #icon><n-icon :component="ReloadOutlined" /></template>
                       </n-button>
                     </template>
-                    刷新 Key
+                    {{ t("刷新 Key") }}
                   </n-tooltip>
                 </template>
-                旧 Key 将立即失效，继续生成新 Key？
+                {{ t("旧 Key 将立即失效，继续生成新 Key？") }}
               </n-popconfirm>
             </div>
             <div v-if="editingGatewayKey" class="key-editor">
@@ -103,12 +103,12 @@
                 v-model:value="gatewayKeyDraft"
                 type="password"
                 class="mono"
-                :input-props="{ 'aria-label': '新 Key' }"
-                placeholder="输入新 Key，然后保存设置"
+                :input-props="{ 'aria-label': t('新 Key') }"
+                :placeholder="t('输入新 Key，然后保存设置')"
               />
-              <n-button size="small" secondary @click="cancelGatewayKeyEdit">取消</n-button>
+              <n-button size="small" secondary @click="cancelGatewayKeyEdit">{{ t("取消") }}</n-button>
             </div>
-            <p>已保存的 Key 只脱敏显示；复制或复制教程配置时才会使用完整值。</p>
+            <p>{{ t("已保存的 Key 只脱敏显示；复制或复制教程配置时才会使用完整值。") }}</p>
           </div>
         </n-form-item>
         <div
@@ -116,53 +116,53 @@
           class="settings-subsection"
           aria-labelledby="startup-title"
         >
-          <h3 id="startup-title">开机启动</h3>
-          <p id="startup-help">登录 Windows 后在托盘后台启动，不自动打开 Dashboard。</p>
+          <h3 id="startup-title">{{ t("开机启动") }}</h3>
+          <p id="startup-help">{{ t("登录 Windows 后在托盘后台启动，不自动打开 Dashboard。") }}</p>
           <n-switch
             v-model:value="config.auto_start"
-            aria-label="随 Windows 登录自动启动 OCG Manager"
+            :aria-label="t('随 Windows 登录自动启动 OCG Manager')"
             aria-describedby="startup-help"
             :disabled="!loaded || saving || regenerating"
             :loading="saving"
           >
-            <template #checked>开启</template>
-            <template #unchecked>关闭</template>
+            <template #checked>{{ t("开启") }}</template>
+            <template #unchecked>{{ t("关闭") }}</template>
           </n-switch>
         </div>
         <div class="settings-subsection" aria-labelledby="request-timeout-title">
-          <h3 id="request-timeout-title">请求超时</h3>
-          <p>分别控制连接建立、非流式响应完成和流式数据停顿的等待上限。</p>
-          <n-form-item label="连接超时">
+          <h3 id="request-timeout-title">{{ t("请求超时") }}</h3>
+          <p>{{ t("分别控制连接建立、非流式响应完成和流式数据停顿的等待上限。") }}</p>
+          <n-form-item :label="t('连接超时')">
             <n-input-number
               v-model:value="config.connect_timeout_secs"
               :min="1"
               :max="300"
               :precision="0"
-              :input-props="{ 'aria-label': '连接超时（秒）' }"
+              :input-props="{ 'aria-label': t('连接超时（秒）') }"
             >
-              <template #suffix>秒</template>
+              <template #suffix>{{ t("秒") }}</template>
             </n-input-number>
           </n-form-item>
-          <n-form-item label="非流式总超时">
+          <n-form-item :label="t('非流式总超时')">
             <n-input-number
               v-model:value="config.non_stream_timeout_secs"
               :min="1"
               :max="3600"
               :precision="0"
-              :input-props="{ 'aria-label': '非流式总超时（秒）' }"
+              :input-props="{ 'aria-label': t('非流式总超时（秒）') }"
             >
-              <template #suffix>秒</template>
+              <template #suffix>{{ t("秒") }}</template>
             </n-input-number>
           </n-form-item>
-          <n-form-item label="流式空闲超时">
+          <n-form-item :label="t('流式空闲超时')">
             <n-input-number
               v-model:value="config.stream_idle_timeout_secs"
               :min="1"
               :max="3600"
               :precision="0"
-              :input-props="{ 'aria-label': '流式空闲超时（秒）' }"
+              :input-props="{ 'aria-label': t('流式空闲超时（秒）') }"
             >
-              <template #suffix>秒</template>
+              <template #suffix>{{ t("秒") }}</template>
             </n-input-number>
           </n-form-item>
         </div>
@@ -172,17 +172,17 @@
         :loading="saving"
         :disabled="!loaded || regenerating || clientRootPreview.status === 'error'"
         @click="saveSettings"
-      >保存设置</n-button>
+      >{{ t("保存设置") }}</n-button>
     </section>
 
     <section class="settings-card appearance-card" aria-labelledby="appearance-title">
       <div class="settings-head">
         <div>
-          <h2 id="appearance-title">◐ 外观</h2>
-          <p>当前：{{ themeLabel }}</p>
+          <h2 id="appearance-title">◐ {{ t("外观") }}</h2>
+          <p>{{ t("当前：{theme}", { theme: themeLabel }) }}</p>
         </div>
       </div>
-      <div class="theme-grid" role="group" aria-label="选择主题">
+      <div class="theme-grid" role="group" :aria-label="t('选择主题')">
         <button
           v-for="option in THEME_OPTIONS"
           :key="option.value"
@@ -201,7 +201,7 @@
             :style="{ background: option.swatch }"
             aria-hidden="true"
           />
-          <span>{{ option.label }}</span>
+          <span>{{ t(option.label as MessageKey) }}</span>
           <n-icon
             v-if="themeName === option.value"
             class="theme-check"
@@ -238,6 +238,8 @@ import { tauriApi } from "../api/tauri";
 import type { AppConfig } from "../api/tauri";
 import { THEME_OPTIONS } from "../theme";
 import type { ResolvedTheme, ThemeName } from "../theme";
+import { t } from "../i18n/index.ts";
+import type { MessageKey } from "../i18n/index.ts";
 import {
   maskConnectionKey,
   normalizeClientRootUrl,
@@ -275,10 +277,10 @@ const config = ref<AppConfig>({
 });
 
 const themeLabel = computed(() => {
-  const selected = THEME_OPTIONS.find((option) => option.value === themeName)?.label ?? "默认";
+  const selected = t((THEME_OPTIONS.find((option) => option.value === themeName)?.label ?? "默认") as MessageKey);
   if (themeName !== "default") return selected;
-  const resolved = THEME_OPTIONS.find((option) => option.value === resolvedTheme)?.label;
-  return `默认 · ${resolved ?? "皓白"}`;
+  const resolved = t((THEME_OPTIONS.find((option) => option.value === resolvedTheme)?.label ?? "皓白") as MessageKey);
+  return t("默认 · {theme}", { theme: resolved });
 });
 const maskedSettingsKey = computed(() => maskConnectionKey(config.value.gateway_key));
 
@@ -296,17 +298,17 @@ const clientRootPreview = computed<{
     if (urls.insecureHttp) {
       return {
         status: "warning",
-        feedback: `API Base URL：${urls.apiBaseUrl}。警告：非本机 HTTP 会明文传输 Gateway Key 与请求内容。`,
+        feedback: t("API Base URL：{url}。警告：非本机 HTTP 会明文传输 Gateway Key 与请求内容。", { url: urls.apiBaseUrl }),
       };
     }
     if (!config.value.client_root_url.trim()) {
-      return { feedback: `留空时自动使用：${urls.rootUrl}（API Base URL：${urls.apiBaseUrl}）` };
+      return { feedback: t("留空时自动使用：{root}（API Base URL：{api}）", { root: urls.rootUrl, api: urls.apiBaseUrl }) };
     }
-    return { feedback: `API Base URL：${urls.apiBaseUrl}` };
+    return { feedback: t("API Base URL：{url}", { url: urls.apiBaseUrl }) };
   } catch (error) {
     return {
       status: "error",
-      feedback: error instanceof Error ? error.message : "地址格式无效",
+      feedback: error instanceof Error ? error.message : t("地址格式无效"),
     };
   }
 });
@@ -317,7 +319,7 @@ async function loadSettings() {
     persistedAutoStart = config.value.auto_start;
     loaded.value = true;
   } catch (e) {
-    message.error(`加载设置失败: ${e}`);
+    message.error(t("加载设置失败: {error}", { error: String(e) }));
   }
 }
 
@@ -326,11 +328,11 @@ async function saveSettings() {
   if (!normalizeClientRootInput()) return;
   const nextGatewayKey = gatewayKeyDraft.value.trim();
   if (editingGatewayKey.value && !nextGatewayKey) {
-    message.error("新 Key 不能为空");
+    message.error(t("新 Key 不能为空"));
     return;
   }
   if (!timeoutsValid()) {
-    message.error("请求超时必须为整数：连接 1–300 秒，其余 1–3600 秒");
+    message.error(t("请求超时必须为整数：连接 1–300 秒，其余 1–3600 秒"));
     return;
   }
   const previousGatewayKey = config.value.gateway_key;
@@ -341,11 +343,11 @@ async function saveSettings() {
     persistedAutoStart = config.value.auto_start;
     editingGatewayKey.value = false;
     gatewayKeyDraft.value = "";
-    message.success("设置已保存");
+    message.success(t("设置已保存"));
   } catch (e) {
     config.value.auto_start = persistedAutoStart;
     config.value.gateway_key = previousGatewayKey;
-    message.error(`保存失败: ${e}`);
+    message.error(t("保存失败: {error}", { error: String(e) }));
   } finally {
     saving.value = false;
   }
@@ -366,7 +368,7 @@ function normalizeClientRootInput(): boolean {
     config.value.client_root_url = normalizeClientRootUrl(config.value.client_root_url);
     return true;
   } catch (error) {
-    message.error(error instanceof Error ? error.message : "下游访问根地址无效");
+    message.error(error instanceof Error ? error.message : t("下游访问根地址无效"));
     return false;
   }
 }
@@ -386,9 +388,9 @@ async function copyKey() {
     keyCopied.value = true;
     clearTimeout(copyTimer);
     copyTimer = setTimeout(() => { keyCopied.value = false; }, 1500);
-    message.success("已复制 Key");
+    message.success(t("已复制 Key"));
   } catch (e) {
-    message.error(e instanceof Error ? e.message : "复制失败");
+    message.error(e instanceof Error ? e.message : t("复制失败"));
   }
 }
 
@@ -397,9 +399,9 @@ async function regenerateKey() {
   try {
     config.value.gateway_key = await tauriApi.regenerateGatewayKey();
     cancelGatewayKeyEdit();
-    message.success("Key 已重新生成");
+    message.success(t("Key 已重新生成"));
   } catch (e) {
-    message.error(`生成失败: ${e}`);
+    message.error(t("生成失败: {error}", { error: String(e) }));
   } finally {
     regenerating.value = false;
   }

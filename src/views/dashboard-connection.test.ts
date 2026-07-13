@@ -115,8 +115,8 @@ test("dashboard keeps the connection center first and protects key regeneration"
 
   assert.ok(template.indexOf("接入中心") < template.indexOf("kpi-row"));
   assert.match(template, /旧 Key 将立即失效/);
-  assert.match(template, /aria-label="复制 API Base URL"/);
-  assert.match(template, /aria-label="刷新 Key"/);
+  assert.match(template, /:aria-label="t\('复制 API Base URL'\)"/);
+  assert.match(template, /:aria-label="t\('刷新 Key'\)"/);
   assert.match(template, /\{\{ maskedKey \}\}/);
   assert.doesNotMatch(template, /<code>\{\{ serviceConfig\.gateway_key \}\}<\/code>/);
 });
@@ -180,7 +180,7 @@ test("settings expose supported Windows auto-start safely", async () => {
   assert.match(settings, /v-if="config\.auto_start_supported"/);
   assert.match(settings, /v-model:value="config\.auto_start"/);
   assert.match(settings, /登录 Windows 后在托盘后台启动，不自动打开 Dashboard/);
-  assert.match(settings, /aria-label="随 Windows 登录自动启动 OCG Manager"/);
+  assert.match(settings, /:aria-label="t\('随 Windows 登录自动启动 OCG Manager'\)"/);
   assert.match(settings, /aria-describedby="startup-help"/);
   assert.match(settings, /:disabled="!loaded \|\| saving \|\| regenerating"/);
   assert.match(settings, /:loading="regenerating"\s+:disabled="saving"/);

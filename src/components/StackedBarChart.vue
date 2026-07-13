@@ -18,7 +18,7 @@
       role="img"
       :aria-labelledby="`chart-title-${gid}`"
     >
-      <title :id="`chart-title-${gid}`">最近 30 天按模型分段的每日消耗</title>
+      <title :id="`chart-title-${gid}`">{{ t("最近 {days} 天按模型分段的每日消耗", { days }) }}</title>
       <defs>
         <linearGradient
           v-for="(c, idx) in CHART_PALETTE"
@@ -109,7 +109,7 @@
       :style="{ left: tooltip.x + 'px', top: tooltip.y + 'px' }"
     >
       <div class="tooltip-title">{{ tooltip.title }}</div>
-      <div class="tooltip-total">合计 ${{ tooltip.total.toFixed(4) }}</div>
+      <div class="tooltip-total">{{ t("合计 {total}", { total: formatCurrency(tooltip.total, 4) }) }}</div>
       <div
         v-for="row in tooltip.rows"
         :key="row.model"
@@ -117,7 +117,7 @@
       >
         <span class="dot" :style="{ background: row.color }" />
         <span class="model">{{ row.model }}</span>
-        <span class="cost">${{ row.cost.toFixed(4) }}</span>
+        <span class="cost">{{ formatCurrency(row.cost, 4) }}</span>
       </div>
     </div>
   </div>
@@ -127,6 +127,7 @@
 import { ref, computed, onMounted, onBeforeUnmount, useId } from "vue";
 import type { DailyModelCost } from "../api/tauri";
 import { CHART_PALETTE } from "../theme";
+import { locale, t } from "../i18n/index.ts";
 
 const props = withDefaults(defineProps<{
   data: DailyModelCost[];
@@ -168,6 +169,22 @@ onBeforeUnmount(() => {
 function modelColor(model: string, models: string[]): string {
   const idx = models.indexOf(model);
   return CHART_PALETTE[idx % CHART_PALETTE.length];
+}
+
+function formatCurrency(value: number, digits: number): string {
+  return new Intl.NumberFormat(locale.value, {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  }).format(value);
+}
+
+function formatChartDate(value: string, short = false): string {
+  const date = new Date(`${value}T00:00:00Z`);
+  return new Intl.DateTimeFormat(locale.value, short
+    ? { month: "2-digit", day: "2-digit", timeZone: "UTC" }
+    : { year: "numeric", month: "short", day: "numeric", timeZone: "UTC" }).format(date);
 }
 
 // --- 数据处理:按日期补零,得到连续的日期序列 ---
@@ -238,7 +255,7 @@ const yTicks = computed(() => {
     out.push({
       value: val,
       y,
-      label: val < 0.001 ? "$0" : `$${val < 1 ? val.toFixed(3) : val.toFixed(2)}`,
+      label: val < 0.001 ? formatCurrency(0, 0) : formatCurrency(val, val < 1 ? 3 : 2),
     });
   }
   return out;
@@ -283,8 +300,7 @@ const xLabels = computed(() => {
   const out: { x: number; text: string }[] = [];
   for (let i = 0; i < n; i += step) {
     const ds = dates.value[i].date;
-    // MM-DD
-    const text = ds.slice(5);
+    const text = formatChartDate(ds, true);
     out.push({ x: padL + barWidth.value * (i + 0.5), text });
   }
   return out;
@@ -321,7 +337,7 @@ function updateTooltip(bi: number, e: MouseEvent) {
     .map((r) => ({ ...r, color: modelColor(r.model, models) }));
   tooltip.value = {
     show: true,
-    title: d.date,
+    title: formatChartDate(d.date),
     total: d.total,
     rows,
     x: e.offsetX + 14,
