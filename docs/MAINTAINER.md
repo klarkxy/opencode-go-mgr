@@ -165,6 +165,11 @@ Pair them with `pnpm run build:web` for a final smoke test.
   reverse‑proxy forwarding headers still require login. Non‑loopback binds
   use a single administrator stored as an Argon2 password hash in SQLite
   and an HttpOnly session cookie.
+- Settings uses the protected `GET /dashboard/api/settings/check-update`
+  endpoint to query the latest GitHub Release. The response contains the
+  current and latest versions plus the release page URL; the gateway never
+  downloads or installs release artifacts. This outbound request runs only
+  when the user clicks the check button; it is not telemetry.
 - Docker may bootstrap the first administrator with
   `OCG_ADMIN_USERNAME` and `OCG_ADMIN_PASSWORD`; otherwise the first
   registration wins.
@@ -285,8 +290,9 @@ draft and the native smoke results, publish the release in GitHub or run
 Current Windows installers are unsigned and macOS uses ad‑hoc signing
 (`-`), not Developer ID notarization. Keep releases in draft until
 native smoke checks and platform warnings are reviewed. Windows/Linux
-ARM64, 32‑bit x86, RPM, Snap, app stores, and automatic updates remain
-unsupported.
+ARM64, 32‑bit x86, RPM, Snap, app stores, and automatic update download or
+installation remain unsupported. Settings can check the latest published
+GitHub Release manually.
 
 ### CI Coverage Boundaries
 

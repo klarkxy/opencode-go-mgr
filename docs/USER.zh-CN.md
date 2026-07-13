@@ -181,8 +181,11 @@ usage chunk 的行会标 `success_no_usage`。usage chunk 只会让 token 数量
 - **登录后自动启动**：只有已安装的 Windows 桌面版暴露此开关；开发构建、
   CLI、Docker、macOS、Linux 面板不显示。
 - **连接 / 非流式 / 流式空闲超时**：应用于上游 HTTP 请求。
+- **检查更新**：检查 GitHub 最新 Release，显示当前版本、最新版本与“查看发
+  布页”链接；不会自动下载或安装。运行 Gateway 的主机必须能访问
+  `api.github.com`；检查失败只影响此次更新检查，不影响 Gateway 转发。
 
-所有设置写入 SQLite，下次启动时重新加载。
+配置项写入 SQLite，下次启动时重新加载；检查更新是按需动作，不会持久化。
 
 ## Gateway 行为
 
@@ -421,7 +424,8 @@ ocg.example.com {
 - 已安装的 Windows 桌面版可以在用户登录时把 OCG Manager 拉起到托盘；开发
   构建、macOS、Linux、CLI、Docker 暂未实现该能力。
 - 不发布 Windows / Linux ARM64、32 位 x86 构建；不支持 RPM、Snap、应用商店
-  包、自动更新、Windows 正式签名、Apple 公证。
+  包、自动下载/安装更新、Windows 正式签名、Apple 公证。设置页可手动检查
+  GitHub 最新 Release。
 
 ## 常见问题
 

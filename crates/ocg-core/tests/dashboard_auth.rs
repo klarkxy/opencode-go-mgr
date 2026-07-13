@@ -88,6 +88,15 @@ async fn public_dashboard_uses_first_registration_and_session_cookie() {
     );
     assert_eq!(
         client
+            .get(format!("{base}/settings/check-update"))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        client
             .get(format!("{base}/settings"))
             .header(reqwest::header::COOKIE, &cookie)
             .send()

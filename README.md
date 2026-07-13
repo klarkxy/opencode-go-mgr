@@ -33,6 +33,8 @@ Windows, macOS, and Linux; a headless CLI is shipped alongside the GUI.
   codebase and a single instance lock.
 - **Headless CLI** — `ocg-manager-cli` ships with the same dashboard assets
   and is ideal for servers, Docker, and remote gateways.
+- **Manual update checks** — Settings checks the latest GitHub Release and
+  links to its release page without downloading or installing it.
 - **No remote sync, no telemetry** — each node owns its own data; there is no
   cloud service, no Admin API, and no cross‑node synchronization.
 
@@ -156,8 +158,9 @@ matrix on a single machine.
 A CLI archive contains the executable, `dist/`, and `LICENSE`. The `dist/`
 folder must sit beside the executable so `serve` can serve the dashboard.
 `SHA256SUMS`, signing and SmartScreen/Gatekeeper caveats, and the
-unsupported list (ARM64, 32‑bit x86, RPM, Snap, app stores, auto‑update) live
-in the [Maintainer guide](docs/MAINTAINER.md).
+unsupported list (ARM64, 32‑bit x86, RPM, Snap, app stores, and automatic
+download/install) live in the [Maintainer guide](docs/MAINTAINER.md). Settings
+can check for a new release manually.
 
 ## License
 

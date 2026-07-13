@@ -175,48 +175,97 @@
       >{{ t("保存设置") }}</n-button>
     </section>
 
-    <section class="settings-card appearance-card" aria-labelledby="appearance-title">
-      <div class="settings-head">
-        <div>
-          <h2 id="appearance-title">◐ {{ t("外观") }}</h2>
-          <p>{{ t("当前：{theme}", { theme: themeLabel }) }}</p>
+    <div class="settings-side">
+      <section class="settings-card" aria-labelledby="appearance-title">
+        <div class="settings-head">
+          <div>
+            <h2 id="appearance-title">◐ {{ t("外观") }}</h2>
+            <p>{{ t("当前：{theme}", { theme: themeLabel }) }}</p>
+          </div>
         </div>
-      </div>
-      <div class="theme-grid" role="group" :aria-label="t('选择主题')">
-        <button
-          v-for="option in THEME_OPTIONS"
-          :key="option.value"
-          type="button"
-          class="theme-option"
-          :class="{ 'theme-option--selected': themeName === option.value }"
-          :aria-pressed="themeName === option.value"
-          @click="emit('update:themeName', option.value)"
-        >
-          <span
-            class="theme-swatch"
-            :class="{
-              'theme-swatch--default': option.value === 'default',
-              'theme-swatch--white': option.value === 'white',
-            }"
-            :style="{ background: option.swatch }"
-            aria-hidden="true"
-          />
-          <span>{{ t(option.label as MessageKey) }}</span>
-          <n-icon
-            v-if="themeName === option.value"
-            class="theme-check"
-            :component="CheckOutlined"
-            aria-hidden="true"
-          />
-        </button>
-      </div>
-    </section>
+        <div class="theme-grid" role="group" :aria-label="t('选择主题')">
+          <button
+            v-for="option in THEME_OPTIONS"
+            :key="option.value"
+            type="button"
+            class="theme-option"
+            :class="{ 'theme-option--selected': themeName === option.value }"
+            :aria-pressed="themeName === option.value"
+            @click="emit('update:themeName', option.value)"
+          >
+            <span
+              class="theme-swatch"
+              :class="{
+                'theme-swatch--default': option.value === 'default',
+                'theme-swatch--white': option.value === 'white',
+              }"
+              :style="{ background: option.swatch }"
+              aria-hidden="true"
+            />
+            <span>{{ t(option.label as MessageKey) }}</span>
+            <n-icon
+              v-if="themeName === option.value"
+              class="theme-check"
+              :component="CheckOutlined"
+              aria-hidden="true"
+            />
+          </button>
+        </div>
+      </section>
+
+      <section class="settings-card" aria-labelledby="update-title">
+        <div class="settings-head">
+          <div>
+            <h2 id="update-title">↻ {{ t("检查更新") }}</h2>
+            <p>{{ t("从 GitHub Releases 检查最新公开版本，不会自动下载或安装。") }}</p>
+          </div>
+        </div>
+        <n-button
+          type="primary"
+          :loading="checkingUpdate"
+          :disabled="checkingUpdate"
+          @click="checkForUpdate"
+        >{{ checkingUpdate ? t("正在检查更新…") : t("检查更新") }}</n-button>
+        <div class="update-result" aria-live="polite" aria-atomic="true">
+          <n-alert
+            v-if="updateResult"
+            :type="updateResult.update_available ? 'warning' : 'success'"
+            :title="t(updateResult.update_available ? '发现新版本' : '已是最新版本')"
+          >
+            <div class="update-result-content">
+              <dl class="update-versions">
+                <div>
+                  <dt>{{ t("当前版本") }}</dt>
+                  <dd><code>v{{ updateResult.current_version }}</code></dd>
+                </div>
+                <div>
+                  <dt>{{ t("最新版本") }}</dt>
+                  <dd><code>v{{ updateResult.latest_version }}</code></dd>
+                </div>
+              </dl>
+              <n-button
+                tag="a"
+                type="primary"
+                size="small"
+                :href="updateResult.release_url"
+                target="_blank"
+                rel="noopener noreferrer"
+              >{{ t("查看发布页") }}</n-button>
+            </div>
+          </n-alert>
+          <n-alert v-else-if="updateError" type="error" :title="t('检查更新失败')">
+            {{ updateError }}
+          </n-alert>
+        </div>
+      </section>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import {
+  NAlert,
   NButton,
   NForm,
   NFormItem,
@@ -235,7 +284,7 @@ import {
   ReloadOutlined,
 } from "@vicons/antd";
 import { tauriApi } from "../api/tauri";
-import type { AppConfig } from "../api/tauri";
+import type { AppConfig, UpdateCheckResult } from "../api/tauri";
 import { THEME_OPTIONS } from "../theme";
 import type { ResolvedTheme, ThemeName } from "../theme";
 import { t } from "../i18n/index.ts";
@@ -260,6 +309,9 @@ const keyCopied = ref(false);
 const loaded = ref(false);
 const editingGatewayKey = ref(false);
 const gatewayKeyDraft = ref("");
+const checkingUpdate = ref(false);
+const updateResult = ref<UpdateCheckResult | null>(null);
+const updateError = ref("");
 let copyTimer: ReturnType<typeof setTimeout> | undefined;
 let persistedAutoStart = false;
 
@@ -407,6 +459,20 @@ async function regenerateKey() {
   }
 }
 
+async function checkForUpdate() {
+  if (checkingUpdate.value) return;
+  checkingUpdate.value = true;
+  updateResult.value = null;
+  updateError.value = "";
+  try {
+    updateResult.value = await tauriApi.checkForUpdate();
+  } catch (error) {
+    updateError.value = error instanceof Error ? error.message : String(error);
+  } finally {
+    checkingUpdate.value = false;
+  }
+}
+
 onMounted(loadSettings);
 onUnmounted(() => clearTimeout(copyTimer));
 </script>
@@ -425,6 +491,11 @@ onUnmounted(() => clearTimeout(copyTimer));
   border-radius: 14px;
   background: var(--ocg-surface);
   box-shadow: var(--ocg-shadow-sm);
+}
+.settings-side {
+  display: grid;
+  align-self: start;
+  gap: 16px;
 }
 .settings-head {
   display: flex;
@@ -507,9 +578,6 @@ onUnmounted(() => clearTimeout(copyTimer));
   color: var(--ocg-subtle);
   font-size: 11px;
 }
-.appearance-card {
-  align-self: start;
-}
 .theme-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
@@ -564,6 +632,39 @@ onUnmounted(() => clearTimeout(copyTimer));
   top: 5px;
   right: 5px;
   font-size: 12px;
+}
+.update-result {
+  margin-top: 14px;
+}
+.update-result:empty {
+  margin-top: 0;
+}
+.update-result-content {
+  display: grid;
+  justify-items: start;
+  gap: 12px;
+}
+.update-versions {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+.update-versions > div {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: baseline;
+  gap: 10px;
+}
+.update-versions dt {
+  color: var(--ocg-subtle);
+  font-size: 11px;
+}
+.update-versions dd {
+  margin: 0;
+}
+.update-result-content code {
+  color: var(--ocg-ink);
+  font: 600 13px/1.4 "Cascadia Mono", Consolas, monospace;
 }
 
 @media (max-width: 800px) {

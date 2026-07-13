@@ -14,6 +14,7 @@
 - Tauri commands 仍注册在 `src-tauri/src/commands/`，但不是当前 Vue dashboard 的主调用路径。
 - 每个节点都由自己的 dashboard 管理；项目不提供远端同步或 Admin API。
 - 非回环监听使用单管理员登录；Docker 可通过 `OCG_ADMIN_USERNAME` 和 `OCG_ADMIN_PASSWORD` 首次初始化（两个必须同时设置，只设一个会启动报错），未提供时由首个注册者创建管理员。
+- 设置页可通过受保护的 `/dashboard/api/settings/check-update` 手动检查 GitHub 最新 Release，显示当前/最新版本与发布页链接；不会自动下载或安装。
 
 ## 关键文件
 
@@ -63,4 +64,4 @@ pnpm run build
 - 流式 usage 依赖上游 usage chunk；没有 chunk 时会记为 `success_no_usage`。
 - Tauri 隔离浏览器 command 存在，但当前 HTTP dashboard 没有按钮调用它。
 - `src-tauri/src/commands/*` 与 `crates/ocg-core/src/dashboard.rs` 有部分重复逻辑；当前不要大拆，除非同时迁移缺失行为并补验证。
-- 当前不发布 Windows/Linux ARM64、32 位 x86、RPM、Snap 或应用商店包，也没有自动更新、Windows 正式签名或 Apple notarization。
+- 当前不发布 Windows/Linux ARM64、32 位 x86、RPM、Snap 或应用商店包，也没有自动下载/安装更新、Windows 正式签名或 Apple notarization。

@@ -30,6 +30,7 @@ pub fn api_router(state: CoreState) -> Router<CoreState> {
             post(reset_account_cooldown),
         )
         .route("/settings", get(get_settings).post(update_settings))
+        .route("/settings/check-update", get(check_update))
         .route(
             "/settings/regenerate-gateway-key",
             post(regenerate_gateway_key),
@@ -649,6 +650,90 @@ async fn get_settings(State(state): State<CoreState>) -> Json<SettingsResponse> 
     })
 }
 
+const GITHUB_LATEST_RELEASE_API: &str =
+    "https://api.github.com/repos/klarkxy/opencode-go-mgr/releases/latest";
+const GITHUB_LATEST_RELEASE_URL: &str =
+    "https://github.com/klarkxy/opencode-go-mgr/releases/latest";
+
+#[derive(Deserialize)]
+struct GithubRelease {
+    tag_name: String,
+}
+
+#[derive(Serialize)]
+struct UpdateCheckResponse {
+    current_version: String,
+    latest_version: String,
+    update_available: bool,
+    release_url: &'static str,
+}
+
+async fn check_update(
+    State(state): State<CoreState>,
+) -> Result<Json<UpdateCheckResponse>, ApiError> {
+    let (_, client) = state.upstream_context();
+    let release = client
+        .get(GITHUB_LATEST_RELEASE_API)
+        .header(reqwest::header::ACCEPT, "application/vnd.github+json")
+        .header(
+            reqwest::header::USER_AGENT,
+            concat!("ocg-manager/", env!("CARGO_PKG_VERSION")),
+        )
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await
+        .and_then(reqwest::Response::error_for_status)
+        .map_err(update_check_error)?
+        .json::<GithubRelease>()
+        .await
+        .map_err(update_check_error)?;
+
+    let current_version = env!("CARGO_PKG_VERSION");
+    let (current_parts, current_version) = parse_stable_version(current_version)
+        .ok_or_else(|| ApiError::internal("application version is not stable X.Y.Z"))?;
+    let (latest_parts, latest_version) =
+        parse_stable_version(&release.tag_name).ok_or_else(|| {
+            ApiError::status(
+                StatusCode::BAD_GATEWAY,
+                "GitHub latest release has an invalid stable version tag",
+            )
+        })?;
+
+    Ok(Json(UpdateCheckResponse {
+        current_version: current_version.to_string(),
+        latest_version: latest_version.to_string(),
+        update_available: is_update_available(current_parts, latest_parts),
+        release_url: GITHUB_LATEST_RELEASE_URL,
+    }))
+}
+
+fn update_check_error(error: reqwest::Error) -> ApiError {
+    ApiError::status(
+        StatusCode::BAD_GATEWAY,
+        format!("failed to check GitHub releases: {error}"),
+    )
+}
+
+fn parse_stable_version(version: &str) -> Option<([u64; 3], &str)> {
+    let version = version.strip_prefix('v').unwrap_or(version);
+    let mut parts = version.split('.');
+    let parse_part = |part: &str| {
+        (!part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
+            .then(|| part.parse().ok())
+            .flatten()
+    };
+    let parsed = [
+        parse_part(parts.next()?)?,
+        parse_part(parts.next()?)?,
+        parse_part(parts.next()?)?,
+    ];
+    parts.next().is_none().then_some((parsed, version))
+}
+
+fn is_update_available(current: [u64; 3], latest: [u64; 3]) -> bool {
+    latest > current
+}
+
 async fn update_settings(
     State(state): State<CoreState>,
     Json(mut config): Json<AppConfig>,
@@ -832,7 +917,7 @@ fn is_loopback(url: &reqwest::Url) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{asset_path, dashboard_account};
+    use super::{asset_path, dashboard_account, is_update_available, parse_stable_version};
     use crate::crypto::{KeyCipher, StaticKeyCipher};
     use crate::db::Database;
     use crate::models::Account;
@@ -899,5 +984,48 @@ mod tests {
         assert!(dto.password.is_empty());
         assert!(dto.key.is_empty());
         let _ = fs::remove_dir_all(dir);
+    }
+
+    fn version_parts(version: &str) -> [u64; 3] {
+        parse_stable_version(version)
+            .expect("test version should be valid")
+            .0
+    }
+
+    #[test]
+    fn stable_version_comparison_detects_newer_release() {
+        assert!(is_update_available(
+            version_parts("1.0.0"),
+            version_parts("1.1.0")
+        ));
+    }
+
+    #[test]
+    fn stable_version_comparison_treats_equal_as_current() {
+        assert!(!is_update_available(
+            version_parts("1.1.0"),
+            version_parts("1.1.0")
+        ));
+    }
+
+    #[test]
+    fn stable_version_comparison_treats_current_ahead_as_current() {
+        assert!(!is_update_available(
+            version_parts("2.0.0"),
+            version_parts("1.9.9")
+        ));
+    }
+
+    #[test]
+    fn stable_version_parser_strips_v_prefix() {
+        assert_eq!(
+            parse_stable_version("v1.2.3").map(|(_, value)| value),
+            Some("1.2.3")
+        );
+    }
+
+    #[test]
+    fn stable_version_parser_rejects_non_stable_tag() {
+        assert!(parse_stable_version("v1.1.0-beta.1").is_none());
     }
 }

@@ -40,6 +40,13 @@ export interface AppConfig {
   stream_idle_timeout_secs: number;
 }
 
+export interface UpdateCheckResult {
+  current_version: string;
+  latest_version: string;
+  update_available: boolean;
+  release_url: string;
+}
+
 export interface GatewayLog {
   id: number;
   level: string;
@@ -220,6 +227,7 @@ export const tauriApi = {
     });
     return result.key;
   },
+  checkForUpdate: () => request<UpdateCheckResult>("/settings/check-update"),
   getGatewayLogs: (limit?: number) => request<GatewayLog[]>(`/logs/gateway?limit=${limit ?? 100}`),
   getForwardLogs: (query: ForwardLogQuery = {}) => {
     const params = new URLSearchParams({

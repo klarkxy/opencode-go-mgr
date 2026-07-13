@@ -221,8 +221,13 @@ The **Settings** view exposes the persistent gateway configuration:
   Linux dashboards hide it.
 - **Connect / non‑stream / stream‑idle timeouts** — apply to upstream
   HTTP requests.
+- **Check for updates** — checks the latest GitHub Release and shows the
+  current version, latest version, and a **View release** link. It does not
+  download or install the release. The host running the Gateway must be able
+  to reach `api.github.com`; a failed check does not affect Gateway forwarding.
 
-All settings are written to SQLite and reloaded on the next start.
+Configuration settings are written to SQLite and reloaded on the next start.
+The update check is an on‑demand action and is not persisted.
 
 ## Gateway Behavior
 
@@ -508,8 +513,9 @@ intentionally want to delete all stored accounts, credentials, and keys.
   tray when the user logs in. Auto‑start is not implemented for
   development builds, macOS, Linux, CLI, or Docker deployments.
 - Windows / Linux ARM64 and 32‑bit x86 builds are not published. RPM,
-  Snap, app‑store packages, automatic updates, Windows signing, and Apple
-  notarization are not implemented.
+  Snap, app‑store packages, automatic update download/installation,
+  Windows signing, and Apple notarization are not implemented. Settings
+  can check the latest GitHub Release manually.
 
 ## Troubleshooting
 
