@@ -194,8 +194,8 @@ export const ptBRMessages = {
   "执行连接检查或发送一条测试消息，再到 OCG Manager 的请求日志确认成功记录。": "Execute uma verificação de conexão ou envie uma mensagem de teste; depois confirme a entrada bem-sucedida nos Logs de requisições do OCG Manager.",
   "API 地址使用不带 /v1 的根地址，由 Cherry Studio 补全 OpenAI 请求路径。": "Use a URL raiz sem /v1; o Cherry Studio completará o caminho da requisição OpenAI.",
 
-  "在 Copilot Chat 的自带密钥模型设置中添加 OpenAI Compatible 完整端点。": "Adicione o endpoint completo OpenAI Compatible nas configurações de modelos com Key própria do Copilot Chat.",
-  "在 Copilot Chat 的模型管理中选择添加 OpenAI Compatible 模型。": "No gerenciamento de modelos do Copilot Chat, escolha adicionar um modelo OpenAI Compatible.",
+  "在 Copilot Chat 的自带密钥模型设置中添加 Custom Endpoint 完整端点。": "Adicione o endpoint completo com Custom Endpoint nas configurações de modelos com chave própria do Copilot Chat.",
+  "在 Copilot Chat 的模型管理中选择 Custom Endpoint，并将 API 类型设为 Chat Completions。": "No gerenciamento de modelos do Copilot Chat, selecione Custom Endpoint e defina o tipo de API como Chat Completions.",
   "填写下方完整 Chat Completions Endpoint、Key 和模型 ID。": "Informe o Chat Completions Endpoint completo, a Key e o ID do modelo abaixo.",
   "在 Chat 中选择该模型并发送测试消息，再到 OCG Manager 的请求日志确认成功记录。": "Selecione o modelo no Chat e envie uma mensagem de teste; depois confirme a entrada bem-sucedida nos Logs de requisições do OCG Manager.",
   "BYOK 只影响支持自带密钥的聊天模型，不接管 Copilot 行内补全、embedding 等能力。": "BYOK afeta apenas modelos de chat que aceitam uma Key própria; ele não substitui o preenchimento inline, embedding ou outros recursos do Copilot.",

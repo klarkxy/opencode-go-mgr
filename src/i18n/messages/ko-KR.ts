@@ -194,8 +194,8 @@ export const koKRMessages = {
   "执行连接检查或发送一条测试消息，再到 OCG Manager 的请求日志确认成功记录。": "연결 검사를 실행하거나 테스트 메시지를 보낸 뒤 OCG Manager의 요청 로그에서 성공 기록을 확인하세요.",
   "API 地址使用不带 /v1 的根地址，由 Cherry Studio 补全 OpenAI 请求路径。": "API URL에는 /v1이 없는 루트 URL을 사용하세요. OpenAI 요청 경로는 Cherry Studio가 완성합니다.",
 
-  "在 Copilot Chat 的自带密钥模型设置中添加 OpenAI Compatible 完整端点。": "Copilot Chat의 BYOK 모델 설정에 전체 OpenAI Compatible 엔드포인트를 추가하세요.",
-  "在 Copilot Chat 的模型管理中选择添加 OpenAI Compatible 模型。": "Copilot Chat 모델 관리에서 OpenAI Compatible 모델 추가를 선택하세요.",
+  "在 Copilot Chat 的自带密钥模型设置中添加 Custom Endpoint 完整端点。": "Copilot Chat의 BYOK 모델 설정에 Custom Endpoint 전체 엔드포인트를 추가하세요.",
+  "在 Copilot Chat 的模型管理中选择 Custom Endpoint，并将 API 类型设为 Chat Completions。": "Copilot Chat 모델 관리에서 Custom Endpoint를 선택하고 API 유형을 Chat Completions로 설정하세요.",
   "填写下方完整 Chat Completions Endpoint、Key 和模型 ID。": "아래의 전체 Chat Completions Endpoint, Key, 모델 ID를 입력하세요.",
   "在 Chat 中选择该模型并发送测试消息，再到 OCG Manager 的请求日志确认成功记录。": "Chat에서 해당 모델을 선택해 테스트 메시지를 보낸 뒤 OCG Manager의 요청 로그에서 성공 기록을 확인하세요.",
   "BYOK 只影响支持自带密钥的聊天模型，不接管 Copilot 行内补全、embedding 等能力。": "BYOK는 사용자 Key를 지원하는 채팅 모델에만 적용되며 Copilot 인라인 완성, embedding 등의 기능을 대체하지 않습니다.",

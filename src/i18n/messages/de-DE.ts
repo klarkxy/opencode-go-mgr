@@ -194,8 +194,8 @@ export const deDEMessages = {
   "执行连接检查或发送一条测试消息，再到 OCG Manager 的请求日志确认成功记录。": "Führen Sie einen Verbindungstest aus oder senden Sie eine Testnachricht und bestätigen Sie anschließend den erfolgreichen Eintrag in den Anfrageprotokollen von OCG Manager.",
   "API 地址使用不带 /v1 的根地址，由 Cherry Studio 补全 OpenAI 请求路径。": "Verwenden Sie die Root-URL ohne /v1; Cherry Studio ergänzt den OpenAI-Anfragepfad.",
 
-  "在 Copilot Chat 的自带密钥模型设置中添加 OpenAI Compatible 完整端点。": "Fügen Sie den vollständigen OpenAI Compatible-Endpoint in den Einstellungen für Modelle mit eigenem Key von Copilot Chat hinzu.",
-  "在 Copilot Chat 的模型管理中选择添加 OpenAI Compatible 模型。": "Wählen Sie in der Modellverwaltung von Copilot Chat die Option zum Hinzufügen eines OpenAI Compatible-Modells.",
+  "在 Copilot Chat 的自带密钥模型设置中添加 Custom Endpoint 完整端点。": "Fügen Sie den vollständigen Endpunkt über Custom Endpoint in den BYOK-Modelleinstellungen von Copilot Chat hinzu.",
+  "在 Copilot Chat 的模型管理中选择 Custom Endpoint，并将 API 类型设为 Chat Completions。": "Wählen Sie in der Modellverwaltung von Copilot Chat Custom Endpoint und setzen Sie den API-Typ auf Chat Completions.",
   "填写下方完整 Chat Completions Endpoint、Key 和模型 ID。": "Geben Sie den vollständigen Chat Completions Endpoint, den Key und die unten angegebene Modell-ID ein.",
   "在 Chat 中选择该模型并发送测试消息，再到 OCG Manager 的请求日志确认成功记录。": "Wählen Sie das Modell in Chat aus, senden Sie eine Testnachricht und bestätigen Sie anschließend den erfolgreichen Eintrag in den Anfrageprotokollen von OCG Manager.",
   "BYOK 只影响支持自带密钥的聊天模型，不接管 Copilot 行内补全、embedding 等能力。": "BYOK betrifft nur Chatmodelle, die eigene Keys unterstützen. Es ersetzt weder Copilot-Inlinevervollständigungen noch die Funktion embedding oder andere Funktionen.",

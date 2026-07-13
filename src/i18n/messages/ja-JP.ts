@@ -194,8 +194,8 @@ export const jaJPMessages = {
   "执行连接检查或发送一条测试消息，再到 OCG Manager 的请求日志确认成功记录。": "接続チェックまたはテストメッセージを実行し、OCG Manager のリクエストログで成功した記録を確認します。",
   "API 地址使用不带 /v1 的根地址，由 Cherry Studio 补全 OpenAI 请求路径。": "API URL には /v1 を含まないルート URL を使用します。OpenAI のリクエストパスは Cherry Studio が補完します。",
 
-  "在 Copilot Chat 的自带密钥模型设置中添加 OpenAI Compatible 完整端点。": "Copilot Chat の BYOK モデル設定に OpenAI Compatible の完全なエンドポイントを追加します。",
-  "在 Copilot Chat 的模型管理中选择添加 OpenAI Compatible 模型。": "Copilot Chat のモデル管理で OpenAI Compatible モデルの追加を選択します。",
+  "在 Copilot Chat 的自带密钥模型设置中添加 Custom Endpoint 完整端点。": "Copilot Chat の BYOK モデル設定で Custom Endpoint の完全なエンドポイントを追加します。",
+  "在 Copilot Chat 的模型管理中选择 Custom Endpoint，并将 API 类型设为 Chat Completions。": "Copilot Chat のモデル管理で Custom Endpoint を選択し、API タイプを Chat Completions に設定します。",
   "填写下方完整 Chat Completions Endpoint、Key 和模型 ID。": "以下の完全な Chat Completions Endpoint、Key、モデル ID を入力します。",
   "在 Chat 中选择该模型并发送测试消息，再到 OCG Manager 的请求日志确认成功记录。": "Chat でこのモデルを選択してテストメッセージを送信し、OCG Manager のリクエストログで成功した記録を確認します。",
   "BYOK 只影响支持自带密钥的聊天模型，不接管 Copilot 行内补全、embedding 等能力。": "BYOK が適用されるのはカスタム Key 対応のチャットモデルだけです。Copilot のインライン補完、embedding などの機能は置き換えません。",

@@ -187,9 +187,9 @@ export const APPLICATION_GUIDES: readonly ApplicationGuide[] = [
     protocol: 'OpenAI Chat Completions',
     officialUrl: 'https://code.visualstudio.com/docs/agent-customization/language-models',
     badge: 'BYOK',
-    summary: '在 Copilot Chat 的自带密钥模型设置中添加 OpenAI Compatible 完整端点。',
+    summary: '在 Copilot Chat 的自带密钥模型设置中添加 Custom Endpoint 完整端点。',
     steps: [
-      '在 Copilot Chat 的模型管理中选择添加 OpenAI Compatible 模型。',
+      '在 Copilot Chat 的模型管理中选择 Custom Endpoint，并将 API 类型设为 Chat Completions。',
       '填写下方完整 Chat Completions Endpoint、Key 和模型 ID。',
       '在 Chat 中选择该模型并发送测试消息，再到 OCG Manager 的请求日志确认成功记录。',
     ],

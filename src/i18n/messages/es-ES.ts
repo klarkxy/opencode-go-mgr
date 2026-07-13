@@ -194,8 +194,8 @@ export const esESMessages = {
   "执行连接检查或发送一条测试消息，再到 OCG Manager 的请求日志确认成功记录。": "Ejecuta una comprobación de conexión o envía un mensaje de prueba y confirma después la entrada correcta en los Registros de solicitudes de OCG Manager.",
   "API 地址使用不带 /v1 的根地址，由 Cherry Studio 补全 OpenAI 请求路径。": "Usa la URL raíz sin /v1; Cherry Studio completará la ruta de solicitud de OpenAI.",
 
-  "在 Copilot Chat 的自带密钥模型设置中添加 OpenAI Compatible 完整端点。": "Añade el endpoint OpenAI Compatible completo en los ajustes de modelos con Key propia de Copilot Chat.",
-  "在 Copilot Chat 的模型管理中选择添加 OpenAI Compatible 模型。": "En la gestión de modelos de Copilot Chat, elige añadir un modelo OpenAI Compatible.",
+  "在 Copilot Chat 的自带密钥模型设置中添加 Custom Endpoint 完整端点。": "Añade el endpoint completo mediante Custom Endpoint en los ajustes de modelos con clave propia de Copilot Chat.",
+  "在 Copilot Chat 的模型管理中选择 Custom Endpoint，并将 API 类型设为 Chat Completions。": "En la gestión de modelos de Copilot Chat, selecciona Custom Endpoint y establece el tipo de API en Chat Completions.",
   "填写下方完整 Chat Completions Endpoint、Key 和模型 ID。": "Introduce el Chat Completions Endpoint completo, la Key y el ID del modelo indicados abajo.",
   "在 Chat 中选择该模型并发送测试消息，再到 OCG Manager 的请求日志确认成功记录。": "Selecciona el modelo en Chat y envía un mensaje de prueba; después confirma la entrada correcta en los Registros de solicitudes de OCG Manager.",
   "BYOK 只影响支持自带密钥的聊天模型，不接管 Copilot 行内补全、embedding 等能力。": "BYOK solo afecta a los modelos de chat que admiten Key propias; no sustituye las finalizaciones en línea de Copilot, la función embedding ni otras funciones.",

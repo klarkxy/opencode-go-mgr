@@ -194,8 +194,8 @@ export const zhTWMessages = {
   "执行连接检查或发送一条测试消息，再到 OCG Manager 的请求日志确认成功记录。": "執行連線檢查或傳送一則測試訊息，再到 OCG Manager 的請求日誌確認成功記錄。",
   "API 地址使用不带 /v1 的根地址，由 Cherry Studio 补全 OpenAI 请求路径。": "API 網址請使用不含 /v1 的根網址，由 Cherry Studio 補齊 OpenAI 請求路徑。",
 
-  "在 Copilot Chat 的自带密钥模型设置中添加 OpenAI Compatible 完整端点。": "在 Copilot Chat 的自備金鑰模型設定中加入完整的 OpenAI Compatible 端點。",
-  "在 Copilot Chat 的模型管理中选择添加 OpenAI Compatible 模型。": "在 Copilot Chat 的模型管理中選擇新增 OpenAI Compatible 模型。",
+  "在 Copilot Chat 的自带密钥模型设置中添加 Custom Endpoint 完整端点。": "在 Copilot Chat 的自備金鑰模型設定中加入 Custom Endpoint 完整端點。",
+  "在 Copilot Chat 的模型管理中选择 Custom Endpoint，并将 API 类型设为 Chat Completions。": "在 Copilot Chat 的模型管理中選擇 Custom Endpoint，並將 API 類型設為 Chat Completions。",
   "填写下方完整 Chat Completions Endpoint、Key 和模型 ID。": "填寫下方完整的 Chat Completions Endpoint、Key 與模型 ID。",
   "在 Chat 中选择该模型并发送测试消息，再到 OCG Manager 的请求日志确认成功记录。": "在 Chat 中選擇該模型並傳送測試訊息，再到 OCG Manager 的請求日誌確認成功記錄。",
   "BYOK 只影响支持自带密钥的聊天模型，不接管 Copilot 行内补全、embedding 等能力。": "BYOK 只影響支援自備金鑰的聊天模型，不會取代 Copilot 行內補全、embedding 等功能。",

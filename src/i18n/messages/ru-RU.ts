@@ -194,8 +194,8 @@ export const ruRUMessages = {
   "执行连接检查或发送一条测试消息，再到 OCG Manager 的请求日志确认成功记录。": "Проверьте подключение или отправьте тестовое сообщение, затем убедитесь, что успешная запись появилась в Журнале запросов OCG Manager.",
   "API 地址使用不带 /v1 的根地址，由 Cherry Studio 补全 OpenAI 请求路径。": "Используйте корневой URL без /v1; Cherry Studio самостоятельно дополнит путь запроса OpenAI.",
 
-  "在 Copilot Chat 的自带密钥模型设置中添加 OpenAI Compatible 完整端点。": "Добавьте полный endpoint OpenAI Compatible в настройки моделей Copilot Chat с собственным Key.",
-  "在 Copilot Chat 的模型管理中选择添加 OpenAI Compatible 模型。": "В управлении моделями Copilot Chat выберите добавление модели OpenAI Compatible.",
+  "在 Copilot Chat 的自带密钥模型设置中添加 Custom Endpoint 完整端点。": "Добавьте полный эндпоинт через Custom Endpoint в настройках BYOK-моделей Copilot Chat.",
+  "在 Copilot Chat 的模型管理中选择 Custom Endpoint，并将 API 类型设为 Chat Completions。": "В управлении моделями Copilot Chat выберите Custom Endpoint и задайте тип API Chat Completions.",
   "填写下方完整 Chat Completions Endpoint、Key 和模型 ID。": "Укажите полный Chat Completions Endpoint, Key и ID модели, приведённые ниже.",
   "在 Chat 中选择该模型并发送测试消息，再到 OCG Manager 的请求日志确认成功记录。": "Выберите эту модель в Chat и отправьте тестовое сообщение, затем убедитесь, что успешная запись появилась в Журнале запросов OCG Manager.",
   "BYOK 只影响支持自带密钥的聊天模型，不接管 Copilot 行内补全、embedding 等能力。": "BYOK влияет только на чат-модели с собственным Key и не заменяет встроенные дополнения Copilot, embedding и другие возможности.",
