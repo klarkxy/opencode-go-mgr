@@ -147,7 +147,7 @@
             </div>
           </n-layout-header>
 
-          <n-layout-content class="app-content">
+          <main class="app-content">
             <Dashboard v-if="activeKey === 'dashboard'" />
             <Accounts v-else-if="activeKey === 'accounts'" />
             <Applications v-else-if="activeKey === 'apps'" />
@@ -158,7 +158,7 @@
               :resolved-theme="resolvedTheme"
               @update:theme-name="themeName = $event"
             />
-          </n-layout-content>
+          </main>
         </n-layout>
       </n-layout>
     </n-message-provider>
@@ -178,7 +178,6 @@ import {
   NIcon,
   NInput,
   NLayout,
-  NLayoutContent,
   NLayoutHeader,
   NLayoutSider,
   NMenu,
@@ -523,7 +522,7 @@ onUnmounted(() => {
 .auth-kicker {
   margin: 20px 0 6px;
   color: var(--ocg-primary);
-  font-size: 11px;
+  font-size: 16px;
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -542,7 +541,7 @@ onUnmounted(() => {
 .auth-error {
   margin: 0 0 12px;
   color: var(--ocg-error);
-  font-size: 13px;
+  font-size: 16px;
 }
 .auth-character {
   position: absolute;
@@ -576,12 +575,12 @@ onUnmounted(() => {
 }
 .brand-mark {
   flex: 0 0 auto;
-  font: 800 15px/1 "Bahnschrift", "Segoe UI Variable Display", sans-serif;
+  font: 800 16px/1 "Bahnschrift", "Segoe UI Variable Display", sans-serif;
   letter-spacing: 0.04em;
 }
 .brand-name {
   color: var(--ocg-ink);
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 650;
 }
 .app-header {
@@ -609,6 +608,9 @@ onUnmounted(() => {
   gap: 8px;
 }
 .app-content {
+  height: calc(100% - 58px);
+  min-width: 0;
+  min-height: 0;
   padding: 24px;
   overflow-y: auto;
   background: var(--ocg-canvas);

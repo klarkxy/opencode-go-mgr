@@ -157,6 +157,12 @@ export const frFRMessages = {
   "配置示例": "Exemples de configuration",
   "已复制": "Copié",
   "复制配置": "Copier la configuration",
+  "自动读取 /v1/models，并仅显示当前节点可用模型。": "Les modèles sont chargés automatiquement depuis /v1/models ; seuls ceux disponibles sur ce nœud sont affichés.",
+  "选择模型 ID": "Sélectionner un ID de modèle",
+  "未返回可用模型": "Aucun modèle disponible n’a été renvoyé",
+  "一键导入": "Importer directement",
+  "即将把当前 Gateway Key 交给 {app}。": "La Gateway Key actuelle sera transmise à {app}.",
+  "客户端导入链接无效": "Le lien d’importation du client est invalide",
   "验证方法": "Procédure de vérification",
   "在客户端发送一次测试消息，再到 OCG Manager 的“请求日志”确认模型、账号和成功状态。": "Envoyez un message de test depuis le client, puis consultez les Journaux des requêtes d’OCG Manager pour vérifier le modèle, le compte et l’état de réussite.",
   "注意事项": "Remarques",
@@ -184,7 +190,7 @@ export const frFRMessages = {
 
   "使用 OpenAI Compatible AI SDK provider，将 OCG Manager 注册为自定义服务商。": "Utilisez le provider OpenAI Compatible AI SDK pour enregistrer OCG Manager comme fournisseur personnalisé.",
   "把下面的 provider 配置合并到项目或用户级 opencode.json。": "Ajoutez la configuration du provider ci-dessous au fichier opencode.json du projet ou de l’utilisateur.",
-  "按节点可用模型调整 models 和默认 model，保留 npm 为 @ai-sdk/openai-compatible。": "Adaptez models et le model par défaut aux modèles disponibles sur votre nœud, et conservez npm avec la valeur @ai-sdk/openai-compatible.",
+  "在启动 OpenCode 的同一终端设置 OCG_API_KEY 环境变量。": "Définissez OCG_API_KEY dans le même terminal que celui utilisé pour lancer OpenCode.",
   "在 OpenCode 中发送一条测试消息，再到 OCG Manager 的请求日志确认成功记录。": "Envoyez un message de test dans OpenCode, puis confirmez l’entrée réussie dans les Journaux des requêtes d’OCG Manager.",
   "baseURL 必须使用带 /v1 的 API Base URL。": "baseURL doit utiliser l’API Base URL qui inclut /v1.",
 
@@ -215,7 +221,7 @@ export const frFRMessages = {
 
   "选择 OpenAI Compatible provider，将对话请求转发到 OCG Manager。": "Choisissez le provider OpenAI Compatible pour transmettre les requêtes de chat à OCG Manager.",
   "打开 Roo Code 配置，将 API Provider 选择为 OpenAI Compatible。": "Ouvrez les paramètres de Roo Code et définissez API Provider sur OpenAI Compatible.",
-  "Agent 模式依赖模型的工具调用能力；仅聊天成功不代表所有模式均可用。": "Le mode Agent dépend des capacités d’appel d’outils du modèle ; la réussite du chat ne garantit pas que tous les modes fonctionnent.",
+  "Roo Code 仅支持原生工具调用；所选模型不支持 tools 时无法使用 Agent 模式。": "Roo Code prend uniquement en charge l’appel d’outils natif ; le mode Agent est inutilisable si le modèle sélectionné ne prend pas en charge tools.",
 
   "在 Continue YAML 配置中添加 OpenAI provider，并明确关闭 Responses API。": "Ajoutez un provider OpenAI à la configuration YAML de Continue et désactivez explicitement Responses API.",
   "打开 Continue 用户级 YAML 配置，将下面的模型项合并到 models。": "Ouvrez la configuration YAML utilisateur de Continue et ajoutez l’entrée de modèle ci-dessous à models.",

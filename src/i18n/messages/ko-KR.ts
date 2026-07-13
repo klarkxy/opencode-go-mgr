@@ -157,6 +157,12 @@ export const koKRMessages = {
   "配置示例": "설정 예시",
   "已复制": "복사됨",
   "复制配置": "설정 복사",
+  "自动读取 /v1/models，并仅显示当前节点可用模型。": "/v1/models에서 자동으로 불러오며 현재 노드에서 사용할 수 있는 모델만 표시합니다.",
+  "选择模型 ID": "모델 ID 선택",
+  "未返回可用模型": "사용 가능한 모델이 반환되지 않았습니다",
+  "一键导入": "한 번에 가져오기",
+  "即将把当前 Gateway Key 交给 {app}。": "현재 Gateway Key를 {app}에 전달합니다.",
+  "客户端导入链接无效": "클라이언트 가져오기 링크가 올바르지 않습니다",
   "验证方法": "검증 방법",
   "在客户端发送一次测试消息，再到 OCG Manager 的“请求日志”确认模型、账号和成功状态。": "클라이언트에서 테스트 메시지를 보낸 뒤 OCG Manager의 ‘요청 로그’에서 모델, 계정, 성공 상태를 확인하세요.",
   "注意事项": "주의 사항",
@@ -184,7 +190,7 @@ export const koKRMessages = {
 
   "使用 OpenAI Compatible AI SDK provider，将 OCG Manager 注册为自定义服务商。": "OpenAI Compatible AI SDK provider를 사용해 OCG Manager를 사용자 지정 프로바이더로 등록합니다.",
   "把下面的 provider 配置合并到项目或用户级 opencode.json。": "아래 provider 설정을 프로젝트 또는 사용자 수준 opencode.json에 병합하세요.",
-  "按节点可用模型调整 models 和默认 model，保留 npm 为 @ai-sdk/openai-compatible。": "노드에서 사용 가능한 모델에 맞게 models와 기본 model을 조정하고 npm은 @ai-sdk/openai-compatible로 유지하세요.",
+  "在启动 OpenCode 的同一终端设置 OCG_API_KEY 环境变量。": "OpenCode를 실행하는 동일한 터미널에서 OCG_API_KEY 환경 변수를 설정하세요.",
   "在 OpenCode 中发送一条测试消息，再到 OCG Manager 的请求日志确认成功记录。": "OpenCode에서 테스트 메시지를 보낸 뒤 OCG Manager의 요청 로그에서 성공 기록을 확인하세요.",
   "baseURL 必须使用带 /v1 的 API Base URL。": "baseURL에는 /v1이 포함된 API Base URL을 사용해야 합니다.",
 
@@ -215,7 +221,7 @@ export const koKRMessages = {
 
   "选择 OpenAI Compatible provider，将对话请求转发到 OCG Manager。": "OpenAI Compatible provider를 선택해 대화 요청을 OCG Manager로 전달하세요.",
   "打开 Roo Code 配置，将 API Provider 选择为 OpenAI Compatible。": "Roo Code 설정을 열고 API Provider를 OpenAI Compatible로 선택하세요.",
-  "Agent 模式依赖模型的工具调用能力；仅聊天成功不代表所有模式均可用。": "Agent 모드는 모델의 도구 호출 기능에 의존합니다. 채팅에 성공했다고 해서 모든 모드를 사용할 수 있는 것은 아닙니다.",
+  "Roo Code 仅支持原生工具调用；所选模型不支持 tools 时无法使用 Agent 模式。": "Roo Code는 네이티브 도구 호출만 지원합니다. 선택한 모델이 tools를 지원하지 않으면 Agent 모드를 사용할 수 없습니다.",
 
   "在 Continue YAML 配置中添加 OpenAI provider，并明确关闭 Responses API。": "Continue YAML 설정에 OpenAI provider를 추가하고 Responses API를 명시적으로 끄세요.",
   "打开 Continue 用户级 YAML 配置，将下面的模型项合并到 models。": "Continue 사용자 수준 YAML 설정을 열고 아래 모델 항목을 models에 병합하세요.",

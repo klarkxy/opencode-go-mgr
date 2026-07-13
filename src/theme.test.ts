@@ -106,6 +106,16 @@ test("theme tokens drive CSS and Naive UI from the same values", () => {
     assert.equal(common.tableHeaderColor, tokens.primarySoft);
     assert.equal(common.hoverColor, tokens.primarySoft);
     assert.equal(common.pressedColor, tokens.canvas);
+    for (const fontSize of [
+      common.fontSize,
+      common.fontSizeMini,
+      common.fontSizeTiny,
+      common.fontSizeSmall,
+      common.fontSizeMedium,
+      common.fontSizeLarge,
+      common.fontSizeHuge,
+    ]) assert.equal(fontSize, "16px");
+    assert.equal(common.lineHeight, "1.6");
     assert.equal(
       overrides.Input!.border,
       `1px solid color-mix(in srgb, ${tokens.muted} 68%, ${tokens.surfaceRaised})`,

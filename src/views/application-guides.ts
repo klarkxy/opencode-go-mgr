@@ -1,20 +1,5 @@
-import { t } from '../i18n/index.ts';
-import type { MessageKey } from '../i18n/index.ts';
-
-const APPLICATION_IDS = [
-  'claude-code',
-  'codex',
-  'opencode',
-  'cherry-studio',
-  'vscode-copilot',
-  'trae',
-  'cline',
-  'roo-code',
-  'continue',
-  'chatbox',
-] as const;
-
-export type ApplicationId = (typeof APPLICATION_IDS)[number];
+import { t } from "../i18n/index.ts";
+import type { MessageKey } from "../i18n/index.ts";
 
 export interface GuideContext {
   rootUrl: string;
@@ -24,6 +9,8 @@ export interface GuideContext {
   messagesUrl: string;
   displayKey: string;
   actualKey: string;
+  modelId: string;
+  iconUrl: string;
 }
 
 export interface GuideSnippet {
@@ -33,16 +20,25 @@ export interface GuideSnippet {
   copy: string;
 }
 
+export interface GuideAction {
+  id: string;
+  kind: "copy" | "launch";
+  label: MessageKey;
+  build: (context: GuideContext) => string;
+}
+
 export interface ApplicationGuide {
-  id: ApplicationId;
+  id: string;
   name: string;
   protocol: string;
+  endpointKind: "messages" | "responses" | "chat";
   officialUrl: string;
   badge?: string;
   summary: MessageKey;
   steps: readonly MessageKey[];
   notes: readonly MessageKey[];
   snippets: (context: GuideContext) => GuideSnippet[];
+  quickActions?: readonly GuideAction[];
 }
 
 function keyedSnippet(
@@ -59,31 +55,78 @@ function keyedSnippet(
   };
 }
 
-export const APPLICATION_GUIDES: readonly ApplicationGuide[] = [
+function encodePayload(payload: unknown): string {
+  const bytes = new TextEncoder().encode(JSON.stringify(payload));
+  const base64 = btoa(String.fromCharCode(...bytes));
+  return encodeURIComponent(base64);
+}
+
+export function buildCherryStudioUrl(context: GuideContext): string {
+  return `cherrystudio://providers/api-keys?v=1&data=${encodePayload({
+    id: "new-api",
+    baseUrl: context.rootUrl,
+    apiKey: context.actualKey,
+  })}`;
+}
+
+export function buildChatboxConfig(context: GuideContext) {
+  return {
+    id: `ocg-manager-${encodeURIComponent(context.rootUrl)}`,
+    name: "OCG Manager",
+    type: "openai" as const,
+    iconUrl: context.iconUrl,
+    urls: { website: `${context.rootUrl}/dashboard/` },
+    settings: {
+      apiHost: context.rootUrl,
+      apiPath: "/v1/chat/completions",
+      apiKey: context.actualKey,
+      models: [{
+        modelId: context.modelId,
+        nickname: context.modelId,
+        type: "chat" as const,
+        capabilities: ["tool_use"] as const,
+      }],
+    },
+  };
+}
+
+export function buildChatboxUrl(context: GuideContext): string {
+  return `chatbox://provider/import?config=${encodePayload(buildChatboxConfig(context))}`;
+}
+
+export const APPLICATION_GUIDES = [
   {
-    id: 'claude-code',
-    name: 'Claude Code',
-    protocol: 'Anthropic Messages',
-    officialUrl: 'https://code.claude.com/docs/en/llm-gateway-connect',
-    summary: '通过 Anthropic 兼容入口连接 OCG Manager，地址使用不带 /v1 的根地址。',
+    id: "claude-code",
+    name: "Claude Code",
+    protocol: "Anthropic Messages",
+    endpointKind: "messages",
+    officialUrl: "https://code.claude.com/docs/en/llm-gateway-connect",
+    summary: "通过 Anthropic 兼容入口连接 OCG Manager，地址使用不带 /v1 的根地址。",
     steps: [
-      '打开用户级 ~/.claude/settings.json，将下面的环境变量和模型配置合并进去。',
-      '确认 ANTHROPIC_BASE_URL 使用下方根地址，ANTHROPIC_AUTH_TOKEN 使用 Gateway Key。',
-      '启动 Claude Code 并发送一条测试消息，再到 OCG Manager 的请求日志确认成功记录。',
+      "打开用户级 ~/.claude/settings.json，将下面的环境变量和模型配置合并进去。",
+      "确认 ANTHROPIC_BASE_URL 使用下方根地址，ANTHROPIC_AUTH_TOKEN 使用 Gateway Key。",
+      "启动 Claude Code 并发送一条测试消息，再到 OCG Manager 的请求日志确认成功记录。",
     ],
     notes: [
-      '示例模型为 minimax-m3；如节点实际可用模型不同，请同步修改 model。',
-      'Claude Code 使用 Anthropic Messages 协议，因此不要给 ANTHROPIC_BASE_URL 追加 /v1。',
+      "Claude Code 使用 Anthropic Messages 协议，因此不要给 ANTHROPIC_BASE_URL 追加 /v1。",
+      "模型能力由实际上游决定；Agent 工具调用需要所选模型正确支持 tools。",
     ],
     snippets: (context) => [
-      keyedSnippet(context, '~/.claude/settings.json', 'json', (key) =>
+      keyedSnippet(context, "~/.claude/settings.json", "json", (key) =>
         JSON.stringify(
           {
             env: {
               ANTHROPIC_BASE_URL: context.rootUrl,
               ANTHROPIC_AUTH_TOKEN: key,
+              ANTHROPIC_MODEL: context.modelId,
+              ANTHROPIC_DEFAULT_FABLE_MODEL: context.modelId,
+              ANTHROPIC_DEFAULT_HAIKU_MODEL: context.modelId,
+              ANTHROPIC_DEFAULT_SONNET_MODEL: context.modelId,
+              ANTHROPIC_DEFAULT_OPUS_MODEL: context.modelId,
+              CLAUDE_CODE_SUBAGENT_MODEL: context.modelId,
+              ANTHROPIC_CUSTOM_MODEL_OPTION: context.modelId,
             },
-            model: 'minimax-m3',
+            model: context.modelId,
           },
           null,
           2,
@@ -92,63 +135,160 @@ export const APPLICATION_GUIDES: readonly ApplicationGuide[] = [
     ],
   },
   {
-    id: 'codex',
-    name: 'Codex',
-    protocol: 'OpenAI Responses',
-    officialUrl: 'https://learn.chatgpt.com/docs/config-file/config-advanced#custom-model-providers',
-    badge: 'Responses',
-    summary: '注册 OCG Manager 为 Codex 自定义模型提供商，通过 Responses 接口调用。',
+    id: "codex",
+    name: "Codex",
+    protocol: "OpenAI Responses",
+    endpointKind: "responses",
+    officialUrl: "https://learn.chatgpt.com/docs/config-file/config-advanced#custom-model-providers",
+    badge: "Responses",
+    summary: "注册 OCG Manager 为 Codex 自定义模型提供商，通过 Responses 接口调用。",
     steps: [
-      '把模型与 provider 配置写入用户级 ~/.codex/config.toml。',
-      '在启动 Codex 的同一终端设置 OCG_API_KEY 环境变量。',
-      '启动 Codex 并发送一条测试消息，再到 OCG Manager 的请求日志确认成功记录。',
+      "把模型与 provider 配置写入用户级 ~/.codex/config.toml。",
+      "在启动 Codex 的同一终端设置 OCG_API_KEY 环境变量。",
+      "启动 Codex 并发送一条测试消息，再到 OCG Manager 的请求日志确认成功记录。",
     ],
     notes: [
-      'OCG Manager 当前提供无状态 Responses 转发，不要依赖 previous_response_id 延续服务端状态。',
-      '示例模型为 glm-5.2；如节点实际可用模型不同，请同步修改 model。',
+      "OCG Manager 当前提供无状态 Responses 转发，不要依赖 previous_response_id 延续服务端状态。",
+      "模型能力由实际上游决定；Agent 工具调用需要所选模型正确支持 tools。",
     ],
     snippets: (context) => [
       {
-        label: '~/.codex/config.toml',
-        language: 'toml',
-        display: `model = "glm-5.2"\nmodel_provider = "ocg"\n\n[model_providers.ocg]\nname = "OCG Manager"\nbase_url = "${context.apiBaseUrl}"\nenv_key = "OCG_API_KEY"\nwire_api = "responses"`,
-        copy: `model = "glm-5.2"\nmodel_provider = "ocg"\n\n[model_providers.ocg]\nname = "OCG Manager"\nbase_url = "${context.apiBaseUrl}"\nenv_key = "OCG_API_KEY"\nwire_api = "responses"`,
+        label: "~/.codex/config.toml",
+        language: "toml",
+        display: `model = ${JSON.stringify(context.modelId)}\nmodel_provider = "ocg"\n\n[model_providers.ocg]\nname = "OCG Manager"\nbase_url = "${context.apiBaseUrl}"\nenv_key = "OCG_API_KEY"\nwire_api = "responses"`,
+        copy: `model = ${JSON.stringify(context.modelId)}\nmodel_provider = "ocg"\n\n[model_providers.ocg]\nname = "OCG Manager"\nbase_url = "${context.apiBaseUrl}"\nenv_key = "OCG_API_KEY"\nwire_api = "responses"`,
       },
       keyedSnippet(
         context,
-        t('当前 PowerShell 会话'),
-        'powershell',
+        t("当前 PowerShell 会话"),
+        "powershell",
         (key) => `$env:OCG_API_KEY = ${JSON.stringify(key)}`,
+      ),
+      keyedSnippet(
+        context,
+        "macOS / Linux shell",
+        "bash",
+        (key) => `export OCG_API_KEY=${JSON.stringify(key)}`,
       ),
     ],
   },
   {
-    id: 'opencode',
-    name: 'OpenCode',
-    protocol: 'OpenAI Chat Completions',
-    officialUrl: 'https://opencode.ai/docs/providers/',
-    summary: '使用 OpenAI Compatible AI SDK provider，将 OCG Manager 注册为自定义服务商。',
+    id: "opencode",
+    name: "OpenCode",
+    protocol: "OpenAI Chat Completions",
+    endpointKind: "chat",
+    officialUrl: "https://opencode.ai/docs/providers/",
+    summary: "使用 OpenAI Compatible AI SDK provider，将 OCG Manager 注册为自定义服务商。",
     steps: [
-      '把下面的 provider 配置合并到项目或用户级 opencode.json。',
-      '按节点可用模型调整 models 和默认 model，保留 npm 为 @ai-sdk/openai-compatible。',
-      '在 OpenCode 中发送一条测试消息，再到 OCG Manager 的请求日志确认成功记录。',
+      "把下面的 provider 配置合并到项目或用户级 opencode.json。",
+      "在启动 OpenCode 的同一终端设置 OCG_API_KEY 环境变量。",
+      "在 OpenCode 中发送一条测试消息，再到 OCG Manager 的请求日志确认成功记录。",
     ],
-    notes: ['baseURL 必须使用带 /v1 的 API Base URL。'],
+    notes: [
+      "baseURL 必须使用带 /v1 的 API Base URL。",
+      "模型能力由实际上游决定；Agent 工具调用需要所选模型正确支持 tools。",
+    ],
     snippets: (context) => [
-      keyedSnippet(context, 'opencode.json', 'json', (key) =>
+      keyedSnippet(context, "opencode.json", "json", () =>
         JSON.stringify(
           {
-            $schema: 'https://opencode.ai/config.json',
+            $schema: "https://opencode.ai/config.json",
             provider: {
               ocg: {
-                npm: '@ai-sdk/openai-compatible',
-                name: 'OCG Manager',
-                options: { baseURL: context.apiBaseUrl, apiKey: key },
-                models: { 'minimax-m3': { name: 'MiniMax M3' } },
+                npm: "@ai-sdk/openai-compatible",
+                name: "OCG Manager",
+                options: { baseURL: context.apiBaseUrl, apiKey: "{env:OCG_API_KEY}" },
+                models: { [context.modelId]: { name: context.modelId } },
               },
             },
-            model: 'ocg/minimax-m3',
+            model: `ocg/${context.modelId}`,
           },
+          null,
+          2,
+        ),
+      ),
+      keyedSnippet(
+        context,
+        t("当前 PowerShell 会话"),
+        "powershell",
+        (key) => `$env:OCG_API_KEY = ${JSON.stringify(key)}`,
+      ),
+      keyedSnippet(
+        context,
+        "macOS / Linux shell",
+        "bash",
+        (key) => `export OCG_API_KEY=${JSON.stringify(key)}`,
+      ),
+    ],
+  },
+  {
+    id: "cherry-studio",
+    name: "Cherry Studio",
+    protocol: "OpenAI Chat Completions",
+    endpointKind: "chat",
+    officialUrl: "https://docs.cherry-ai.com/docs/en-us/pre-basic/settings/providers",
+    summary: "在服务商设置中新增 OpenAI 类型的自定义服务商，并手工添加可用模型。",
+    steps: [
+      "进入设置 → 模型服务，新增 OpenAI 类型的自定义服务商。",
+      "填写下方 Base URL、Key 和模型 ID。",
+      "执行连接检查或发送一条测试消息，再到 OCG Manager 的请求日志确认成功记录。",
+    ],
+    notes: ["API 地址使用不带 /v1 的根地址，由 Cherry Studio 补全 OpenAI 请求路径。"],
+    snippets: (context) => [
+      keyedSnippet(
+        context,
+        t("服务商参数"),
+        "text",
+        (key) =>
+          t("服务商类型: OpenAI\nAPI 地址: {url}\nAPI Key: {key}\n模型 ID: {model}", {
+            url: context.rootUrl,
+            key,
+            model: context.modelId,
+          }),
+      ),
+    ],
+    quickActions: [{
+      id: "cherry-import",
+      kind: "launch",
+      label: "一键导入",
+      build: buildCherryStudioUrl,
+    }],
+  },
+  {
+    id: "vscode-copilot",
+    name: "VS Code Copilot Chat",
+    protocol: "OpenAI Chat Completions",
+    endpointKind: "chat",
+    officialUrl: "https://code.visualstudio.com/docs/agent-customization/language-models",
+    badge: "BYOK",
+    summary: "在 Copilot Chat 的自带密钥模型设置中添加 Custom Endpoint 完整端点。",
+    steps: [
+      "在 Copilot Chat 的模型管理中选择 Custom Endpoint，并将 API 类型设为 Chat Completions。",
+      "填写下方完整 Chat Completions Endpoint、Key 和模型 ID。",
+      "在 Chat 中选择该模型并发送测试消息，再到 OCG Manager 的请求日志确认成功记录。",
+    ],
+    notes: [
+      "BYOK 只影响支持自带密钥的聊天模型，不接管 Copilot 行内补全、embedding 等能力。",
+      "模型能力由实际上游决定；Agent 工具调用需要所选模型正确支持 tools。",
+    ],
+    snippets: (context) => [
+      keyedSnippet(context, "chatLanguageModels.json", "json", (key) =>
+        JSON.stringify(
+          [{
+            name: "OCG Manager",
+            vendor: "customendpoint",
+            apiKey: key,
+            apiType: "chat-completions",
+            models: [{
+              id: context.modelId,
+              name: context.modelId,
+              url: context.chatCompletionsUrl,
+              toolCalling: true,
+              vision: false,
+              maxInputTokens: 32768,
+              maxOutputTokens: 8192,
+            }],
+          }],
           null,
           2,
         ),
@@ -156,168 +296,115 @@ export const APPLICATION_GUIDES: readonly ApplicationGuide[] = [
     ],
   },
   {
-    id: 'cherry-studio',
-    name: 'Cherry Studio',
-    protocol: 'OpenAI Chat Completions',
-    officialUrl: 'https://docs.cherry-ai.com/docs/en-us/pre-basic/settings/providers',
-    summary: '在服务商设置中新增 OpenAI 类型的自定义服务商，并手工添加可用模型。',
+    id: "cline",
+    name: "Cline",
+    protocol: "OpenAI Chat Completions",
+    endpointKind: "chat",
+    officialUrl: "https://docs.cline.bot/provider-config/openai-compatible",
+    summary: "选择 OpenAI Compatible provider，直接填写 OCG Manager 的 API Base URL。",
     steps: [
-      '进入设置 → 模型服务，新增 OpenAI 类型的自定义服务商。',
-      '按下方参数填写 API 地址和 Key，并手工添加示例模型 minimax-m3。',
-      '执行连接检查或发送一条测试消息，再到 OCG Manager 的请求日志确认成功记录。',
+      "打开 Cline 设置，将 API Provider 选择为 OpenAI Compatible。",
+      "填写下方 Base URL、Key 和模型 ID。",
+      "发送一条测试任务，再到 OCG Manager 的请求日志确认成功记录。",
     ],
-    notes: ['API 地址使用不带 /v1 的根地址，由 Cherry Studio 补全 OpenAI 请求路径。'],
+    notes: ["模型能力由实际上游决定；Agent 工具调用需要所选模型正确支持 tools。"],
     snippets: (context) => [
       keyedSnippet(
         context,
-        t('服务商参数'),
-        'text',
-        (key) =>
-          t('服务商类型: OpenAI\nAPI 地址: {url}\nAPI Key: {key}\n模型 ID: {model}', {
-            url: context.rootUrl,
-            key,
-            model: 'minimax-m3',
-          }),
+        t("Provider 参数"),
+        "text",
+        (key) => `Base URL: ${context.apiBaseUrl}\nAPI Key: ${key}\nModel ID: ${context.modelId}`,
       ),
     ],
   },
   {
-    id: 'vscode-copilot',
-    name: 'VS Code Copilot Chat',
-    protocol: 'OpenAI Chat Completions',
-    officialUrl: 'https://code.visualstudio.com/docs/agent-customization/language-models',
-    badge: 'BYOK',
-    summary: '在 Copilot Chat 的自带密钥模型设置中添加 Custom Endpoint 完整端点。',
+    id: "roo-code",
+    name: "Roo Code",
+    protocol: "OpenAI Chat Completions",
+    endpointKind: "chat",
+    officialUrl: "https://roocodeinc.github.io/Roo-Code/providers/openai-compatible/",
+    summary: "选择 OpenAI Compatible provider，将对话请求转发到 OCG Manager。",
     steps: [
-      '在 Copilot Chat 的模型管理中选择 Custom Endpoint，并将 API 类型设为 Chat Completions。',
-      '填写下方完整 Chat Completions Endpoint、Key 和模型 ID。',
-      '在 Chat 中选择该模型并发送测试消息，再到 OCG Manager 的请求日志确认成功记录。',
+      "打开 Roo Code 配置，将 API Provider 选择为 OpenAI Compatible。",
+      "填写下方 Base URL、Key 和模型 ID。",
+      "发送一条测试任务，再到 OCG Manager 的请求日志确认成功记录。",
+    ],
+    notes: ["Roo Code 仅支持原生工具调用；所选模型不支持 tools 时无法使用 Agent 模式。"],
+    snippets: (context) => [
+      keyedSnippet(
+        context,
+        t("Provider 参数"),
+        "text",
+        (key) => `Base URL: ${context.apiBaseUrl}\nAPI Key: ${key}\nModel ID: ${context.modelId}`,
+      ),
+    ],
+  },
+  {
+    id: "continue",
+    name: "Continue",
+    protocol: "OpenAI Chat Completions",
+    endpointKind: "chat",
+    officialUrl: "https://docs.continue.dev/customize/model-providers/top-level/openai",
+    summary: "在 Continue YAML 配置中添加 OpenAI provider，并明确关闭 Responses API。",
+    steps: [
+      "打开 Continue 用户级 YAML 配置，将下面的模型项合并到 models。",
+      "保持 provider 为 openai、apiBase 使用 /v1 地址、useResponsesApi 为 false。",
+      "选择 OCG Manager 模型发送测试消息，再到请求日志确认成功记录。",
     ],
     notes: [
-      'BYOK 只影响支持自带密钥的聊天模型，不接管 Copilot 行内补全、embedding 等能力。',
+      "useResponsesApi: false 用于明确走 Chat Completions 兼容路径。",
+      "模型能力由实际上游决定；Agent 工具调用需要所选模型正确支持 tools。",
     ],
     snippets: (context) => [
       keyedSnippet(
         context,
-        t('Custom Endpoint 参数'),
-        'text',
+        "Continue YAML",
+        "yaml",
         (key) =>
-          `Endpoint: ${context.chatCompletionsUrl}\nAPI Key: ${key}\nModel ID: minimax-m3`,
+          `name: OCG Manager\nversion: 1.0.0\nschema: v1\nmodels:\n  - name: ${JSON.stringify(`${context.modelId} (OCG)`)}\n    provider: openai\n    model: ${JSON.stringify(context.modelId)}\n    apiBase: ${JSON.stringify(context.apiBaseUrl)}\n    apiKey: ${JSON.stringify(key)}\n    useResponsesApi: false\n    capabilities:\n      - tool_use`,
       ),
     ],
   },
   {
-    id: 'trae',
-    name: 'Trae',
-    protocol: 'OpenAI Compatible',
-    officialUrl: 'https://docs.trae.ai/ide/models',
-    badge: '版本相关',
-    summary: '在支持自定义模型的 Trae 版本中填写 OCG Manager 的 OpenAI Compatible 参数。',
+    id: "chatbox",
+    name: "Chatbox",
+    protocol: "OpenAI Chat Completions",
+    endpointKind: "chat",
+    officialUrl: "https://docs.chatboxai.app/en/guides/providers/import-config",
+    summary: "新增 OpenAI API 类型提供商，API Host 使用 OCG Manager 根地址。",
     steps: [
-      '打开模型管理，确认当前 Trae 版本提供自定义 OpenAI Compatible 模型入口。',
-      '按下方参数填写 Base URL、Key 和模型 ID。',
-      '选择该模型发送测试消息，再到 OCG Manager 的请求日志确认成功记录。',
+      "打开设置 → 模型提供方，选择 OpenAI API 或兼容提供方。",
+      "填写下方 API Host、Key 和模型 ID，保留默认的 /v1/chat/completions 路径。",
+      "发送一条测试消息，再到 OCG Manager 的请求日志确认成功记录。",
     ],
-    notes: [
-      'Trae 的自定义模型入口和字段可能随版本、渠道或地区变化，请以当前客户端界面为准。',
-      '此页不宣称所有 Trae 版本均兼容。',
-    ],
+    notes: ["API Host 使用不带 /v1 的根地址，避免形成重复路径。"],
     snippets: (context) => [
       keyedSnippet(
         context,
-        t('自定义模型参数'),
-        'text',
-        (key) => `Base URL: ${context.apiBaseUrl}\nAPI Key: ${key}\nModel ID: minimax-m3`,
+        t("Provider 参数"),
+        "text",
+        (key) => `API Host: ${context.rootUrl}\nAPI Key: ${key}\nModel ID: ${context.modelId}`,
       ),
     ],
-  },
-  {
-    id: 'cline',
-    name: 'Cline',
-    protocol: 'OpenAI Chat Completions',
-    officialUrl: 'https://docs.cline.bot/provider-config/openai-compatible',
-    summary: '选择 OpenAI Compatible provider，直接填写 OCG Manager 的 API Base URL。',
-    steps: [
-      '打开 Cline 设置，将 API Provider 选择为 OpenAI Compatible。',
-      '填写下方 Base URL、Key 和模型 ID。',
-      '发送一条测试任务，再到 OCG Manager 的请求日志确认成功记录。',
-    ],
-    notes: ['模型能力由实际上游决定；Agent 工具调用需要所选模型正确支持 tools。'],
-    snippets: (context) => [
-      keyedSnippet(
-        context,
-        t('Provider 参数'),
-        'text',
-        (key) => `Base URL: ${context.apiBaseUrl}\nAPI Key: ${key}\nModel ID: minimax-m3`,
-      ),
+    quickActions: [
+      {
+        id: "chatbox-copy",
+        kind: "copy",
+        label: "复制配置",
+        build: (context) => JSON.stringify(buildChatboxConfig(context), null, 2),
+      },
+      {
+        id: "chatbox-import",
+        kind: "launch",
+        label: "一键导入",
+        build: buildChatboxUrl,
+      },
     ],
   },
-  {
-    id: 'roo-code',
-    name: 'Roo Code',
-    protocol: 'OpenAI Chat Completions',
-    officialUrl: 'https://docs.roocode.com/providers/openai-compatible',
-    summary: '选择 OpenAI Compatible provider，将对话请求转发到 OCG Manager。',
-    steps: [
-      '打开 Roo Code 配置，将 API Provider 选择为 OpenAI Compatible。',
-      '填写下方 Base URL、Key 和模型 ID。',
-      '发送一条测试任务，再到 OCG Manager 的请求日志确认成功记录。',
-    ],
-    notes: ['Agent 模式依赖模型的工具调用能力；仅聊天成功不代表所有模式均可用。'],
-    snippets: (context) => [
-      keyedSnippet(
-        context,
-        t('Provider 参数'),
-        'text',
-        (key) => `Base URL: ${context.apiBaseUrl}\nAPI Key: ${key}\nModel ID: minimax-m3`,
-      ),
-    ],
-  },
-  {
-    id: 'continue',
-    name: 'Continue',
-    protocol: 'OpenAI Chat Completions',
-    officialUrl: 'https://docs.continue.dev/customize/model-providers/top-level/openai',
-    summary: '在 Continue YAML 配置中添加 OpenAI provider，并明确关闭 Responses API。',
-    steps: [
-      '打开 Continue 用户级 YAML 配置，将下面的模型项合并到 models。',
-      '保持 provider 为 openai、apiBase 使用 /v1 地址、useResponsesApi 为 false。',
-      '选择 OCG Manager 模型发送测试消息，再到请求日志确认成功记录。',
-    ],
-    notes: ['useResponsesApi: false 用于明确走 Chat Completions 兼容路径。'],
-    snippets: (context) => [
-      keyedSnippet(
-        context,
-        'Continue YAML',
-        'yaml',
-        (key) =>
-          `models:\n  - name: MiniMax M3 (OCG)\n    provider: openai\n    model: minimax-m3\n    apiBase: ${JSON.stringify(context.apiBaseUrl)}\n    apiKey: ${JSON.stringify(key)}\n    useResponsesApi: false`,
-      ),
-    ],
-  },
-  {
-    id: 'chatbox',
-    name: 'Chatbox',
-    protocol: 'OpenAI Chat Completions',
-    officialUrl: 'https://docs.chatboxai.app/en/guides/providers',
-    summary: '新增 OpenAI API 类型提供商，API Host 使用 OCG Manager 根地址。',
-    steps: [
-      '打开设置 → 模型提供方，选择 OpenAI API 或兼容提供方。',
-      '填写下方 API Host、Key 和模型 ID，保留默认的 /v1/chat/completions 路径。',
-      '发送一条测试消息，再到 OCG Manager 的请求日志确认成功记录。',
-    ],
-    notes: ['API Host 使用不带 /v1 的根地址，避免形成重复路径。'],
-    snippets: (context) => [
-      keyedSnippet(
-        context,
-        t('Provider 参数'),
-        'text',
-        (key) => `API Host: ${context.rootUrl}\nAPI Key: ${key}\nModel ID: minimax-m3`,
-      ),
-    ],
-  },
-];
+] as const satisfies readonly ApplicationGuide[];
+
+export type ApplicationId = (typeof APPLICATION_GUIDES)[number]["id"];
 
 export function isApplicationId(value: string | null | undefined): value is ApplicationId {
-  return typeof value === 'string' && APPLICATION_IDS.some((id) => id === value);
+  return typeof value === "string" && APPLICATION_GUIDES.some((guide) => guide.id === value);
 }

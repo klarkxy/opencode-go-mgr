@@ -218,6 +218,7 @@ export const tauriApi = {
     request<Account>(`/accounts/${id}/reset-cooldown`, { method: "POST" }),
 
   getSettings: () => request<AppConfig>("/settings"),
+  getApplicationModels: () => request<string[]>("/application-models"),
   updateSettings: async (config: AppConfig) => {
     await request<unknown>("/settings", { method: "POST", body: jsonBody(config) });
   },
