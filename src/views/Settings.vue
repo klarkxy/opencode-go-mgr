@@ -53,6 +53,7 @@
                       quaternary
                       aria-label="刷新 Key"
                       :loading="regenerating"
+                      :disabled="saving"
                     >
                       <template #icon><n-icon :component="ReloadOutlined" /></template>
                     </n-button>
@@ -64,6 +65,24 @@
             </n-popconfirm>
           </div>
         </n-form-item>
+        <div
+          v-if="config.auto_start_supported"
+          class="settings-subsection"
+          aria-labelledby="startup-title"
+        >
+          <h3 id="startup-title">开机启动</h3>
+          <p id="startup-help">登录 Windows 后在托盘后台启动，不自动打开 Dashboard。</p>
+          <n-switch
+            v-model:value="config.auto_start"
+            aria-label="随 Windows 登录自动启动 OCG Manager"
+            aria-describedby="startup-help"
+            :disabled="!loaded || saving || regenerating"
+            :loading="saving"
+          >
+            <template #checked>开启</template>
+            <template #unchecked>关闭</template>
+          </n-switch>
+        </div>
         <div class="settings-subsection" aria-labelledby="request-timeout-title">
           <h3 id="request-timeout-title">请求超时</h3>
           <p>分别控制连接建立、非流式响应完成和流式数据停顿的等待上限。</p>
@@ -102,7 +121,7 @@
           </n-form-item>
         </div>
       </n-form>
-      <n-button type="primary" :loading="saving" :disabled="!loaded" @click="saveSettings">保存设置</n-button>
+      <n-button type="primary" :loading="saving" :disabled="!loaded || regenerating" @click="saveSettings">保存设置</n-button>
     </section>
 
     <section class="settings-card appearance-card" aria-labelledby="appearance-title">
@@ -154,6 +173,7 @@ import {
   NInput,
   NInputNumber,
   NPopconfirm,
+  NSwitch,
   NTooltip,
   useMessage,
 } from "naive-ui";
@@ -180,6 +200,7 @@ const regenerating = ref(false);
 const keyCopied = ref(false);
 const loaded = ref(false);
 let copyTimer: ReturnType<typeof setTimeout> | undefined;
+let persistedAutoStart = false;
 
 // ponytail: keep this pre-load fallback in sync with AppConfig::default().
 const config = ref<AppConfig>({
@@ -187,6 +208,7 @@ const config = ref<AppConfig>({
   gateway_key: "",
   upstream_base_url: "https://opencode.ai/zen/go",
   auto_start: false,
+  auto_start_supported: false,
   connect_timeout_secs: 30,
   non_stream_timeout_secs: 120,
   stream_idle_timeout_secs: 300,
@@ -202,6 +224,7 @@ const themeLabel = computed(() => {
 async function loadSettings() {
   try {
     config.value = await tauriApi.getSettings();
+    persistedAutoStart = config.value.auto_start;
     loaded.value = true;
   } catch (e) {
     message.error(`加载设置失败: ${e}`);
@@ -217,8 +240,10 @@ async function saveSettings() {
   saving.value = true;
   try {
     await tauriApi.updateSettings(config.value);
+    persistedAutoStart = config.value.auto_start;
     message.success("设置已保存");
   } catch (e) {
+    config.value.auto_start = persistedAutoStart;
     message.error(`保存失败: ${e}`);
   } finally {
     saving.value = false;

@@ -32,7 +32,7 @@ test("dashboard and settings keep partial data safe", async () => {
   const app = await readFile(new URL("../App.vue", import.meta.url), "utf8");
 
   assert.match(dashboard, /Promise\.allSettled/);
-  assert.match(settings, /:disabled="!loaded"/);
+  assert.match(settings, /:disabled="!loaded \|\| regenerating"/);
   assert.match(settings, /if \(!loaded\.value\) return/);
   assert.match(app, /mode === "register"[\s\S]*getAuthStatus\(\)[\s\S]*status\?\.initialized/);
 });
@@ -54,4 +54,20 @@ test("settings expose bounded request timeouts", async () => {
   assert.match(api, /non_stream_timeout_secs: number/);
   assert.match(api, /stream_idle_timeout_secs: number/);
   assert.doesNotMatch(dashboard, /ref<AppConfig>/);
+});
+
+test("settings expose supported Windows auto-start safely", async () => {
+  const settings = await readFile(new URL("./Settings.vue", import.meta.url), "utf8");
+  const api = await readFile(new URL("../api/tauri.ts", import.meta.url), "utf8");
+
+  assert.match(settings, /v-if="config\.auto_start_supported"/);
+  assert.match(settings, /v-model:value="config\.auto_start"/);
+  assert.match(settings, /登录 Windows 后在托盘后台启动，不自动打开 Dashboard/);
+  assert.match(settings, /aria-label="随 Windows 登录自动启动 OCG Manager"/);
+  assert.match(settings, /aria-describedby="startup-help"/);
+  assert.match(settings, /:disabled="!loaded \|\| saving \|\| regenerating"/);
+  assert.match(settings, /:loading="regenerating"\s+:disabled="saving"/);
+  assert.match(settings, /:disabled="!loaded \|\| regenerating" @click="saveSettings"/);
+  assert.match(settings, /config\.value\.auto_start = persistedAutoStart/);
+  assert.match(api, /auto_start_supported: boolean/);
 });

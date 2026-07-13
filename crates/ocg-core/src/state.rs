@@ -4,7 +4,7 @@ use crate::models::AppConfig;
 use parking_lot::Mutex;
 use std::path::PathBuf;
 use std::sync::{
-    Arc,
+    Arc, OnceLock,
     atomic::{AtomicBool, Ordering},
 };
 use std::time::Duration;
@@ -15,14 +15,19 @@ pub struct GatewayHandle {
     pub task: tokio::task::JoinHandle<()>,
 }
 
-// Note: Mutex lock ordering is (1) db, (2) config, (3) http_client, (4) gateway.
+pub type AutoStartSync = fn(bool) -> crate::Result<()>;
+
+// Note: Mutex lock ordering is (1) settings_update, (2) db, (3) config,
+// (4) http_client, (5) gateway.
 // Never acquire in reverse order; always drop one before acquiring another where possible.
 pub struct CoreStateInner {
     pub db: Mutex<Database>,
     pub config: Mutex<AppConfig>,
+    pub settings_update: Mutex<()>,
     pub gateway: Mutex<Option<GatewayHandle>>,
     pub dashboard_session_token: String,
     dashboard_local_mode: AtomicBool,
+    auto_start_sync: OnceLock<AutoStartSync>,
     pub dashboard_dir: Mutex<Option<PathBuf>>,
     http_client: Mutex<reqwest::Client>,
     pub data_dir: PathBuf,
@@ -48,9 +53,11 @@ impl CoreStateInner {
         Ok(Self {
             db: Mutex::new(db),
             config: Mutex::new(config),
+            settings_update: Mutex::new(()),
             gateway: Mutex::new(None),
             dashboard_session_token: uuid::Uuid::new_v4().simple().to_string(),
             dashboard_local_mode: AtomicBool::new(false),
+            auto_start_sync: OnceLock::new(),
             dashboard_dir: Mutex::new(None),
             http_client: Mutex::new(http_client),
             data_dir,
@@ -83,6 +90,25 @@ impl CoreStateInner {
 
     pub fn dashboard_local_mode(&self) -> bool {
         self.dashboard_local_mode.load(Ordering::Relaxed)
+    }
+
+    pub fn set_auto_start_sync(&self, sync: AutoStartSync) {
+        assert!(
+            self.auto_start_sync.set(sync).is_ok(),
+            "auto-start sync is already configured"
+        );
+    }
+
+    pub fn auto_start_supported(&self) -> bool {
+        self.auto_start_sync.get().is_some()
+    }
+
+    pub fn sync_auto_start(&self, enabled: bool) -> crate::Result<()> {
+        let sync = self
+            .auto_start_sync
+            .get()
+            .ok_or_else(|| anyhow::anyhow!("auto-start is unavailable in this runtime"))?;
+        sync(enabled)
     }
 
     pub fn set_config(&self, config: AppConfig) -> crate::Result<()> {

@@ -9,7 +9,21 @@ use serde_json::json;
 use std::fs;
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
+
+static AUTO_START_SYNCED: AtomicBool = AtomicBool::new(false);
+static AUTO_START_FAIL: AtomicBool = AtomicBool::new(false);
+
+fn test_auto_start_sync(enabled: bool) -> anyhow::Result<()> {
+    if enabled && AUTO_START_FAIL.load(Ordering::Relaxed) {
+        anyhow::bail!("test auto-start failure");
+    }
+    AUTO_START_SYNCED.store(enabled, Ordering::Relaxed);
+    Ok(())
+}
 
 fn state(label: &str) -> Arc<CoreStateInner> {
     let mut dir = std::env::temp_dir();
@@ -201,6 +215,7 @@ async fn loopback_settings_trim_and_require_gateway_key() {
     assert_eq!(roundtrip["connect_timeout_secs"], 12);
     assert_eq!(roundtrip["non_stream_timeout_secs"], 345);
     assert_eq!(roundtrip["stream_idle_timeout_secs"], 678);
+    assert_eq!(roundtrip["auto_start_supported"], false);
 
     config.gateway_key = "   ".into();
     assert_eq!(
@@ -248,6 +263,141 @@ async fn loopback_settings_trim_and_require_gateway_key() {
     }
 
     gateway::stop_gateway(handle);
+}
+
+#[tokio::test]
+async fn loopback_settings_gate_and_sync_auto_start() {
+    AUTO_START_SYNCED.store(false, Ordering::Relaxed);
+    AUTO_START_FAIL.store(false, Ordering::Relaxed);
+    let unsupported_state = state("settings-auto-start-unsupported");
+    let unsupported_handle = gateway::start_gateway_on(
+        unsupported_state.clone(),
+        SocketAddr::from(([127, 0, 0, 1], 0)),
+    )
+    .await
+    .unwrap();
+    let unsupported_url = format!(
+        "http://127.0.0.1:{}/dashboard/api/settings",
+        unsupported_handle.port
+    );
+    let client = reqwest::Client::new();
+    let mut unsupported_config = unsupported_state.config();
+    unsupported_config.auto_start = true;
+    assert_eq!(
+        client
+            .post(&unsupported_url)
+            .json(&unsupported_config)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert!(!unsupported_state.config().auto_start);
+
+    let mut preserved_config = unsupported_state.config();
+    preserved_config.auto_start = true;
+    unsupported_state
+        .set_config(preserved_config.clone())
+        .unwrap();
+    let roundtrip = client
+        .get(&unsupported_url)
+        .send()
+        .await
+        .unwrap()
+        .json::<serde_json::Value>()
+        .await
+        .unwrap();
+    assert_eq!(roundtrip["auto_start_supported"], false);
+    assert_eq!(roundtrip["auto_start"], true);
+    preserved_config.connect_timeout_secs = 31;
+    assert_eq!(
+        client
+            .post(&unsupported_url)
+            .json(&preserved_config)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK
+    );
+    assert!(unsupported_state.config().auto_start);
+    preserved_config.auto_start = false;
+    assert_eq!(
+        client
+            .post(&unsupported_url)
+            .json(&preserved_config)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert!(unsupported_state.config().auto_start);
+    gateway::stop_gateway(unsupported_handle);
+
+    let supported_state = state("settings-auto-start-supported");
+    supported_state.set_auto_start_sync(test_auto_start_sync);
+    let supported_handle = gateway::start_gateway_on(
+        supported_state.clone(),
+        SocketAddr::from(([127, 0, 0, 1], 0)),
+    )
+    .await
+    .unwrap();
+    let supported_url = format!(
+        "http://127.0.0.1:{}/dashboard/api/settings",
+        supported_handle.port
+    );
+    let mut supported_config = supported_state.config();
+    supported_config.auto_start = true;
+    AUTO_START_FAIL.store(true, Ordering::Relaxed);
+    assert_eq!(
+        client
+            .post(&supported_url)
+            .json(&supported_config)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::INTERNAL_SERVER_ERROR
+    );
+    assert!(!supported_state.config().auto_start);
+    let persisted = supported_state
+        .db
+        .lock()
+        .get_setting("config")
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&persisted).unwrap()["auto_start"],
+        false
+    );
+
+    AUTO_START_FAIL.store(false, Ordering::Relaxed);
+    assert_eq!(
+        client
+            .post(&supported_url)
+            .json(&supported_config)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK
+    );
+    assert!(supported_state.config().auto_start);
+    assert!(AUTO_START_SYNCED.load(Ordering::Relaxed));
+    let roundtrip = client
+        .get(&supported_url)
+        .send()
+        .await
+        .unwrap()
+        .json::<serde_json::Value>()
+        .await
+        .unwrap();
+    assert_eq!(roundtrip["auto_start_supported"], true);
+    assert_eq!(roundtrip["auto_start"], true);
+
+    gateway::stop_gateway(supported_handle);
 }
 
 #[tokio::test]

@@ -31,6 +31,7 @@ export interface AppConfig {
   gateway_key: string;
   upstream_base_url: string;
   auto_start: boolean;
+  auto_start_supported: boolean;
   connect_timeout_secs: number;
   non_stream_timeout_secs: number;
   stream_idle_timeout_secs: number;

@@ -89,5 +89,5 @@ Each node manages its own accounts through its own dashboard. OCG Manager does n
 - Responses hosted tools such as `web_search`, `web_search_preview`, and `tool_search` cannot run on OpenCode-Go. Their declarations are ignored in automatic tool mode; explicitly forcing one returns a 400 error. Function, custom, and namespace tools are converted normally.
 - Streaming cost is exact only when upstream emits usage chunks; otherwise logs end as `success_no_usage`.
 - The current HTTP dashboard does not expose the older isolated WebView browser command.
-- The current HTTP dashboard does not expose the Windows startup toggle; non-Windows auto-start is not implemented.
+- The installed Windows desktop dashboard can start OCG Manager in the tray when the user logs in. Auto-start is not implemented for development builds, macOS, Linux, CLI, or Docker deployments.
 - Windows/Linux ARM64 and 32-bit x86 builds are not published. RPM, Snap, app-store packages, automatic updates, Windows signing, and Apple notarization are not implemented.

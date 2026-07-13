@@ -634,27 +634,62 @@ async fn reset_account_cooldown(
     Ok(Json(dashboard_account(account)))
 }
 
-async fn get_settings(State(state): State<CoreState>) -> Json<AppConfig> {
-    Json(state.config())
+#[derive(Serialize)]
+struct SettingsResponse {
+    #[serde(flatten)]
+    config: AppConfig,
+    auto_start_supported: bool,
+}
+
+async fn get_settings(State(state): State<CoreState>) -> Json<SettingsResponse> {
+    let auto_start_supported = state.auto_start_supported();
+    Json(SettingsResponse {
+        config: state.config(),
+        auto_start_supported,
+    })
 }
 
 async fn update_settings(
     State(state): State<CoreState>,
     Json(mut config): Json<AppConfig>,
 ) -> Result<Json<GatewayStatus>, ApiError> {
+    let _settings_update = state.settings_update.lock();
     config.gateway_key = config.gateway_key.trim().to_string();
     if config.gateway_key.is_empty() {
         return Err(ApiError::bad_request("gateway key is required"));
     }
     config.validate_timeouts().map_err(ApiError::bad_request)?;
     validate_upstream_url(&config.upstream_base_url)?;
+    let previous_config = state.config();
+    let next_auto_start = config.auto_start;
+    let auto_start_supported = state.auto_start_supported();
+    if !auto_start_supported && next_auto_start != previous_config.auto_start {
+        return Err(ApiError::bad_request(
+            "auto-start is unavailable in this runtime",
+        ));
+    }
     state.set_config(config).map_err(ApiError::internal)?;
+    if auto_start_supported {
+        if let Err(sync_error) = state.sync_auto_start(next_auto_start) {
+            let config_rollback_error = state.set_config(previous_config.clone()).err();
+            let auto_start_rollback_error = state.sync_auto_start(previous_config.auto_start).err();
+            let mut message = format!("failed to synchronize auto-start: {sync_error}");
+            if let Some(error) = config_rollback_error {
+                message.push_str(&format!("; failed to restore settings: {error}"));
+            }
+            if let Some(error) = auto_start_rollback_error {
+                message.push_str(&format!("; failed to restore auto-start state: {error}"));
+            }
+            return Err(ApiError::internal(message));
+        }
+    }
     Ok(Json(status_from_state(&state)))
 }
 
 async fn regenerate_gateway_key(
     State(state): State<CoreState>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
+    let _settings_update = state.settings_update.lock();
     let mut config = state.config();
     config.gateway_key = format!(
         "ocg-{}-{}",

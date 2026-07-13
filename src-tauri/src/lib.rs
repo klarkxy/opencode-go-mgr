@@ -44,6 +44,18 @@ pub fn run() {
         }
     };
 
+    #[cfg(all(windows, not(debug_assertions)))]
+    {
+        core_state.set_auto_start_sync(autostart::sync);
+        if let Err(e) = core_state.sync_auto_start(core_state.config().auto_start) {
+            let _ = core_state.db.lock().log_gateway(
+                "warn",
+                "startup",
+                &format!("failed to synchronize auto-start: {e}"),
+            );
+        }
+    }
+
     // Start gateway on startup
     let config = core_state.config();
     let gateway_state = core_state.clone();

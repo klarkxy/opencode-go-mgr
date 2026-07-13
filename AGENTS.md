@@ -48,7 +48,7 @@ pnpm run build
 - 不要新增 Tauri `invoke` 前端路径，除非你明确要恢复桌面 WebView 内调用；当前主路径是 HTTP dashboard。
 - 安全边界别省：Gateway 鉴权、key 存储混淆、HTTP URL 校验、冷却状态写入、SSE 透传都不能为了简化拿掉。
 - 不要重新引入远端同步；远端节点通过自己的 dashboard 管理。
-- `auto_start` 目前只存在 Windows 注册表 helper，非 Windows 为 no-op，当前 HTTP dashboard 不暴露这个设置。
+- `auto_start` 仅在 Windows release/安装版 Tauri 桌面进程中可用；HTTP dashboard 依据运行时能力显示开关，开发构建、CLI、Docker、macOS 和 Linux 不暴露该设置。
 
 ## 测试策略
 

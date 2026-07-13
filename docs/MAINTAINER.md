@@ -83,7 +83,7 @@ Each CLI archive contains its executable, `dist/`, and `LICENSE`. Do not ship th
 
 The release script rejects unsupported host/architecture pairs, checks package/Tauri/Cargo versions, uses exact Tauri bundle paths, and preserves the previous `release/` on failure. It does not erase Cargo incremental build caches.
 
-`.github/workflows/release.yml` runs `pnpm install --frozen-lockfile`, tests, design lint, and the native release build on Windows, macOS, and Linux. A manual run uploads three Actions artifacts. A `v*` tag also combines their files, regenerates `SHA256SUMS`, and creates or updates a **draft** GitHub Release; it never publishes the release.
+`.github/workflows/release.yml` runs `pnpm install --frozen-lockfile`, tests, design lint, and the native release build on Windows, macOS, and Linux. A manual run uploads three Actions artifacts. A `v*` tag also combines their files, regenerates `SHA256SUMS`, and creates or updates a **draft** GitHub Release; it never publishes the release. After reviewing the draft and native smoke results, publish it in GitHub or run `gh release edit vX.Y.Z --draft=false`.
 
 CI extracts every CLI archive, checks its contents and checksum, runs add/list/disable/enable/status/remove, and starts `serve` to probe the bundled dashboard. It also installs and uninstalls NSIS on Windows, mounts and verifies the Universal DMG on macOS, and launches the AppImage under Xvfb on Linux before probing the GUI gateway. SmartScreen and Gatekeeper approval dialogs still require manual release-candidate checks on real desktops.
 
@@ -92,6 +92,5 @@ The initial Windows setup is unsigned and macOS uses ad-hoc signing (`-`), not D
 ## Known Debt
 
 - The HTTP dashboard and Tauri command layer overlap. Do not delete Tauri commands until browser and startup behavior are either migrated or intentionally removed.
-- The startup helper exists in the Tauri layer, but the HTTP dashboard does not expose that setting.
-- Auto-start is Windows-only; the non-Windows implementation is intentionally a no-op.
+- Auto-start is capability-gated: only Windows release/installed Tauri processes inject the registry sync hook. Development builds, CLI, Docker, macOS, and Linux dashboards do not expose the switch.
 - Existing generated Tauri schema files are noisy in diffs; avoid touching them unless the Tauri config actually changed.

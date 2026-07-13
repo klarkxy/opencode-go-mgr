@@ -13,6 +13,7 @@ pub fn update_settings(
     state: State<'_, AppState>,
     config: AppConfig,
 ) -> Result<GatewayStatus, String> {
+    let _settings_update = state.core.settings_update.lock();
     config.validate_timeouts()?;
     validate_upstream_url(&config.upstream_base_url)?;
     // ponytail: only restart if the port actually changed. Gateway key and
@@ -78,6 +79,7 @@ pub fn update_settings(
 
 #[tauri::command]
 pub fn regenerate_gateway_key(state: State<'_, AppState>) -> Result<String, String> {
+    let _settings_update = state.core.settings_update.lock();
     let mut config = state.core.config();
     config.gateway_key = format!("ocg-{}-{}", random_word(), random_word());
     state
