@@ -1,5 +1,9 @@
 import { computed, ref, watch } from "vue";
-import {
+import * as naiveUiModule from "naive-ui";
+
+const cjsNaiveUi = naiveUiModule as unknown as { default: typeof naiveUiModule };
+const naiveUi = "dateDeDE" in (naiveUiModule as object) ? naiveUiModule : cjsNaiveUi.default;
+const {
   dateDeDE,
   dateEnUS,
   dateEsAR,
@@ -20,7 +24,7 @@ import {
   ruRU,
   zhCN,
   zhTW,
-} from "naive-ui";
+} = naiveUi;
 import { deDEMessages } from "./messages/de-DE.ts";
 import { enUSMessages, type MessageKey, type Messages } from "./messages/en-US.ts";
 import { esESMessages } from "./messages/es-ES.ts";
