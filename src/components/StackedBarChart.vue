@@ -137,7 +137,7 @@ const props = withDefaults(defineProps<{
 });
 
 // --- 布局常量 ---
-const padL = 48;
+const padL = 104;
 const padR = 16;
 const padT = 16;
 const padB = 28;
@@ -365,7 +365,7 @@ function updateTooltip(bi: number, e: MouseEvent) {
 }
 .axis-text {
   fill: var(--n-text-color-3, rgba(127, 127, 127, 0.9));
-  font-size: 11px;
+  font-size: 16px;
 }
 .bar-seg {
   transition: opacity 0.15s ease;
@@ -382,7 +382,7 @@ function updateTooltip(bi: number, e: MouseEvent) {
   border-radius: 8px;
   background: var(--n-color-popover, #fff);
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
-  font-size: 12px;
+  font-size: 16px;
 }
 .tooltip-title {
   font-weight: 600;
@@ -391,13 +391,13 @@ function updateTooltip(bi: number, e: MouseEvent) {
 .tooltip-total {
   color: var(--n-text-color-3, #888);
   margin-bottom: 6px;
-  font-size: 11px;
+  font-size: 16px;
 }
 .tooltip-row {
   display: flex;
   align-items: center;
   gap: 6px;
-  line-height: 18px;
+  line-height: 1.6;
 }
 .tooltip-row .dot {
   width: 8px;

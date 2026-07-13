@@ -96,6 +96,15 @@ async fn public_dashboard_uses_first_registration_and_session_cookie() {
     );
     assert_eq!(
         client
+            .get(format!("{base}/application-models"))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        client
             .get(format!("{base}/settings"))
             .header(reqwest::header::COOKIE, &cookie)
             .send()
@@ -103,6 +112,16 @@ async fn public_dashboard_uses_first_registration_and_session_cookie() {
             .unwrap()
             .status(),
         StatusCode::OK
+    );
+    assert_eq!(
+        client
+            .get(format!("{base}/application-models"))
+            .header(reqwest::header::COOKIE, &cookie)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::BAD_GATEWAY
     );
 
     assert_eq!(

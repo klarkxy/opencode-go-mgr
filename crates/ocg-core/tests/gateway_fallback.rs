@@ -3,7 +3,7 @@ use axum::body::Body;
 use axum::extract::{OriginalUri, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::post;
+use axum::routing::{get, post};
 use chrono::{Duration, Utc};
 use ocg_core::crypto::{KeyCipher, StaticKeyCipher};
 use ocg_core::db::Database;
@@ -110,6 +110,7 @@ async fn start_mock_upstream(
         .route("/v1/chat/completions", post(mock_chat))
         .route("/v1/responses", post(mock_chat))
         .route("/v1/messages", post(mock_chat))
+        .route("/v1/models", get(mock_chat))
         .with_state(state);
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
         .await
@@ -292,6 +293,18 @@ async fn chat(port: u16) -> (u16, String) {
     (status, body)
 }
 
+async fn models(port: u16) -> (StatusCode, String) {
+    let response = reqwest::Client::new()
+        .get(format!("http://127.0.0.1:{port}/v1/models"))
+        .header(reqwest::header::AUTHORIZATION, "Bearer gw-test")
+        .send()
+        .await
+        .unwrap();
+    let status = response.status();
+    let body = response.text().await.unwrap();
+    (status, body)
+}
+
 async fn protocol_call(port: u16, path: &str, model: &str) -> (StatusCode, serde_json::Value) {
     let body = match path {
         "/v1/chat/completions" => serde_json::json!({
@@ -368,6 +381,135 @@ async fn protocol_stream_call(port: u16, path: &str, model: &str) -> (StatusCode
     let status = response.status();
     let body = response.text().await.unwrap();
     (status, body)
+}
+
+#[tokio::test]
+async fn model_discovery_does_not_create_inference_logs() {
+    let replies = HashMap::from([(
+        "key-1".to_string(),
+        VecDeque::from([MockReply {
+            status: 200,
+            body: r#"{"object":"list","data":[{"id":"deepseek-v4-flash"}]}"#,
+        }]),
+    )]);
+    let (base_url, calls, stop_mock) = start_mock_upstream(replies).await;
+    let (state, dir) = build_state(base_url, &["key-1"]);
+    let (port, gateway_handle) = start_gateway(state.clone()).await;
+
+    let (status, body) = models(port).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains("deepseek-v4-flash"));
+    assert_eq!(calls.lock().unwrap()[0].path, "/v1/models");
+    let logs = state
+        .db
+        .lock()
+        .query_forward_logs(10, 0, None, None)
+        .unwrap();
+    assert!(logs.items.is_empty());
+    assert_eq!(logs.summary.total_requests, 0);
+
+    gateway::stop_gateway(gateway_handle);
+    let _ = stop_mock.send(());
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn model_discovery_keeps_rate_limit_cooldown_without_logging() {
+    let replies = HashMap::from([(
+        "key-1".to_string(),
+        VecDeque::from([MockReply {
+            status: 429,
+            body: LIMITED_BODY,
+        }]),
+    )]);
+    let (base_url, _calls, stop_mock) = start_mock_upstream(replies).await;
+    let (state, dir) = build_state(base_url, &["key-1"]);
+    let (port, gateway_handle) = start_gateway(state.clone()).await;
+
+    let (status, _) = models(port).await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+    let stored = state.db.lock().get_account("acct-1").unwrap().unwrap();
+    let remaining = stored.cooldown_until.unwrap() - Utc::now();
+    assert!(remaining > Duration::days(2) && remaining <= Duration::days(3));
+    let logs = state
+        .db
+        .lock()
+        .query_forward_logs(10, 0, None, None)
+        .unwrap();
+    assert_eq!(logs.summary.total_requests, 0);
+
+    gateway::stop_gateway(gateway_handle);
+    let _ = stop_mock.send(());
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn application_models_intersects_upstream_models_in_upstream_order() {
+    let replies = HashMap::from([(
+        "key-1".to_string(),
+        VecDeque::from([MockReply {
+            status: 200,
+            body: r#"{"object":"list","data":[{"id":"unknown"},{"id":"minimax-m2.7"},{"id":"deepseek-v4-flash"},{"id":"minimax-m2.7"},{"id":"qwen3.7-plus"}]}"#,
+        }]),
+    )]);
+    let (base_url, calls, stop_mock) = start_mock_upstream(replies).await;
+    let (state, dir) = build_state(base_url, &["key-1"]);
+    let (port, gateway_handle) = start_gateway(state.clone()).await;
+
+    let response = reqwest::Client::new()
+        .get(format!(
+            "http://127.0.0.1:{port}/dashboard/api/application-models"
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.json::<serde_json::Value>().await.unwrap(),
+        serde_json::json!(["minimax-m2.7", "deepseek-v4-flash", "qwen3.7-plus"])
+    );
+    assert_eq!(calls.lock().unwrap()[0].path, "/v1/models");
+    assert_eq!(
+        state
+            .db
+            .lock()
+            .query_forward_logs(10, 0, None, None)
+            .unwrap()
+            .summary
+            .total_requests,
+        0
+    );
+
+    gateway::stop_gateway(gateway_handle);
+    let _ = stop_mock.send(());
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn application_models_maps_upstream_failure_to_bad_gateway() {
+    let replies = HashMap::from([(
+        "key-1".to_string(),
+        VecDeque::from([MockReply {
+            status: 500,
+            body: r#"{"error":"upstream unavailable"}"#,
+        }]),
+    )]);
+    let (base_url, _calls, stop_mock) = start_mock_upstream(replies).await;
+    let (state, dir) = build_state(base_url, &["key-1"]);
+    let (port, gateway_handle) = start_gateway(state).await;
+
+    let response = reqwest::Client::new()
+        .get(format!(
+            "http://127.0.0.1:{port}/dashboard/api/application-models"
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+
+    gateway::stop_gateway(gateway_handle);
+    let _ = stop_mock.send(());
+    let _ = fs::remove_dir_all(dir);
 }
 
 #[tokio::test]

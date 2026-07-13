@@ -540,7 +540,7 @@ onUnmounted(() => clearTimeout(copyTimer));
 .settings-head p {
   margin: 4px 0 0;
   color: var(--ocg-subtle);
-  font-size: 11px;
+  font-size: 16px;
 }
 .key-field {
   display: grid;
@@ -557,7 +557,7 @@ onUnmounted(() => clearTimeout(copyTimer));
 .key-stack > p {
   margin: 0;
   color: var(--ocg-subtle);
-  font-size: 11px;
+  font-size: 16px;
   line-height: 1.5;
 }
 .key-display {
@@ -573,7 +573,7 @@ onUnmounted(() => clearTimeout(copyTimer));
 .key-display code {
   overflow: hidden;
   color: var(--ocg-ink);
-  font: 12px/1.4 "Cascadia Mono", Consolas, monospace;
+  font: 16px/1.4 "Cascadia Mono", Consolas, monospace;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -589,7 +589,7 @@ onUnmounted(() => clearTimeout(copyTimer));
 .client-root-field > p {
   margin: 6px 0 0;
   color: var(--ocg-subtle);
-  font-size: 11px;
+  font-size: 16px;
   line-height: 1.5;
 }
 .settings-subsection {
@@ -600,12 +600,12 @@ onUnmounted(() => clearTimeout(copyTimer));
 .settings-subsection h3 {
   margin: 0;
   color: var(--ocg-ink);
-  font: 700 15px/1.3 "Bahnschrift", "Segoe UI Variable Display", sans-serif;
+  font: 700 18px/1.3 "Bahnschrift", "Segoe UI Variable Display", sans-serif;
 }
 .settings-subsection > p {
   margin: 4px 0 14px;
   color: var(--ocg-subtle);
-  font-size: 11px;
+  font-size: 16px;
 }
 .theme-grid {
   display: grid;
@@ -625,7 +625,7 @@ onUnmounted(() => clearTimeout(copyTimer));
   border-radius: 10px;
   color: var(--ocg-muted);
   background: var(--ocg-canvas);
-  font: 600 13px/1 "Segoe UI Variable Text", "Microsoft YaHei UI", sans-serif;
+  font: 600 16px/1 "Segoe UI Variable Text", "Microsoft YaHei UI", sans-serif;
   cursor: pointer;
   transition: border-color 0.16s ease, box-shadow 0.16s ease, color 0.16s ease;
 }
@@ -660,7 +660,7 @@ onUnmounted(() => clearTimeout(copyTimer));
   position: absolute;
   top: 5px;
   right: 5px;
-  font-size: 12px;
+  font-size: 16px;
 }
 .update-result {
   margin-top: 14px;
@@ -686,14 +686,14 @@ onUnmounted(() => clearTimeout(copyTimer));
 }
 .update-versions dt {
   color: var(--ocg-subtle);
-  font-size: 11px;
+  font-size: 16px;
 }
 .update-versions dd {
   margin: 0;
 }
 .update-result-content code {
   color: var(--ocg-ink);
-  font: 600 13px/1.4 "Cascadia Mono", Consolas, monospace;
+  font: 600 16px/1.4 "Cascadia Mono", Consolas, monospace;
 }
 
 @media (max-width: 800px) {

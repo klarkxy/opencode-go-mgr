@@ -99,6 +99,11 @@ const MESSAGE_MODELS: &[&str] = &[
     "qwen3.6-plus",
 ];
 
+/// Returns every model ID with a known native upstream protocol.
+pub fn supported_model_ids() -> impl Iterator<Item = &'static str> {
+    CHAT_MODELS.iter().chain(MESSAGE_MODELS).copied()
+}
+
 const ANTHROPIC_THINKING_ENCRYPTED_PREFIX: &str = "ocg-anthropic-thinking-v1:";
 const CHAT_REASONING_ENCRYPTED_PREFIX: &str = "ocg-chat-reasoning-v1:";
 const CHAT_TOOL_REASONING_PLACEHOLDER: &str = "Tool call reasoning unavailable.";
@@ -2180,6 +2185,29 @@ mod tests {
             response_tool_choice: json!("auto"),
             response_tools: Vec::new(),
         }
+    }
+
+    #[test]
+    fn supported_model_ids_lists_every_routable_model() {
+        assert_eq!(
+            supported_model_ids().collect::<Vec<_>>(),
+            [
+                "glm-5.2",
+                "glm-5.1",
+                "kimi-k2.7-code",
+                "kimi-k2.6",
+                "deepseek-v4-pro",
+                "deepseek-v4-flash",
+                "mimo-v2.5",
+                "mimo-v2.5-pro",
+                "minimax-m3",
+                "minimax-m2.7",
+                "minimax-m2.5",
+                "qwen3.7-max",
+                "qwen3.7-plus",
+                "qwen3.6-plus",
+            ]
+        );
     }
 
     #[test]

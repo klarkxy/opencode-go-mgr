@@ -1,169 +1,195 @@
 <template>
   <div class="applications">
-    <header class="page-head">
-      <div>
-        <h1>{{ t("应用接入教程") }}</h1>
-        <p class="page-copy">{{ t("选择常用客户端，复制当前节点配置并完成一次请求验证。") }}</p>
-      </div>
-      <n-tag type="info" :bordered="false" round>{{ t("客户端数：{count}", { count: applicationGuides.length }) }}</n-tag>
-    </header>
+    <div class="application-layout">
+      <aside class="application-sider">
+        <nav class="application-nav" :aria-label="t('选择下游应用')">
+          <n-menu
+            :value="currentApplication"
+            :options="applicationMenuOptions"
+            :root-indent="16"
+            @update:value="selectApplication"
+          />
+        </nav>
+      </aside>
 
-    <section class="connection-panel" aria-labelledby="connection-panel-title">
-      <div class="connection-head">
-        <div>
-          <h2 id="connection-panel-title">{{ t("当前节点接入轨") }}</h2>
-          <p>{{ t("地址随设置实时生成；Key 始终脱敏展示。") }}</p>
-        </div>
-        <n-tag v-if="settingsLoaded" type="success" :bordered="false" size="small">{{ t("已同步设置") }}</n-tag>
-        <n-tag v-else-if="settingsLoading" :bordered="false" size="small">{{ t("正在读取设置") }}</n-tag>
-        <n-tag v-else type="error" :bordered="false" size="small">{{ t("读取失败") }}</n-tag>
-      </div>
-
-      <div class="connection-track">
-        <article class="connection-stage">
-          <span>ROOT</span>
-          <div class="connection-value">
-            <code>{{ connectionUrls.rootUrl }}</code>
-            <n-button
-              circle
-              quaternary
-              size="small"
-              :aria-label="t('复制根地址')"
-              :disabled="!settingsLoaded"
-              @click="copyValue('root', connectionUrls.rootUrl, t('根地址'))"
-            >
-              <template #icon>
-                <n-icon :component="copiedTarget === 'root' ? CheckOutlined : CopyOutlined" />
-              </template>
-            </n-button>
+      <div class="application-content">
+        <div class="application-page">
+          <div class="application-picker">
+            <n-select
+              :value="currentApplication"
+              :options="applicationSelectOptions"
+              :aria-label="t('选择下游应用')"
+              @update:value="selectApplication"
+            />
           </div>
-        </article>
-        <article class="connection-stage">
-          <span>API BASE</span>
-          <div class="connection-value">
-            <code>{{ connectionUrls.apiBaseUrl }}</code>
-            <n-button
-              circle
-              quaternary
-              size="small"
-              :aria-label="t('复制 API Base URL')"
-              :disabled="!settingsLoaded"
-              @click="copyValue('api', connectionUrls.apiBaseUrl, 'API Base URL')"
-            >
-              <template #icon>
-                <n-icon :component="copiedTarget === 'api' ? CheckOutlined : CopyOutlined" />
-              </template>
-            </n-button>
-          </div>
-        </article>
-        <article class="connection-stage connection-stage--endpoint">
-          <span>{{ activeEndpoint.label }}</span>
-          <div class="connection-value">
-            <code>{{ activeEndpoint.url }}</code>
-            <n-button
-              circle
-              quaternary
-              size="small"
-              :aria-label="t('复制 {label}', { label: activeEndpoint.label })"
-              :disabled="!settingsLoaded"
-              @click="copyValue('endpoint', activeEndpoint.url, activeEndpoint.label)"
-            >
-              <template #icon>
-                <n-icon :component="copiedTarget === 'endpoint' ? CheckOutlined : CopyOutlined" />
-              </template>
-            </n-button>
-          </div>
-        </article>
-      </div>
 
-      <div class="key-row">
-        <span>GATEWAY KEY</span>
-        <code>{{ maskedKey }}</code>
-        <n-button
-          circle
-          quaternary
-          size="small"
-          :aria-label="t('复制 Gateway Key')"
-          :disabled="!settingsLoaded || !serviceConfig.gateway_key"
-          @click="copyValue('key', serviceConfig.gateway_key, 'Gateway Key')"
-        >
-          <template #icon>
-            <n-icon :component="copiedTarget === 'key' ? CheckOutlined : CopyOutlined" />
-          </template>
-        </n-button>
-      </div>
-    </section>
+          <section class="connection-panel" aria-labelledby="connection-panel-title">
+            <div class="connection-head">
+              <div>
+                <h2 id="connection-panel-title">{{ t("当前节点接入轨") }}</h2>
+                <p>{{ t("地址随设置实时生成；Key 始终脱敏展示。") }}</p>
+              </div>
+              <n-tag v-if="settingsLoaded" type="success" :bordered="false">{{ t("已同步设置") }}</n-tag>
+              <n-tag v-else-if="settingsLoading" :bordered="false">{{ t("正在读取设置") }}</n-tag>
+              <n-tag v-else type="error" :bordered="false">{{ t("读取失败") }}</n-tag>
+            </div>
 
-    <n-alert v-if="settingsError" type="error" :title="t('节点设置加载失败')">
-      {{ t("{error}。教程正文仍可阅读，但为避免复制错误地址，动态配置复制已禁用。", { error: settingsError }) }}
-    </n-alert>
-    <n-alert
-      v-if="connectionUrls.insecureHttp"
-      type="warning"
-      :title="t('当前使用非本机 HTTP 地址')"
-    >
-      {{ t("Gateway Key 与请求内容会以明文传输。仅在可信局域网内使用，公网接入请配置 HTTPS。") }}
-    </n-alert>
+            <div class="connection-track">
+              <article class="connection-stage">
+                <span>ROOT</span>
+                <div class="connection-value">
+                  <code>{{ connectionUrls.rootUrl }}</code>
+                  <n-button
+                    circle
+                    quaternary
+                    :aria-label="t('复制根地址')"
+                    :disabled="!settingsLoaded"
+                    @click="copyValue('root', connectionUrls.rootUrl, t('根地址'))"
+                  >
+                    <template #icon>
+                      <n-icon :component="copiedTarget === 'root' ? CheckOutlined : CopyOutlined" />
+                    </template>
+                  </n-button>
+                </div>
+              </article>
+              <article class="connection-stage">
+                <span>API BASE</span>
+                <div class="connection-value">
+                  <code>{{ connectionUrls.apiBaseUrl }}</code>
+                  <n-button
+                    circle
+                    quaternary
+                    :aria-label="t('复制 API Base URL')"
+                    :disabled="!settingsLoaded"
+                    @click="copyValue('api', connectionUrls.apiBaseUrl, 'API Base URL')"
+                  >
+                    <template #icon>
+                      <n-icon :component="copiedTarget === 'api' ? CheckOutlined : CopyOutlined" />
+                    </template>
+                  </n-button>
+                </div>
+              </article>
+              <article class="connection-stage">
+                <span>{{ activeEndpoint.label }}</span>
+                <div class="connection-value">
+                  <code>{{ activeEndpoint.url }}</code>
+                  <n-button
+                    circle
+                    quaternary
+                    :aria-label="t('复制 {label}', { label: activeEndpoint.label })"
+                    :disabled="!settingsLoaded"
+                    @click="copyValue('endpoint', activeEndpoint.url, activeEndpoint.label)"
+                  >
+                    <template #icon>
+                      <n-icon :component="copiedTarget === 'endpoint' ? CheckOutlined : CopyOutlined" />
+                    </template>
+                  </n-button>
+                </div>
+              </article>
+            </div>
 
-    <section class="guide-card" :aria-label="t('下游应用教程')">
-      <n-tabs
-        class="guide-tabs"
-        type="line"
-        size="small"
-        role="tablist"
-        :aria-label="t('选择下游应用')"
-        :value="currentApplication"
-        @update:value="selectApplication"
-      >
-        <n-tab-pane
-          v-for="guide in applicationGuides"
-          :key="guide.id"
-          :name="guide.id"
-          :tab="guide.name"
-          :tab-props="applicationTabProps(guide.id)"
-          display-directive="if"
-        >
-          <article
-            :id="`${guide.id}-panel`"
-            class="guide-body"
-            role="tabpanel"
-            :aria-labelledby="`${guide.id}-tab`"
-            tabindex="0"
+            <div class="key-row">
+              <span>GATEWAY KEY</span>
+              <code>{{ maskedKey }}</code>
+              <n-button
+                circle
+                quaternary
+                :aria-label="t('复制 Gateway Key')"
+                :disabled="!settingsLoaded || !serviceConfig.gateway_key"
+                @click="copyValue('key', serviceConfig.gateway_key, 'Gateway Key')"
+              >
+                <template #icon>
+                  <n-icon :component="copiedTarget === 'key' ? CheckOutlined : CopyOutlined" />
+                </template>
+              </n-button>
+            </div>
+
+            <div class="model-row">
+              <div>
+                <strong>{{ t("模型") }}</strong>
+                <p>{{ t("自动读取 /v1/models，并仅显示当前节点可用模型。") }}</p>
+              </div>
+              <n-select
+                v-model:value="selectedModel"
+                class="model-select"
+                :options="modelOptions"
+                :loading="modelsLoading"
+                :disabled="!settingsLoaded"
+                :placeholder="t('选择模型 ID')"
+                filterable
+              />
+            </div>
+          </section>
+
+          <n-alert v-if="settingsError" type="error" :title="t('节点设置加载失败')">
+            {{ t("{error}。教程正文仍可阅读，但为避免复制错误地址，动态配置复制已禁用。", { error: settingsError }) }}
+          </n-alert>
+          <n-alert v-if="modelsError" type="warning" :title="t('读取失败')">
+            {{ modelsError }}
+          </n-alert>
+          <n-alert
+            v-if="connectionUrls.insecureHttp"
+            type="warning"
+            :title="t('当前使用非本机 HTTP 地址')"
           >
+            {{ t("Gateway Key 与请求内容会以明文传输。仅在可信局域网内使用，公网接入请配置 HTTPS。") }}
+          </n-alert>
+
+          <article class="guide-body" :aria-labelledby="`${activeGuide.id}-title`">
             <header class="guide-head">
               <div>
                 <div class="guide-title-row">
-                  <h2>{{ guide.name }}</h2>
-                  <n-tag size="small" type="info" :bordered="false">{{ guide.protocol }}</n-tag>
-                  <n-tag
-                    v-if="guide.badge"
-                    size="small"
-                    :type="guide.id === 'trae' ? 'warning' : 'default'"
-                    :bordered="false"
-                  >
-                    {{ guide.badge }}
-                  </n-tag>
+                  <h1 :id="`${activeGuide.id}-title`">{{ activeGuide.name }}</h1>
+                  <n-tag type="info" :bordered="false">{{ activeGuide.protocol }}</n-tag>
+                  <n-tag v-if="activeGuide.badge" :bordered="false">{{ activeGuide.badge }}</n-tag>
                 </div>
-                <p>{{ guide.summary }}</p>
+                <p>{{ t(activeGuide.summary) }}</p>
               </div>
-              <a :href="guide.officialUrl" target="_blank" rel="noopener noreferrer">
+              <a :href="activeGuide.officialUrl" target="_blank" rel="noopener noreferrer">
                 {{ t("官方文档") }}
                 <n-icon :component="ExportOutlined" aria-hidden="true" />
               </a>
             </header>
 
-            <section class="guide-section" :aria-labelledby="`${guide.id}-steps`">
-              <h3 :id="`${guide.id}-steps`">{{ t("配置步骤") }}</h3>
+            <div v-if="activeGuide.quickActions?.length" class="quick-actions">
+              <template v-for="action in activeGuide.quickActions" :key="action.id">
+                <n-button
+                  v-if="action.kind === 'copy'"
+                  secondary
+                  :disabled="!canGenerateConfig"
+                  @click="copyGuideAction(action)"
+                >
+                  <template #icon><n-icon :component="CopyOutlined" /></template>
+                  {{ t(action.label) }}
+                </n-button>
+                <n-popconfirm
+                  v-else
+                  :negative-text="t('取消')"
+                  @positive-click="launchGuideAction(action)"
+                >
+                  <template #trigger>
+                    <n-button type="primary" :disabled="!canGenerateConfig">
+                      <template #icon><n-icon :component="ExportOutlined" /></template>
+                      {{ t(action.label) }}
+                    </n-button>
+                  </template>
+                  {{ t("即将把当前 Gateway Key 交给 {app}。", { app: activeGuide.name }) }}
+                </n-popconfirm>
+              </template>
+            </div>
+
+            <section class="guide-section" :aria-labelledby="`${activeGuide.id}-steps`">
+              <h2 :id="`${activeGuide.id}-steps`">{{ t("配置步骤") }}</h2>
               <ol>
-                <li v-for="step in guide.steps" :key="step">{{ step }}</li>
+                <li v-for="step in activeGuide.steps" :key="step">{{ t(step) }}</li>
               </ol>
             </section>
 
-            <section class="guide-section" :aria-labelledby="`${guide.id}-snippets`">
-              <h3 :id="`${guide.id}-snippets`">{{ t("配置示例") }}</h3>
+            <section class="guide-section" :aria-labelledby="`${activeGuide.id}-snippets`">
+              <h2 :id="`${activeGuide.id}-snippets`">{{ t("配置示例") }}</h2>
               <div class="snippet-grid">
                 <article
-                  v-for="(snippet, index) in guide.snippets(guideContext)"
+                  v-for="(snippet, index) in activeGuide.snippets(guideContext)"
                   :key="snippet.label"
                   class="snippet-card"
                 >
@@ -171,18 +197,17 @@
                     <strong>{{ snippet.label }}</strong>
                     <span>{{ snippet.language }}</span>
                     <n-button
-                      size="small"
                       secondary
-                      :disabled="!settingsLoaded || !serviceConfig.gateway_key"
+                      :disabled="!canGenerateConfig"
                       :aria-label="t('复制 {label}', { label: snippet.label })"
-                      @click="copyValue(`${guide.id}:${index}`, snippet.copy, snippet.label)"
+                      @click="copyValue(`${activeGuide.id}:${index}`, snippet.copy, snippet.label)"
                     >
                       <template #icon>
                         <n-icon
-                          :component="copiedTarget === `${guide.id}:${index}` ? CheckOutlined : CopyOutlined"
+                          :component="copiedTarget === `${activeGuide.id}:${index}` ? CheckOutlined : CopyOutlined"
                         />
                       </template>
-                      {{ copiedTarget === `${guide.id}:${index}` ? t("已复制") : t("复制配置") }}
+                      {{ copiedTarget === `${activeGuide.id}:${index}` ? t("已复制") : t("复制配置") }}
                     </n-button>
                   </header>
                   <pre><code>{{ snippet.display }}</code></pre>
@@ -190,36 +215,39 @@
               </div>
             </section>
 
-            <section class="guide-section verification" :aria-labelledby="`${guide.id}-verify`">
-              <h3 :id="`${guide.id}-verify`">{{ t("验证方法") }}</h3>
+            <section class="guide-section verification" :aria-labelledby="`${activeGuide.id}-verify`">
+              <h2 :id="`${activeGuide.id}-verify`">{{ t("验证方法") }}</h2>
               <p>{{ t("在客户端发送一次测试消息，再到 OCG Manager 的“请求日志”确认模型、账号和成功状态。") }}</p>
             </section>
 
-            <section class="guide-section" :aria-labelledby="`${guide.id}-notes`">
-              <h3 :id="`${guide.id}-notes`">{{ t("注意事项") }}</h3>
+            <section class="guide-section" :aria-labelledby="`${activeGuide.id}-notes`">
+              <h2 :id="`${activeGuide.id}-notes`">{{ t("注意事项") }}</h2>
               <ul>
-                <li v-for="note in guide.notes" :key="note">{{ note }}</li>
+                <li v-for="note in activeGuide.notes" :key="note">{{ t(note) }}</li>
               </ul>
             </section>
           </article>
-        </n-tab-pane>
-      </n-tabs>
-    </section>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import {
   NAlert,
   NButton,
   NIcon,
-  NTabPane,
-  NTabs,
+  NMenu,
+  NPopconfirm,
+  NSelect,
   NTag,
   useMessage,
 } from "naive-ui";
+import type { MenuOption, SelectOption } from "naive-ui";
 import { CheckOutlined, CopyOutlined, ExportOutlined } from "@vicons/antd";
+import logoUrl from "../../assets/logo/ocg_logo_final_transparent.png";
 import { tauriApi } from "../api/tauri";
 import {
   maskConnectionKey,
@@ -230,15 +258,20 @@ import {
   APPLICATION_GUIDES,
   isApplicationId,
 } from "./application-guides";
-import type { ApplicationId, GuideContext } from "./application-guides";
+import type { ApplicationGuide, ApplicationId, GuideAction, GuideContext } from "./application-guides";
 import { t } from "../i18n/index.ts";
 
 const DEFAULT_APPLICATION: ApplicationId = "claude-code";
+const allowedImportProtocols = new Set(["cherrystudio:", "chatbox:"]);
 const message = useMessage();
 const currentApplication = ref<ApplicationId>(readApplication());
 const settingsLoading = ref(true);
 const settingsLoaded = ref(false);
 const settingsError = ref("");
+const modelsLoading = ref(false);
+const modelsError = ref("");
+const modelOptions = ref<SelectOption[]>([]);
+const selectedModel = ref<string | null>(null);
 const copiedTarget = ref("");
 let copyTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -248,12 +281,18 @@ const serviceConfig = ref({
   client_root_url: "",
 });
 
-const applicationGuides = computed(() => APPLICATION_GUIDES.map((guide) => ({
-  ...guide,
-  badge: guide.badge === "版本相关" ? t("版本相关") : guide.badge,
-  summary: t(guide.summary),
-  steps: guide.steps.map((step) => t(step)),
-  notes: guide.notes.map((note) => t(note)),
+const applicationGuides: readonly ApplicationGuide[] = APPLICATION_GUIDES;
+const activeGuide = computed<ApplicationGuide>(() => (
+  applicationGuides.find((guide) => guide.id === currentApplication.value)
+  ?? applicationGuides[0]
+));
+const applicationMenuOptions = computed<MenuOption[]>(() => applicationGuides.map((guide) => ({
+  key: guide.id,
+  label: guide.name,
+})));
+const applicationSelectOptions = computed<SelectOption[]>(() => applicationGuides.map((guide) => ({
+  value: guide.id,
+  label: guide.name,
 })));
 
 const connectionUrls = computed(() => resolveConnectionUrls(
@@ -271,12 +310,19 @@ const guideContext = computed<GuideContext>(() => ({
   messagesUrl: connectionUrls.value.messagesUrl,
   displayKey: maskedKey.value,
   actualKey: serviceConfig.value.gateway_key,
+  modelId: selectedModel.value?.trim() || "<MODEL_ID>",
+  iconUrl: new URL(logoUrl, window.location.origin).href,
 }));
+const canGenerateConfig = computed(() => (
+  settingsLoaded.value
+  && Boolean(serviceConfig.value.gateway_key)
+  && Boolean(selectedModel.value?.trim())
+));
 const activeEndpoint = computed(() => {
-  if (currentApplication.value === "claude-code") {
+  if (activeGuide.value.endpointKind === "messages") {
     return { label: "MESSAGES ENDPOINT", url: connectionUrls.value.messagesUrl };
   }
-  if (currentApplication.value === "codex") {
+  if (activeGuide.value.endpointKind === "responses") {
     return { label: "RESPONSES ENDPOINT", url: connectionUrls.value.responsesUrl };
   }
   return { label: "CHAT ENDPOINT", url: connectionUrls.value.chatCompletionsUrl };
@@ -287,50 +333,38 @@ function readApplication(): ApplicationId {
   return isApplicationId(value) ? value : DEFAULT_APPLICATION;
 }
 
-function selectApplication(value: string | number) {
-  if (typeof value === "string" && isApplicationId(value)) currentApplication.value = value;
+function selectApplication(value: string | number | null) {
+  if (typeof value !== "string" || !isApplicationId(value) || value === currentApplication.value) return;
+  currentApplication.value = value;
+  writeApplicationUrl(value, "push");
 }
 
-function applicationTabProps(id: ApplicationId) {
-  const selected = currentApplication.value === id;
-  return {
-    id: `${id}-tab`,
-    role: "tab",
-    tabindex: selected ? 0 : -1,
-    "aria-selected": selected,
-    "aria-controls": `${id}-panel`,
-    onKeydown: (event: KeyboardEvent) => handleApplicationTabKeydown(event, id),
-  };
-}
-
-function handleApplicationTabKeydown(event: KeyboardEvent, id: ApplicationId) {
-  const index = APPLICATION_GUIDES.findIndex((guide) => guide.id === id);
-  let nextIndex: number | undefined;
-  if (event.key === "ArrowRight") nextIndex = (index + 1) % APPLICATION_GUIDES.length;
-  if (event.key === "ArrowLeft") nextIndex = (index - 1 + APPLICATION_GUIDES.length) % APPLICATION_GUIDES.length;
-  if (event.key === "Home") nextIndex = 0;
-  if (event.key === "End") nextIndex = APPLICATION_GUIDES.length - 1;
-  if (nextIndex === undefined) return;
-
-  event.preventDefault();
-  const next = APPLICATION_GUIDES[nextIndex].id;
-  currentApplication.value = next;
-  requestAnimationFrame(() => document.getElementById(`${next}-tab`)?.focus());
-}
-
-function syncApplication(value: ApplicationId) {
+function writeApplicationUrl(value: ApplicationId, mode: "push" | "replace") {
   const url = new URL(window.location.href);
   url.searchParams.set("app", value);
-  window.history.replaceState(null, "", url);
+  if (mode === "push") window.history.pushState(null, "", url);
+  else window.history.replaceState(null, "", url);
 }
 
 function onPopState() {
   const params = new URLSearchParams(window.location.search);
   if (params.get("view") !== "apps") return;
-  const value = params.get("app");
-  const next = isApplicationId(value) ? value : DEFAULT_APPLICATION;
-  if (currentApplication.value === next) syncApplication(next);
-  else currentApplication.value = next;
+  currentApplication.value = readApplication();
+}
+
+async function loadModels() {
+  modelsLoading.value = true;
+  modelsError.value = "";
+  try {
+    const modelIds = await tauriApi.getApplicationModels();
+    if (!modelIds.length) throw new Error(t("未返回可用模型"));
+    modelOptions.value = modelIds.map((modelId) => ({ label: modelId, value: modelId }));
+    if (!selectedModel.value || !modelIds.includes(selectedModel.value)) selectedModel.value = modelIds[0];
+  } catch (error) {
+    modelsError.value = error instanceof Error ? error.message : String(error);
+  } finally {
+    modelsLoading.value = false;
+  }
 }
 
 async function loadSettings() {
@@ -342,6 +376,7 @@ async function loadSettings() {
       client_root_url: settings.client_root_url,
     };
     settingsLoaded.value = true;
+    await loadModels();
   } catch (error) {
     settingsError.value = error instanceof Error ? error.message : String(error);
   } finally {
@@ -362,10 +397,25 @@ async function copyValue(target: string, value: string, label: string) {
   }
 }
 
-watch(currentApplication, syncApplication);
+async function copyGuideAction(action: GuideAction) {
+  await copyValue(`action:${activeGuide.value.id}:${action.id}`, action.build(guideContext.value), t(action.label));
+}
+
+function launchGuideAction(action: GuideAction) {
+  try {
+    const value = action.build(guideContext.value);
+    if (!allowedImportProtocols.has(new URL(value).protocol)) {
+      throw new Error(t("客户端导入链接无效"));
+    }
+    window.location.assign(value);
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : t("客户端导入链接无效"));
+  }
+}
 
 onMounted(() => {
-  syncApplication(currentApplication.value);
+  const value = new URLSearchParams(window.location.search).get("app");
+  if (!isApplicationId(value)) writeApplicationUrl(currentApplication.value, "replace");
   window.addEventListener("popstate", onPopState);
   void loadSettings();
 });
@@ -378,84 +428,101 @@ onUnmounted(() => {
 
 <style scoped>
 .applications {
-  display: grid;
-  gap: 16px;
-  width: min(1180px, 100%);
+  width: min(1280px, 100%);
   min-width: 0;
   margin: 0 auto;
 }
 
-.page-head,
+.application-layout {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.application-content {
+  min-width: 0;
+}
+
+.application-sider {
+  position: sticky;
+  top: 16px;
+  max-height: calc(100vh - 128px);
+  overflow-y: auto;
+  border: 1px solid var(--ocg-border);
+  border-radius: 12px;
+  background: var(--ocg-surface);
+  box-shadow: var(--ocg-shadow-sm);
+}
+
+.application-nav {
+  padding: 8px;
+}
+
+.application-page {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.application-picker {
+  display: none;
+}
+
 .connection-head,
 .guide-head,
 .guide-title-row,
 .connection-value,
 .key-row,
-.snippet-card > header {
+.snippet-card > header,
+.model-row {
   display: flex;
   align-items: center;
 }
 
-.page-head {
-  justify-content: space-between;
-  gap: 16px;
-}
-.page-kicker {
-  margin: 0 0 4px;
-  color: var(--ocg-primary);
-  font: 700 10px/1.2 "Cascadia Mono", Consolas, monospace;
-  letter-spacing: 0.12em;
-}
-.page-head h1 {
-  margin: 0;
-  color: var(--ocg-ink);
-  font: 700 24px/1.25 "Bahnschrift", "Segoe UI Variable Display", sans-serif;
-}
-.page-copy {
-  margin: 6px 0 0;
-  color: var(--ocg-subtle);
-  font-size: 12px;
-}
-
-.connection-panel,
-.guide-card {
+.connection-panel {
   min-width: 0;
+  padding: 16px;
   border: 1px solid var(--ocg-border);
   border-radius: 14px;
   background: var(--ocg-surface);
   box-shadow: var(--ocg-shadow-sm);
 }
-.connection-panel {
-  padding: 16px;
-}
+
 .connection-head {
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 12px;
 }
+
 .connection-head h2 {
   margin: 0;
   color: var(--ocg-ink);
-  font: 700 15px/1.3 "Bahnschrift", "Segoe UI Variable Display", sans-serif;
+  font: 700 18px/1.3 "Bahnschrift", "Segoe UI Variable Display", sans-serif;
 }
-.connection-head p {
-  margin: 3px 0 0;
+
+.connection-head p,
+.model-row p {
+  margin: 4px 0 0;
   color: var(--ocg-subtle);
-  font-size: 11px;
+  font-size: 16px;
 }
+
 .connection-track {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 22px;
 }
+
 .connection-stage {
   position: relative;
   min-width: 0;
-  padding: 10px 8px 10px 12px;
+  padding: 12px;
   border: 1px solid var(--ocg-border);
   border-radius: 10px;
   background: color-mix(in srgb, var(--ocg-canvas) 72%, var(--ocg-surface));
 }
+
 .connection-stage:not(:last-child)::after {
   content: "→";
   position: absolute;
@@ -464,131 +531,167 @@ onUnmounted(() => {
   color: var(--ocg-subtle);
   transform: translateY(-50%);
 }
+
 .connection-stage > span,
 .key-row > span {
   display: block;
   margin-bottom: 5px;
   color: var(--ocg-subtle);
-  font: 700 9px/1.2 "Cascadia Mono", Consolas, monospace;
-  letter-spacing: 0.08em;
+  font: 700 16px/1.2 "Cascadia Mono", Consolas, monospace;
+  letter-spacing: 0.04em;
 }
+
 .connection-value {
   min-width: 0;
-  gap: 4px;
+  gap: 6px;
 }
+
 .connection-value code,
 .key-row code {
   min-width: 0;
   overflow: hidden;
   color: var(--ocg-ink);
-  font: 11px/1.45 "Cascadia Mono", Consolas, monospace;
+  font: 16px/1.5 "Cascadia Mono", Consolas, monospace;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
 .connection-value code {
   flex: 1 1 auto;
 }
+
 .key-row {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 10px;
   margin-top: 10px;
-  padding: 8px 8px 8px 12px;
+  padding: 10px 12px;
   border-radius: 10px;
   background: var(--ocg-primary-soft);
 }
+
 .key-row > span {
   margin: 0;
   color: var(--ocg-primary);
 }
 
-.guide-card {
-  padding: 0 18px 18px;
+.model-row {
+  justify-content: space-between;
+  gap: 20px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--ocg-divider);
 }
-.guide-tabs {
-  min-width: 0;
+
+.model-row strong {
+  color: var(--ocg-ink);
 }
+
+.model-select {
+  width: min(380px, 100%);
+}
+
 .guide-body {
   display: grid;
   gap: 22px;
   min-width: 0;
-  padding-top: 8px;
+  padding: 8px 0 32px;
 }
+
 .guide-head {
   align-items: flex-start;
   justify-content: space-between;
   gap: 18px;
 }
+
 .guide-title-row {
   flex-wrap: wrap;
   gap: 8px;
 }
-.guide-head h2 {
+
+.guide-head h1 {
   margin: 0;
   color: var(--ocg-ink);
-  font: 700 21px/1.3 "Bahnschrift", "Segoe UI Variable Display", sans-serif;
+  font: 700 24px/1.3 "Bahnschrift", "Segoe UI Variable Display", sans-serif;
 }
+
 .guide-head p {
-  margin: 7px 0 0;
+  margin: 8px 0 0;
   color: var(--ocg-muted);
-  font-size: 13px;
+  font-size: 16px;
   line-height: 1.65;
 }
+
 .guide-head > a {
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
-  gap: 5px;
-  padding: 7px 10px;
+  gap: 6px;
+  padding: 8px 12px;
   border: 1px solid var(--ocg-border);
   border-radius: 8px;
   color: var(--ocg-primary);
-  font-size: 12px;
+  font-size: 16px;
   font-weight: 650;
   text-decoration: none;
 }
+
 .guide-head > a:hover {
   border-color: var(--ocg-primary);
 }
+
+.quick-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .guide-section {
   min-width: 0;
   padding-top: 18px;
   border-top: 1px solid var(--ocg-divider);
 }
-.guide-section h3 {
+
+.guide-section h2 {
   margin: 0 0 10px;
   color: var(--ocg-ink);
-  font: 700 14px/1.3 "Bahnschrift", "Segoe UI Variable Display", sans-serif;
+  font: 700 18px/1.3 "Bahnschrift", "Segoe UI Variable Display", sans-serif;
 }
+
 .guide-section ol,
 .guide-section ul {
   display: grid;
   gap: 8px;
   margin: 0;
-  padding-left: 22px;
+  padding-left: 24px;
   color: var(--ocg-muted);
-  font-size: 13px;
+  font-size: 16px;
   line-height: 1.65;
 }
+
 .verification {
-  padding: 14px 16px;
+  padding: 16px;
   border: 1px solid color-mix(in srgb, var(--ocg-success) 28%, var(--ocg-border));
   border-radius: 10px;
   background: var(--ocg-success-soft);
 }
-.verification h3 {
+
+.verification h2 {
   color: var(--ocg-success);
 }
+
 .verification p {
   margin: 0;
   color: var(--ocg-ink);
-  font-size: 13px;
+  font-size: 16px;
   line-height: 1.6;
 }
+
 .snippet-grid {
   display: grid;
   gap: 12px;
 }
+
 .snippet-card {
   min-width: 0;
   overflow: hidden;
@@ -596,35 +699,40 @@ onUnmounted(() => {
   border-radius: 10px;
   background: color-mix(in srgb, var(--ocg-canvas) 82%, var(--ocg-surface));
 }
+
 .snippet-card > header {
   gap: 8px;
-  min-height: 42px;
-  padding: 6px 8px 6px 12px;
+  min-height: 48px;
+  padding: 8px 10px 8px 12px;
   border-bottom: 1px solid var(--ocg-border);
 }
+
 .snippet-card strong {
   min-width: 0;
   overflow: hidden;
   color: var(--ocg-ink);
-  font-size: 12px;
+  font-size: 16px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
 .snippet-card header > span {
   margin-right: auto;
   color: var(--ocg-subtle);
-  font: 10px/1 "Cascadia Mono", Consolas, monospace;
+  font: 16px/1 "Cascadia Mono", Consolas, monospace;
   text-transform: uppercase;
 }
+
 .snippet-card pre {
   max-width: 100%;
   margin: 0;
   overflow: auto;
-  padding: 14px;
+  padding: 16px;
   color: var(--ocg-ink);
-  font: 12px/1.6 "Cascadia Mono", Consolas, monospace;
+  font: 16px/1.6 "Cascadia Mono", Consolas, monospace;
   tab-size: 2;
 }
+
 .snippet-card code {
   display: block;
   width: max-content;
@@ -632,11 +740,26 @@ onUnmounted(() => {
   white-space: pre;
 }
 
+@media (max-width: 1023px) {
+  .application-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .application-sider {
+    display: none;
+  }
+
+  .application-picker {
+    display: block;
+  }
+}
+
 @media (max-width: 800px) {
   .connection-track {
     grid-template-columns: 1fr;
     gap: 18px;
   }
+
   .connection-stage:not(:last-child)::after {
     content: "↓";
     top: auto;
@@ -647,36 +770,37 @@ onUnmounted(() => {
 }
 
 @media (max-width: 640px) {
-  .applications {
+  .application-page {
     gap: 12px;
   }
-  .page-head,
-  .guide-head {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-  .page-head h1 {
-    font-size: 21px;
-  }
+
   .connection-panel {
     padding: 12px;
   }
-  .guide-card {
-    padding: 0 12px 14px;
+
+  .model-row,
+  .guide-head {
+    align-items: stretch;
+    flex-direction: column;
   }
-  .guide-body {
-    gap: 18px;
-  }
+
+  .model-select,
   .guide-head > a {
     width: 100%;
+  }
+
+  .guide-head > a {
     justify-content: center;
   }
+
   .snippet-card > header {
     flex-wrap: wrap;
   }
+
   .snippet-card header > span {
     margin-right: 0;
   }
+
   .snippet-card header > .n-button {
     margin-left: auto;
   }

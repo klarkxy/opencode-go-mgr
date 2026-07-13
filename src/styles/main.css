@@ -1,5 +1,6 @@
 :root {
   color-scheme: light;
+  --ocg-font-size: 16px;
   --ocg-canvas: #f7f7f8;
   --ocg-surface: #ffffff;
   --ocg-surface-raised: #ffffff;
@@ -28,6 +29,8 @@ body,
   height: 100%;
   margin: 0;
   padding: 0;
+  font-size: var(--ocg-font-size);
+  line-height: 1.6;
   font-family: "Segoe UI Variable Text", "Noto Sans SC", "Microsoft YaHei UI", sans-serif;
   background: var(--ocg-canvas);
 }
