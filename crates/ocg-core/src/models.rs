@@ -160,6 +160,14 @@ pub struct ForwardLog {
     pub error_message: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ForwardMetrics {
+    pub prompt_tokens: i64,
+    pub completion_tokens: i64,
+    pub cached_tokens: i64,
+    pub cost: f64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ForwardLogSummary {
     pub total_requests: i64,

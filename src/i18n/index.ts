@@ -1,8 +1,7 @@
 import { computed, ref, watch } from "vue";
-import * as naiveUiModule from "naive-ui";
+// @ts-expect-error naive-ui ships index.d.ts beside this ESM file, which TypeScript doesn't pair automatically.
+import * as naiveUiLocales from "naive-ui/es/locales/index.mjs";
 
-const cjsNaiveUi = naiveUiModule as unknown as { default: typeof naiveUiModule };
-const naiveUi = "dateDeDE" in (naiveUiModule as object) ? naiveUiModule : cjsNaiveUi.default;
 const {
   dateDeDE,
   dateEnUS,
@@ -24,7 +23,7 @@ const {
   ruRU,
   zhCN,
   zhTW,
-} = naiveUi;
+} = naiveUiLocales as typeof import("naive-ui");
 import { deDEMessages } from "./messages/de-DE.ts";
 import { enUSMessages, type MessageKey, type Messages } from "./messages/en-US.ts";
 import { esESMessages } from "./messages/es-ES.ts";

@@ -2579,7 +2579,7 @@ dependencies = [
 
 [[package]]
 name = "ocg-core"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "anyhow",
  "argon2",
@@ -2600,7 +2600,7 @@ dependencies = [
 
 [[package]]
 name = "ocg-manager"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2616,7 +2616,7 @@ dependencies = [
 
 [[package]]
 name = "ocg-manager-cli"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "anyhow",
  "chrono",

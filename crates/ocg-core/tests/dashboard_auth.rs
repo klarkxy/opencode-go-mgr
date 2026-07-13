@@ -8,7 +8,6 @@ use reqwest::StatusCode;
 use serde_json::json;
 use std::fs;
 use std::net::SocketAddr;
-use std::path::PathBuf;
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
@@ -35,7 +34,7 @@ fn state(label: &str) -> Arc<CoreStateInner> {
     fs::create_dir_all(&dir).unwrap();
     let db = Database::open(dir.clone()).unwrap();
     let cipher: Arc<dyn KeyCipher + Send + Sync> = Arc::new(StaticKeyCipher::new("test"));
-    Arc::new(CoreStateInner::new(db, PathBuf::from(dir), cipher).unwrap())
+    Arc::new(CoreStateInner::new(db, dir, cipher).unwrap())
 }
 
 #[tokio::test]

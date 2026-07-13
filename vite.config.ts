@@ -27,5 +27,14 @@ export default defineConfig({
     target: "es2022",
     minify: true,
     sourcemap: !!process.env.TAURI_DEBUG,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes("/src/i18n/messages/")) return "translations";
+          if (id.includes("/node_modules/@vicons/")) return "icons";
+          if (id.includes("/node_modules/vue/") || id.includes("/node_modules/@vue/")) return "vue";
+        },
+      },
+    },
   },
 });

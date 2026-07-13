@@ -3,6 +3,7 @@ use crate::models::Account;
 use anyhow::Result;
 use chrono::Utc;
 
+#[derive(Default)]
 pub struct AccountSelector;
 
 impl AccountSelector {

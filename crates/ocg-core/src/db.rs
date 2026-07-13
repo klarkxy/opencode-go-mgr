@@ -152,7 +152,7 @@ impl Database {
         };
         let key = key_cipher.unwrap_or(&existing.key_cipher);
         let password = match password_cipher {
-            Some(s) if s.is_empty() => None,
+            Some("") => None,
             Some(s) => Some(s.to_string()),
             None => existing.password_cipher.clone(),
         };
@@ -288,10 +288,7 @@ impl Database {
         id: i64,
         status: &str,
         http_status: Option<i32>,
-        prompt_tokens: i64,
-        completion_tokens: i64,
-        cached_tokens: i64,
-        cost: f64,
+        metrics: ForwardMetrics,
         error_message: Option<&str>,
     ) -> Result<()> {
         self.conn.execute(
@@ -308,10 +305,10 @@ impl Database {
                 id,
                 status,
                 http_status,
-                prompt_tokens,
-                completion_tokens,
-                cached_tokens,
-                cost,
+                metrics.prompt_tokens,
+                metrics.completion_tokens,
+                metrics.cached_tokens,
+                metrics.cost,
                 error_message
             ],
         )?;

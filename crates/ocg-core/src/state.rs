@@ -116,7 +116,7 @@ impl CoreStateInner {
         let http_client = build_http_client(&config)?;
         {
             let db = self.db.lock();
-            save_config(&*db, &config)?;
+            save_config(&db, &config)?;
         }
         let mut current_config = self.config.lock();
         let mut current_client = self.http_client.lock();
@@ -138,11 +138,11 @@ impl CoreStateInner {
     }
 
     pub fn encrypt_key(&self, plaintext: &str) -> crate::Result<String> {
-        self.cipher.encrypt(plaintext).map_err(|e| e.into())
+        self.cipher.encrypt(plaintext)
     }
 
     pub fn decrypt_key(&self, ciphertext: &str) -> crate::Result<String> {
-        self.cipher.decrypt(ciphertext).map_err(|e| e.into())
+        self.cipher.decrypt(ciphertext)
     }
 }
 

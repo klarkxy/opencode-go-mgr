@@ -126,7 +126,7 @@ fn resolve_data_dir(data_dir: Option<PathBuf>) -> PathBuf {
 }
 
 fn resolve_cipher(
-    data_dir: &PathBuf,
+    data_dir: &Path,
     encryption_key: Option<String>,
 ) -> Result<Arc<dyn KeyCipher + Send + Sync>> {
     let cipher = match encryption_key {
@@ -179,9 +179,10 @@ async fn serve(
     println!("press Ctrl+C to stop");
 
     // Hold the gateway handle so it stays alive
-    let mut gateway_lock = state.gateway.lock();
-    *gateway_lock = Some(handle);
-    drop(gateway_lock);
+    {
+        let mut gateway_lock = state.gateway.lock();
+        *gateway_lock = Some(handle);
+    }
 
     let _ = state.db.lock().log_gateway(
         "info",
@@ -207,43 +208,6 @@ fn resolve_dashboard_dir(explicit: Option<PathBuf>, executable: Option<&Path>) -
         let dist = executable?.parent()?.join("dist");
         dist.is_dir().then_some(dist)
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{Cli, Commands, resolve_dashboard_dir};
-    use clap::Parser;
-
-    #[test]
-    fn serve_accepts_container_bind_address() {
-        let cli = Cli::try_parse_from(["ocg-manager-cli", "serve", "--host", "0.0.0.0"]).unwrap();
-        let Commands::Serve { host, .. } = cli.command else {
-            panic!("expected serve command");
-        };
-        assert!(host.is_unspecified());
-    }
-
-    #[test]
-    fn dashboard_dir_prefers_explicit_then_existing_packaged_dist() {
-        let root = std::env::temp_dir().join(format!("ocg-cli-dashboard-{}", uuid::Uuid::new_v4()));
-        let dist = root.join("dist");
-        std::fs::create_dir_all(&dist).unwrap();
-        let executable = root.join("ocg-manager-cli");
-        let explicit = root.join("custom");
-
-        assert_eq!(
-            resolve_dashboard_dir(Some(explicit.clone()), Some(&executable)),
-            Some(explicit)
-        );
-        assert_eq!(
-            resolve_dashboard_dir(None, Some(&executable)),
-            Some(dist.clone())
-        );
-        std::fs::remove_dir_all(&dist).unwrap();
-        assert_eq!(resolve_dashboard_dir(None, Some(&executable)), None);
-
-        std::fs::remove_dir_all(root).unwrap();
-    }
 }
 
 async fn key_command(
@@ -503,4 +467,41 @@ async fn ping_keys(
         );
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Cli, Commands, resolve_dashboard_dir};
+    use clap::Parser;
+
+    #[test]
+    fn serve_accepts_container_bind_address() {
+        let cli = Cli::try_parse_from(["ocg-manager-cli", "serve", "--host", "0.0.0.0"]).unwrap();
+        let Commands::Serve { host, .. } = cli.command else {
+            panic!("expected serve command");
+        };
+        assert!(host.is_unspecified());
+    }
+
+    #[test]
+    fn dashboard_dir_prefers_explicit_then_existing_packaged_dist() {
+        let root = std::env::temp_dir().join(format!("ocg-cli-dashboard-{}", uuid::Uuid::new_v4()));
+        let dist = root.join("dist");
+        std::fs::create_dir_all(&dist).unwrap();
+        let executable = root.join("ocg-manager-cli");
+        let explicit = root.join("custom");
+
+        assert_eq!(
+            resolve_dashboard_dir(Some(explicit.clone()), Some(&executable)),
+            Some(explicit)
+        );
+        assert_eq!(
+            resolve_dashboard_dir(None, Some(&executable)),
+            Some(dist.clone())
+        );
+        std::fs::remove_dir_all(&dist).unwrap();
+        assert_eq!(resolve_dashboard_dir(None, Some(&executable)), None);
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }

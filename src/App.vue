@@ -166,7 +166,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, defineAsyncComponent, h, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import type { Component } from "vue";
 import {
   NButton,
@@ -198,11 +198,6 @@ import {
   LogoutOutlined,
   SettingOutlined,
 } from "@vicons/antd";
-import Dashboard from "./views/Dashboard.vue";
-import Accounts from "./views/Accounts.vue";
-import Applications from "./views/Applications.vue";
-import Logs from "./views/Logs.vue";
-import Settings from "./views/Settings.vue";
 import LocaleSwitcher from "./components/LocaleSwitcher.vue";
 import { locale, naiveDateLocale, naiveLocale, t } from "./i18n/index.ts";
 import type { MessageKey } from "./i18n/index.ts";
@@ -220,6 +215,12 @@ import {
 import type { ThemeName } from "./theme";
 
 type ViewKey = "dashboard" | "accounts" | "apps" | "logs" | "settings";
+
+const Dashboard = defineAsyncComponent(() => import("./views/Dashboard.vue"));
+const Accounts = defineAsyncComponent(() => import("./views/Accounts.vue"));
+const Applications = defineAsyncComponent(() => import("./views/Applications.vue"));
+const Logs = defineAsyncComponent(() => import("./views/Logs.vue"));
+const Settings = defineAsyncComponent(() => import("./views/Settings.vue"));
 
 const views = new Set<ViewKey>(["dashboard", "accounts", "apps", "logs", "settings"]);
 const osTheme = useOsTheme();

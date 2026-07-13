@@ -7,7 +7,7 @@ use crate::gateway::protocol::{
 };
 use crate::gateway::protocol_stream::StreamConverter;
 use crate::gateway::selector::AccountSelector;
-use crate::models::{Account, AppConfig, ForwardLog};
+use crate::models::{Account, AppConfig, ForwardLog, ForwardMetrics};
 use crate::state::CoreState;
 use anyhow::Result;
 use axum::body::Body;
@@ -127,10 +127,7 @@ async fn forward_request_impl(
                     &model,
                     "error",
                     None,
-                    0,
-                    0,
-                    0,
-                    0.0,
+                    ForwardMetrics::default(),
                     Some(&error_message),
                 )?;
             }
@@ -169,10 +166,7 @@ async fn forward_request_impl(
                 &model,
                 "error",
                 Some(status.as_u16() as i32),
-                0,
-                0,
-                0,
-                0.0,
+                ForwardMetrics::default(),
                 Some(&error_message),
             )?;
         }
@@ -209,10 +203,7 @@ async fn forward_request_impl(
                     &model,
                     "client_error",
                     Some(429),
-                    0,
-                    0,
-                    0,
-                    0.0,
+                    ForwardMetrics::default(),
                     Some(&text),
                 )?;
                 db.set_account_cooldown(&account.id, Some(until), Some(&text))?;
@@ -235,10 +226,7 @@ async fn forward_request_impl(
                     &model,
                     "client_error",
                     Some(408),
-                    0,
-                    0,
-                    0,
-                    0.0,
+                    ForwardMetrics::default(),
                     Some(&error_message),
                 )?;
             }
@@ -265,10 +253,7 @@ async fn forward_request_impl(
                     &model,
                     "client_error",
                     Some(status.as_u16() as i32),
-                    0,
-                    0,
-                    0,
-                    0.0,
+                    ForwardMetrics::default(),
                     Some(&sanitize_upstream_error(&text)),
                 )?;
             }
@@ -290,10 +275,7 @@ async fn forward_request_impl(
                 &model,
                 "client_error",
                 Some(status.as_u16() as i32),
-                0,
-                0,
-                0,
-                0.0,
+                ForwardMetrics::default(),
                 Some(&sanitize_upstream_error(&text)),
             )?;
         }
@@ -331,10 +313,7 @@ async fn forward_request_impl(
                 &model,
                 "streaming",
                 Some(status.as_u16() as i32),
-                0,
-                0,
-                0,
-                0.0,
+                ForwardMetrics::default(),
                 None,
             )?
         };
@@ -376,10 +355,7 @@ async fn forward_request_impl(
                                     initial_id,
                                     "error",
                                     None,
-                                    0,
-                                    0,
-                                    0,
-                                    0.0,
+                                    ForwardMetrics::default(),
                                     Some(&msg),
                                 );
                                 chunks
@@ -408,8 +384,13 @@ async fn forward_request_impl(
                     }
                     let chunks = converter_map.lock().error_event(&msg);
                     let db = state_h.db.lock();
-                    let _ =
-                        db.update_forward_log(initial_id, "error", None, 0, 0, 0, 0.0, Some(&msg));
+                    let _ = db.update_forward_log(
+                        initial_id,
+                        "error",
+                        None,
+                        ForwardMetrics::default(),
+                        Some(&msg),
+                    );
                     chunks
                 }
             };
@@ -495,10 +476,12 @@ async fn forward_request_impl(
                         initial_id,
                         &status_str,
                         None,
-                        prompt,
-                        completion,
-                        cached,
-                        cost,
+                        ForwardMetrics {
+                            prompt_tokens: prompt,
+                            completion_tokens: completion,
+                            cached_tokens: cached,
+                            cost,
+                        },
                         finish_error.as_deref().or(stream_error.as_deref()),
                     ) {
                         let _ = db.log_gateway(
@@ -534,10 +517,7 @@ async fn forward_request_impl(
                         &model,
                         "error",
                         Some(status.as_u16() as i32),
-                        0,
-                        0,
-                        0,
-                        0.0,
+                        ForwardMetrics::default(),
                         Some(&error_message),
                     )?;
                 }
@@ -560,10 +540,7 @@ async fn forward_request_impl(
                     &model,
                     "error",
                     Some(status.as_u16() as i32),
-                    0,
-                    0,
-                    0,
-                    0.0,
+                    ForwardMetrics::default(),
                     Some(message),
                 )?;
                 return Ok(ForwardResult {
@@ -589,10 +566,12 @@ async fn forward_request_impl(
                     &model,
                     "error",
                     Some(status.as_u16() as i32),
-                    prompt_tokens,
-                    completion_tokens,
-                    cached_tokens,
-                    cost,
+                    ForwardMetrics {
+                        prompt_tokens,
+                        completion_tokens,
+                        cached_tokens,
+                        cost,
+                    },
                     Some(&message),
                 )?;
                 return Ok(ForwardResult {
@@ -612,10 +591,12 @@ async fn forward_request_impl(
                 &model,
                 "success",
                 Some(status.as_u16() as i32),
-                prompt_tokens,
-                completion_tokens,
-                cached_tokens,
-                cost,
+                ForwardMetrics {
+                    prompt_tokens,
+                    completion_tokens,
+                    cached_tokens,
+                    cost,
+                },
                 None,
             )?;
         }
@@ -707,10 +688,7 @@ pub async fn forward_get(
             "",
             category,
             Some(status.as_u16() as i32),
-            0,
-            0,
-            0,
-            0.0,
+            ForwardMetrics::default(),
             Some(&body),
         )?;
         if status.as_u16() == 429 {
@@ -774,10 +752,7 @@ fn log_forward(
     model: &str,
     status: &str,
     http_status: Option<i32>,
-    prompt_tokens: i64,
-    completion_tokens: i64,
-    cached_tokens: i64,
-    cost: f64,
+    metrics: ForwardMetrics,
     error_message: Option<&str>,
 ) -> Result<i64> {
     db.log_forward(&ForwardLog {
@@ -788,10 +763,10 @@ fn log_forward(
         account_name: account.name.clone(),
         status: status.to_string(),
         http_status,
-        prompt_tokens,
-        completion_tokens,
-        cached_tokens,
-        cost,
+        prompt_tokens: metrics.prompt_tokens,
+        completion_tokens: metrics.completion_tokens,
+        cached_tokens: metrics.cached_tokens,
+        cost: metrics.cost,
         error_message: error_message.map(|s| s.to_string()),
     })
 }
