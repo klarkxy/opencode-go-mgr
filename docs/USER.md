@@ -9,6 +9,7 @@ true / false circuit breaker and protocol conversion actually work.
 
 - [What It Does](#what-it-does)
 - [Install And First Run](#install-and-first-run)
+- [Download, Upgrade, Backup, Restore, And Uninstall](#download-upgrade-backup-restore-and-uninstall)
 - [The Dashboard](#the-dashboard)
   - [Connection Center](#connection-center)
   - [Application Guides](#application-guides)
@@ -51,9 +52,9 @@ The four jobs of the gateway are:
 
 1. Run the NSIS setup `ocg-manager_<version>_windows-x64-setup.exe`. It
    installs for the current user without administrator rights.
-2. Launch **OCG Manager** from the Start menu. The main window is hidden
-   by default — open the dashboard from the tray icon.
-3. The first Windows release line is unsigned; SmartScreen may warn. Click
+2. Launch **OCG Manager** from the Start menu. A normal launch opens the
+   dashboard in your system browser; use the tray icon to open it again.
+3. Current Windows builds are unsigned; SmartScreen may warn. Click
    **More info → Run anyway** to continue.
 4. Add an OpenCode‑Go account in the **Accounts** view, copy the Gateway
    Key, and point your client at `http://127.0.0.1:9042/v1`.
@@ -65,16 +66,68 @@ The four jobs of the gateway are:
 1. Open the Universal DMG and drag **OCG Manager** to **Applications**.
 2. The app is ad‑hoc signed, so on the first launch macOS may block it. Open
    **Privacy & Security** and click **Open Anyway** to allow it.
-3. Open the dashboard from the tray icon, add an account, copy the Gateway
-   Key, and configure your client.
+3. Launch the app. A normal launch opens the dashboard in your system
+   browser; use the tray icon to reopen it. Add an account, copy the
+   Gateway Key, and configure your client.
 
 ### Linux x64
 
 1. Install the `.deb` with your package manager, or mark the AppImage
    executable with `chmod +x ocg-manager_<version>_linux-x64.AppImage`.
 2. Verify the download against `SHA256SUMS` first.
-3. Launch the executable. The dashboard opens from the tray icon.
+3. Launch the executable. A normal launch opens the dashboard in your
+   system browser; use the tray icon to reopen it.
 4. Data lives in `~/.ocg-mgr/`.
+
+The installed Windows auto-start path stays in the tray without opening a
+browser.
+
+## Download, Upgrade, Backup, Restore, And Uninstall
+
+Download the GUI package or CLI archive for your platform from the
+[latest GitHub Release](https://github.com/klarkxy/opencode-go-mgr/releases/latest),
+plus `SHA256SUMS` from the same release. Compare the matching checksum
+before installing: use `Get-FileHash <file> -Algorithm SHA256` on
+PowerShell, `shasum -a 256 <file>` on macOS, or `sha256sum <file>` on
+Linux.
+
+Before an upgrade or restore, stop every process using the data: choose
+**Quit** from the desktop tray, stop the CLI with Ctrl+C or its service
+manager, or run `docker compose stop`. Then copy the **entire** GUI data
+directory, CLI data directory, or Docker `ocg-data` volume. A stopped
+Docker container can be copied with
+`docker compose cp ocg-manager:/data/. ./ocg-data-backup`. Check that the
+backup contains `data.sqlite` and, where present, `.encryption-key`.
+
+To restore, stop the process, move the current data aside, copy the whole
+backup back to its original directory or an empty Docker volume, and then
+start the same or a newer version. Docker files in `/data` must remain
+writable by UID/GID `10001`. The Windows GUI obfuscation is bound to the
+Windows user and machine, so its data cannot directly restore account keys
+or passwords on another machine; create fresh data there and re-enter the
+credentials. macOS/Linux GUI, CLI, and Docker restores must preserve
+`.encryption-key` or the explicitly supplied `--encryption-key` /
+`OCG_MANAGER_ENCRYPTION_KEY` value. There is no automatic downgrade
+compatibility guarantee; do not open a newer database with an older build.
+
+Upgrade and uninstall by surface:
+
+- **Windows GUI:** run the new installer over the current install. Remove
+  it from Windows **Installed apps**; the uninstaller asks whether to
+  delete `%USERPROFILE%\.ocg-mgr`.
+- **macOS GUI:** replace the app in **Applications** with the new DMG copy.
+  Delete the app to uninstall; remove `~/.ocg-mgr` separately only when
+  you also intend to delete the data.
+- **Linux GUI:** install the new `.deb` over the old package, or replace
+  the AppImage. Remove the package or AppImage to uninstall; data remains
+  in `~/.ocg-mgr` until you delete it.
+- **CLI:** replace the extracted package as a unit so the executable,
+  `dist/`, and `LICENSE` stay together. Delete that package to uninstall;
+  its data remains in `~/.ocg-mgr-cli` or the custom `--data-dir`.
+- **Docker:** after backing up, update the checkout and run
+  `docker compose up -d --build`. `docker compose down` removes containers
+  but keeps `ocg-data`; `docker compose down -v` permanently deletes the
+  volume and is only for an intentional reset after a verified backup.
 
 ## The Dashboard
 
@@ -82,7 +135,7 @@ The dashboard is a single‑page Vue 3 application served by the gateway. The
 left rail exposes four views: **Dashboard**, **Accounts**, **Applications**,
 and **Logs**, plus the **Settings** menu. The top right of the header
 contains the theme switcher, the language switcher, and the sign‑out
-button. The footer carries the about line and version.
+button.
 
 The dashboard speaks ten languages out of the box: 简体中文, 繁體中文,
 English, 日本語, 한국어, Español, Français, Deutsch, Português (Brasil),
@@ -139,8 +192,9 @@ The **Accounts** view lets you create, edit, enable, disable, and remove
 OpenCode‑Go accounts. Each account card shows the account name, the
 cooldown state, and the 5‑hour / weekly / monthly usage bars driven by
 local accounting. You can paste an OpenCode‑Go `username` and `password`
-alongside the key; the password is stored encrypted and used by the
-gateway to refresh upstream sessions when needed.
+alongside the key; both the key and saved password are only obfuscated on
+disk. The gateway uses the password to refresh upstream sessions when
+needed.
 
 You can also reset a cooldown manually from this view. The bar snaps back
 to its local estimate as soon as the cooldown is cleared.
@@ -151,8 +205,8 @@ The **Logs** view shows the rolling buffer of requests the gateway has
 forwarded, including the timestamp, the chosen account, the model, the
 status code, the upstream error if any, and the streamed usage when the
 upstream emitted a usage chunk. Rows with `success_no_usage` mean the
-stream finished without a usage chunk; cost is exact only when the
-upstream emits usage data.
+stream finished without a usage chunk. A usage chunk makes token counts
+accurate; cost is still estimated from the local model price table.
 
 ### Settings
 
@@ -184,22 +238,26 @@ The gateway is served at `http://<bind>:<port>` and exposes:
 | `GET`  | `/v1/models` | OpenAI model list |
 | `GET`  | `/dashboard/` | Vue 3 dashboard (HTML) |
 | `*`    | `/dashboard/api/...` | Dashboard JSON API |
-| `GET`  | `/healthz` | Liveness probe used by the Docker healthcheck |
 
 The default bind is `127.0.0.1:9042`. The CLI can override the host with
 `serve --host 0.0.0.0` and the port with `serve --port <port>`. The
 desktop app also binds loopback and uses a Tauri single‑instance lock to
-prevent two tray apps from competing for the port.
+prevent two tray apps from competing for the port. There is no HTTP health
+endpoint; Docker checks container-internal TCP port `9042`.
 
 ### Authentication
 
-The gateway uses two different authentication mechanisms depending on
-where the request comes from:
+Gateway API endpoints require the **Gateway Key**, accepted as either
+`Authorization: Bearer <key>` or the Anthropic-compatible
+`x-api-key: <key>` header. Dashboard authentication depends on the
+listener bind:
 
 - **Loopback binds (the default).** Requests that come straight to the
-  loopback address skip dashboard login. The client only needs the
-  **Gateway Key** in `Authorization: Bearer <key>` to reach the upstream
-  endpoints. This is what the desktop app and the default CLI use.
+  loopback address skip dashboard login unless they carry `Forwarded`,
+  `x-forwarded-for`, `x-forwarded-proto`, or `x-real-ip`; any of those
+  headers requires login. The client still needs the **Gateway Key** to
+  reach the upstream endpoints. This is what the desktop app and the
+  default CLI use.
 - **Non‑loopback binds.** A single administrator account, stored as an
   Argon2 password hash in SQLite, governs the dashboard. Sign‑in returns
   an HttpOnly session cookie. Standard reverse‑proxy forwarding headers
@@ -207,10 +265,32 @@ where the request comes from:
   administrator can be bootstrapped with `OCG_ADMIN_USERNAME` and
   `OCG_ADMIN_PASSWORD`; otherwise the first registration wins.
 
-The Gateway Key in the `Authorization` header is the only credential the
-client needs. It is local — it has nothing to do with the OpenCode‑Go
-account key, which the gateway retrieves from SQLite and sends upstream as
-its own `Authorization: Bearer <opencode-go-key>` header.
+The Gateway Key is the only credential the client needs. It is local — it
+has nothing to do with the OpenCode‑Go account key, which the gateway
+retrieves from SQLite and sends upstream with its own
+`Authorization: Bearer <opencode-go-key>` header.
+
+Minimal POSIX-shell checks for all three protocols:
+
+```bash
+BASE=http://127.0.0.1:9042
+KEY=replace-with-gateway-key
+
+# OpenAI Chat Completions
+curl "$BASE/v1/chat/completions" -H "Authorization: Bearer $KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"ping"}],"stream":false}'
+
+# OpenAI Responses
+curl "$BASE/v1/responses" -H "Authorization: Bearer $KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"deepseek-v4-flash","input":"ping","store":false}'
+
+# Anthropic Messages
+curl "$BASE/v1/messages" -H "x-api-key: $KEY" \
+  -H "anthropic-version: 2023-06-01" -H "Content-Type: application/json" \
+  -d '{"model":"deepseek-v4-flash","max_tokens":16,"messages":[{"role":"user","content":"ping"}]}'
+```
 
 ### Protocol Conversion
 
@@ -255,8 +335,10 @@ cooling down, the gateway returns `429` with the soonest reset time.
 
 The 5‑hour, weekly, and monthly bars are local estimates. They are driven
 by the requests the gateway actually forwards, not by the upstream's
-authoritative billing. Streaming cost is exact only when the upstream
-emits a usage chunk; otherwise the log row ends with `success_no_usage`.
+authoritative billing. An upstream usage chunk provides accurate streaming
+token counts, but cost always remains an estimate calculated from the
+local model price table. Without a usage chunk, the log row ends with
+`success_no_usage`.
 
 The dashboard always pairs a bar with the account's cooldown state. While
 a true circuit breaker is active, the matching bar is forced to 100% and
@@ -293,15 +375,16 @@ is `ocg-manager-cli.exe`; on Linux you may need `chmod +x
 ocg-manager-cli` after extraction.
 
 The CLI data directory defaults to `~/.ocg-mgr-cli` on every platform; you
-can override it with `--data-dir <path>`. The encryption key defaults to
-`<data-dir>/.encryption-key`; you can override it with `--encryption-key
-<key>` or the `OCG_MANAGER_ENCRYPTION_KEY` environment variable.
+can override it with `--data-dir <path>`. The obfuscation secret defaults
+to `<data-dir>/.encryption-key`; you can override it with the named
+`--encryption-key <key>` option or the `OCG_MANAGER_ENCRYPTION_KEY`
+environment variable.
 
 ```text
 ocg-manager-cli
 ├── serve         Start the gateway server
 │   --host        Address to listen on (default 127.0.0.1)
-│   -p, --port    Gateway port (overrides config)
+│   -p, --port    Gateway port (sets and saves config)
 │   --dashboard-dir  Directory containing the built web dashboard
 ├── key list      List accounts and their enabled state
 ├── key add <name> <key>
@@ -325,10 +408,13 @@ The fastest way to bootstrap a headless gateway:
 ./ocg-manager-cli serve --port 9042
 ```
 
-`key ping` decrypts the key, sends a tiny chat completion, and prints the
-real upstream status code and a short body excerpt — use it to surface
-real `401`/`403`/`429`/`200` from each key without going through the
-dashboard.
+`serve --port <port>` writes the new port to SQLite. Later `serve` runs
+without `--port` reuse that saved value.
+
+`key ping` reads the obfuscated key, sends a tiny chat completion, and
+prints the real upstream status code and a short body excerpt — use it to
+surface real `401`/`403`/`429`/`200` from each key without going through
+the dashboard.
 
 ## Docker
 
@@ -346,14 +432,20 @@ docker compose logs ocg-manager
 together; setting only one stops startup with an error. Once an
 administrator exists, later environment changes do not reset it. When
 both are omitted, the first visitor creates the administrator in the
-dashboard.
+dashboard. After the administrator exists, you may remove both variables
+while keeping the volume; the stored account remains.
 
-Open the dashboard URL printed in the logs and sign in. Data and the
-generated encryption key persist in the `ocg-data` volume. The container
-publishes the gateway only at `127.0.0.1:9042` on the host. Direct
-requests to a gateway bound to a loopback address skip dashboard login;
-reverse‑proxied requests still require it. The container's `HEALTHCHECK`
-hits `127.0.0.1:9042` over TCP every 30 seconds.
+Set `OCG_PORT` in `.env` to change the host port; the container still uses
+port `9042`. Open `http://127.0.0.1:<OCG_PORT>/dashboard/` and sign in.
+Data and the generated `.encryption-key` obfuscation secret persist in the
+`ocg-data` volume. The container process binds `0.0.0.0`, so the dashboard
+requires administrator login even when it is published only on host
+`127.0.0.1`. That host mapping limits reachability; it does not enable
+loopback login bypass. The container's `HEALTHCHECK` opens
+`127.0.0.1:9042` over TCP every 30 seconds; there is no `/healthz` route.
+
+CLI startup prints the Gateway Key, so `docker compose logs` is sensitive.
+Restrict access to those logs and regenerate the Gateway Key if they leak.
 
 For HTTPS, point an existing reverse proxy at that loopback port. For
 example, with Caddy:
@@ -373,12 +465,15 @@ intentionally want to delete all stored accounts, credentials, and keys.
 - **GUI data location.** Windows: `%USERPROFILE%\.ocg-mgr`. macOS / Linux:
   `~/.ocg-mgr`. CLI data defaults to `~/.ocg-mgr-cli` on every platform
   and can be overridden with `--data-dir <path>`.
-- **Key storage.** Keys are obfuscated before storage, not strongly
-  encrypted. The macOS / Linux GUI and the CLI also place a
+- **Credential storage.** Account keys and saved login passwords are
+  obfuscated before storage; this is not cryptographic protection. The
+  macOS / Linux GUI and the CLI also place a
   `.encryption-key` file inside the data directory; **back it up with
   the database** because losing it makes stored credentials unreadable.
-  Treat anyone with the data directory and the binary as able to recover
-  stored keys.
+  Obfuscation is not a security boundary: anyone with the data directory
+  and its `.encryption-key`, or able to run the Windows GUI in the original
+  Windows user/machine context, can recover account keys and saved login
+  passwords.
 - **No cross‑node sync.** Each node manages its own accounts through its
   own dashboard. OCG Manager does not synchronize account credentials
   between nodes.
@@ -404,8 +499,9 @@ intentionally want to delete all stored accounts, credentials, and keys.
   `tool_search` cannot run on OpenCode‑Go. Their declarations are dropped
   in automatic tool mode; explicitly forcing one returns a `400` error.
   Function, custom, and namespace tools are converted normally.
-- Streaming cost is exact only when upstream emits usage chunks; otherwise
-  logs end as `success_no_usage`.
+- Streaming token counts are accurate only when upstream emits usage
+  chunks; cost always uses the local price table. Without usage, logs end
+  as `success_no_usage`.
 - The current HTTP dashboard does not expose the older isolated WebView
   browser command.
 - The installed Windows desktop dashboard can start OCG Manager in the
@@ -419,8 +515,10 @@ intentionally want to delete all stored accounts, credentials, and keys.
 
 - **The dashboard never opens from the tray.** Another process is bound
   to `127.0.0.1:9042`, or a previous tray app still holds the
-  single‑instance lock. Quit the release tray app (or run
-  `scripts/free-dev-port.mjs` to clean stale Vite processes) and retry.
+  single‑instance lock. Quit that process or the previous release tray app
+  and retry. For source development only, `scripts/free-dev-port.mjs`
+  clears stale Vite processes on port `30001`; it does not release `9042`
+  or the desktop single-instance lock.
 - **`401 Unauthorized` from the upstream.** The OpenCode‑Go account key
   is invalid or revoked. Open the **Accounts** view, replace the key,
   and try again. `key ping <id>` is the fastest way to confirm.
@@ -435,13 +533,16 @@ intentionally want to delete all stored accounts, credentials, and keys.
   add / enable another account.
 - **Docker first‑run registration does not pick up my `OCG_ADMIN_PASSWORD`.**
   The variables are only honored when the database has no administrator
-  yet. Reset the `ocg-data` volume to bootstrap a fresh administrator.
+  yet. Use the stored administrator account. Recreate `ocg-data` only for
+  an intentional full reset after a verified backup; doing so erases every
+  account, credential, and setting.
 - **SmartScreen / Gatekeeper warns about the installer or the DMG.** The
-  first Windows release line is unsigned and the macOS app is ad‑hoc
+  current Windows builds are unsigned and the macOS app is ad‑hoc
   signed. Use **Open Anyway** for the first launch; the warning is not a
   sign of tampering.
 
 ---
 
 [中文用户指南](USER.zh-CN.md) · [Maintainer guide](MAINTAINER.md) ·
-[维护者指南](MAINTAINER.zh-CN.md) · [Back to README](../README.md)
+[维护者指南](MAINTAINER.zh-CN.md) · [Security policy](../SECURITY.md) ·
+[Back to README](../README.md)

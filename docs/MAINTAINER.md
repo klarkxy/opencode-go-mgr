@@ -9,13 +9,16 @@ out of scope.
 ## Table Of Contents
 
 - [Layout](#layout)
+- [Prerequisites](#prerequisites)
 - [Development](#development)
 - [Checks And Builds](#checks-and-builds)
 - [Rust Checks](#rust-checks)
 - [Frontend Checks](#frontend-checks)
 - [Architecture Notes](#architecture-notes)
+- [Upgrades And Database Migrations](#upgrades-and-database-migrations)
 - [Release Artifacts](#release-artifacts)
 - [CI Workflow](#ci-workflow)
+- [Release Procedure](#release-procedure)
 - [Release Validation Checklist](#release-validation-checklist)
 - [Known Debt](#known-debt)
 - [Coding Conventions](#coding-conventions)
@@ -47,6 +50,15 @@ ocg-manager/
 Tauri `invoke()`. Tauri commands still register in
 `src-tauri/src/commands/`, but they are not the main Vue data path — the
 HTTP dashboard is.
+
+## Prerequisites
+
+Use Node.js 22 (the CI baseline), pnpm 10.29.2, and Rust 1.85 or newer.
+Native build dependencies vary by runner; treat
+`.github/workflows/release.yml` as the source of truth. The current Linux
+runner installs `libwebkit2gtk-4.1-dev libayatana-appindicator3-dev
+librsvg2-dev libxdo-dev libssl-dev patchelf libfuse2 xvfb xauth xdg-utils
+dbus-x11`.
 
 ## Development
 
@@ -95,10 +107,13 @@ pnpm run build
 ## Rust Checks
 
 ```bash
-cargo fmt --all
+cargo fmt --all -- --check
 cargo check --workspace --all-targets
 cargo test --workspace
 ```
+
+The first command checks formatting without changing files. Run
+`cargo fmt --all` to apply formatting.
 
 For focused work:
 
@@ -168,6 +183,14 @@ Pair them with `pnpm run build:web` for a final smoke test.
 Each node owns its account data and is managed through its own dashboard.
 There is no cross‑node sync and no Admin API. Do not add one.
 
+## Upgrades And Database Migrations
+
+SQLite migrations run in place when the GUI or CLI starts. Stop the process
+and back up the complete data directory before upgrading, including the
+database and `.encryption-key` when present. Downgrades are not guaranteed;
+to roll back, restore the data backup made by the matching older version
+instead of opening a migrated database with an older binary.
+
 ## Release Artifacts
 
 The supported matrix is intentionally small:
@@ -208,7 +231,8 @@ assets. Windows has no portable GUI artifact.
 4. Builds the CLI binary, packages it with `dist/` and `LICENSE` into
    the per‑platform archive, and on macOS uses `lipo` + `codesign -` to
    create the universal CLI.
-5. Writes `SHA256SUMS` over the staged artifacts.
+5. Writes `SHA256SUMS` over every payload in the staged `release/`
+   directory.
 6. Atomically replaces `release/`. On any error, the previous `release/`
    is preserved and the staged tree is removed.
 
@@ -252,16 +276,46 @@ Each runner also runs a smoke flow on the freshly built bundle:
   WEBKIT_DISABLE_COMPOSITING_MODE=1` and wait for the dashboard.
 
 When a `v*` tag is pushed, a downstream `draft-release` job downloads the
-three artifacts, assembles `release/`, regenerates `SHA256SUMS`, and
-creates or updates a **draft** GitHub Release. It never publishes the
-release. After reviewing the draft and the native smoke results,
-publish the release in GitHub or run `gh release edit vX.Y.Z --draft=false`.
+three per-runner Actions artifacts, assembles the seven platform payloads in
+`release/`, regenerates `SHA256SUMS` over all seven, and creates or updates a
+**draft** GitHub Release. It never publishes the release. After reviewing the
+draft and the native smoke results, publish the release in GitHub or run
+`gh release edit vX.Y.Z --draft=false`.
 
-The initial Windows setup is unsigned and macOS uses ad‑hoc signing
+Current Windows installers are unsigned and macOS uses ad‑hoc signing
 (`-`), not Developer ID notarization. Keep releases in draft until
 native smoke checks and platform warnings are reviewed. Windows/Linux
 ARM64, 32‑bit x86, RPM, Snap, app stores, and automatic updates remain
 unsupported.
+
+### CI Coverage Boundaries
+
+The repository has no `pull_request` workflow, so these checks do not run
+automatically on PRs. The release workflow also does not build or smoke-test
+the Docker image, drive real desktop UI interactions, or test backup/restore,
+database downgrade, or migration rollback. Run the relevant checks manually
+when changing those paths.
+
+## Release Procedure
+
+1. Choose `X.Y.Z` and set it in `package.json`,
+   `src-tauri/tauri.conf.json`, the workspace `Cargo.toml`, and
+   `src-tauri/Cargo.toml`.
+2. Run `cargo check --workspace --all-targets` to refresh `Cargo.lock`, then
+   run `pnpm install --frozen-lockfile`, `cargo fmt --all -- --check`,
+   `pnpm run test`, `pnpm run design:lint`, and `pnpm run build`. Commit the
+   intended lockfile changes; never hand-edit them.
+3. Review the diff and current-platform `release/` payloads, then commit the
+   version and lockfile changes.
+4. Create an annotated tag on that commit with
+   `git tag -a vX.Y.Z -m "OCG Manager vX.Y.Z"`, then push the branch and tag.
+5. Wait for every `release.yml` matrix job and `draft-release` to pass. Review
+   the draft's seven payloads, `SHA256SUMS`, smoke logs, and platform warnings.
+6. Publish the draft in GitHub or run
+   `gh release edit vX.Y.Z --draft=false`, then verify the public release.
+
+Treat published assets and tags as immutable. If a published payload is wrong,
+ship a new patch version; do not replace the asset or retarget the tag.
 
 ## Release Validation Checklist
 
@@ -270,7 +324,9 @@ covers most of them; the manual parts need a real desktop.
 
 - [ ] `pnpm run test`, `pnpm run design:lint`, `pnpm run build` are
       green on the three runners.
-- [ ] `release/SHA256SUMS` matches the three native artifacts.
+- [ ] Each runner's `release/SHA256SUMS` matches every payload in that
+      directory; the aggregated release checksum matches all seven platform
+      payloads.
 - [ ] On Windows, run the installer once, confirm SmartScreen warning
       text, open the dashboard, add an account, send one request.
 - [ ] On macOS, mount the DMG, confirm the **Open Anyway** flow works,
@@ -332,4 +388,5 @@ covers most of them; the manual parts need a real desktop.
 ---
 
 [中文维护者指南](MAINTAINER.zh-CN.md) · [User guide](USER.md) ·
-[用户指南](USER.zh-CN.md) · [Back to README](../README.md)
+[用户指南](USER.zh-CN.md) · [Security policy](../SECURITY.md) ·
+[Back to README](../README.md)

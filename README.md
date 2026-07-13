@@ -36,6 +36,15 @@ Windows, macOS, and Linux; a headless CLI is shipped alongside the GUI.
 - **No remote sync, no telemetry** — each node owns its own data; there is no
   cloud service, no Admin API, and no cross‑node synchronization.
 
+## Download
+
+Download the GUI installer or CLI archive for your platform from the
+[latest GitHub Release](https://github.com/klarkxy/opencode-go-mgr/releases/latest).
+Download `SHA256SUMS` from the same release and compare the matching entry with
+the artifact's SHA-256 before installing. On PowerShell use
+`Get-FileHash <file> -Algorithm SHA256`; on macOS use `shasum -a 256 <file>`;
+on Linux use `sha256sum <file>`.
+
 ## Quick Start
 
 The default gateway address and the header that carries the local key:
@@ -59,9 +68,11 @@ curl http://127.0.0.1:9042/v1/chat/completions \
   -d '{"model":"glm-5.2","messages":[{"role":"user","content":"hello"}],"stream":true}'
 ```
 
-The first time you launch the desktop app, open the dashboard from the tray
-icon, add an OpenCode‑Go account, copy the Gateway Key, and point any
-OpenAI‑compatible client at `http://127.0.0.1:9042/v1`.
+On a normal desktop launch, OCG Manager opens the dashboard in your system
+browser after the Gateway is ready. Add an OpenCode‑Go account, copy the
+Gateway Key, and point any OpenAI‑compatible client at
+`http://127.0.0.1:9042/v1`. If the browser does not open or you close the tab,
+use the tray icon to reopen the dashboard.
 
 ## True And False Circuit Breakers
 
@@ -111,6 +122,7 @@ that could double‑bill the request.
 - [中文 README](README.zh-CN.md) · [English README](README.md)
 - [User guide](docs/USER.md) · [用户指南](docs/USER.zh-CN.md)
 - [Maintainer guide](docs/MAINTAINER.md) · [维护者指南](docs/MAINTAINER.zh-CN.md)
+- [Security policy](SECURITY.md)
 - [OpenCode‑Go anti‑abuse statement](OPENCODE_GO_ANTI_ABUSE.md) ·
   [OpenCode‑Go 防滥用声明](OPENCODE_GO_ANTI_ABUSE.zh-CN.md)
 
