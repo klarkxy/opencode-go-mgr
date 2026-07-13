@@ -389,7 +389,7 @@ onUnmounted(() => clearTimeout(copyTimer));
   align-items: center;
   gap: 6px;
   color: var(--ocg-success);
-  font: 700 10px/1 "Cascadia Mono", Consolas, monospace;
+  font: 700 16px/1 "Cascadia Mono", Consolas, monospace;
   letter-spacing: 0.08em;
 }
 .ready-mark > span {
@@ -421,7 +421,7 @@ onUnmounted(() => clearTimeout(copyTimer));
 .connection-value code {
   display: block;
   overflow: hidden;
-  font: 12px/1.4 "Cascadia Mono", Consolas, monospace;
+  font: 16px/1.4 "Cascadia Mono", Consolas, monospace;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -433,7 +433,7 @@ onUnmounted(() => clearTimeout(copyTimer));
 .connection-warning {
   margin: 10px 2px 0;
   color: var(--ocg-warning);
-  font-size: 11px;
+  font-size: 16px;
   line-height: 1.5;
 }
 .hero-character {
@@ -493,12 +493,12 @@ onUnmounted(() => clearTimeout(copyTimer));
 }
 .kpi-card small {
   color: var(--ocg-subtle);
-  font-size: 14px;
+  font-size: 16px;
 }
 .kpi-card span:last-child {
   margin-top: 3px;
   color: var(--ocg-subtle);
-  font-size: 11px;
+  font-size: 16px;
 }
 
 .card {
@@ -517,12 +517,12 @@ onUnmounted(() => clearTimeout(copyTimer));
 .card-title {
   margin: 0;
   color: var(--ocg-ink);
-  font: 650 15px/1.3 "Bahnschrift", "Segoe UI Variable Display", sans-serif;
+  font: 650 18px/1.3 "Bahnschrift", "Segoe UI Variable Display", sans-serif;
 }
 .card-desc {
   margin: 3px 0 0;
   color: var(--ocg-subtle);
-  font-size: 11px;
+  font-size: 16px;
 }
 .chart-card {
   padding-bottom: 12px;
@@ -533,7 +533,7 @@ onUnmounted(() => clearTimeout(copyTimer));
   justify-content: flex-end;
   gap: 8px 16px;
   color: var(--ocg-subtle);
-  font-size: 11px;
+  font-size: 16px;
 }
 .chart-stats b {
   color: var(--ocg-ink);
@@ -551,7 +551,7 @@ onUnmounted(() => clearTimeout(copyTimer));
   align-items: center;
   gap: 5px;
   color: var(--ocg-muted);
-  font-size: 10px;
+  font-size: 16px;
 }
 .legend-dot {
   width: 7px;
@@ -588,13 +588,13 @@ onUnmounted(() => clearTimeout(copyTimer));
 .account-top strong {
   overflow: hidden;
   color: var(--ocg-ink);
-  font-size: 13px;
+  font-size: 16px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .account-status {
   flex: 0 0 auto;
-  font-size: 10px;
+  font-size: 16px;
   font-weight: 650;
 }
 .account-status.active { color: var(--ocg-success); }
@@ -602,7 +602,7 @@ onUnmounted(() => clearTimeout(copyTimer));
 .account-status.disabled { color: var(--ocg-subtle); }
 .account-usage {
   color: var(--ocg-subtle);
-  font-size: 10px;
+  font-size: 16px;
   line-height: 1.5;
 }
 

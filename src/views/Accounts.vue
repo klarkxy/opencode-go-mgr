@@ -772,7 +772,7 @@ onUnmounted(() => window.clearInterval(clock));
   display: flex;
   justify-content: space-between;
   gap: 12px;
-  font-size: 12px;
+  font-size: 16px;
   color: var(--n-text-color-2);
 }
 

@@ -16,17 +16,23 @@
         >
           <div class="client-root-field">
             <n-input
-              v-model:value="config.client_root_url"
-              clearable
+              v-model:value="clientRootInputValue"
+              :readonly="config.client_root_url_from_env"
+              :clearable="!config.client_root_url_from_env && !!config.client_root_url"
               class="mono"
               :input-props="{
                 'aria-label': t('下游访问根地址（可选）'),
                 'aria-describedby': 'client-root-help',
               }"
-              placeholder="https://ocg.example.com"
               @blur="normalizeClientRootInput"
             />
             <p id="client-root-help">
+              <template v-if="config.client_root_url_from_env">
+                {{ t("由环境变量 OCG_CLIENT_ROOT_URL 管理；修改环境变量并重启后生效。") }}<br />
+              </template>
+              <span v-else-if="!config.client_root_url.trim()" class="sr-only">
+                {{ automaticClientRootFeedback }}
+              </span>
               {{ t("仅用于下游教程、展示和复制；不会修改 Gateway 监听、DNS 或反向代理。") }}
             </p>
           </div>
@@ -321,6 +327,7 @@ const config = ref<AppConfig>({
   gateway_key: "",
   upstream_base_url: "https://opencode.ai/zen/go",
   client_root_url: "",
+  client_root_url_from_env: false,
   auto_start: false,
   auto_start_supported: false,
   connect_timeout_secs: 30,
@@ -335,6 +342,27 @@ const themeLabel = computed(() => {
   return t("默认 · {theme}", { theme: resolved });
 });
 const maskedSettingsKey = computed(() => maskConnectionKey(config.value.gateway_key));
+
+const automaticClientRootUrls = computed(() => resolveConnectionUrls(
+  "",
+  window.location.origin,
+  config.value.gateway_port,
+  import.meta.env.DEV,
+));
+const automaticClientRootFeedback = computed(() => t(
+  "未配置时自动使用：{root}（API Base URL：{api}）；自动值不会写入设置。",
+  {
+    root: automaticClientRootUrls.value.rootUrl,
+    api: automaticClientRootUrls.value.apiBaseUrl,
+  },
+));
+
+const clientRootInputValue = computed({
+  get: () => config.value.client_root_url || automaticClientRootUrls.value.rootUrl,
+  set: (value: string) => {
+    if (!config.value.client_root_url_from_env) config.value.client_root_url = value;
+  },
+});
 
 const clientRootPreview = computed<{
   status?: "error" | "warning";
@@ -354,7 +382,7 @@ const clientRootPreview = computed<{
       };
     }
     if (!config.value.client_root_url.trim()) {
-      return { feedback: t("留空时自动使用：{root}（API Base URL：{api}）", { root: urls.rootUrl, api: urls.apiBaseUrl }) };
+      return { feedback: automaticClientRootFeedback.value };
     }
     return { feedback: t("API Base URL：{url}", { url: urls.apiBaseUrl }) };
   } catch (error) {
@@ -416,6 +444,7 @@ function cancelGatewayKeyEdit() {
 }
 
 function normalizeClientRootInput(): boolean {
+  if (config.value.client_root_url_from_env) return true;
   try {
     config.value.client_root_url = normalizeClientRootUrl(config.value.client_root_url);
     return true;
@@ -511,7 +540,7 @@ onUnmounted(() => clearTimeout(copyTimer));
 .settings-head p {
   margin: 4px 0 0;
   color: var(--ocg-subtle);
-  font-size: 11px;
+  font-size: 16px;
 }
 .key-field {
   display: grid;
@@ -528,7 +557,7 @@ onUnmounted(() => clearTimeout(copyTimer));
 .key-stack > p {
   margin: 0;
   color: var(--ocg-subtle);
-  font-size: 11px;
+  font-size: 16px;
   line-height: 1.5;
 }
 .key-display {
@@ -544,7 +573,7 @@ onUnmounted(() => clearTimeout(copyTimer));
 .key-display code {
   overflow: hidden;
   color: var(--ocg-ink);
-  font: 12px/1.4 "Cascadia Mono", Consolas, monospace;
+  font: 16px/1.4 "Cascadia Mono", Consolas, monospace;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -560,7 +589,7 @@ onUnmounted(() => clearTimeout(copyTimer));
 .client-root-field > p {
   margin: 6px 0 0;
   color: var(--ocg-subtle);
-  font-size: 11px;
+  font-size: 16px;
   line-height: 1.5;
 }
 .settings-subsection {
@@ -571,12 +600,12 @@ onUnmounted(() => clearTimeout(copyTimer));
 .settings-subsection h3 {
   margin: 0;
   color: var(--ocg-ink);
-  font: 700 15px/1.3 "Bahnschrift", "Segoe UI Variable Display", sans-serif;
+  font: 700 18px/1.3 "Bahnschrift", "Segoe UI Variable Display", sans-serif;
 }
 .settings-subsection > p {
   margin: 4px 0 14px;
   color: var(--ocg-subtle);
-  font-size: 11px;
+  font-size: 16px;
 }
 .theme-grid {
   display: grid;
@@ -596,7 +625,7 @@ onUnmounted(() => clearTimeout(copyTimer));
   border-radius: 10px;
   color: var(--ocg-muted);
   background: var(--ocg-canvas);
-  font: 600 13px/1 "Segoe UI Variable Text", "Microsoft YaHei UI", sans-serif;
+  font: 600 16px/1 "Segoe UI Variable Text", "Microsoft YaHei UI", sans-serif;
   cursor: pointer;
   transition: border-color 0.16s ease, box-shadow 0.16s ease, color 0.16s ease;
 }
@@ -631,7 +660,7 @@ onUnmounted(() => clearTimeout(copyTimer));
   position: absolute;
   top: 5px;
   right: 5px;
-  font-size: 12px;
+  font-size: 16px;
 }
 .update-result {
   margin-top: 14px;
@@ -657,14 +686,14 @@ onUnmounted(() => clearTimeout(copyTimer));
 }
 .update-versions dt {
   color: var(--ocg-subtle);
-  font-size: 11px;
+  font-size: 16px;
 }
 .update-versions dd {
   margin: 0;
 }
 .update-result-content code {
   color: var(--ocg-ink);
-  font: 600 13px/1.4 "Cascadia Mono", Consolas, monospace;
+  font: 600 16px/1.4 "Cascadia Mono", Consolas, monospace;
 }
 
 @media (max-width: 800px) {

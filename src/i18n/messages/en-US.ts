@@ -160,6 +160,12 @@ export const enUSMessages = {
   "配置示例": "Configuration examples",
   "已复制": "Copied",
   "复制配置": "Copy configuration",
+  "自动读取 /v1/models，并仅显示当前节点可用模型。": "Models are loaded automatically from /v1/models, showing only models available on this node.",
+  "选择模型 ID": "Select a model ID",
+  "未返回可用模型": "No available models were returned",
+  "一键导入": "Import directly",
+  "即将把当前 Gateway Key 交给 {app}。": "The current Gateway Key will be passed to {app}.",
+  "客户端导入链接无效": "The client import link is invalid",
   "验证方法": "How to verify",
   "在客户端发送一次测试消息，再到 OCG Manager 的“请求日志”确认模型、账号和成功状态。": "Send a test message from the client, then check OCG Manager's Request Logs for the model, account, and success status.",
   "注意事项": "Notes",
@@ -187,7 +193,7 @@ export const enUSMessages = {
 
   "使用 OpenAI Compatible AI SDK provider，将 OCG Manager 注册为自定义服务商。": "Use the OpenAI Compatible AI SDK provider to register OCG Manager as a custom provider.",
   "把下面的 provider 配置合并到项目或用户级 opencode.json。": "Merge the provider configuration below into the project or user-level opencode.json.",
-  "按节点可用模型调整 models 和默认 model，保留 npm 为 @ai-sdk/openai-compatible。": "Adjust models and the default model for your node, and keep npm set to @ai-sdk/openai-compatible.",
+  "在启动 OpenCode 的同一终端设置 OCG_API_KEY 环境变量。": "Set OCG_API_KEY in the same terminal that launches OpenCode.",
   "在 OpenCode 中发送一条测试消息，再到 OCG Manager 的请求日志确认成功记录。": "Send a test message in OpenCode, then confirm the successful entry in OCG Manager's Request Logs.",
   "baseURL 必须使用带 /v1 的 API Base URL。": "baseURL must use the API Base URL that includes /v1.",
 
@@ -218,7 +224,7 @@ export const enUSMessages = {
 
   "选择 OpenAI Compatible provider，将对话请求转发到 OCG Manager。": "Choose the OpenAI Compatible provider to forward chat requests to OCG Manager.",
   "打开 Roo Code 配置，将 API Provider 选择为 OpenAI Compatible。": "Open Roo Code settings and set API Provider to OpenAI Compatible.",
-  "Agent 模式依赖模型的工具调用能力；仅聊天成功不代表所有模式均可用。": "Agent mode depends on the model's tool-calling capabilities; successful chat alone does not mean every mode will work.",
+  "Roo Code 仅支持原生工具调用；所选模型不支持 tools 时无法使用 Agent 模式。": "Roo Code only supports native tool calling; Agent mode cannot be used when the selected model does not support tools.",
 
   "在 Continue YAML 配置中添加 OpenAI provider，并明确关闭 Responses API。": "Add an OpenAI provider to the Continue YAML configuration and explicitly disable the Responses API.",
   "打开 Continue 用户级 YAML 配置，将下面的模型项合并到 models。": "Open Continue's user-level YAML configuration and merge the model entry below into models.",
@@ -262,6 +268,7 @@ export const enUSMessages = {
   "上游连接与访问凭据": "Upstream connection and access credentials",
   "下游访问根地址（可选）": "Downstream root URL (optional)",
   "仅用于下游教程、展示和复制；不会修改 Gateway 监听、DNS 或反向代理。": "Used only in downstream guides, display, and copy actions; it does not change the Gateway listener, DNS, or reverse proxy.",
+  "由环境变量 OCG_CLIENT_ROOT_URL 管理；修改环境变量并重启后生效。": "Managed by the OCG_CLIENT_ROOT_URL environment variable; restart after changing the variable.",
   "已脱敏 Key": "Masked key",
   "设置自定义 Key": "Set custom key",
   "新 Key": "New key",
@@ -294,7 +301,7 @@ export const enUSMessages = {
   "查看发布页": "View release",
   "检查更新失败": "Update check failed",
   "API Base URL：{url}。警告：非本机 HTTP 会明文传输 Gateway Key 与请求内容。": "API Base URL: {url}. Warning: non-local HTTP sends the Gateway Key and request content in plain text.",
-  "留空时自动使用：{root}（API Base URL：{api}）": "When blank, this uses {root} automatically (API Base URL: {api}).",
+  "未配置时自动使用：{root}（API Base URL：{api}）；自动值不会写入设置。": "When unconfigured, {root} is used automatically (API Base URL: {api}); the automatic value is not saved.",
   "API Base URL：{url}": "API Base URL: {url}",
   "地址格式无效": "Invalid URL format",
   "加载设置失败: {error}": "Failed to load settings: {error}",

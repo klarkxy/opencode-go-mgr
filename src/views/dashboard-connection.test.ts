@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { APPLICATION_GUIDES } from "./application-guides.ts";
+import {
+  APPLICATION_GUIDES,
+  buildChatboxConfig,
+  buildChatboxUrl,
+  buildCherryStudioUrl,
+} from "./application-guides.ts";
 import {
   maskConnectionKey,
   normalizeClientRootUrl,
@@ -77,20 +82,26 @@ test("connection URL derivation handles configured, development, and production 
   assert.equal(resolveConnectionUrls("https://192.168.1.8:9042", "https://ignored", 9042, false).insecureHttp, false);
 });
 
-test("application catalog has ten unique clients and never displays a complete key", () => {
-  assert.equal(APPLICATION_GUIDES.length, 10);
-  assert.equal(new Set(APPLICATION_GUIDES.map((guide) => guide.id)).size, 10);
+test("application catalog has nine verified clients and never displays a complete key", () => {
+  assert.equal(APPLICATION_GUIDES.length, 9);
+  assert.equal(new Set(APPLICATION_GUIDES.map((guide) => guide.id)).size, 9);
+  assert.ok(APPLICATION_GUIDES.every((guide) => String(guide.id) !== "trae"));
 
   const actualKey = "ocg-this-is-the-complete-secret-key";
   const urls = resolveConnectionUrls("https://edge.example.com/ocg", "https://ignored", 9042, false);
-  const context = { ...urls, displayKey: maskConnectionKey(actualKey), actualKey };
+  const context = {
+    ...urls,
+    displayKey: maskConnectionKey(actualKey),
+    actualKey,
+    modelId: "verified-model",
+    iconUrl: "https://edge.example.com/dashboard/ocg.png",
+  };
   const expectedAddress = new Map([
     ["claude-code", urls.rootUrl],
     ["codex", urls.apiBaseUrl],
     ["opencode", urls.apiBaseUrl],
     ["cherry-studio", urls.rootUrl],
     ["vscode-copilot", urls.chatCompletionsUrl],
-    ["trae", urls.apiBaseUrl],
     ["cline", urls.apiBaseUrl],
     ["roo-code", urls.apiBaseUrl],
     ["continue", urls.apiBaseUrl],
@@ -102,11 +113,104 @@ test("application catalog has ten unique clients and never displays a complete k
     assert.ok(snippets.length > 0, guide.id);
     assert.ok(snippets.every((snippet) => !snippet.display.includes(actualKey)), `${guide.id} display`);
     assert.ok(snippets.some((snippet) => snippet.copy.includes(actualKey)), `${guide.id} copy`);
+    assert.ok(snippets.some((snippet) => snippet.copy.includes(context.modelId)), `${guide.id} model`);
     assert.ok(
       snippets.some((snippet) => snippet.copy.includes(expectedAddress.get(guide.id)!)),
       `${guide.id} address`,
     );
   }
+
+  const claudeGuide = APPLICATION_GUIDES.find((guide) => guide.id === "claude-code");
+  assert.ok(claudeGuide);
+  const claudeSettings = JSON.parse(claudeGuide.snippets(context)[0].copy);
+  for (const variable of [
+    "ANTHROPIC_MODEL",
+    "ANTHROPIC_DEFAULT_FABLE_MODEL",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL",
+    "CLAUDE_CODE_SUBAGENT_MODEL",
+  ]) {
+    assert.equal(claudeSettings.env[variable], context.modelId, variable);
+  }
+  assert.equal(claudeSettings.env.ANTHROPIC_CUSTOM_MODEL_OPTION, context.modelId);
+
+  for (const appId of ["codex", "opencode"]) {
+    const guide = APPLICATION_GUIDES.find((candidate) => candidate.id === appId);
+    assert.ok(guide);
+    const snippets = guide.snippets(context);
+    assert.ok(snippets.some((snippet) => snippet.language === "powershell" && snippet.copy.includes(actualKey)));
+    assert.ok(snippets.some((snippet) => snippet.language === "bash" && snippet.copy.includes(actualKey)));
+  }
+  const openCode = APPLICATION_GUIDES.find((guide) => guide.id === "opencode");
+  assert.ok(openCode);
+  const openCodeConfig = JSON.parse(openCode.snippets(context)[0].copy);
+  assert.equal(openCodeConfig.provider.ocg.options.apiKey, "{env:OCG_API_KEY}");
+  assert.doesNotMatch(openCode.snippets(context)[0].copy, new RegExp(actualKey));
+});
+
+test("Cherry Studio and Chatbox imports encode the exact key and selected model", () => {
+  const urls = resolveConnectionUrls("https://edge.example.com/ocg", "https://ignored", 9042, false);
+  const context = {
+    ...urls,
+    displayKey: "ocg-…7890",
+    actualKey: "ocg-secret-key",
+    modelId: "selected-model",
+    iconUrl: "https://edge.example.com/dashboard/ocg.png",
+  };
+  const decode = (value: string, parameter: string) => {
+    const encoded = new URL(value).searchParams.get(parameter);
+    assert.ok(encoded);
+    return JSON.parse(Buffer.from(encoded, "base64").toString("utf8"));
+  };
+
+  const cherryUrl = buildCherryStudioUrl(context);
+  assert.equal(new URL(cherryUrl).protocol, "cherrystudio:");
+  assert.deepEqual(decode(cherryUrl, "data"), {
+    id: "new-api",
+    baseUrl: context.rootUrl,
+    apiKey: context.actualKey,
+  });
+  assert.doesNotMatch(cherryUrl, /sk-ocg-/);
+
+  const chatboxConfig = buildChatboxConfig(context);
+  assert.equal(chatboxConfig.id, `ocg-manager-${encodeURIComponent(context.rootUrl)}`);
+  assert.equal(chatboxConfig.settings.apiHost, context.rootUrl);
+  assert.equal(chatboxConfig.settings.apiPath, "/v1/chat/completions");
+  assert.equal(chatboxConfig.settings.apiKey, context.actualKey);
+  assert.equal(chatboxConfig.settings.models[0].modelId, context.modelId);
+  assert.deepEqual(chatboxConfig.settings.models[0].capabilities, ["tool_use"]);
+  const chatboxUrl = buildChatboxUrl(context);
+  assert.equal(new URL(chatboxUrl).protocol, "chatbox:");
+  assert.deepEqual(decode(chatboxUrl, "config"), chatboxConfig);
+});
+
+test("generated VS Code and Continue configs use their current complete shapes", () => {
+  const urls = resolveConnectionUrls("https://edge.example.com/ocg", "https://ignored", 9042, false);
+  const context = {
+    ...urls,
+    displayKey: "ocg-…7890",
+    actualKey: "ocg-secret-key",
+    modelId: "selected-model",
+    iconUrl: "https://edge.example.com/dashboard/ocg.png",
+  };
+  const vscode = APPLICATION_GUIDES.find((guide) => guide.id === "vscode-copilot")!;
+  const vscodeConfig = JSON.parse(vscode.snippets(context)[0].copy);
+  assert.equal(vscodeConfig[0].vendor, "customendpoint");
+  assert.equal(vscodeConfig[0].apiType, "chat-completions");
+  assert.equal(vscodeConfig[0].models[0].url, urls.chatCompletionsUrl);
+  assert.equal(vscodeConfig[0].models[0].id, context.modelId);
+  assert.equal(vscodeConfig[0].models[0].toolCalling, true);
+  assert.equal(vscodeConfig[0].models[0].vision, false);
+  assert.equal(vscodeConfig[0].models[0].maxInputTokens, 32768);
+  assert.equal(vscodeConfig[0].models[0].maxOutputTokens, 8192);
+
+  const continueGuide = APPLICATION_GUIDES.find((guide) => guide.id === "continue")!;
+  const yaml = continueGuide.snippets(context)[0].copy;
+  assert.match(yaml, /^name: OCG Manager\nversion: 1\.0\.0\nschema: v1\nmodels:/);
+  assert.match(yaml, /model: "selected-model"/);
+  assert.match(yaml, /useResponsesApi: false/);
+  assert.match(yaml, /capabilities:\n\s+- tool_use/);
 });
 
 test("dashboard keeps the connection center first and protects key regeneration", async () => {
@@ -134,17 +238,29 @@ test("dashboard and settings keep partial data safe", async () => {
   assert.match(app, /mode === "register"[\s\S]*getAuthStatus\(\)[\s\S]*status\?\.initialized/);
 });
 
-test("applications view keeps deep links and keyboard-accessible tabs", async () => {
+test("applications view uses deep-linked subpages and a responsive second navigation", async () => {
   const applications = await readFile(new URL("./Applications.vue", import.meta.url), "utf8");
   const app = await readFile(new URL("../App.vue", import.meta.url), "utf8");
 
   assert.match(applications, /DEFAULT_APPLICATION: ApplicationId = "claude-code"/);
   assert.match(applications, /url\.searchParams\.set\("app", value\)/);
-  assert.match(applications, /:tab-props="applicationTabProps\(guide\.id\)"/);
-  assert.match(applications, /event\.key === "ArrowRight"/);
-  assert.match(applications, /role="tabpanel"/);
+  assert.match(applications, /window\.history\.pushState/);
+  assert.match(applications, /<aside class="application-sider">/);
+  assert.doesNotMatch(applications, /<n-layout/);
+  assert.match(applications, /<n-menu/);
+  assert.match(applications, /<n-select/);
+  assert.match(applications, /tauriApi\.getApplicationModels\(\)/);
+  assert.doesNotMatch(applications, /Authorization: `Bearer/);
+  assert.doesNotMatch(applications, /\s+tag(?:\s|>)/);
+  assert.doesNotMatch(applications, /fetch\(`\$\{connectionUrls\.value\.apiBaseUrl\}/);
+  assert.doesNotMatch(applications, /<n-tabs/);
+  assert.doesNotMatch(applications, /<n-tab-pane/);
+  assert.doesNotMatch(applications, /class="page-head"/);
+  assert.doesNotMatch(applications, /class="guide-card"/);
   assert.match(applications, /\{\{ maskedKey \}\}/);
   assert.doesNotMatch(applications, /<code>\{\{ serviceConfig\.gateway_key \}\}<\/code>/);
+  assert.match(app, /<main class="app-content">/);
+  assert.doesNotMatch(app, /<n-layout-content/);
   assert.match(app, /"dashboard", "accounts", "apps", "logs", "settings"/);
 });
 
@@ -154,8 +270,16 @@ test("settings expose the downstream display root and bounded request timeouts",
   const dashboard = await readFile(new URL("./Dashboard.vue", import.meta.url), "utf8");
 
   assert.match(settings, /下游访问根地址（可选）/);
-  assert.match(settings, /placeholder="https:\/\/ocg\.example\.com"/);
+  assert.match(settings, /v-model:value="clientRootInputValue"/);
+  assert.match(settings, /:readonly="config\.client_root_url_from_env"/);
+  assert.match(settings, /:clearable="!config\.client_root_url_from_env && !!config\.client_root_url"/);
+  assert.match(settings, /由环境变量 OCG_CLIENT_ROOT_URL 管理/);
+  assert.match(settings, /v-else-if="!config\.client_root_url\.trim\(\)" class="sr-only"/);
+  assert.match(settings, /\{\{ automaticClientRootFeedback \}\}/);
   assert.match(settings, /config\.client_root_url/);
+  assert.match(settings, /client_root_url_from_env: false/);
+  assert.match(settings, /get: \(\) => config\.value\.client_root_url \|\| automaticClientRootUrls\.value\.rootUrl/);
+  assert.doesNotMatch(settings, /config\.value\.client_root_url = resolveConnectionUrls/);
   assert.match(settings, /非本机 HTTP 会明文传输 Gateway Key 与请求内容/);
   assert.match(settings, /不会修改 Gateway 监听、DNS 或反向代理/);
   assert.match(settings, /请求超时/);
@@ -167,6 +291,7 @@ test("settings expose the downstream display root and bounded request timeouts",
   assert.match(settings, /stream_idle_timeout_secs: 300/);
   assert.match(settings, /if \(!timeoutsValid\(\)\)/);
   assert.match(api, /client_root_url: string/);
+  assert.match(api, /client_root_url_from_env: boolean/);
   assert.match(api, /connect_timeout_secs: number/);
   assert.match(api, /non_stream_timeout_secs: number/);
   assert.match(api, /stream_idle_timeout_secs: number/);

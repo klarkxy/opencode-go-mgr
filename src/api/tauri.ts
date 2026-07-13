@@ -33,6 +33,7 @@ export interface AppConfig {
   gateway_key: string;
   upstream_base_url: string;
   client_root_url: string;
+  client_root_url_from_env: boolean;
   auto_start: boolean;
   auto_start_supported: boolean;
   connect_timeout_secs: number;
@@ -226,6 +227,7 @@ export const tauriApi = {
     request<Account>(`/accounts/${id}/reset-cooldown`, { method: "POST" }),
 
   getSettings: () => request<AppConfig>("/settings"),
+  getApplicationModels: () => request<string[]>("/application-models"),
   updateSettings: async (config: AppConfig) => {
     await request<unknown>("/settings", { method: "POST", body: jsonBody(config) });
   },

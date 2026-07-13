@@ -678,34 +678,16 @@ pub async fn forward_get(
         .await
         .map_err(|error| anyhow::anyhow!(response_body_error(&error)))?;
 
-    {
+    if status.as_u16() == 429 {
         let db = state.db.lock();
-        let category = if status.is_server_error() {
-            "error"
-        } else if status.is_client_error() {
-            "client_error"
-        } else {
-            "success"
-        };
-        log_forward(
-            &db,
-            &account,
-            "",
-            category,
-            Some(status.as_u16() as i32),
-            ForwardMetrics::default(),
-            Some(&body),
+        // 429 cooldown: parse the reset window so the next request skips this account.
+        let cooldown = parse_reset(&body).unwrap_or_else(|| Duration::minutes(5));
+        db.set_account_rate_limit(
+            &account.id,
+            Utc::now() + cooldown,
+            &body,
+            parse_usage_limit_window(&body),
         )?;
-        if status.as_u16() == 429 {
-            // 429 cooldown: parse the reset window so the next request skips this account.
-            let cooldown = parse_reset(&body).unwrap_or_else(|| Duration::minutes(5));
-            db.set_account_rate_limit(
-                &account.id,
-                Utc::now() + cooldown,
-                &body,
-                parse_usage_limit_window(&body),
-            )?;
-        }
     }
 
     let mut headers = HeaderMap::new();

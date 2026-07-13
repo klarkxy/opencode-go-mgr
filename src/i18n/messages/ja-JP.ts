@@ -162,6 +162,12 @@ export const jaJPMessages = {
   "配置示例": "設定例",
   "已复制": "コピーしました",
   "复制配置": "設定をコピー",
+  "自动读取 /v1/models，并仅显示当前节点可用模型。": "/v1/models から自動取得し、このノードで利用可能なモデルのみを表示します。",
+  "选择模型 ID": "モデル ID を選択",
+  "未返回可用模型": "利用可能なモデルが返されませんでした",
+  "一键导入": "ワンクリックでインポート",
+  "即将把当前 Gateway Key 交给 {app}。": "現在の Gateway Key を {app} に渡します。",
+  "客户端导入链接无效": "クライアントのインポートリンクが無効です",
   "验证方法": "検証方法",
   "在客户端发送一次测试消息，再到 OCG Manager 的“请求日志”确认模型、账号和成功状态。": "クライアントからテストメッセージを送信し、OCG Manager の「リクエストログ」でモデル、アカウント、成功ステータスを確認します。",
   "注意事项": "注意事項",
@@ -189,7 +195,7 @@ export const jaJPMessages = {
 
   "使用 OpenAI Compatible AI SDK provider，将 OCG Manager 注册为自定义服务商。": "OpenAI Compatible AI SDK provider を使用し、OCG Manager をカスタムプロバイダーとして登録します。",
   "把下面的 provider 配置合并到项目或用户级 opencode.json。": "以下の provider 設定をプロジェクトまたはユーザーレベルの opencode.json に追加します。",
-  "按节点可用模型调整 models 和默认 model，保留 npm 为 @ai-sdk/openai-compatible。": "ノードで利用可能なモデルに合わせて models とデフォルトの model を調整し、npm は @ai-sdk/openai-compatible のままにします。",
+  "在启动 OpenCode 的同一终端设置 OCG_API_KEY 环境变量。": "OpenCode を起動する同じターミナルで OCG_API_KEY 環境変数を設定します。",
   "在 OpenCode 中发送一条测试消息，再到 OCG Manager 的请求日志确认成功记录。": "OpenCode でテストメッセージを送信し、OCG Manager のリクエストログで成功した記録を確認します。",
   "baseURL 必须使用带 /v1 的 API Base URL。": "baseURL には /v1 を含む API Base URL を指定してください。",
 
@@ -220,7 +226,7 @@ export const jaJPMessages = {
 
   "选择 OpenAI Compatible provider，将对话请求转发到 OCG Manager。": "OpenAI Compatible provider を選択し、チャットリクエストを OCG Manager に転送します。",
   "打开 Roo Code 配置，将 API Provider 选择为 OpenAI Compatible。": "Roo Code の設定を開き、API Provider に OpenAI Compatible を選択します。",
-  "Agent 模式依赖模型的工具调用能力；仅聊天成功不代表所有模式均可用。": "Agent モードはモデルのツール呼び出し能力に依存します。チャットが成功しても、すべてのモードが利用できるとは限りません。",
+  "Roo Code 仅支持原生工具调用；所选模型不支持 tools 时无法使用 Agent 模式。": "Roo Code はネイティブのツール呼び出しのみをサポートします。選択したモデルが tools に対応していない場合、Agent モードは使用できません。",
 
   "在 Continue YAML 配置中添加 OpenAI provider，并明确关闭 Responses API。": "Continue の YAML 設定に OpenAI provider を追加し、Responses API を明示的に無効にします。",
   "打开 Continue 用户级 YAML 配置，将下面的模型项合并到 models。": "Continue のユーザーレベル YAML 設定を開き、以下のモデル項目を models に追加します。",
@@ -264,6 +270,7 @@ export const jaJPMessages = {
   "上游连接与访问凭据": "アップストリーム接続とアクセス認証情報",
   "下游访问根地址（可选）": "ダウンストリームのルート URL（任意）",
   "仅用于下游教程、展示和复制；不会修改 Gateway 监听、DNS 或反向代理。": "ダウンストリームガイド、表示、コピーにのみ使用されます。Gateway のリッスン設定、DNS、リバースプロキシは変更されません。",
+  "由环境变量 OCG_CLIENT_ROOT_URL 管理；修改环境变量并重启后生效。": "環境変数 OCG_CLIENT_ROOT_URL によって管理されています。変数を変更した後に再起動してください。",
   "已脱敏 Key": "マスク済み Key",
   "设置自定义 Key": "カスタム Key を設定",
   "新 Key": "新しい Key",
@@ -296,7 +303,7 @@ export const jaJPMessages = {
   "查看发布页": "リリースページを見る",
   "检查更新失败": "更新の確認に失敗しました",
   "API Base URL：{url}。警告：非本机 HTTP 会明文传输 Gateway Key 与请求内容。": "API Base URL：{url}。警告：ローカル以外の HTTP では Gateway Key とリクエスト内容が平文で送信されます。",
-  "留空时自动使用：{root}（API Base URL：{api}）": "空欄の場合は自動的に {root} を使用します（API Base URL：{api}）。",
+  "未配置时自动使用：{root}（API Base URL：{api}）；自动值不会写入设置。": "未設定の場合は {root} を自動的に使用します（API Base URL：{api}）。自動値は設定に保存されません。",
   "API Base URL：{url}": "API Base URL：{url}",
   "地址格式无效": "URL の形式が無効です",
   "加载设置失败: {error}": "設定の読み込みに失敗しました：{error}",

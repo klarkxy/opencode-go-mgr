@@ -162,6 +162,12 @@ export const deDEMessages = {
   "配置示例": "Konfigurationsbeispiele",
   "已复制": "Kopiert",
   "复制配置": "Konfiguration kopieren",
+  "自动读取 /v1/models，并仅显示当前节点可用模型。": "Modelle werden automatisch aus /v1/models geladen; angezeigt werden nur auf diesem Knoten verfügbare Modelle.",
+  "选择模型 ID": "Modell-ID auswählen",
+  "未返回可用模型": "Keine verfügbaren Modelle zurückgegeben",
+  "一键导入": "Direkt importieren",
+  "即将把当前 Gateway Key 交给 {app}。": "Der aktuelle Gateway Key wird an {app} übergeben.",
+  "客户端导入链接无效": "Der Client-Importlink ist ungültig",
   "验证方法": "Überprüfung",
   "在客户端发送一次测试消息，再到 OCG Manager 的“请求日志”确认模型、账号和成功状态。": "Senden Sie im Client eine Testnachricht und prüfen Sie anschließend in den Anfrageprotokollen von OCG Manager Modell, Konto und Erfolgsstatus.",
   "注意事项": "Hinweise",
@@ -189,7 +195,7 @@ export const deDEMessages = {
 
   "使用 OpenAI Compatible AI SDK provider，将 OCG Manager 注册为自定义服务商。": "Verwenden Sie den OpenAI Compatible AI SDK provider, um OCG Manager als benutzerdefinierten Anbieter zu registrieren.",
   "把下面的 provider 配置合并到项目或用户级 opencode.json。": "Übernehmen Sie die folgende provider-Konfiguration in die projekt- oder benutzerspezifische Datei opencode.json.",
-  "按节点可用模型调整 models 和默认 model，保留 npm 为 @ai-sdk/openai-compatible。": "Passen Sie models und das Standard-model an die auf Ihrem Knoten verfügbaren Modelle an und belassen Sie npm auf @ai-sdk/openai-compatible.",
+  "在启动 OpenCode 的同一终端设置 OCG_API_KEY 环境变量。": "Setzen Sie OCG_API_KEY in demselben Terminal, in dem Sie OpenCode starten.",
   "在 OpenCode 中发送一条测试消息，再到 OCG Manager 的请求日志确认成功记录。": "Senden Sie in OpenCode eine Testnachricht und bestätigen Sie anschließend den erfolgreichen Eintrag in den Anfrageprotokollen von OCG Manager.",
   "baseURL 必须使用带 /v1 的 API Base URL。": "baseURL muss die API Base URL einschließlich /v1 verwenden.",
 
@@ -220,7 +226,7 @@ export const deDEMessages = {
 
   "选择 OpenAI Compatible provider，将对话请求转发到 OCG Manager。": "Wählen Sie den OpenAI Compatible provider, um Chatanfragen an OCG Manager weiterzuleiten.",
   "打开 Roo Code 配置，将 API Provider 选择为 OpenAI Compatible。": "Öffnen Sie die Roo Code-Einstellungen und setzen Sie API Provider auf OpenAI Compatible.",
-  "Agent 模式依赖模型的工具调用能力；仅聊天成功不代表所有模式均可用。": "Der Agent-Modus hängt von den Werkzeugaufruffunktionen des Modells ab. Ein erfolgreicher Chat bedeutet nicht, dass alle Modi funktionieren.",
+  "Roo Code 仅支持原生工具调用；所选模型不支持 tools 时无法使用 Agent 模式。": "Roo Code unterstützt nur native Werkzeugaufrufe; ohne tools-Unterstützung des gewählten Modells ist der Agent-Modus nicht nutzbar.",
 
   "在 Continue YAML 配置中添加 OpenAI provider，并明确关闭 Responses API。": "Fügen Sie der Continue-YAML-Konfiguration einen OpenAI provider hinzu und deaktivieren Sie ausdrücklich die Responses API.",
   "打开 Continue 用户级 YAML 配置，将下面的模型项合并到 models。": "Öffnen Sie die benutzerspezifische YAML-Konfiguration von Continue und übernehmen Sie den folgenden Modelleintrag in models.",
@@ -264,6 +270,7 @@ export const deDEMessages = {
   "上游连接与访问凭据": "Upstream-Verbindung und Zugangsdaten",
   "下游访问根地址（可选）": "Client-Root-URL (optional)",
   "仅用于下游教程、展示和复制；不会修改 Gateway 监听、DNS 或反向代理。": "Wird nur in Client-Anleitungen, der Anzeige und bei Kopieraktionen verwendet. Gateway-Listener, DNS und Reverse-Proxy werden dadurch nicht geändert.",
+  "由环境变量 OCG_CLIENT_ROOT_URL 管理；修改环境变量并重启后生效。": "Wird durch die Umgebungsvariable OCG_CLIENT_ROOT_URL verwaltet; nach einer Änderung der Variable neu starten.",
   "已脱敏 Key": "Maskierter Key",
   "设置自定义 Key": "Benutzerdefinierten Key festlegen",
   "新 Key": "Neuer Key",
@@ -296,7 +303,7 @@ export const deDEMessages = {
   "查看发布页": "Release-Seite öffnen",
   "检查更新失败": "Update-Prüfung fehlgeschlagen",
   "API Base URL：{url}。警告：非本机 HTTP 会明文传输 Gateway Key 与请求内容。": "API Base URL: {url}. Warnung: Bei einer nicht lokalen HTTP-Verbindung werden Gateway Key und Anfrageinhalte im Klartext übertragen.",
-  "留空时自动使用：{root}（API Base URL：{api}）": "Wenn das Feld leer bleibt, wird automatisch {root} verwendet (API Base URL: {api}).",
+  "未配置时自动使用：{root}（API Base URL：{api}）；自动值不会写入设置。": "Wenn nicht konfiguriert, wird automatisch {root} verwendet (API Base URL: {api}); der automatische Wert wird nicht gespeichert.",
   "API Base URL：{url}": "API Base URL: {url}",
   "地址格式无效": "Ungültiges URL-Format",
   "加载设置失败: {error}": "Einstellungen konnten nicht geladen werden: {error}",

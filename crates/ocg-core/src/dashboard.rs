@@ -1,10 +1,14 @@
 use crate::auth;
-use crate::gateway::limit::{parse_reset, parse_usage_limit_window};
+use crate::gateway::{
+    forwarder::forward_get,
+    limit::{parse_reset, parse_usage_limit_window},
+    protocol::supported_model_ids,
+};
 use crate::models::*;
 use crate::state::CoreState;
 use axum::{
     Json, Router,
-    body::Body,
+    body::{Body, to_bytes},
     extract::{Path, Query, Request, State},
     http::{HeaderMap, HeaderValue, Response as HttpResponse, StatusCode, header},
     middleware::{self, Next},
@@ -39,6 +43,7 @@ pub fn api_router(state: CoreState) -> Router<CoreState> {
             post(regenerate_gateway_key),
         )
         .route("/gateway/status", get(gateway_status))
+        .route("/application-models", get(application_models))
         .route("/logs/gateway", get(gateway_logs))
         .route("/logs/forward", get(forward_logs))
         .route("/dashboard/summary", get(dashboard_summary))
@@ -677,13 +682,15 @@ struct SettingsResponse {
     #[serde(flatten)]
     config: AppConfig,
     auto_start_supported: bool,
+    client_root_url_from_env: bool,
 }
 
 async fn get_settings(State(state): State<CoreState>) -> Json<SettingsResponse> {
     let auto_start_supported = state.auto_start_supported();
     Json(SettingsResponse {
-        config: state.config(),
+        config: state.settings_config(),
         auto_start_supported,
+        client_root_url_from_env: state.client_root_url_from_env(),
     })
 }
 
@@ -828,6 +835,46 @@ async fn regenerate_gateway_key(
 
 async fn gateway_status(State(state): State<CoreState>) -> Json<GatewayStatus> {
     Json(status_from_state(&state))
+}
+
+async fn application_models(State(state): State<CoreState>) -> Result<Json<Vec<String>>, ApiError> {
+    let (config, client) = state.upstream_context();
+    let response = forward_get(&client, &state, &config, "/v1/models")
+        .await
+        .map_err(|_| {
+            ApiError::status(
+                StatusCode::BAD_GATEWAY,
+                "failed to load upstream model list",
+            )
+        })?;
+    if !response.status().is_success() {
+        return Err(ApiError::status(
+            StatusCode::BAD_GATEWAY,
+            "upstream model discovery failed",
+        ));
+    }
+    let body = to_bytes(response.into_body(), 1024 * 1024)
+        .await
+        .map_err(|_| ApiError::status(StatusCode::BAD_GATEWAY, "upstream model list is invalid"))?;
+    let payload: serde_json::Value = serde_json::from_slice(&body)
+        .map_err(|_| ApiError::status(StatusCode::BAD_GATEWAY, "upstream model list is invalid"))?;
+    let data = payload
+        .get("data")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| {
+            ApiError::status(StatusCode::BAD_GATEWAY, "upstream model list is invalid")
+        })?;
+    let supported = supported_model_ids().collect::<Vec<_>>();
+    let mut models = Vec::new();
+    for id in data
+        .iter()
+        .filter_map(|model| model.get("id").and_then(serde_json::Value::as_str))
+    {
+        if supported.contains(&id) && !models.iter().any(|model| model == id) {
+            models.push(id.to_string());
+        }
+    }
+    Ok(Json(models))
 }
 
 #[derive(Deserialize)]

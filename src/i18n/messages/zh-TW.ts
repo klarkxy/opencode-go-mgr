@@ -162,6 +162,12 @@ export const zhTWMessages = {
   "配置示例": "設定範例",
   "已复制": "已複製",
   "复制配置": "複製設定",
+  "自动读取 /v1/models，并仅显示当前节点可用模型。": "自動從 /v1/models 讀取，並僅顯示目前節點可用的模型。",
+  "选择模型 ID": "選擇模型 ID",
+  "未返回可用模型": "未傳回可用模型",
+  "一键导入": "一鍵匯入",
+  "即将把当前 Gateway Key 交给 {app}。": "即將把目前的 Gateway Key 交給 {app}。",
+  "客户端导入链接无效": "用戶端匯入連結無效",
   "验证方法": "驗證方式",
   "在客户端发送一次测试消息，再到 OCG Manager 的“请求日志”确认模型、账号和成功状态。": "在用戶端傳送一則測試訊息，再到 OCG Manager 的「請求日誌」確認模型、帳號與成功狀態。",
   "注意事项": "注意事項",
@@ -189,7 +195,7 @@ export const zhTWMessages = {
 
   "使用 OpenAI Compatible AI SDK provider，将 OCG Manager 注册为自定义服务商。": "使用 OpenAI Compatible AI SDK provider，將 OCG Manager 註冊為自訂服務提供者。",
   "把下面的 provider 配置合并到项目或用户级 opencode.json。": "將下列 provider 設定合併至專案或使用者層級的 opencode.json。",
-  "按节点可用模型调整 models 和默认 model，保留 npm 为 @ai-sdk/openai-compatible。": "依節點可用模型調整 models 與預設 model，並保留 npm 為 @ai-sdk/openai-compatible。",
+  "在启动 OpenCode 的同一终端设置 OCG_API_KEY 环境变量。": "請在啟動 OpenCode 的同一個終端設定 OCG_API_KEY 環境變數。",
   "在 OpenCode 中发送一条测试消息，再到 OCG Manager 的请求日志确认成功记录。": "在 OpenCode 中傳送一則測試訊息，再到 OCG Manager 的請求日誌確認成功記錄。",
   "baseURL 必须使用带 /v1 的 API Base URL。": "baseURL 必須使用包含 /v1 的 API Base URL。",
 
@@ -220,7 +226,7 @@ export const zhTWMessages = {
 
   "选择 OpenAI Compatible provider，将对话请求转发到 OCG Manager。": "選擇 OpenAI Compatible provider，將對話請求轉送至 OCG Manager。",
   "打开 Roo Code 配置，将 API Provider 选择为 OpenAI Compatible。": "開啟 Roo Code 設定，將 API Provider 選為 OpenAI Compatible。",
-  "Agent 模式依赖模型的工具调用能力；仅聊天成功不代表所有模式均可用。": "Agent 模式依賴模型的工具呼叫能力；僅聊天成功不代表所有模式皆可使用。",
+  "Roo Code 仅支持原生工具调用；所选模型不支持 tools 时无法使用 Agent 模式。": "Roo Code 僅支援原生工具呼叫；所選模型不支援 tools 時無法使用 Agent 模式。",
 
   "在 Continue YAML 配置中添加 OpenAI provider，并明确关闭 Responses API。": "在 Continue YAML 設定中加入 OpenAI provider，並明確停用 Responses API。",
   "打开 Continue 用户级 YAML 配置，将下面的模型项合并到 models。": "開啟 Continue 使用者層級的 YAML 設定，將下列模型項目合併至 models。",
@@ -264,6 +270,7 @@ export const zhTWMessages = {
   "上游连接与访问凭据": "上游連線與存取憑證",
   "下游访问根地址（可选）": "下游存取根網址（選填）",
   "仅用于下游教程、展示和复制；不会修改 Gateway 监听、DNS 或反向代理。": "僅用於下游教學、顯示與複製；不會修改 Gateway 監聽、DNS 或反向 Proxy。",
+  "由环境变量 OCG_CLIENT_ROOT_URL 管理；修改环境变量并重启后生效。": "由環境變數 OCG_CLIENT_ROOT_URL 管理；修改環境變數後請重新啟動。",
   "已脱敏 Key": "已遮罩的 Key",
   "设置自定义 Key": "設定自訂 Key",
   "新 Key": "新 Key",
@@ -296,7 +303,7 @@ export const zhTWMessages = {
   "查看发布页": "查看發佈頁面",
   "检查更新失败": "檢查更新失敗",
   "API Base URL：{url}。警告：非本机 HTTP 会明文传输 Gateway Key 与请求内容。": "API Base URL：{url}。警告：非本機 HTTP 會以明文傳輸 Gateway Key 與請求內容。",
-  "留空时自动使用：{root}（API Base URL：{api}）": "留空時會自動使用：{root}（API Base URL：{api}）",
+  "未配置时自动使用：{root}（API Base URL：{api}）；自动值不会写入设置。": "未設定時會自動使用：{root}（API Base URL：{api}）；自動值不會寫入設定。",
   "API Base URL：{url}": "API Base URL：{url}",
   "地址格式无效": "網址格式無效",
   "加载设置失败: {error}": "載入設定失敗：{error}",

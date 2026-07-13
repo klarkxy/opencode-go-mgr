@@ -160,15 +160,22 @@ panel that always appears at the top. It contains:
   not transmitted in clear text.
 
 The "Downstream Access Root" setting in **Settings** controls only the
-URLs the dashboard shows and the application tutorials emit. Leave it
-empty to use the current dashboard origin, or set the externally reachable
-root such as `https://ocg.example.com` when clients reach the gateway
-through a reverse proxy or a different host. A trailing `/v1` is accepted
-and removed automatically. The setting does **not** change the gateway
-bind address, configure DNS, or create a reverse proxy — those must
-already route to the running gateway. Plain HTTP is allowed for LAN
-deployments, but it exposes the Gateway Key and request contents to the
-network.
+URLs the dashboard shows and the application tutorials emit. Its effective
+value is selected in this order: a non-empty `OCG_CLIENT_ROOT_URL`
+environment variable, the manually saved dashboard value, then an automatic
+fallback. While the environment variable is active, the input is read-only;
+changes take effect after restart and are never written to SQLite. With no
+environment or saved value, production uses the current dashboard origin and
+development uses `http://127.0.0.1:<Gateway port>`. The automatic value is
+shown in the input but is not saved.
+
+Set an externally reachable root such as `https://ocg.example.com` when
+clients reach the gateway through a reverse proxy or a different host. A
+trailing `/v1` is accepted and removed automatically. This setting does
+**not** change the gateway bind address, configure DNS, or create a reverse
+proxy — those must already route to the running gateway. Plain HTTP is
+allowed for LAN deployments, but it exposes the Gateway Key and request
+contents to the network.
 
 ### Application Guides
 
@@ -447,6 +454,14 @@ administrator exists, later environment changes do not reset it. When
 both are omitted, the first visitor creates the administrator in the
 dashboard. After the administrator exists, you may remove both variables
 while keeping the volume; the stored account remains.
+
+The optional `OCG_CLIENT_ROOT_URL` is the environment equivalent of the
+dashboard's Downstream Access Root. Use it when a reverse proxy is present or
+the Dashboard and Gateway have different externally reachable addresses. A
+non-empty value must be an absolute HTTP(S) URL; when present, it overrides the
+saved SQLite value, and an invalid value stops startup. It does not configure the
+listener, DNS, or reverse proxy. Normally use `https://ocg.example.com`, not
+`/dashboard/` or a concrete API endpoint; a trailing `/v1` is accepted.
 
 Set `OCG_PORT` in `.env` to change the host port; the container still uses
 port `9042`. Open `http://127.0.0.1:<OCG_PORT>/dashboard/` and sign in.
