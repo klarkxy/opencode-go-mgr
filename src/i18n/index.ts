@@ -140,7 +140,7 @@ export function writeLocale(storage: Pick<Storage, "setItem"> | null, value: Loc
 }
 
 function browserLocales(): readonly string[] {
-  if (typeof navigator === "undefined") return [];
+  if (typeof window === "undefined" || typeof navigator === "undefined") return [];
   return navigator.languages?.length ? navigator.languages : navigator.language ? [navigator.language] : [];
 }
 
