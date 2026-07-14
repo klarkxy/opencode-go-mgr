@@ -126,10 +126,14 @@ Upgrade and uninstall by surface:
 - **CLI:** replace the extracted package as a unit so the executable,
   `dist/`, and `LICENSE` stay together. Delete that package to uninstall;
   its data remains in `~/.ocg-mgr-cli` or the custom `--data-dir`.
-- **Docker:** after backing up, update the checkout and run
-  `docker compose up -d --build`. `docker compose down` removes containers
-  but keeps `ocg-data`; `docker compose down -v` permanently deletes the
-  volume and is only for an intentional reset after a verified backup.
+- **Docker:** after backing up, run `docker compose pull` followed by
+  `docker compose up -d --no-build`. Pin `OCG_IMAGE` to the full release tag
+  for repeatable production deployments. `docker compose down` removes
+  containers but keeps `ocg-data`; `docker compose down -v` permanently
+  deletes the volume and is only for an intentional reset after a verified
+  backup. Selecting an older image does not roll back the database; restore
+  the complete backup made by that older version when a database rollback is
+  required.
 
 ## The Dashboard
 
@@ -440,14 +444,22 @@ the dashboard.
 
 ## Docker
 
-Build and start the headless gateway with its dashboard:
+Pull and start the published headless gateway with its dashboard
+(recommended):
 
 ```bash
 cp .env.example .env
 # Edit .env and choose the initial administrator credentials.
-docker compose up -d --build
+docker compose pull
+docker compose up -d --no-build
 docker compose logs ocg-manager
 ```
+
+The default image is `ghcr.io/klarkxy/opencode-go-mgr:latest`. For repeatable
+production deployments, set `OCG_IMAGE` in `.env` to a full release tag such
+as `ghcr.io/klarkxy/opencode-go-mgr:1.2.0`. To build the current checkout
+instead, set `OCG_IMAGE=ocg-manager:local` and run
+`docker compose up -d --build`.
 
 `OCG_ADMIN_USERNAME` and `OCG_ADMIN_PASSWORD` create the administrator
 **only when the database has no administrator yet**. Both must be set

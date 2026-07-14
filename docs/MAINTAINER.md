@@ -225,6 +225,10 @@ Each CLI archive contains its executable, `dist/`, and `LICENSE`. Do not
 ship the CLI executable alone: `serve` needs the sibling dashboard
 assets. Windows has no portable GUI artifact.
 
+The `linux/amd64` container is published separately as
+`ghcr.io/klarkxy/opencode-go-mgr`; it is not one of the seven files attached
+to the GitHub Release.
+
 `scripts/release.mjs` does the heavy lifting:
 
 1. Validates that `package.json`, `src-tauri/tauri.conf.json`, the
@@ -289,6 +293,13 @@ three per-runner Actions artifacts, assembles the seven platform payloads in
 draft and the native smoke results, publish the release in GitHub or run
 `gh release edit vX.Y.Z --draft=false`.
 
+Publishing the GitHub Release triggers `.github/workflows/container.yml`.
+That workflow checks out the release tag, builds and smoke-tests the hardened
+`linux/amd64` container, pushes full-version, minor, `latest`, and commit-SHA
+tags to `ghcr.io/klarkxy/opencode-go-mgr`, and records SBOM and provenance
+attestations. A manual dispatch can backfill an existing release tag; it must
+opt in explicitly before updating `latest`.
+
 Current Windows installers are unsigned and macOS uses ad‑hoc signing
 (`-`), not Developer ID notarization. Keep releases in draft until
 native smoke checks and platform warnings are reviewed. Windows/Linux
@@ -299,10 +310,11 @@ GitHub Release manually.
 ### CI Coverage Boundaries
 
 The repository has no `pull_request` workflow, so these checks do not run
-automatically on PRs. The release workflow also does not build or smoke-test
-the Docker image, drive real desktop UI interactions, or test backup/restore,
-database downgrade, or migration rollback. Run the relevant checks manually
-when changing those paths.
+automatically on PRs. The container workflow covers `linux/amd64` only and
+runs after a release is published or manually dispatched. CI does not drive
+real desktop UI interactions or test container ARM64, backup/restore, database
+downgrade, or migration rollback. Run the relevant checks manually when
+changing those paths.
 
 ## Release Procedure
 
@@ -321,6 +333,8 @@ when changing those paths.
    the draft's seven payloads, `SHA256SUMS`, smoke logs, and platform warnings.
 6. Publish the draft in GitHub or run
    `gh release edit vX.Y.Z --draft=false`, then verify the public release.
+7. Wait for `container.yml`, verify the GHCR package is public, inspect its
+   version and digest, and anonymously pull the full-version tag.
 
 Treat published assets and tags as immutable. If a published payload is wrong,
 ship a new patch version; do not replace the asset or retarget the tag.
@@ -350,6 +364,8 @@ covers most of them; the manual parts need a real desktop.
       gone.
 - [ ] Review the draft GitHub Release notes and the unsigned/ad‑hoc
       warnings before flipping `--draft=false`.
+- [ ] After publishing, confirm `container.yml` passed and anonymously pull
+      `ghcr.io/klarkxy/opencode-go-mgr:<version>` by the expected digest.
 
 ## Known Debt
 

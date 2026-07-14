@@ -15,6 +15,7 @@
 - 每个节点都由自己的 dashboard 管理；项目不提供远端同步或 Admin API。
 - 非回环监听使用单管理员登录；Docker 可通过 `OCG_ADMIN_USERNAME` 和 `OCG_ADMIN_PASSWORD` 首次初始化（两个必须同时设置，只设一个会启动报错），未提供时由首个注册者创建管理员。
 - 设置页可通过受保护的 `/dashboard/api/settings/check-update` 手动检查 GitHub 最新 Release，显示当前/最新版本与发布页链接；不会自动下载或安装。
+- 公开 GitHub Release 发布后，`.github/workflows/container.yml` 会构建并冒烟验证 `linux/amd64` 镜像，发布到 `ghcr.io/klarkxy/opencode-go-mgr`；Compose 默认使用该镜像，本地源码构建需设置 `OCG_IMAGE=ocg-manager:local` 后执行 `docker compose up -d --build`。
 - 下游访问根地址优先使用非空 `OCG_CLIENT_ROOT_URL`，其次是 SQLite 手工值，最后由前端按生产 origin / 开发 Gateway 端口自动推导；环境变量覆盖只读且不得写回 SQLite。
 
 ## 关键文件
