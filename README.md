@@ -167,6 +167,6 @@ can check for a new release manually.
 
 See [LICENSE](LICENSE).
 
-## Star History Rank
+## Star History
 
-[![Star History Rank](https://api.star-history.com/badge?repo=klarkxy/opencode-go-mgr)](https://www.star-history.com/klarkxy/opencode-go-mgr)
+[![Star History Chart](https://api.star-history.com/image?repos=klarkxy/opencode-go-mgr&type=Date)](https://www.star-history.com/#klarkxy/opencode-go-mgr&Date)
