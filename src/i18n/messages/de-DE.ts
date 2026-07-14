@@ -8,6 +8,7 @@ export const deDEMessages = {
   "复制失败": "Kopieren fehlgeschlagen",
   "未设置": "Nicht festgelegt",
   "默认": "Standard",
+  "恢复默认": "Standardwerte wiederherstellen",
   "皓白": "Strahlendes Weiß",
   "曜黑": "Tiefschwarz",
   "藤紫": "Glyzinie",

@@ -8,6 +8,7 @@ export const frFRMessages = {
   "复制失败": "Échec de la copie",
   "未设置": "Non défini",
   "默认": "Par défaut",
+  "恢复默认": "Rétablir les valeurs par défaut",
   "皓白": "Blanc éclatant",
   "曜黑": "Noir profond",
   "藤紫": "Glycine",

@@ -8,6 +8,7 @@ export const ptBRMessages = {
   "复制失败": "Falha ao copiar",
   "未设置": "Não configurado",
   "默认": "Padrão",
+  "恢复默认": "Restaurar padrões",
   "皓白": "Branco brilhante",
   "曜黑": "Preto meia-noite",
   "藤紫": "Glicínia",

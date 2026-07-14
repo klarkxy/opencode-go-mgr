@@ -104,7 +104,21 @@
             </div>
 
             <div class="model-row">
-              <strong>{{ t("模型") }}</strong>
+              <div class="model-row-head">
+                <strong>{{ t("模型") }}</strong>
+                <n-button
+                  size="small"
+                  secondary
+                  :loading="modelsLoading"
+                  :disabled="!settingsLoaded
+                    || (activeGuide.id === 'claude-desktop'
+                      ? !claudeDesktopModelsLoaded
+                      : applicationModelIds.length === 0)"
+                  @click="restoreApplicationDefaults"
+                >
+                  {{ t("恢复默认") }}
+                </n-button>
+              </div>
               <div
                 class="model-controls"
                 :class="{ 'model-controls--single': !activeGuide.multipleModels && !activeGuide.modelFields }"
@@ -272,7 +286,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, onActivated, onMounted, onUnmounted, ref, watch } from "vue";
 import {
   NAlert,
   NButton,
@@ -287,7 +301,7 @@ import {
 import type { MenuOption, SelectOption } from "naive-ui";
 import { CheckOutlined, CopyOutlined, ExportOutlined } from "@vicons/antd";
 import logoUrl from "../../assets/logo/ocg_logo_final_transparent.png";
-import { tauriApi } from "../api/tauri";
+import { tauriApi, type ClaudeDesktopModels } from "../api/tauri";
 import { useClipboard } from "../utils/format.ts";
 import {
   maskConnectionKey,
@@ -297,6 +311,7 @@ import {
 import {
   APPLICATION_GUIDES,
   isApplicationId,
+  recommendClaudeCodeModel,
 } from "./application-guides";
 import type { ApplicationGuide, ApplicationId, GuideAction, GuideContext } from "./application-guides";
 import { t } from "../i18n/index.ts";
@@ -312,10 +327,21 @@ const settingsLoaded = ref(false);
 const settingsError = ref("");
 const modelsLoading = ref(false);
 const modelsError = ref("");
+const modelsInitialized = ref(false);
 const claudeDesktopModelsLoaded = ref(false);
+const claudeDesktopDefaults = ref<ClaudeDesktopModels>({ sonnet: "", opus: "", haiku: "" });
+const applicationModelIds = ref<string[]>([]);
 const modelOptions = ref<SelectOption[]>([]);
-const selectedModels = ref<string[]>([]);
-const selectedModel = ref<string | null>(null);
+const selectedModelsByApplication = ref<Partial<Record<ApplicationId, string[]>>>({});
+const selectedModelByApplication = ref<Partial<Record<ApplicationId, string | null>>>({});
+const selectedModels = computed<string[]>({
+  get: () => selectedModelsByApplication.value[currentApplication.value] ?? [],
+  set: (value) => { selectedModelsByApplication.value[currentApplication.value] = value; },
+});
+const selectedModel = computed<string | null>({
+  get: () => selectedModelByApplication.value[currentApplication.value] ?? null,
+  set: (value) => { selectedModelByApplication.value[currentApplication.value] = value; },
+});
 const modelValues = ref<Record<string, string>>({});
 const snippetDrafts = ref<Record<string, string>>({});
 
@@ -422,6 +448,7 @@ async function loadModels() {
   modelsLoading.value = true;
   modelsError.value = "";
   claudeDesktopModelsLoaded.value = false;
+  applicationModelIds.value = [];
   for (const field of CLAUDE_DESKTOP_FIELDS) delete modelValues.value[field];
   const errors: string[] = [];
   try {
@@ -430,6 +457,7 @@ async function loadModels() {
       tauriApi.getClaudeDesktopModels(),
     ]);
     const modelIds = modelsResult.status === "fulfilled" ? modelsResult.value : [];
+    applicationModelIds.value = modelIds;
     if (modelsResult.status === "rejected") {
       errors.push(modelsResult.reason instanceof Error ? modelsResult.reason.message : String(modelsResult.reason));
     } else if (!modelIds.length) {
@@ -444,27 +472,45 @@ async function loadModels() {
       ...Object.values(claudeDesktopModels ?? {}).filter(Boolean),
     ])];
     modelOptions.value = availableIds.map((modelId) => ({ label: modelId, value: modelId }));
-    selectedModels.value = modelIds.length ? modelIds : availableIds;
-    if (!selectedModel.value || !availableIds.includes(selectedModel.value)) {
-      selectedModel.value = availableIds[0] ?? null;
-    }
+    const defaultSelectedModels = modelIds.length ? modelIds : availableIds;
+    const fallbackModel = availableIds[0] ?? "";
     for (const guide of applicationGuides) {
+      if (!isApplicationId(guide.id)) continue;
+      if (!guide.modelFields?.length) {
+        if (guide.multipleModels) {
+          selectedModelsByApplication.value[guide.id] = [...defaultSelectedModels];
+        }
+        const selected = selectedModelByApplication.value[guide.id];
+        if (!selected || !availableIds.includes(selected)) {
+          selectedModelByApplication.value[guide.id] = availableIds[0] ?? null;
+        }
+        continue;
+      }
       if (guide.id === "claude-desktop") continue;
-      for (const field of guide.modelFields ?? []) {
-        if (!availableIds.includes(modelValues.value[field])) modelValues.value[field] = availableIds[0] ?? "";
+      for (const field of guide.modelFields) {
+        if (!availableIds.includes(modelValues.value[field])) {
+          modelValues.value[field] = guide.id === "claude-code"
+            ? recommendClaudeCodeModel(field, modelIds) || fallbackModel
+            : fallbackModel;
+        }
       }
     }
     if (claudeDesktopModels) {
+      claudeDesktopDefaults.value = { ...claudeDesktopModels };
       Object.assign(modelValues.value, claudeDesktopModels);
       claudeDesktopModelsLoaded.value = true;
     }
     modelsError.value = errors.join("；");
   } finally {
+    modelsInitialized.value = true;
     modelsLoading.value = false;
   }
 }
 
-async function loadSettings() {
+async function loadSettings(loadApplicationModels = true) {
+  settingsLoading.value = true;
+  settingsLoaded.value = false;
+  settingsError.value = "";
   try {
     const settings = await tauriApi.getSettings();
     serviceConfig.value = {
@@ -473,7 +519,7 @@ async function loadSettings() {
       client_root_url: settings.client_root_url,
     };
     settingsLoaded.value = true;
-    await loadModels();
+    if (loadApplicationModels) await loadModels();
   } catch (error) {
     settingsError.value = error instanceof Error ? error.message : String(error);
   } finally {
@@ -506,6 +552,34 @@ function updateSnippetDraft(index: number, value: string) {
   snippetDrafts.value[snippetKey(index)] = value;
 }
 
+function clearApplicationDrafts(applicationId: string) {
+  const prefix = `${applicationId}:`;
+  for (const key of Object.keys(snippetDrafts.value)) {
+    if (key.startsWith(prefix)) delete snippetDrafts.value[key];
+  }
+}
+
+function restoreApplicationDefaults() {
+  const guide = activeGuide.value;
+  const models = applicationModelIds.value;
+  if (guide.id !== "claude-desktop" && !models.length) return;
+
+  if (guide.id === "claude-desktop") {
+    Object.assign(modelValues.value, claudeDesktopDefaults.value);
+  } else if (guide.modelFields) {
+    for (const field of guide.modelFields) {
+      modelValues.value[field] = guide.id === "claude-code"
+        ? recommendClaudeCodeModel(field, models)
+        : models[0] ?? "";
+    }
+  } else {
+    if (guide.multipleModels) selectedModels.value = [...models];
+    selectedModel.value = models[0] ?? null;
+  }
+
+  clearApplicationDrafts(guide.id);
+}
+
 async function copySnippet(index: number, snippet: { label: string; display: string; copy: string }) {
   if (activeGuide.value.id === "claude-desktop") {
     if (!claudeDesktopModelsLoaded.value) {
@@ -519,6 +593,7 @@ async function copySnippet(index: number, snippet: { label: string; display: str
         haiku: modelValues.value.haiku,
       });
       Object.assign(modelValues.value, persisted);
+      claudeDesktopDefaults.value = { ...persisted };
     } catch (error) {
       message.error(error instanceof Error ? error.message : String(error));
       return;
@@ -543,8 +618,8 @@ function launchGuideAction(action: GuideAction) {
   }
 }
 
-watch([currentApplication, selectedModel, selectedModels, modelValues], () => {
-  snippetDrafts.value = {};
+watch([selectedModelByApplication, selectedModelsByApplication, modelValues], () => {
+  clearApplicationDrafts(activeGuide.value.id);
   if (
     activeGuide.value.multipleModels
     && (!selectedModel.value || !selectedModels.value.includes(selectedModel.value))
@@ -558,6 +633,10 @@ onMounted(() => {
   if (!isApplicationId(value)) writeApplicationUrl(currentApplication.value, "replace");
   window.addEventListener("popstate", onPopState);
   void loadSettings();
+});
+
+onActivated(() => {
+  if (!settingsLoading.value) void loadSettings(!modelsInitialized.value);
 });
 
 onUnmounted(() => {
@@ -726,6 +805,13 @@ onUnmounted(() => {
 
 .model-row strong {
   color: var(--ocg-ink);
+}
+
+.model-row-head {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
 }
 
 .model-controls {
@@ -923,6 +1009,10 @@ onUnmounted(() => {
   .guide-head {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .model-row-head {
+    justify-content: space-between;
   }
 
   .model-controls,

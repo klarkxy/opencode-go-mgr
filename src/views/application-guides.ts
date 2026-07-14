@@ -94,6 +94,48 @@ export function buildChatboxUrl(context: GuideContext): string {
   return `chatbox://provider/import?config=${encodePayload(buildChatboxConfig(context))}`;
 }
 
+const CLAUDE_CODE_MODEL_PREFERENCES: Readonly<Record<string, readonly string[]>> = {
+  ANTHROPIC_MODEL: ["qwen3.7-plus", "minimax-m3", "kimi-k2.7-code", "glm-5.2"],
+  ANTHROPIC_DEFAULT_FABLE_MODEL: ["qwen3.7-max", "glm-5.2", "kimi-k2.7-code", "deepseek-v4-pro"],
+  ANTHROPIC_DEFAULT_HAIKU_MODEL: ["deepseek-v4-flash", "minimax-m3", "mimo-v2.5"],
+  ANTHROPIC_DEFAULT_SONNET_MODEL: ["qwen3.7-plus", "minimax-m3", "kimi-k2.7-code", "glm-5.2"],
+  ANTHROPIC_DEFAULT_OPUS_MODEL: ["glm-5.2", "qwen3.7-max", "kimi-k2.7-code", "deepseek-v4-pro"],
+  CLAUDE_CODE_SUBAGENT_MODEL: ["minimax-m3", "qwen3.7-plus", "deepseek-v4-flash", "kimi-k2.7-code"],
+  ANTHROPIC_CUSTOM_MODEL_OPTION: ["kimi-k2.7-code", "glm-5.2", "qwen3.7-max", "deepseek-v4-pro"],
+};
+
+export function recommendClaudeCodeModel(field: string, availableModels: readonly string[]): string {
+  return CLAUDE_CODE_MODEL_PREFERENCES[field]
+    ?.find((model) => availableModels.includes(model))
+    ?? availableModels[0]
+    ?? "";
+}
+
+const VSCODE_MODEL_CONTEXT_WINDOWS: Readonly<Record<string, number>> = {
+  "glm-5.2": 1_000_000,
+  "glm-5.1": 202_752,
+  "kimi-k2.7-code": 262_144,
+  "kimi-k2.6": 262_144,
+  "deepseek-v4-pro": 1_000_000,
+  "deepseek-v4-flash": 1_000_000,
+  "mimo-v2.5": 1_000_000,
+  "mimo-v2.5-pro": 1_048_576,
+  "minimax-m3": 1_000_000,
+  "minimax-m2.7": 204_800,
+  "minimax-m2.5": 204_800,
+  "qwen3.7-max": 1_000_000,
+  "qwen3.7-plus": 1_000_000,
+  "qwen3.6-plus": 1_000_000,
+};
+
+function vscodeTokenLimits(modelId: string) {
+  const contextWindow = VSCODE_MODEL_CONTEXT_WINDOWS[modelId];
+  // ponytail: unknown future models keep conservative limits until their real window is added above.
+  if (!contextWindow) return { maxInputTokens: 32_768, maxOutputTokens: 8_192 };
+  const maxOutputTokens = modelId === "glm-5.1" ? 32_768 : 65_536;
+  return { maxInputTokens: contextWindow - maxOutputTokens, maxOutputTokens };
+}
+
 export const APPLICATION_GUIDES = [
   {
     id: "claude-code",
@@ -474,8 +516,7 @@ export const APPLICATION_GUIDES = [
               url: context.chatCompletionsUrl,
               toolCalling: true,
               vision: false,
-              maxInputTokens: 32768,
-              maxOutputTokens: 8192,
+              ...vscodeTokenLimits(modelId),
             })),
           }],
           null,

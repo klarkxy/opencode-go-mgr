@@ -5,6 +5,7 @@ import {
   APPLICATION_GUIDES,
   buildChatboxConfig,
   buildChatboxUrl,
+  recommendClaudeCodeModel,
 } from "./application-guides.ts";
 import {
   maskConnectionKey,
@@ -252,6 +253,27 @@ test("application catalog has thirteen verified clients and never displays a com
   }
 });
 
+test("Claude Code defaults balance model capability and cost with safe fallbacks", () => {
+  const models = [
+    "glm-5.2",
+    "kimi-k2.7-code",
+    "deepseek-v4-flash",
+    "minimax-m3",
+    "qwen3.7-max",
+    "qwen3.7-plus",
+  ];
+  assert.equal(recommendClaudeCodeModel("ANTHROPIC_MODEL", models), "qwen3.7-plus");
+  assert.equal(recommendClaudeCodeModel("ANTHROPIC_DEFAULT_FABLE_MODEL", models), "qwen3.7-max");
+  assert.equal(recommendClaudeCodeModel("ANTHROPIC_DEFAULT_HAIKU_MODEL", models), "deepseek-v4-flash");
+  assert.equal(recommendClaudeCodeModel("ANTHROPIC_DEFAULT_SONNET_MODEL", models), "qwen3.7-plus");
+  assert.equal(recommendClaudeCodeModel("ANTHROPIC_DEFAULT_OPUS_MODEL", models), "glm-5.2");
+  assert.equal(recommendClaudeCodeModel("CLAUDE_CODE_SUBAGENT_MODEL", models), "minimax-m3");
+  assert.equal(recommendClaudeCodeModel("ANTHROPIC_CUSTOM_MODEL_OPTION", models), "kimi-k2.7-code");
+  assert.equal(recommendClaudeCodeModel("ANTHROPIC_DEFAULT_HAIKU_MODEL", ["mimo-v2.5"]), "mimo-v2.5");
+  assert.equal(recommendClaudeCodeModel("unknown", ["fallback-model"]), "fallback-model");
+  assert.equal(recommendClaudeCodeModel("ANTHROPIC_MODEL", []), "");
+});
+
 test("dotenv snippets quote keys containing comments and replacement tokens", () => {
   const actualKey = "ocg-$&-$$-#fragment";
   const urls = resolveConnectionUrls("https://edge.example.com/ocg", "https://ignored", 9042, false);
@@ -311,17 +333,44 @@ test("generated VS Code and Continue configs use their current complete shapes",
     modelValues: {},
     iconUrl: "https://edge.example.com/dashboard/ocg.png",
   };
+  const vscodeWindows = new Map<string, number>([
+    ["glm-5.2", 1_000_000],
+    ["glm-5.1", 202_752],
+    ["kimi-k2.7-code", 262_144],
+    ["kimi-k2.6", 262_144],
+    ["deepseek-v4-pro", 1_000_000],
+    ["deepseek-v4-flash", 1_000_000],
+    ["mimo-v2.5", 1_000_000],
+    ["mimo-v2.5-pro", 1_048_576],
+    ["minimax-m3", 1_000_000],
+    ["minimax-m2.7", 204_800],
+    ["minimax-m2.5", 204_800],
+    ["qwen3.7-max", 1_000_000],
+    ["qwen3.7-plus", 1_000_000],
+    ["qwen3.6-plus", 1_000_000],
+  ]);
+  const vscodeContext = {
+    ...context,
+    modelId: "glm-5.2",
+    modelIds: [...vscodeWindows.keys()],
+  };
   const vscode = APPLICATION_GUIDES.find((guide) => guide.id === "vscode-copilot")!;
-  const vscodeConfig = JSON.parse(vscode.snippets(context)[0].copy);
+  const vscodeConfig = JSON.parse(vscode.snippets(vscodeContext)[0].copy);
   assert.equal(vscodeConfig[0].vendor, "customendpoint");
   assert.equal(vscodeConfig[0].apiType, "chat-completions");
   assert.equal(vscodeConfig[0].models[0].url, urls.chatCompletionsUrl);
-  assert.equal(vscodeConfig[0].models[0].id, context.modelId);
+  assert.equal(vscodeConfig[0].models[0].id, vscodeContext.modelId);
   assert.equal(vscodeConfig[0].models[0].toolCalling, true);
   assert.equal(vscodeConfig[0].models[0].vision, false);
-  assert.equal(vscodeConfig[0].models[0].maxInputTokens, 32768);
-  assert.equal(vscodeConfig[0].models[0].maxOutputTokens, 8192);
-  assert.deepEqual(vscodeConfig[0].models.map((model: { id: string }) => model.id), context.modelIds);
+  assert.deepEqual(vscodeConfig[0].models.map((model: { id: string }) => model.id), vscodeContext.modelIds);
+  for (const model of vscodeConfig[0].models) {
+    assert.equal(
+      model.maxInputTokens + model.maxOutputTokens,
+      vscodeWindows.get(model.id),
+      model.id,
+    );
+    assert.equal(model.maxOutputTokens, model.id === "glm-5.1" ? 32_768 : 65_536, model.id);
+  }
 
   const continueGuide = APPLICATION_GUIDES.find((guide) => guide.id === "continue")!;
   const yaml = continueGuide.snippets(context)[0].copy;
@@ -362,6 +411,12 @@ test("dashboard and settings keep partial data safe", async () => {
 test("applications view uses deep-linked subpages and a responsive second navigation", async () => {
   const applications = await readFile(new URL("./Applications.vue", import.meta.url), "utf8");
   const app = await readFile(new URL("../App.vue", import.meta.url), "utf8");
+  const restoreDefaults = applications.slice(
+    applications.indexOf("function restoreApplicationDefaults"),
+    applications.indexOf("async function copySnippet"),
+  );
+  const modelRowStart = applications.indexOf('<div class="model-row">');
+  const modelRow = applications.slice(modelRowStart, applications.indexOf("</section>", modelRowStart));
 
   assert.match(applications, /DEFAULT_APPLICATION: ApplicationId = "claude-code"/);
   assert.match(applications, /url\.searchParams\.set\("app", value\)/);
@@ -378,6 +433,21 @@ test("applications view uses deep-linked subpages and a responsive second naviga
   assert.match(applications, /if \(guide\.id === "claude-desktop"\) continue/);
   assert.match(applications, /if \(!claudeDesktopModelsLoaded\.value\)[\s\S]*?return;/);
   assert.match(applications, /@click="loadModels"/);
+  assert.match(modelRow, /@click="restoreApplicationDefaults"/);
+  assert.equal(applications.match(/@click="restoreApplicationDefaults"/g)?.length, 1);
+  assert.match(app, /<KeepAlive>\s*<Applications v-if="activeKey === 'apps'" \/>\s*<\/KeepAlive>/);
+  assert.match(applications, /modelsInitialized\.value = true/);
+  assert.match(applications, /onActivated\(\(\) => \{[\s\S]*?loadSettings\(!modelsInitialized\.value\)/);
+  assert.match(applications, /applicationModelIds\.value = modelIds/);
+  assert.match(applications, /selectedModelsByApplication\.value\[currentApplication\.value\]/);
+  assert.match(applications, /selectedModelByApplication\.value\[currentApplication\.value\]/);
+  assert.match(restoreDefaults, /recommendClaudeCodeModel\(field, models\)/);
+  assert.match(restoreDefaults, /selectedModels\.value = \[\.\.\.models\]/);
+  assert.match(restoreDefaults, /selectedModel\.value = models\[0\] \?\? null/);
+  assert.match(restoreDefaults, /claudeDesktopDefaults\.value/);
+  assert.match(restoreDefaults, /clearApplicationDrafts\(guide\.id\)/);
+  assert.match(applications, /key\.startsWith\(prefix\)/);
+  assert.doesNotMatch(restoreDefaults, /loadModels|tauriApi\./);
   assert.match(applications, /tauriApi\.updateClaudeDesktopModels/);
   assert.match(applications, /v-model:value="selectedModels"/);
   assert.match(applications, /type="textarea"/);

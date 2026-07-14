@@ -6,6 +6,7 @@ export const enUSMessages = {
   "复制失败": "Copy failed",
   "未设置": "Not set",
   "默认": "Default",
+  "恢复默认": "Restore defaults",
   "皓白": "Bright White",
   "曜黑": "Midnight Black",
   "藤紫": "Wisteria",

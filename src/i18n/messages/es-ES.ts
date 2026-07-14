@@ -8,6 +8,7 @@ export const esESMessages = {
   "复制失败": "Error al copiar",
   "未设置": "Sin configurar",
   "默认": "Predeterminado",
+  "恢复默认": "Restaurar valores predeterminados",
   "皓白": "Blanco luminoso",
   "曜黑": "Negro medianoche",
   "藤紫": "Glicinia",
