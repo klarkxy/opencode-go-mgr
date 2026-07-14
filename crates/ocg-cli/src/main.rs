@@ -13,6 +13,7 @@ use std::sync::Arc;
 #[derive(Parser)]
 #[command(name = "ocg-manager-cli")]
 #[command(about = "Headless CLI for OCG Manager gateway")]
+#[command(version)]
 struct Cli {
     /// Data directory for the CLI (default: ~/.ocg-mgr-cli)
     #[arg(long, global = true)]
@@ -472,7 +473,15 @@ async fn ping_keys(
 #[cfg(test)]
 mod tests {
     use super::{Cli, Commands, resolve_dashboard_dir};
-    use clap::Parser;
+    use clap::{CommandFactory, Parser};
+
+    #[test]
+    fn exposes_package_version() {
+        assert_eq!(
+            Cli::command().get_version(),
+            Some(env!("CARGO_PKG_VERSION"))
+        );
+    }
 
     #[test]
     fn serve_accepts_container_bind_address() {

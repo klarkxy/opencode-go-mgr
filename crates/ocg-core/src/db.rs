@@ -26,8 +26,8 @@ impl Database {
             [],
         )?;
 
-        let version: i32 = self
-            .conn
+        let tx = self.conn.unchecked_transaction()?;
+        let version: i32 = tx
             .query_row(
                 "SELECT version FROM schema_version ORDER BY version DESC LIMIT 1",
                 [],
@@ -36,7 +36,7 @@ impl Database {
             .unwrap_or(0);
 
         if version < 1 {
-            self.conn.execute_batch(
+            tx.execute_batch(
                 "CREATE TABLE IF NOT EXISTS accounts (
                     id TEXT PRIMARY KEY,
                     name TEXT NOT NULL,
@@ -82,7 +82,7 @@ impl Database {
         if version < 2 {
             // v2: per-account rate-limit cooldown (parsed from upstream 429 body).
             // Two nullable columns; no new table — account count is tiny, avoids a JOIN.
-            self.conn.execute_batch(
+            tx.execute_batch(
                 "ALTER TABLE accounts ADD COLUMN cooldown_until TEXT;
                 ALTER TABLE accounts ADD COLUMN last_error TEXT;
                 INSERT OR REPLACE INTO schema_version (version) VALUES (2);",
@@ -90,7 +90,7 @@ impl Database {
         }
 
         if version < 3 {
-            self.conn.execute_batch(
+            tx.execute_batch(
                 "ALTER TABLE accounts ADD COLUMN username TEXT;
                 ALTER TABLE accounts ADD COLUMN password_cipher TEXT;
                 INSERT OR REPLACE INTO schema_version (version) VALUES (3);",
@@ -98,7 +98,7 @@ impl Database {
         }
 
         if version < 4 {
-            self.conn.execute_batch(
+            tx.execute_batch(
                 "ALTER TABLE accounts ADD COLUMN usage_5h_baseline_percent REAL CHECK (usage_5h_baseline_percent BETWEEN 0 AND 100);
                 ALTER TABLE accounts ADD COLUMN usage_5h_anchor_success_cost REAL CHECK (usage_5h_anchor_success_cost >= 0);
                 ALTER TABLE accounts ADD COLUMN usage_week_baseline_percent REAL CHECK (usage_week_baseline_percent BETWEEN 0 AND 100);
@@ -109,6 +109,7 @@ impl Database {
             )?;
         }
 
+        tx.commit()?;
         Ok(())
     }
 
@@ -830,6 +831,51 @@ mod tests {
         assert_cost(usage.window_month, 2.5);
 
         drop(db);
+        fs::remove_dir_all(dir).expect("test data dir should be removed");
+    }
+
+    #[test]
+    fn migrations_roll_back_partial_schema_changes() {
+        let dir = temp_data_dir("atomic-migration");
+        let conn = Connection::open(dir.join("data.sqlite")).expect("v3 db should open");
+        conn.execute_batch(
+            "CREATE TABLE schema_version (version INTEGER PRIMARY KEY);
+             INSERT INTO schema_version (version) VALUES (3);
+             CREATE TABLE accounts (
+                 id TEXT PRIMARY KEY,
+                 usage_5h_anchor_success_cost REAL
+             );",
+        )
+        .expect("conflicting v3 schema should be created");
+        drop(conn);
+
+        assert!(Database::open(dir.clone()).is_err());
+        let conn = Connection::open(dir.join("data.sqlite")).expect("db should reopen");
+        let columns = conn
+            .prepare("PRAGMA table_info(accounts)")
+            .expect("table info should prepare")
+            .query_map([], |row| row.get::<_, String>(1))
+            .expect("table info should query")
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .expect("columns should load");
+        let version: i32 = conn
+            .query_row("SELECT MAX(version) FROM schema_version", [], |row| {
+                row.get(0)
+            })
+            .expect("schema version should load");
+        assert!(
+            !columns
+                .iter()
+                .any(|name| name == "usage_5h_baseline_percent")
+        );
+        assert!(
+            columns
+                .iter()
+                .any(|name| name == "usage_5h_anchor_success_cost")
+        );
+        assert_eq!(version, 3);
+
+        drop(conn);
         fs::remove_dir_all(dir).expect("test data dir should be removed");
     }
 

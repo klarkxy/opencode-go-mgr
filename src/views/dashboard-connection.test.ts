@@ -167,7 +167,9 @@ test("Cherry Studio and Chatbox imports encode the exact key and selected model"
   const cherryUrl = buildCherryStudioUrl(context);
   assert.equal(new URL(cherryUrl).protocol, "cherrystudio:");
   assert.deepEqual(decode(cherryUrl, "data"), {
-    id: "new-api",
+    id: "ocg-manager",
+    name: "OCG Manager",
+    type: "openai",
     baseUrl: context.rootUrl,
     apiKey: context.actualKey,
   });

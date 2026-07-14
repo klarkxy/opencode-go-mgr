@@ -1,5 +1,5 @@
 import { ref } from "vue";
-import { locale } from "../i18n/index.ts";
+import { locale, t } from "../i18n/index.ts";
 
 /**
  * Shared formatting helpers used across Dashboard, Accounts, Logs, and
@@ -39,8 +39,8 @@ export function useClipboard(timeout = 1500) {
 
   async function copy(target: string, value: string, label: string) {
     const writeText = navigator.clipboard?.writeText?.bind(navigator.clipboard);
-    if (!value) throw new Error("没有可复制的内容");
-    if (!writeText) throw new Error("当前环境不支持剪贴板");
+    if (!value) throw new Error(t("没有可复制的内容"));
+    if (!writeText) throw new Error(t("当前环境不支持剪贴板"));
     await writeText(value);
     copiedTarget.value = target;
     clearTimeout(timer);

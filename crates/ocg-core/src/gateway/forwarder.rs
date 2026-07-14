@@ -647,53 +647,110 @@ pub async fn forward_get(
 ) -> Result<Response> {
     ensure_safe_upstream_base_url(&config.upstream_base_url)?;
     let selector = AccountSelector::new();
-    let account = {
-        let db = state.db.lock();
-        selector
-            .select(&db, None)?
-            .ok_or_else(|| anyhow::anyhow!("no enabled accounts available"))
-    }?;
+    let mut failed_ids = Vec::new();
+    let mut last_http_error = None;
+    let mut last_transport_error = None;
 
-    let key = state.decrypt_key(&account.key_cipher)?;
-    let url = format!(
-        "{}{}",
-        config.upstream_base_url.trim_end_matches('/'),
-        upstream_path
-    );
+    loop {
+        let account = {
+            let db = state.db.lock();
+            let excluded = failed_ids.iter().map(String::as_str).collect::<Vec<_>>();
+            selector.select_excluding(&db, &excluded)?
+        };
+        let Some(account) = account else {
+            if let Some(until) = state.db.lock().soonest_cooldown_reset()? {
+                return Ok(rate_limited_response(ApiFormat::ChatCompletions, until));
+            }
+            if let Some((status, body)) = last_http_error {
+                let mut headers = HeaderMap::new();
+                headers.insert("content-type", HeaderValue::from_static("application/json"));
+                return Ok((status, headers, body).into_response());
+            }
+            if let Some(error) = last_transport_error {
+                return Err(error);
+            }
+            anyhow::bail!("no enabled accounts available");
+        };
 
-    let resp = match client
-        .get(&url)
-        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", key))
-        .timeout(StdDuration::from_secs(config.non_stream_timeout_secs))
-        .send()
-        .await
-    {
-        Ok(r) => r,
-        Err(e) => return Err(e.into()),
-    };
+        let key = match state.decrypt_key(&account.key_cipher) {
+            Ok(key) => key,
+            Err(error) => {
+                last_transport_error = Some(error);
+                failed_ids.push(account.id);
+                continue;
+            }
+        };
+        let url = format!(
+            "{}{}",
+            config.upstream_base_url.trim_end_matches('/'),
+            upstream_path
+        );
+        let mut retried_same_account = false;
 
-    let status = resp.status();
-    let body = resp
-        .text()
-        .await
-        .map_err(|error| anyhow::anyhow!(response_body_error(&error)))?;
+        loop {
+            let resp = match client
+                .get(&url)
+                .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", key))
+                .timeout(StdDuration::from_secs(config.non_stream_timeout_secs))
+                .send()
+                .await
+            {
+                Ok(response) => response,
+                Err(error) => {
+                    last_transport_error = Some(error.into());
+                    if !retried_same_account {
+                        retried_same_account = true;
+                        continue;
+                    }
+                    failed_ids.push(account.id.clone());
+                    break;
+                }
+            };
 
-    if status.as_u16() == 429 {
-        let db = state.db.lock();
-        // 429 cooldown: parse the reset window so the next request skips this account.
-        let cooldown = parse_reset(&body).unwrap_or_else(|| Duration::minutes(5));
-        db.set_account_rate_limit(
-            &account.id,
-            Utc::now() + cooldown,
-            &body,
-            parse_usage_limit_window(&body),
-        )?;
+            let status = resp.status();
+            let body = match resp.text().await {
+                Ok(body) => body,
+                Err(error) => {
+                    last_transport_error = Some(anyhow::anyhow!(response_body_error(&error)));
+                    if !retried_same_account {
+                        retried_same_account = true;
+                        continue;
+                    }
+                    failed_ids.push(account.id.clone());
+                    break;
+                }
+            };
+
+            if status.as_u16() == 429 {
+                let db = state.db.lock();
+                let cooldown = parse_reset(&body).unwrap_or_else(|| Duration::minutes(5));
+                db.set_account_rate_limit(
+                    &account.id,
+                    Utc::now() + cooldown,
+                    &body,
+                    parse_usage_limit_window(&body),
+                )?;
+            }
+            if status.is_server_error() || status.as_u16() == 408 {
+                last_http_error = Some((status, body));
+                if !retried_same_account {
+                    retried_same_account = true;
+                    continue;
+                }
+                failed_ids.push(account.id.clone());
+                break;
+            }
+            if matches!(status.as_u16(), 401 | 403 | 429) {
+                last_http_error = Some((status, body));
+                failed_ids.push(account.id.clone());
+                break;
+            }
+
+            let mut headers = HeaderMap::new();
+            headers.insert("content-type", HeaderValue::from_static("application/json"));
+            return Ok((status, headers, body).into_response());
+        }
     }
-
-    let mut headers = HeaderMap::new();
-    headers.insert("content-type", HeaderValue::from_static("application/json"));
-
-    Ok((status, headers, body).into_response())
 }
 
 fn ensure_safe_upstream_base_url(base: &str) -> Result<()> {
@@ -736,6 +793,19 @@ fn response_body_error(error: &reqwest::Error) -> String {
 fn error_response(format: ApiFormat, message: &str, upstream: Option<&Value>) -> Response {
     let body = format_error(format, StatusCode::BAD_GATEWAY, message, upstream);
     (StatusCode::BAD_GATEWAY, axum::Json(body)).into_response()
+}
+
+pub(crate) fn rate_limited_response(
+    format: ApiFormat,
+    resets_at: chrono::DateTime<Utc>,
+) -> Response {
+    let message = format!(
+        "all accounts rate-limited, soonest resets at {}",
+        resets_at.to_rfc3339()
+    );
+    let mut body = format_error(format, StatusCode::TOO_MANY_REQUESTS, &message, None);
+    body["error"]["resets_at"] = serde_json::json!(resets_at.to_rfc3339());
+    (StatusCode::TOO_MANY_REQUESTS, axum::Json(body)).into_response()
 }
 
 fn log_forward(

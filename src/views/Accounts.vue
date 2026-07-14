@@ -568,10 +568,7 @@ async function loadAccounts() {
     accounts.value = loaded;
     drafts.value = nextDrafts;
     // 限流并发拉取用量，避免账号多时 N 次请求同时打到后端
-    const settled = await mapWithConcurrency(loaded, 4, (account) => loadAccountUsage(account.id));
-    if (settled.some((r) => r.status === "rejected")) {
-      message.warning(t("用量加载失败"));
-    }
+    await mapWithConcurrency(loaded, 4, (account) => loadAccountUsage(account.id));
   } catch (e) {
     message.error(t("加载账号失败: {error}", { error: String(e) }));
   }
@@ -650,7 +647,11 @@ async function pingAccount(id: string) {
   } finally {
     pinging.value[id] = false;
     // ping 可能改变冷却状态，仅刷新该账号而非全量重载
-    await refreshAccountState(id);
+    try {
+      await refreshAccountState(id);
+    } catch (e) {
+      message.error(t("加载账号失败: {error}", { error: String(e) }));
+    }
   }
 }
 

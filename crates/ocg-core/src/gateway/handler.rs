@@ -1,4 +1,4 @@
-use crate::gateway::forwarder::{forward_get, forward_request};
+use crate::gateway::forwarder::{forward_get, forward_request, rate_limited_response};
 use crate::gateway::protocol::{ApiFormat, format_error, prepare_request};
 use crate::gateway::selector::AccountSelector;
 use crate::models::AppConfig;
@@ -198,17 +198,4 @@ fn protocol_error_response(
         axum::Json(format_error(format, status, message, upstream)),
     )
         .into_response()
-}
-
-fn rate_limited_response(
-    format: ApiFormat,
-    resets_at: chrono::DateTime<chrono::Utc>,
-) -> axum::response::Response {
-    let message = format!(
-        "all accounts rate-limited, soonest resets at {}",
-        resets_at.to_rfc3339()
-    );
-    let mut body = format_error(format, StatusCode::TOO_MANY_REQUESTS, &message, None);
-    body["error"]["resets_at"] = serde_json::json!(resets_at.to_rfc3339());
-    (StatusCode::TOO_MANY_REQUESTS, axum::Json(body)).into_response()
 }

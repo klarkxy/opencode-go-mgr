@@ -94,6 +94,9 @@ test("accounts render before per-account usage and expose failed loads for retry
   assert.ok(load.indexOf("accounts.value = loaded") < load.indexOf("getAccountUsage"));
   assert.match(load, /loadAccountUsage\(account\.id\)/);
   assert.match(load, /usageLoadErrors\.value\[accountId\] = String\(error\)/);
+
+  const ping = source.slice(source.indexOf("async function pingAccount"), source.indexOf("async function toggleAccount"));
+  assert.match(ping, /try \{\s+await refreshAccountState\(id\);\s+\} catch \(e\) \{/);
 });
 
 test("manual editor writes on commit events instead of each value update", async () => {

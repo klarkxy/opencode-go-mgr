@@ -63,7 +63,9 @@ function encodePayload(payload: unknown): string {
 
 export function buildCherryStudioUrl(context: GuideContext): string {
   return `cherrystudio://providers/api-keys?v=1&data=${encodePayload({
-    id: "new-api",
+    id: "ocg-manager",
+    name: "OCG Manager",
+    type: "openai",
     baseUrl: context.rootUrl,
     apiKey: context.actualKey,
   })}`;

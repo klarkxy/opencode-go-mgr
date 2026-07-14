@@ -8,7 +8,7 @@ use chrono::{Duration, Utc};
 use ocg_core::crypto::{KeyCipher, StaticKeyCipher};
 use ocg_core::db::Database;
 use ocg_core::gateway;
-use ocg_core::models::Account;
+use ocg_core::models::{Account, AccountUpdate};
 use ocg_core::state::{CoreStateInner, GatewayHandle};
 use std::collections::{HashMap, VecDeque};
 use std::convert::Infallible;
@@ -437,6 +437,118 @@ async fn model_discovery_keeps_rate_limit_cooldown_without_logging() {
         .query_forward_logs(10, 0, None, None)
         .unwrap();
     assert_eq!(logs.summary.total_requests, 0);
+
+    gateway::stop_gateway(gateway_handle);
+    let _ = stop_mock.send(());
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn application_models_falls_back_after_rate_limit() {
+    let replies = HashMap::from([
+        (
+            "key-1".to_string(),
+            VecDeque::from([MockReply {
+                status: 429,
+                body: LIMITED_BODY,
+            }]),
+        ),
+        (
+            "key-2".to_string(),
+            VecDeque::from([MockReply {
+                status: 500,
+                body: r#"{"error":"temporary failure"}"#,
+            }]),
+        ),
+        (
+            "key-3".to_string(),
+            VecDeque::from([MockReply {
+                status: 200,
+                body: r#"{"object":"list","data":[{"id":"deepseek-v4-flash"}]}"#,
+            }]),
+        ),
+    ]);
+    let (base_url, calls, stop_mock) = start_mock_upstream(replies).await;
+    let (state, dir) = build_state(base_url, &["key-1", "key-2", "key-3"]);
+    let (port, gateway_handle) = start_gateway(state.clone()).await;
+
+    let response = reqwest::Client::new()
+        .get(format!(
+            "http://127.0.0.1:{port}/dashboard/api/application-models"
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.json::<serde_json::Value>().await.unwrap(),
+        serde_json::json!(["deepseek-v4-flash"])
+    );
+    assert_eq!(
+        calls
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|call| call.key.as_str())
+            .collect::<Vec<_>>(),
+        ["key-1", "key-2", "key-2", "key-3"]
+    );
+    assert!(
+        state
+            .db
+            .lock()
+            .get_account("acct-1")
+            .unwrap()
+            .unwrap()
+            .cooldown_until
+            .is_some()
+    );
+
+    gateway::stop_gateway(gateway_handle);
+    let _ = stop_mock.send(());
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn application_models_skips_an_account_with_a_broken_key() {
+    let replies = HashMap::from([(
+        "key-2".to_string(),
+        VecDeque::from([MockReply {
+            status: 200,
+            body: r#"{"object":"list","data":[{"id":"deepseek-v4-flash"}]}"#,
+        }]),
+    )]);
+    let (base_url, calls, stop_mock) = start_mock_upstream(replies).await;
+    let (state, dir) = build_state(base_url, &["key-1", "key-2"]);
+    state
+        .db
+        .lock()
+        .update_account(
+            "acct-1",
+            &AccountUpdate {
+                name: None,
+                username: None,
+                password: None,
+                key: None,
+                enabled: None,
+                referral_code: None,
+                recharge_date: None,
+            },
+            Some("not-a-valid-ciphertext"),
+            None,
+        )
+        .unwrap();
+    let (port, gateway_handle) = start_gateway(state).await;
+
+    let response = reqwest::Client::new()
+        .get(format!(
+            "http://127.0.0.1:{port}/dashboard/api/application-models"
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(calls.lock().unwrap()[0].key, "key-2");
 
     gateway::stop_gateway(gateway_handle);
     let _ = stop_mock.send(());
