@@ -261,7 +261,7 @@ test("applications view uses deep-linked subpages and a responsive second naviga
   assert.doesNotMatch(applications, /<code>\{\{ serviceConfig\.gateway_key \}\}<\/code>/);
   assert.match(app, /<main class="app-content">/);
   assert.doesNotMatch(app, /<n-layout-content/);
-  assert.match(app, /"dashboard", "accounts", "apps", "logs", "settings"/);
+  assert.match(app, /dashboard.*accounts.*apps.*logs.*settings/s);
 });
 
 test("settings expose the downstream display root and bounded request timeouts", async () => {
@@ -281,7 +281,7 @@ test("settings expose the downstream display root and bounded request timeouts",
   assert.match(settings, /get: \(\) => config\.value\.client_root_url \|\| automaticClientRootUrls\.value\.rootUrl/);
   assert.doesNotMatch(settings, /config\.value\.client_root_url = resolveConnectionUrls/);
   assert.match(settings, /非本机 HTTP 会明文传输 Gateway Key 与请求内容/);
-  assert.match(settings, /不会修改 Gateway 监听、DNS 或反向代理/);
+  assert.match(settings, /仅用于下游教程、展示和复制/);
   assert.match(settings, /请求超时/);
   assert.match(settings, /config\.connect_timeout_secs"\s+:min="1"\s+:max="300"\s+:precision="0"/);
   assert.match(settings, /config\.non_stream_timeout_secs"\s+:min="1"\s+:max="3600"\s+:precision="0"/);

@@ -137,7 +137,7 @@
       <div class="card-head chart-head">
         <div>
           <h3 class="card-title">{{ t("每日消耗") }}</h3>
-          <p class="card-desc">{{ t("最近 {days} 天 · 成功请求", { days: 30 }) }}</p>
+          <p class="card-desc">{{ t("每日消耗趋势") }}</p>
         </div>
         <div class="chart-stats" :aria-label="t('图表摘要')">
           <span>{{ t("模型：{count}", { count: formatNumber(legendModels.length) }) }}</span>
@@ -197,20 +197,20 @@ import StackedBarChart from "../components/StackedBarChart.vue";
 import { tauriApi } from "../api/tauri";
 import type { Account, DailyModelCost, DashboardSummary, UsageWindow } from "../api/tauri";
 import { CHART_PALETTE } from "../theme";
-import { locale, t } from "../i18n/index.ts";
-import { maskConnectionKey, resolveConnectionUrls, writeConnectionValue } from "./dashboard-connection";
+import { t } from "../i18n/index.ts";
+import { formatCost, formatNumber, useClipboard } from "../utils/format.ts";
+import { maskConnectionKey, resolveConnectionUrls } from "./dashboard-connection";
 
 type ConnectionTarget = "api" | "key" | "upstream";
 
 const message = useMessage();
+const { copiedTarget, copy, cleanup } = useClipboard();
 const characterImage = new URL("../../assets/opencode-mascot.png", import.meta.url).href;
 const accounts = ref<Account[]>([]);
 const usageMap = ref<Record<string, UsageWindow>>({});
 const dailyCosts = ref<DailyModelCost[]>([]);
 const loading = ref(true);
 const refreshingKey = ref(false);
-const copiedTarget = ref<ConnectionTarget | null>(null);
-let copyTimer: ReturnType<typeof setTimeout> | undefined;
 
 const serviceConfig = ref({
   gateway_port: 9042,
@@ -243,20 +243,6 @@ const connectionUrls = computed(() => resolveConnectionUrls(
 ));
 const serviceApiUrl = computed(() => connectionUrls.value.apiBaseUrl);
 
-function formatCost(value: number): string {
-  const digits = value !== 0 && value < 0.01 ? 4 : 2;
-  return new Intl.NumberFormat(locale.value, {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits,
-  }).format(value);
-}
-
-function formatNumber(value: number): string {
-  return new Intl.NumberFormat(locale.value).format(value);
-}
-
 function isCoolingDown(account: Account): boolean {
   if (!account.cooldown_until) return false;
   const until = Date.parse(account.cooldown_until);
@@ -280,11 +266,7 @@ function getUsageText(accountId: string): string {
 
 async function copyConnection(target: ConnectionTarget, value: string, label: string) {
   try {
-    const writeText = navigator.clipboard?.writeText?.bind(navigator.clipboard);
-    await writeConnectionValue(writeText, value);
-    copiedTarget.value = target;
-    clearTimeout(copyTimer);
-    copyTimer = setTimeout(() => { copiedTarget.value = null; }, 1500);
+    await copy(target, value, label);
     message.success(t("已复制 {label}", { label }));
   } catch (e) {
     message.error(e instanceof Error ? e.message : t("复制失败"));
@@ -324,7 +306,7 @@ onMounted(async () => {
   loading.value = false;
 });
 
-onUnmounted(() => clearTimeout(copyTimer));
+onUnmounted(cleanup);
 </script>
 
 <style scoped>

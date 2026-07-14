@@ -109,7 +109,7 @@
       :style="{ left: tooltip.x + 'px', top: tooltip.y + 'px' }"
     >
       <div class="tooltip-title">{{ tooltip.title }}</div>
-      <div class="tooltip-total">{{ t("合计 {total}", { total: formatCurrency(tooltip.total, 4) }) }}</div>
+      <div class="tooltip-total">{{ t("合计 {total}", { total: formatCost(tooltip.total) }) }}</div>
       <div
         v-for="row in tooltip.rows"
         :key="row.model"
@@ -117,7 +117,7 @@
       >
         <span class="dot" :style="{ background: row.color }" />
         <span class="model">{{ row.model }}</span>
-        <span class="cost">{{ formatCurrency(row.cost, 4) }}</span>
+        <span class="cost">{{ formatCost(row.cost) }}</span>
       </div>
     </div>
   </div>
@@ -128,6 +128,7 @@ import { ref, computed, onMounted, onBeforeUnmount, useId } from "vue";
 import type { DailyModelCost } from "../api/tauri";
 import { CHART_PALETTE } from "../theme";
 import { locale, t } from "../i18n/index.ts";
+import { formatCost } from "../utils/format.ts";
 
 const props = withDefaults(defineProps<{
   data: DailyModelCost[];
@@ -169,15 +170,6 @@ onBeforeUnmount(() => {
 function modelColor(model: string, models: string[]): string {
   const idx = models.indexOf(model);
   return CHART_PALETTE[idx % CHART_PALETTE.length];
-}
-
-function formatCurrency(value: number, digits: number): string {
-  return new Intl.NumberFormat(locale.value, {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits,
-  }).format(value);
 }
 
 function formatChartDate(value: string, short = false): string {
@@ -255,7 +247,7 @@ const yTicks = computed(() => {
     out.push({
       value: val,
       y,
-      label: val < 0.001 ? formatCurrency(0, 0) : formatCurrency(val, val < 1 ? 3 : 2),
+      label: val < 0.001 ? formatCost(0) : formatCost(val),
     });
   }
   return out;

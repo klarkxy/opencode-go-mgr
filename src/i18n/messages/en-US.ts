@@ -118,7 +118,6 @@ export const enUSMessages = {
   "{hours}小时{minutes}分钟": "{hours}h {minutes}m",
   "{minutes}分钟": "{minutes}m",
   "{seconds}秒": "{seconds}s",
-  "手动值保存后会继续累加本机用量；100% 仅为提示，收到真实 429 后才会熔断。": "After a manual value is saved, local usage continues to accumulate; 100% is only a warning, and the circuit opens only after a real 429 response.",
   "用量加载失败": "Usage failed to load",
   "重试": "Retry",
   "用量保存失败: {error}": "Failed to save usage: {error}",
@@ -322,6 +321,18 @@ export const enUSMessages = {
   "请填写根地址，不要包含 /v1 后的接口路径": "Enter the root URL without an endpoint path after /v1",
   "没有可复制的内容": "There is nothing to copy",
   "当前环境不支持剪贴板": "Clipboard access is not available in this environment",
+
+  "API Key": "API Key",
+  "ROOT": "ROOT",
+  "API BASE": "API BASE",
+  "GATEWAY KEY": "GATEWAY KEY",
+  "CHAT ENDPOINT": "CHAT ENDPOINT",
+  "MESSAGES ENDPOINT": "MESSAGES ENDPOINT",
+  "RESPONSES ENDPOINT": "RESPONSES ENDPOINT",
+  "5小时": "5h",
+  "每日消耗趋势": "Daily spend trend",
+  "需要修改时点击编辑图标。": "Click the edit icon to modify.",
+  "仅用于下游教程、展示和复制。": "Used only in downstream guides, display, and copy actions.",
 } as const;
 
 export type MessageKey = keyof typeof enUSMessages;

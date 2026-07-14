@@ -215,13 +215,21 @@ import type { ThemeName } from "./theme";
 
 type ViewKey = "dashboard" | "accounts" | "apps" | "logs" | "settings";
 
+const viewConfig: Record<ViewKey, MessageKey> = {
+  dashboard: "仪表盘",
+  accounts: "账号",
+  apps: "应用",
+  logs: "日志",
+  settings: "设置",
+};
+const views = new Set<ViewKey>(Object.keys(viewConfig) as ViewKey[]);
+
 const Dashboard = defineAsyncComponent(() => import("./views/Dashboard.vue"));
 const Accounts = defineAsyncComponent(() => import("./views/Accounts.vue"));
 const Applications = defineAsyncComponent(() => import("./views/Applications.vue"));
 const Logs = defineAsyncComponent(() => import("./views/Logs.vue"));
 const Settings = defineAsyncComponent(() => import("./views/Settings.vue"));
 
-const views = new Set<ViewKey>(["dashboard", "accounts", "apps", "logs", "settings"]);
 const osTheme = useOsTheme();
 const collapsed = ref(false);
 const activeKey = ref<ViewKey>(readView());
@@ -258,14 +266,7 @@ const menuOptions = computed(() => [
   { label: t("日志"), key: "logs", icon: renderIcon(FileTextOutlined) },
   { label: t("设置"), key: "settings", icon: renderIcon(SettingOutlined) },
 ]);
-const titleMap: Record<ViewKey, MessageKey> = {
-  dashboard: "仪表盘",
-  accounts: "账号管理",
-  apps: "应用教程",
-  logs: "日志",
-  settings: "设置",
-};
-const currentTitle = computed(() => t(titleMap[activeKey.value]));
+const currentTitle = computed(() => t(viewConfig[activeKey.value]));
 const themeNames = new Set<ThemeName>(THEME_OPTIONS.map(({ value }) => value));
 const themeLabel = computed(() => {
   const selected = t((THEME_OPTIONS.find(({ value }) => value === themeName.value)?.label ?? "默认") as MessageKey);

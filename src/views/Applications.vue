@@ -36,7 +36,7 @@
 
             <div class="connection-track">
               <article class="connection-stage">
-                <span>ROOT</span>
+                <span>{{ t("ROOT") }}</span>
                 <div class="connection-value">
                   <code>{{ connectionUrls.rootUrl }}</code>
                   <n-button
@@ -53,7 +53,7 @@
                 </div>
               </article>
               <article class="connection-stage">
-                <span>API BASE</span>
+                <span>{{ t("API BASE") }}</span>
                 <div class="connection-value">
                   <code>{{ connectionUrls.apiBaseUrl }}</code>
                   <n-button
@@ -89,7 +89,7 @@
             </div>
 
             <div class="key-row">
-              <span>GATEWAY KEY</span>
+              <span>{{ t("GATEWAY KEY") }}</span>
               <code>{{ maskedKey }}</code>
               <n-button
                 circle
@@ -249,10 +249,10 @@ import type { MenuOption, SelectOption } from "naive-ui";
 import { CheckOutlined, CopyOutlined, ExportOutlined } from "@vicons/antd";
 import logoUrl from "../../assets/logo/ocg_logo_final_transparent.png";
 import { tauriApi } from "../api/tauri";
+import { useClipboard } from "../utils/format.ts";
 import {
   maskConnectionKey,
   resolveConnectionUrls,
-  writeConnectionValue,
 } from "./dashboard-connection";
 import {
   APPLICATION_GUIDES,
@@ -264,6 +264,7 @@ import { t } from "../i18n/index.ts";
 const DEFAULT_APPLICATION: ApplicationId = "claude-code";
 const allowedImportProtocols = new Set(["cherrystudio:", "chatbox:"]);
 const message = useMessage();
+const { copiedTarget, copy, cleanup } = useClipboard();
 const currentApplication = ref<ApplicationId>(readApplication());
 const settingsLoading = ref(true);
 const settingsLoaded = ref(false);
@@ -272,8 +273,6 @@ const modelsLoading = ref(false);
 const modelsError = ref("");
 const modelOptions = ref<SelectOption[]>([]);
 const selectedModel = ref<string | null>(null);
-const copiedTarget = ref("");
-let copyTimer: ReturnType<typeof setTimeout> | undefined;
 
 const serviceConfig = ref({
   gateway_port: 9042,
@@ -320,12 +319,12 @@ const canGenerateConfig = computed(() => (
 ));
 const activeEndpoint = computed(() => {
   if (activeGuide.value.endpointKind === "messages") {
-    return { label: "MESSAGES ENDPOINT", url: connectionUrls.value.messagesUrl };
+    return { label: t("MESSAGES ENDPOINT"), url: connectionUrls.value.messagesUrl };
   }
   if (activeGuide.value.endpointKind === "responses") {
-    return { label: "RESPONSES ENDPOINT", url: connectionUrls.value.responsesUrl };
+    return { label: t("RESPONSES ENDPOINT"), url: connectionUrls.value.responsesUrl };
   }
-  return { label: "CHAT ENDPOINT", url: connectionUrls.value.chatCompletionsUrl };
+  return { label: t("CHAT ENDPOINT"), url: connectionUrls.value.chatCompletionsUrl };
 });
 
 function readApplication(): ApplicationId {
@@ -386,11 +385,7 @@ async function loadSettings() {
 
 async function copyValue(target: string, value: string, label: string) {
   try {
-    const writeText = navigator.clipboard?.writeText?.bind(navigator.clipboard);
-    await writeConnectionValue(writeText, value);
-    copiedTarget.value = target;
-    clearTimeout(copyTimer);
-    copyTimer = setTimeout(() => { copiedTarget.value = ""; }, 1500);
+    await copy(target, value, label);
     message.success(t("已复制 {label}", { label }));
   } catch (error) {
     message.error(error instanceof Error ? error.message : t("复制失败"));
@@ -422,7 +417,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener("popstate", onPopState);
-  clearTimeout(copyTimer);
+  cleanup();
 });
 </script>
 
@@ -511,7 +506,7 @@ onUnmounted(() => {
 .connection-track {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 22px;
+  gap: 28px;
 }
 
 .connection-stage {

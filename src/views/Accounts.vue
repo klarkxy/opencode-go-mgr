@@ -2,7 +2,7 @@
   <div class="accounts-view">
   <n-space vertical :size="16" class="accounts-content">
     <n-space justify="space-between" align="center" class="accounts-toolbar">
-      <n-h3 style="margin: 0">{{ t("账号管理") }}</n-h3>
+      <n-h3 style="margin: 0">{{ t("账号") }}</n-h3>
       <n-button type="primary" @click="showCreateModal = true">
         <template #icon>
           <n-icon :component="PlusOutlined" />
@@ -189,9 +189,6 @@
           />
         </div>
       </div>
-      <p class="usage-hint">
-        {{ t("手动值保存后会继续累加本机用量；100% 仅为提示，收到真实 429 后才会熔断。") }}
-      </p>
 
       <div v-if="expanded[account.id]" class="account-detail">
         <n-form :model="drafts[account.id]" label-placement="top" :show-feedback="false">
@@ -229,7 +226,7 @@
                 </n-button>
               </div>
             </n-form-item>
-            <n-form-item label="API Key">
+            <n-form-item :label="t('API Key')">
               <n-input
                 v-model:value="drafts[account.id].key"
                 :input-props="{ 'aria-label': t('{name} API Key', { name: account.name }) }"
@@ -350,7 +347,8 @@ import {
   usagePercentFromCost,
 } from "./accounts-usage";
 import type { UsageEditState, UsageKey } from "./accounts-usage";
-import { locale, t } from "../i18n/index.ts";
+import { t } from "../i18n/index.ts";
+import { formatCost } from "../utils/format.ts";
 
 type AccountDraft = {
   name: string;
@@ -372,7 +370,7 @@ const vUsageSliderLabel = {
 };
 
 const usageLimits = computed<Array<{ key: UsageKey; label: string; limit: number }>>(() => [
-  { key: "window_5h", label: "5h", limit: 12 },
+  { key: "window_5h", label: t("5小时"), limit: 12 },
   { key: "window_week", label: t("本周"), limit: 30 },
   { key: "window_month", label: t("本月"), limit: 60 },
 ]);
@@ -486,16 +484,6 @@ function accountIsCooling(account: Account): boolean {
 
 function accountUsageLimitReached(account: Account, key: UsageKey): boolean {
   return isUsageLimitReached(account, key, now.value);
-}
-
-function formatCost(value: number): string {
-  const digits = value !== 0 && value < 0.01 ? 4 : 2;
-  return new Intl.NumberFormat(locale.value, {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits,
-  }).format(value);
 }
 
 function formatRemaining(account: Account): string {
@@ -759,13 +747,13 @@ onUnmounted(() => window.clearInterval(clock));
 
 .usage-save-error {
   color: var(--n-error-color);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .usage-hint {
   margin: 8px 0 0;
   color: var(--n-text-color-3);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .usage-meta {

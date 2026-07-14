@@ -280,6 +280,9 @@ export function toNaiveThemeOverrides(tokens: ThemeTokens): GlobalThemeOverrides
       fontFamily: '"Segoe UI Variable Text", "Noto Sans SC", "Microsoft YaHei UI", sans-serif',
       fontFamilyMono: '"Cascadia Mono", Consolas, monospace',
       fontSize: "16px",
+      // All sizes unified to 16px: the design intentionally uses a single base
+      // size across the UI, with visual hierarchy driven by weight and color
+      // instead of font-size scaling.
       fontSizeMini: "16px",
       fontSizeTiny: "16px",
       fontSizeSmall: "16px",

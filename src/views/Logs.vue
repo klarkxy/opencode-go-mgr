@@ -105,7 +105,9 @@ import type { DataTableCreateSummary } from "naive-ui";
 import { ClearOutlined, ReloadOutlined } from "@vicons/antd";
 import { tauriApi } from "../api/tauri";
 import type { Account, ForwardLog, ForwardLogSummary, GatewayLog } from "../api/tauri";
-import { locale, t } from "../i18n/index.ts";
+import { t } from "../i18n/index.ts";
+import { locale } from "../i18n/index.ts";
+import { formatNumber } from "../utils/format.ts";
 
 type LogTab = "gateway" | "forward";
 
@@ -143,7 +145,6 @@ const dateFormatter = computed(() => new Intl.DateTimeFormat(locale.value, {
   minute: "2-digit",
   second: "2-digit",
 }));
-const numberFormatter = computed(() => new Intl.NumberFormat(locale.value));
 const costFormatter = computed(() => new Intl.NumberFormat(locale.value, {
   style: "currency",
   currency: "USD",
@@ -186,18 +187,18 @@ const forwardColumns = computed(() => [
     },
   },
   { title: "HTTP", key: "http_status", width: 72 },
-  { title: t("输入"), key: "prompt_tokens", width: 92, align: "right" as const, render: (row: ForwardLog) => numberFormatter.value.format(row.prompt_tokens) },
-  { title: t("输出"), key: "completion_tokens", width: 92, align: "right" as const, render: (row: ForwardLog) => numberFormatter.value.format(row.completion_tokens) },
-  { title: t("缓存"), key: "cached_tokens", width: 92, align: "right" as const, render: (row: ForwardLog) => numberFormatter.value.format(row.cached_tokens) },
+  { title: t("输入"), key: "prompt_tokens", width: 92, align: "right" as const, render: (row: ForwardLog) => formatNumber(row.prompt_tokens) },
+  { title: t("输出"), key: "completion_tokens", width: 92, align: "right" as const, render: (row: ForwardLog) => formatNumber(row.completion_tokens) },
+  { title: t("缓存"), key: "cached_tokens", width: 92, align: "right" as const, render: (row: ForwardLog) => formatNumber(row.cached_tokens) },
   { title: t("成本"), key: "cost", width: 112, align: "right" as const, render: (row: ForwardLog) => costFormatter.value.format(row.cost) },
   { title: t("错误"), key: "error_message", minWidth: 220, ellipsis: { tooltip: true } },
 ]);
 
 const forwardSummary: DataTableCreateSummary<ForwardLog> = () => ({
-  timestamp: { value: t("请求数：{count}", { count: numberFormatter.value.format(forwardTotals.value.total_requests) }), colSpan: 5 },
-  prompt_tokens: { value: numberFormatter.value.format(forwardTotals.value.prompt_tokens) },
-  completion_tokens: { value: numberFormatter.value.format(forwardTotals.value.completion_tokens) },
-  cached_tokens: { value: numberFormatter.value.format(forwardTotals.value.cached_tokens) },
+  timestamp: { value: t("请求数：{count}", { count: formatNumber(forwardTotals.value.total_requests) }), colSpan: 5 },
+  prompt_tokens: { value: formatNumber(forwardTotals.value.prompt_tokens) },
+  completion_tokens: { value: formatNumber(forwardTotals.value.completion_tokens) },
+  cached_tokens: { value: formatNumber(forwardTotals.value.cached_tokens) },
   cost: { value: costFormatter.value.format(forwardTotals.value.cost) },
   error_message: { value: "" },
 });

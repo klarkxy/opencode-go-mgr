@@ -33,7 +33,7 @@
               <span v-else-if="!config.client_root_url.trim()" class="sr-only">
                 {{ automaticClientRootFeedback }}
               </span>
-              {{ t("仅用于下游教程、展示和复制；不会修改 Gateway 监听、DNS 或反向代理。") }}
+              {{ t("仅用于下游教程、展示和复制。") }}
             </p>
           </div>
         </n-form-item>
@@ -114,7 +114,7 @@
               />
               <n-button size="small" secondary @click="cancelGatewayKeyEdit">{{ t("取消") }}</n-button>
             </div>
-            <p>{{ t("已保存的 Key 只脱敏显示；复制或复制教程配置时才会使用完整值。") }}</p>
+            <p>{{ t("需要修改时点击编辑图标。") }}</p>
           </div>
         </n-form-item>
         <div
@@ -295,11 +295,11 @@ import { THEME_OPTIONS } from "../theme";
 import type { ResolvedTheme, ThemeName } from "../theme";
 import { t } from "../i18n/index.ts";
 import type { MessageKey } from "../i18n/index.ts";
+import { useClipboard } from "../utils/format.ts";
 import {
   maskConnectionKey,
   normalizeClientRootUrl,
   resolveConnectionUrls,
-  writeConnectionValue,
 } from "./dashboard-connection";
 
 const { themeName, resolvedTheme } = defineProps<{
@@ -311,14 +311,13 @@ const emit = defineEmits<{ "update:themeName": [value: ThemeName] }>();
 const message = useMessage();
 const saving = ref(false);
 const regenerating = ref(false);
-const keyCopied = ref(false);
+const { copiedTarget: keyCopied, copy, cleanup } = useClipboard();
 const loaded = ref(false);
 const editingGatewayKey = ref(false);
 const gatewayKeyDraft = ref("");
 const checkingUpdate = ref(false);
 const updateResult = ref<UpdateCheckResult | null>(null);
 const updateError = ref("");
-let copyTimer: ReturnType<typeof setTimeout> | undefined;
 let persistedAutoStart = false;
 
 // ponytail: keep this pre-load fallback in sync with AppConfig::default().
@@ -464,11 +463,7 @@ function timeoutsValid(): boolean {
 
 async function copyKey() {
   try {
-    const writeText = navigator.clipboard?.writeText?.bind(navigator.clipboard);
-    await writeConnectionValue(writeText, config.value.gateway_key);
-    keyCopied.value = true;
-    clearTimeout(copyTimer);
-    copyTimer = setTimeout(() => { keyCopied.value = false; }, 1500);
+    await copy("settings-key", config.value.gateway_key, "Key");
     message.success(t("已复制 Key"));
   } catch (e) {
     message.error(e instanceof Error ? e.message : t("复制失败"));
@@ -503,7 +498,7 @@ async function checkForUpdate() {
 }
 
 onMounted(loadSettings);
-onUnmounted(() => clearTimeout(copyTimer));
+onUnmounted(cleanup);
 </script>
 
 <style scoped>
