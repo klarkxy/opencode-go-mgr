@@ -226,8 +226,10 @@ ship the CLI executable alone: `serve` needs the sibling dashboard
 assets. Windows has no portable GUI artifact.
 
 The `linux/amd64` container is published separately as
-`ghcr.io/klarkxy/opencode-go-mgr`; it is not one of the seven files attached
-to the GitHub Release.
+`ghcr.io/klarkxy/opencode-go-mgr`; it is not one of the seven platform
+payloads or the `SHA256SUMS` file attached to the GitHub Release (eight
+attachments total). The runtime image includes `LICENSE` at
+`/usr/share/licenses/ocg-manager/LICENSE`.
 
 `scripts/release.mjs` does the heavy lifting:
 
@@ -295,10 +297,37 @@ draft and the native smoke results, publish the release in GitHub or run
 
 Publishing the GitHub Release triggers `.github/workflows/container.yml`.
 That workflow checks out the release tag, builds and smoke-tests the hardened
-`linux/amd64` container, pushes full-version, minor, `latest`, and commit-SHA
-tags to `ghcr.io/klarkxy/opencode-go-mgr`, and records SBOM and provenance
-attestations. A manual dispatch can backfill an existing release tag; it must
-opt in explicitly before updating `latest`.
+`linux/amd64` container, pushes `X.Y.Z`, `X.Y`, stable-release `latest`, and
+`sha-<12-character-commit>` tags to `ghcr.io/klarkxy/opencode-go-mgr`, and
+records an SPDX SBOM, BuildKit SLSA provenance, and GitHub signed provenance.
+Treat `X.Y.Z` and `sha-*` as release-specific tags that must not be moved;
+`X.Y` and `latest` are moving channels. Only the manifest digest is technically
+immutable.
+
+A manual dispatch can backfill an existing release tag and must opt in before
+updating `latest`. Its GitHub signing certificate identifies the workflow ref
+that triggered the dispatch, even though the build checks out the requested
+tag. Do not describe a historical manual backfill as tag-triggered provenance;
+normal `release.published` runs use the release tag context.
+
+After publication, record the digest and verify both the OCI index and the
+GitHub attestation. Constrain verification to this signer workflow:
+
+```bash
+docker buildx imagetools inspect ghcr.io/klarkxy/opencode-go-mgr:X.Y.Z
+docker buildx imagetools inspect --raw \
+  ghcr.io/klarkxy/opencode-go-mgr@sha256:<digest>
+docker buildx imagetools inspect --format '{{json .SBOM}}' \
+  ghcr.io/klarkxy/opencode-go-mgr@sha256:<digest> > sbom.json
+gh attestation verify \
+  oci://ghcr.io/klarkxy/opencode-go-mgr@sha256:<digest> \
+  --repo klarkxy/opencode-go-mgr \
+  --signer-workflow klarkxy/opencode-go-mgr/.github/workflows/container.yml
+```
+
+SBOM and provenance are supply-chain metadata, not vulnerability scanning.
+The GitHub attestation signs the provenance statement; this project does not
+currently add a separate Cosign image signature.
 
 Current Windows installers are unsigned and macOS uses ad‑hoc signing
 (`-`), not Developer ID notarization. Keep releases in draft until
@@ -313,8 +342,10 @@ The repository has no `pull_request` workflow, so these checks do not run
 automatically on PRs. The container workflow covers `linux/amd64` only and
 runs after a release is published or manually dispatched. CI does not drive
 real desktop UI interactions or test container ARM64, backup/restore, database
-downgrade, or migration rollback. Run the relevant checks manually when
-changing those paths.
+downgrade, migration rollback, an upstream account, or a real Gateway request.
+Its container smoke checks TCP health, dashboard HTML, auth status, the bundled
+license, and a protected settings request returning `401`. Run the relevant
+checks manually when changing uncovered paths.
 
 ## Release Procedure
 
@@ -325,12 +356,16 @@ changing those paths.
    run `pnpm install --frozen-lockfile`, `cargo fmt --all -- --check`,
    `pnpm run test`, `pnpm run design:lint`, and `pnpm run build`. Commit the
    intended lockfile changes; never hand-edit them.
-3. Review the diff and current-platform `release/` payloads, then commit the
-   version and lockfile changes.
-4. Create an annotated tag on that commit with
-   `git tag -a vX.Y.Z -m "OCG Manager vX.Y.Z"`, then push the branch and tag.
+3. Compare against the previous public tag, review the diff and
+   current-platform `release/` payloads, then commit the version, lockfile,
+   documentation, and release-note changes.
+4. Merge the reviewed change first. On the final commit already on `main`,
+   create an annotated tag with
+   `git tag -a vX.Y.Z -m "OCG Manager vX.Y.Z"`, then push the tag. Never tag a
+   branch commit that will later be squash-merged.
 5. Wait for every `release.yml` matrix job and `draft-release` to pass. Review
-   the draft's seven payloads, `SHA256SUMS`, smoke logs, and platform warnings.
+   the draft's seven payloads, `SHA256SUMS`, smoke logs, platform warnings, and
+   notes generated from the previous-tag diff.
 6. Publish the draft in GitHub or run
    `gh release edit vX.Y.Z --draft=false`, then verify the public release.
 7. Wait for `container.yml`, verify the GHCR package is public, inspect its
@@ -346,6 +381,9 @@ covers most of them; the manual parts need a real desktop.
 
 - [ ] `pnpm run test`, `pnpm run design:lint`, `pnpm run build` are
       green on the three runners.
+- [ ] `git diff --check` is clean, the previous-tag diff contains only the
+      intended release scope, and all four version manifests plus the three
+      local Cargo lock entries agree.
 - [ ] Each runner's `release/SHA256SUMS` matches every payload in that
       directory; the aggregated release checksum matches all seven platform
       payloads.
@@ -362,10 +400,14 @@ covers most of them; the manual parts need a real desktop.
 - [ ] Confirm `scripts/release.mjs` reported a successful atomic
       replacement of `release/` and that the previous `release/` is
       gone.
+- [ ] Build the container locally and confirm UID/GID `10001`, bundled
+      `LICENSE`, read-only/capability hardening, dashboard authentication, and
+      backup/restore ownership on an isolated volume.
 - [ ] Review the draft GitHub Release notes and the unsigned/ad‑hoc
       warnings before flipping `--draft=false`.
 - [ ] After publishing, confirm `container.yml` passed and anonymously pull
-      `ghcr.io/klarkxy/opencode-go-mgr:<version>` by the expected digest.
+      `ghcr.io/klarkxy/opencode-go-mgr:<version>` by the expected digest; then
+      verify the signer workflow, SBOM, and SLSA provenance.
 
 ## Known Debt
 

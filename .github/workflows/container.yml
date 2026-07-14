@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing semver tag to publish, for example v1.2.0
+        description: Existing semver tag to publish, for example v1.2.3
         required: true
         type: string
       publish_latest:
@@ -119,6 +119,8 @@ jobs:
             echo "Container did not become healthy; last status: $status" >&2
             exit 1
           fi
+
+          docker exec "$SMOKE_CONTAINER" test -f /usr/share/licenses/ocg-manager/LICENSE
 
           curl --fail --silent --show-error --max-time 10 \
             http://127.0.0.1:19042/dashboard/ > "$RUNNER_TEMP/dashboard.html"

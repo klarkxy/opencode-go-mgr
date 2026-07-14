@@ -10,3 +10,4 @@ release
 *.log
 .env*
 ocg-key.local.txt
+ocg-data-backup*/

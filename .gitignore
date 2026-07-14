@@ -23,6 +23,9 @@ pnpm-debug.log*
 .env.local
 .env.*.local
 
+# Local data backups must never be committed or sent to a container build context
+ocg-data-backup*/
+
 # Editor / IDE
 .vscode
 .idea

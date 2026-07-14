@@ -98,8 +98,9 @@ Before an upgrade or restore, stop every process using the data: choose
 manager, or run `docker compose stop`. Then copy the **entire** GUI data
 directory, CLI data directory, or Docker `ocg-data` volume. A stopped
 Docker container can be copied with
-`docker compose cp ocg-manager:/data/. ./ocg-data-backup`. Check that the
-backup contains `data.sqlite` and, where present, `.encryption-key`.
+`docker compose cp ocg-manager:/data/. ../ocg-data-backup`. Keep the backup
+outside the repository and check that the backup contains `data.sqlite` and,
+where present, `.encryption-key`.
 
 To restore, stop the process, move the current data aside, copy the whole
 backup back to its original directory or an empty Docker volume, and then
@@ -111,6 +112,29 @@ credentials. macOS/Linux GUI, CLI, and Docker restores must preserve
 `.encryption-key` or the explicitly supplied `--encryption-key` /
 `OCG_MANAGER_ENCRYPTION_KEY` value. There is no automatic downgrade
 compatibility guarantee; do not open a newer database with an older build.
+
+To restore a Docker backup into a fresh named volume, first verify the backup
+and confirm that `.env` pins the intended same or newer image. The
+`docker compose down -v` command below permanently deletes the current volume;
+run it only after preserving that current data separately:
+
+```bash
+docker compose down -v
+docker compose run --rm --no-deps --user root \
+  --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER \
+  --entrypoint sh \
+  --volume ../ocg-data-backup:/backup:ro \
+  ocg-manager \
+  -c 'cp -a /backup/. /data/ && chown -R 10001:10001 /data && \
+      find /data -type d -exec chmod 700 {} + && \
+      find /data -type f -exec chmod 600 {} +'
+docker compose up -d --no-build
+docker compose ps
+```
+
+If the original deployment used `OCG_MANAGER_ENCRYPTION_KEY`, put the same
+secret back into `.env` before the restore. Keep the backup until the dashboard,
+accounts, and a real Gateway request have all been verified.
 
 Upgrade and uninstall by surface:
 
@@ -444,22 +468,40 @@ the dashboard.
 
 ## Docker
 
-Pull and start the published headless gateway with its dashboard
-(recommended):
+The public headless image can be pulled from GHCR without signing in. It is a
+Linux container and currently publishes `linux/amd64` only; there is no native
+ARM64 image. Run the Compose commands from a checkout containing
+`compose.yaml` and `.env.example` (preferably the matching release tag):
 
 ```bash
+git clone --branch v1.2.1 --depth 1 https://github.com/klarkxy/opencode-go-mgr.git
+cd opencode-go-mgr
 cp .env.example .env
-# Edit .env and choose the initial administrator credentials.
+# PowerShell: Copy-Item .env.example .env
+# Edit .env before exposing the service outside the host.
 docker compose pull
 docker compose up -d --no-build
-docker compose logs ocg-manager
+docker compose ps
 ```
 
 The default image is `ghcr.io/klarkxy/opencode-go-mgr:latest`. For repeatable
 production deployments, set `OCG_IMAGE` in `.env` to a full release tag such
-as `ghcr.io/klarkxy/opencode-go-mgr:1.2.0`. To build the current checkout
+as `ghcr.io/klarkxy/opencode-go-mgr:1.2.1`. The full version and
+`sha-<commit>` tags identify one release and are intended not to move;
+`1.2` and `latest` move forward. Only a digest such as
+`ghcr.io/klarkxy/opencode-go-mgr@sha256:...` is technically immutable. To build the current checkout
 instead, set `OCG_IMAGE=ocg-manager:local` and run
-`docker compose up -d --build`.
+`docker compose up -d --build`. `NPM_REGISTRY` and `CARGO_REGISTRY` are build
+arguments for that source-build path only; they do not change a pulled image.
+
+| Variable | Scope | Meaning |
+| --- | --- | --- |
+| `OCG_IMAGE` | Compose | Image tag, mirror, local name, or immutable digest. |
+| `OCG_PORT` | Compose | Host loopback port; the container still listens on `9042`. |
+| `OCG_ADMIN_USERNAME` + `OCG_ADMIN_PASSWORD` | First start | Optional administrator bootstrap; both or neither. |
+| `OCG_CLIENT_ROOT_URL` | Runtime | Read-only external client root override. |
+| `OCG_MANAGER_ENCRYPTION_KEY` | Runtime restore | Original explicit obfuscation key, when one was used. |
+| `NPM_REGISTRY` + `CARGO_REGISTRY` | Source build | Dependency registries used only by `--build`. |
 
 `OCG_ADMIN_USERNAME` and `OCG_ADMIN_PASSWORD` create the administrator
 **only when the database has no administrator yet**. Both must be set
@@ -467,7 +509,18 @@ together; setting only one stops startup with an error. Once an
 administrator exists, later environment changes do not reset it. When
 both are omitted, the first visitor creates the administrator in the
 dashboard. After the administrator exists, you may remove both variables
-while keeping the volume; the stored account remains.
+while keeping the volume; the stored account remains. Bootstrap credentials
+are visible to anyone with Docker daemon access. Protect `.env`, use a long
+random password, and do not expose an uninitialized dashboard publicly. After
+initialization, remove both values and run
+`docker compose up -d --no-build --force-recreate` to remove them from the
+container environment.
+
+`OCG_MANAGER_ENCRYPTION_KEY` is an advanced restore override. Leave it unset
+for normal deployments so the generated `.encryption-key` stays in the data
+volume. If the original deployment supplied this variable, the restored
+deployment must use the same value; changing or losing it makes saved
+credentials unreadable. Treat it like a password.
 
 The optional `OCG_CLIENT_ROOT_URL` is the environment equivalent of the
 dashboard's Downstream Access Root. Use it when a reverse proxy is present or
@@ -485,9 +538,46 @@ requires administrator login even when it is published only on host
 `127.0.0.1`. That host mapping limits reachability; it does not enable
 loopback login bypass. The container's `HEALTHCHECK` opens
 `127.0.0.1:9042` over TCP every 30 seconds; there is no `/healthz` route.
+That TCP check proves only that the process is listening; it does not prove
+that the dashboard API, an upstream account, or a real model request works.
+Use `/dashboard/`, not the server root `/`.
 
-CLI startup prints the Gateway Key, so `docker compose logs` is sensitive.
-Restrict access to those logs and regenerate the Gateway Key if they leak.
+The image runs as the unprivileged `ocg` user (UID/GID 10001). The supplied
+Compose service makes the root filesystem read-only, mounts `/tmp` as tmpfs,
+drops every Linux capability, and enables `no-new-privileges`. The named
+`ocg-data` volume remains writable and is the only persistent application
+state. Routine operational checks are:
+
+```bash
+docker compose config --quiet
+docker compose ps
+docker compose logs --tail=100 -f ocg-manager
+curl --fail http://127.0.0.1:9042/dashboard/
+```
+
+Replace `9042` in the curl command with the configured host `OCG_PORT` when
+you changed it.
+
+The startup log contains the Gateway Key, so log output and Docker daemon
+access are sensitive. Configure log rotation in your Docker host if its
+defaults are not bounded.
+
+Each stable image includes an SPDX SBOM, BuildKit SLSA provenance, and a
+GitHub signed provenance attestation. Inspect and verify a release with:
+
+```bash
+docker buildx imagetools inspect ghcr.io/klarkxy/opencode-go-mgr:1.2.1
+gh attestation verify \
+  oci://ghcr.io/klarkxy/opencode-go-mgr:1.2.1 \
+  --repo klarkxy/opencode-go-mgr
+```
+
+The second command requires an authenticated GitHub CLI. Public pulls are
+anonymous; if the OCI client still requests registry credentials, authenticate
+to `ghcr.io` with a token that can read packages. Provenance proves how the
+artifact was produced; it is not a vulnerability scan.
+
+Regenerate the Gateway Key if it leaks.
 
 For HTTPS, point an existing reverse proxy at that loopback port. For
 example, with Caddy:
@@ -546,9 +636,11 @@ intentionally want to delete all stored accounts, credentials, and keys.
   as `success_no_usage`.
 - The current HTTP dashboard does not expose the older isolated WebView
   browser command.
-- The installed Windows desktop dashboard can start OCG Manager in the
-  tray when the user logs in. Auto‑start is not implemented for
-  development builds, macOS, Linux, CLI, or Docker deployments.
+- The installed Windows desktop dashboard can start OCG Manager in the tray
+  when the user logs in. Development builds, macOS, Linux, CLI, and Docker do
+  not expose that dashboard `auto_start` switch. Docker Compose separately
+  uses `restart: unless-stopped`, so its service can restart with the Docker
+  daemon.
 - Windows / Linux ARM64 and 32‑bit x86 builds are not published. RPM,
   Snap, app‑store packages, automatic update download/installation,
   Windows signing, and Apple notarization are not implemented. Settings

@@ -10,6 +10,7 @@ services:
     environment:
       - OCG_ADMIN_USERNAME
       - OCG_ADMIN_PASSWORD
+      - OCG_MANAGER_ENCRYPTION_KEY
       - OCG_CLIENT_ROOT_URL
     ports:
       - "127.0.0.1:${OCG_PORT:-9042}:9042"
