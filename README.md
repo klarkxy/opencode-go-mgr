@@ -49,9 +49,26 @@ the artifact's SHA-256 before installing. On PowerShell use
 `Get-FileHash <file> -Algorithm SHA256`; on macOS use `shasum -a 256 <file>`;
 on Linux use `sha256sum <file>`.
 
-The published headless container is
-`ghcr.io/klarkxy/opencode-go-mgr`. See the [Docker guide](docs/USER.md#docker)
-for Compose, persistence, upgrades, and local source builds.
+### Docker quick start
+
+The public headless image is `ghcr.io/klarkxy/opencode-go-mgr` and can be
+pulled without a registry login. The published image currently targets
+`linux/amd64`.
+
+```bash
+git clone --branch v1.2.1 --depth 1 https://github.com/klarkxy/opencode-go-mgr.git
+cd opencode-go-mgr
+cp .env.example .env
+# Edit .env: choose first-run administrator setup and pin OCG_IMAGE to 1.2.1.
+docker compose pull
+docker compose up -d --no-build
+docker compose ps
+```
+
+Open `http://127.0.0.1:9042/dashboard/`; the server root `/` is not the
+dashboard URL. See the [Docker guide](docs/USER.md#docker) for credentials,
+persistence, backup/restore, HTTPS, upgrades, digest/attestation verification,
+and local source builds.
 
 ## Quick Start
 

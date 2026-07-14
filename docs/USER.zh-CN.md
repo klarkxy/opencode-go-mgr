@@ -87,7 +87,8 @@ macOS 使用 `shasum -a 256 <文件>`，Linux 使用 `sha256sum <文件>`。
 升级或恢复前，先停止所有会写数据的进程：从桌面托盘选择 **退出**，用 Ctrl+C
 或服务管理器停止 CLI，Docker 则执行 `docker compose stop`。然后复制**整个**
 GUI 数据目录、CLI 数据目录或 Docker `ocg-data` 卷。已停止的 Docker 容器可用
-`docker compose cp ocg-manager:/data/. ./ocg-data-backup` 复制数据。确认备份中有
+`docker compose cp ocg-manager:/data/. ../ocg-data-backup` 复制数据。备份必须放在
+仓库外，并确认其中有
 `data.sqlite`，以及适用时的 `.encryption-key`。
 
 恢复时先停进程，把现有数据移到别处，再把完整备份放回原目录或空的 Docker
@@ -97,6 +98,27 @@ GUI 数据目录、CLI 数据目录或 Docker `ocg-data` 卷。已停止的 Dock
 GUI、CLI 与 Docker 恢复时必须保留 `.encryption-key`，或原来显式传入的
 `--encryption-key` / `OCG_MANAGER_ENCRYPTION_KEY` 值。项目不保证数据库自动
 向下兼容，不要用旧版本打开新版数据库。
+
+要把 Docker 备份恢复到全新命名卷，先确认备份有效，并确认 `.env` 固定到原版本
+或更新版本。下面的 `docker compose down -v` 会永久删除当前卷，必须先把当前数据
+另行保存后才能执行：
+
+```bash
+docker compose down -v
+docker compose run --rm --no-deps --user root \
+  --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER \
+  --entrypoint sh \
+  --volume ../ocg-data-backup:/backup:ro \
+  ocg-manager \
+  -c 'cp -a /backup/. /data/ && chown -R 10001:10001 /data && \
+      find /data -type d -exec chmod 700 {} + && \
+      find /data -type f -exec chmod 600 {} +'
+docker compose up -d --no-build
+docker compose ps
+```
+
+原部署如果使用了 `OCG_MANAGER_ENCRYPTION_KEY`，恢复前先把同一个秘密值写回
+`.env`。在管理面板、账号和一次真实 Gateway 请求都验证通过前，请保留备份。
 
 各运行方式的升级与卸载：
 
@@ -370,25 +392,49 @@ ocg-manager-cli
 
 ## Docker
 
-拉取并启动带管理面板的已发布无头 Gateway（推荐）：
+GHCR 上的公开无头镜像无需登录即可拉取。它是 Linux 容器，目前只发布
+`linux/amd64`，没有原生 ARM64 镜像。请在包含 `compose.yaml` 与
+`.env.example` 的仓库目录中运行（建议检出对应 Release tag）：
 
 ```bash
+git clone --branch v1.2.1 --depth 1 https://github.com/klarkxy/opencode-go-mgr.git
+cd opencode-go-mgr
 cp .env.example .env
-# 编辑 .env，选择初始管理员凭据
+# PowerShell：Copy-Item .env.example .env
+# 对外开放服务前先编辑 .env
 docker compose pull
 docker compose up -d --no-build
-docker compose logs ocg-manager
+docker compose ps
 ```
 
 默认镜像是 `ghcr.io/klarkxy/opencode-go-mgr:latest`。生产部署建议在 `.env`
 中用 `OCG_IMAGE` 固定完整版本标签，例如
-`ghcr.io/klarkxy/opencode-go-mgr:1.2.0`。需要调试当前源码时，设置
+`ghcr.io/klarkxy/opencode-go-mgr:1.2.1`。完整版本与 `sha-<commit>` 标签用于
+标识单次发布，按发布策略不应移动；`1.2` 与 `latest` 会继续移动。技术上只有
+`ghcr.io/klarkxy/opencode-go-mgr@sha256:...` digest 真正不可变。需要调试当前源码时，设置
 `OCG_IMAGE=ocg-manager:local`，再执行 `docker compose up -d --build`。
+`NPM_REGISTRY` 与 `CARGO_REGISTRY` 只属于源码构建参数，不会改变已拉取镜像。
+
+| 变量 | 作用范围 | 含义 |
+| --- | --- | --- |
+| `OCG_IMAGE` | Compose | 镜像标签、镜像站、本地名称或不可变 digest。 |
+| `OCG_PORT` | Compose | 宿主机回环端口；容器内仍监听 `9042`。 |
+| `OCG_ADMIN_USERNAME` + `OCG_ADMIN_PASSWORD` | 首次启动 | 可选管理员引导；必须同时设置或都不设置。 |
+| `OCG_CLIENT_ROOT_URL` | 运行时 | 只读覆盖外部客户端根地址。 |
+| `OCG_MANAGER_ENCRYPTION_KEY` | 恢复时 | 原部署曾显式使用的混淆密钥。 |
+| `NPM_REGISTRY` + `CARGO_REGISTRY` | 源码构建 | 仅 `--build` 使用的依赖注册表。 |
 
 `OCG_ADMIN_USERNAME` 与 `OCG_ADMIN_PASSWORD` **只在数据库里还没有管理员时**
 生效。两个变量必须同时设置；只设一个会启动报错。已有管理员后，后续修改环境
 变量不会再覆盖。都不设置时，由首位访客在面板里创建管理员。管理员创建后，
-只要保留卷，就可以移除这两个变量，数据库里的账号仍然有效。
+只要保留卷，就可以移除这两个变量，数据库里的账号仍然有效。拥有 Docker daemon
+权限的人可以看到容器环境变量；请保护 `.env`、使用长随机密码，且不要把未初始化
+的面板直接暴露到公网。初始化完成后删除这两个值，并执行
+`docker compose up -d --no-build --force-recreate`，把它们从容器环境中移除。
+
+`OCG_MANAGER_ENCRYPTION_KEY` 是高级恢复覆盖项。正常部署请留空，让生成的
+`.encryption-key` 留在数据卷中。原部署如果显式使用了该变量，恢复时必须使用同一
+值；修改或丢失会导致已保存凭据无法读取。请把它当作密码保管。
 
 可选的 `OCG_CLIENT_ROOT_URL` 等同于面板里的“下游访问根地址”，适合在反向代理
 或 Dashboard 与 Gateway 使用不同外部地址时显式指定客户端根地址。非空值必须是
@@ -402,9 +448,40 @@ docker compose logs ocg-manager
 `0.0.0.0`，因此即使只发布到宿主机 `127.0.0.1`，管理面板也必须使用管理员登
 录；宿主机端口映射只限制可达范围，不会启用回环免登录。容器的 `HEALTHCHECK`
 每 30 秒对容器内 `127.0.0.1:9042` 做 TCP 探活，不存在 `/healthz` 路由。
+这个 TCP 检查只说明进程正在监听，不能证明面板 API、上游账号或真实模型请求可用。
+请访问 `/dashboard/`，不要把服务根路径 `/` 当作面板地址。
 
-CLI 启动时会打印 Gateway Key，因此 `docker compose logs` 属于敏感信息。限制
-日志读取权限；如果日志泄露，请重新生成 Gateway Key。
+镜像以非特权 `ocg` 用户（UID/GID 10001）运行。随附 Compose 把根文件系统设为
+只读、把 `/tmp` 挂成 tmpfs、丢弃全部 Linux capability，并启用
+`no-new-privileges`；只有命名卷 `ocg-data` 保存可写应用状态。常用检查命令：
+
+```bash
+docker compose config --quiet
+docker compose ps
+docker compose logs --tail=100 -f ocg-manager
+curl --fail http://127.0.0.1:9042/dashboard/
+```
+
+如果修改过 `OCG_PORT`，请把 curl 命令里的 `9042` 替换成实际宿主机端口。
+
+启动日志会打印 Gateway Key，因此日志输出和 Docker daemon 权限都属于敏感信息。
+如果 Docker 主机默认没有限制日志大小，请由部署方配置日志轮转。
+
+每个稳定镜像都带 SPDX SBOM、BuildKit SLSA provenance 与 GitHub 签名的
+provenance attestation。可这样检查发布版本：
+
+```bash
+docker buildx imagetools inspect ghcr.io/klarkxy/opencode-go-mgr:1.2.1
+gh attestation verify \
+  oci://ghcr.io/klarkxy/opencode-go-mgr:1.2.1 \
+  --repo klarkxy/opencode-go-mgr
+```
+
+第二条命令要求 GitHub CLI 已登录。公开镜像可匿名拉取；如果 OCI 客户端仍要求
+registry 凭据，请用具备 package 读取权限的 token 登录 `ghcr.io`。Provenance
+证明产物如何构建，不等于漏洞扫描。
+
+如果 Gateway Key 泄露，请重新生成。
 
 需要 HTTPS 时，把现有反向代理指向该回环端口即可，例如 Caddy：
 
@@ -452,7 +529,8 @@ ocg.example.com {
   没有 usage 时日志记为 `success_no_usage`。
 - 当前 HTTP 面板没有暴露旧的隔离 WebView 浏览器命令。
 - 已安装的 Windows 桌面版可以在用户登录时把 OCG Manager 拉起到托盘；开发
-  构建、macOS、Linux、CLI、Docker 暂未实现该能力。
+  构建、macOS、Linux、CLI、Docker 不暴露面板里的 `auto_start` 开关。Docker
+  Compose 另由 `restart: unless-stopped` 在 Docker daemon 重启后恢复服务。
 - 不发布 Windows / Linux ARM64、32 位 x86 构建；不支持 RPM、Snap、应用商店
   包、自动下载/安装更新、Windows 正式签名、Apple 公证。设置页可手动检查
   GitHub 最新 Release。

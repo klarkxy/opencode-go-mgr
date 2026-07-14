@@ -31,11 +31,14 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 
 FROM debian:bookworm-slim
 
-RUN useradd --system --uid 10001 --home-dir /nonexistent --shell /usr/sbin/nologin ocg \
+RUN groupadd --gid 10001 ocg \
+    && useradd --uid 10001 --gid 10001 --no-create-home \
+      --home-dir /nonexistent --shell /usr/sbin/nologin ocg \
     && install -d -o ocg -g ocg /data
 
 COPY --from=cli /ocg-manager-cli /usr/local/bin/ocg-manager-cli
 COPY --from=web /src/dist /opt/ocg-manager/dist
+COPY LICENSE /usr/share/licenses/ocg-manager/LICENSE
 
 USER ocg
 VOLUME ["/data"]
