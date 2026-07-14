@@ -146,6 +146,7 @@ export const ptBRMessages = {
   "{error}。教程正文仍可阅读，但为避免复制错误地址，动态配置复制已禁用。": "{error}. Os guias ainda podem ser lidos, mas a cópia da configuração dinâmica foi desativada para evitar URLs incorretas.",
   "当前使用非本机 HTTP 地址": "Uma URL HTTP não local está em uso",
   "Gateway Key 与请求内容会以明文传输。仅在可信局域网内使用，公网接入请配置 HTTPS。": "A Gateway Key e o conteúdo da requisição serão transmitidos em texto simples. Use apenas em uma LAN confiável; configure HTTPS para acesso público.",
+  "Gemini CLI 的远程 Base URL 必须使用 HTTPS；仅 localhost、127.0.0.1 和 [::1] 可使用 HTTP。": "URLs base remotas do Gemini CLI devem usar HTTPS; somente localhost, 127.0.0.1 e [::1] podem usar HTTP.",
   "选择下游应用": "Selecionar aplicativo downstream",
   "官方文档": "Documentação oficial",
   "配置步骤": "Etapas de configuração",

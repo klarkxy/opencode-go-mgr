@@ -127,12 +127,13 @@
                   <label v-for="field in activeGuide.modelFields" :key="field" class="model-field">
                     <span>{{ field }}</span>
                     <n-select
-                      v-model:value="modelValues[field]"
+                      :value="modelValues[field]"
                       :options="modelOptions"
                       :loading="modelsLoading"
                       :disabled="!settingsLoaded || (activeGuide.id === 'claude-desktop' && !claudeDesktopModelsLoaded)"
                       :placeholder="t('选择模型 ID')"
                       filterable
+                      @update:value="updateModelField(field, $event)"
                     />
                   </label>
                 </template>
@@ -184,6 +185,11 @@
           >
             {{ t("Gateway Key 与请求内容会以明文传输。仅在可信局域网内使用，公网接入请配置 HTTPS。") }}
           </n-alert>
+          <n-alert
+            v-if="activeGuide.id === 'gemini-cli' && !geminiCliBaseUrlAllowed"
+            type="error"
+            :title="t('Gemini CLI 的远程 Base URL 必须使用 HTTPS；仅 localhost、127.0.0.1 和 [::1] 可使用 HTTP。')"
+          />
 
           <article class="guide-body" :aria-labelledby="`${activeGuide.id}-title`">
             <header class="guide-head">
@@ -286,7 +292,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onActivated, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, onActivated, onMounted, onUnmounted, ref } from "vue";
 import {
   NAlert,
   NButton,
@@ -304,6 +310,7 @@ import logoUrl from "../../assets/logo/ocg_logo_final_transparent.png";
 import { tauriApi, type ClaudeDesktopModels } from "../api/tauri";
 import { useClipboard } from "../utils/format.ts";
 import {
+  isGeminiCliBaseUrlAllowed,
   maskConnectionKey,
   resolveConnectionUrls,
   restoreMaskedConnectionKey,
@@ -312,6 +319,7 @@ import {
   APPLICATION_GUIDES,
   isApplicationId,
   recommendClaudeCodeModel,
+  reconcileApplicationModelSelection,
 } from "./application-guides";
 import type { ApplicationGuide, ApplicationId, GuideAction, GuideContext } from "./application-guides";
 import { t } from "../i18n/index.ts";
@@ -336,11 +344,25 @@ const selectedModelsByApplication = ref<Partial<Record<ApplicationId, string[]>>
 const selectedModelByApplication = ref<Partial<Record<ApplicationId, string | null>>>({});
 const selectedModels = computed<string[]>({
   get: () => selectedModelsByApplication.value[currentApplication.value] ?? [],
-  set: (value) => { selectedModelsByApplication.value[currentApplication.value] = value; },
+  set: (value) => {
+    const applicationId = currentApplication.value;
+    if (sameStringArray(selectedModelsByApplication.value[applicationId], value)) return;
+    selectedModelsByApplication.value[applicationId] = [...value];
+    const primary = selectedModelByApplication.value[applicationId];
+    if (!primary || !value.includes(primary)) {
+      selectedModelByApplication.value[applicationId] = value[0] ?? null;
+    }
+    clearApplicationDrafts(applicationId);
+  },
 });
 const selectedModel = computed<string | null>({
   get: () => selectedModelByApplication.value[currentApplication.value] ?? null,
-  set: (value) => { selectedModelByApplication.value[currentApplication.value] = value; },
+  set: (value) => {
+    const applicationId = currentApplication.value;
+    if ((selectedModelByApplication.value[applicationId] ?? null) === value) return;
+    selectedModelByApplication.value[applicationId] = value;
+    clearApplicationDrafts(applicationId);
+  },
 });
 const modelValues = ref<Record<string, string>>({});
 const snippetDrafts = ref<Record<string, string>>({});
@@ -393,9 +415,11 @@ const guideContext = computed<GuideContext>(() => ({
   iconUrl: new URL(logoUrl, window.location.origin).href,
 }));
 const currentSnippets = computed(() => activeGuide.value.snippets(guideContext.value));
+const geminiCliBaseUrlAllowed = computed(() => isGeminiCliBaseUrlAllowed(connectionUrls.value.rootUrl));
 const canGenerateConfig = computed(() => (
   settingsLoaded.value
   && Boolean(serviceConfig.value.gateway_key)
+  && (activeGuide.value.id !== "gemini-cli" || geminiCliBaseUrlAllowed.value)
   && (activeGuide.value.id !== "claude-desktop" || claudeDesktopModelsLoaded.value)
   && (activeGuide.value.modelFields?.every((field) => Boolean(modelValues.value[field]))
     ?? Boolean(selectedModel.value?.trim()))
@@ -448,20 +472,20 @@ async function loadModels() {
   modelsLoading.value = true;
   modelsError.value = "";
   claudeDesktopModelsLoaded.value = false;
-  applicationModelIds.value = [];
-  for (const field of CLAUDE_DESKTOP_FIELDS) delete modelValues.value[field];
   const errors: string[] = [];
   try {
     const [modelsResult, desktopResult] = await Promise.allSettled([
       tauriApi.getApplicationModels(),
       tauriApi.getClaudeDesktopModels(),
     ]);
-    const modelIds = modelsResult.status === "fulfilled" ? modelsResult.value : [];
-    applicationModelIds.value = modelIds;
+    const modelIds = modelsResult.status === "fulfilled"
+      ? modelsResult.value
+      : applicationModelIds.value;
     if (modelsResult.status === "rejected") {
       errors.push(modelsResult.reason instanceof Error ? modelsResult.reason.message : String(modelsResult.reason));
-    } else if (!modelIds.length) {
-      errors.push(t("未返回可用模型"));
+    } else {
+      applicationModelIds.value = modelIds;
+      if (!modelIds.length) errors.push(t("未返回可用模型"));
     }
     const claudeDesktopModels = desktopResult.status === "fulfilled" ? desktopResult.value : undefined;
     if (desktopResult.status === "rejected") {
@@ -469,7 +493,7 @@ async function loadModels() {
     }
     const availableIds = [...new Set([
       ...modelIds,
-      ...Object.values(claudeDesktopModels ?? {}).filter(Boolean),
+      ...Object.values(claudeDesktopModels ?? claudeDesktopDefaults.value).filter(Boolean),
     ])];
     modelOptions.value = availableIds.map((modelId) => ({ label: modelId, value: modelId }));
     const defaultSelectedModels = modelIds.length ? modelIds : availableIds;
@@ -477,27 +501,57 @@ async function loadModels() {
     for (const guide of applicationGuides) {
       if (!isApplicationId(guide.id)) continue;
       if (!guide.modelFields?.length) {
-        if (guide.multipleModels) {
-          selectedModelsByApplication.value[guide.id] = [...defaultSelectedModels];
+        const selection = reconcileApplicationModelSelection(
+          selectedModelsByApplication.value[guide.id],
+          selectedModelByApplication.value[guide.id],
+          availableIds,
+          defaultSelectedModels,
+          Boolean(guide.multipleModels),
+        );
+        let changed = false;
+        if (
+          guide.multipleModels
+          && !sameStringArray(selectedModelsByApplication.value[guide.id], selection.selectedModels)
+        ) {
+          selectedModelsByApplication.value[guide.id] = selection.selectedModels;
+          changed = true;
         }
-        const selected = selectedModelByApplication.value[guide.id];
-        if (!selected || !availableIds.includes(selected)) {
-          selectedModelByApplication.value[guide.id] = availableIds[0] ?? null;
+        if ((selectedModelByApplication.value[guide.id] ?? null) !== selection.selectedModel) {
+          selectedModelByApplication.value[guide.id] = selection.selectedModel;
+          changed = true;
         }
+        if (changed) clearApplicationDrafts(guide.id);
         continue;
       }
       if (guide.id === "claude-desktop") continue;
+      let changed = false;
       for (const field of guide.modelFields) {
         if (!availableIds.includes(modelValues.value[field])) {
-          modelValues.value[field] = guide.id === "claude-code"
+          const nextModel = guide.id === "claude-code"
             ? recommendClaudeCodeModel(field, modelIds) || fallbackModel
             : fallbackModel;
+          if (modelValues.value[field] !== nextModel) {
+            modelValues.value[field] = nextModel;
+            changed = true;
+          }
         }
       }
+      if (changed) clearApplicationDrafts(guide.id);
     }
     if (claudeDesktopModels) {
       claudeDesktopDefaults.value = { ...claudeDesktopModels };
-      Object.assign(modelValues.value, claudeDesktopModels);
+      let changed = false;
+      for (const field of CLAUDE_DESKTOP_FIELDS) {
+        const current = modelValues.value[field];
+        const nextModel = current && availableIds.includes(current)
+          ? current
+          : claudeDesktopModels[field];
+        if (current !== nextModel) {
+          modelValues.value[field] = nextModel;
+          changed = true;
+        }
+      }
+      if (changed) clearApplicationDrafts("claude-desktop");
       claudeDesktopModelsLoaded.value = true;
     }
     modelsError.value = errors.join("；");
@@ -550,6 +604,19 @@ function snippetDraft(index: number, snippet: { display: string }): string {
 
 function updateSnippetDraft(index: number, value: string) {
   snippetDrafts.value[snippetKey(index)] = value;
+}
+
+function updateModelField(field: string, value: string | number | null) {
+  const nextModel = typeof value === "string" ? value : "";
+  if (modelValues.value[field] === nextModel) return;
+  modelValues.value[field] = nextModel;
+  clearApplicationDrafts(activeGuide.value.id);
+}
+
+function sameStringArray(left: readonly string[] | undefined, right: readonly string[]): boolean {
+  if (!left) return false;
+  return left.length === right.length
+    && left.every((value, index) => value === right[index]);
 }
 
 function clearApplicationDrafts(applicationId: string) {
@@ -617,16 +684,6 @@ function launchGuideAction(action: GuideAction) {
     message.error(error instanceof Error ? error.message : t("客户端导入链接无效"));
   }
 }
-
-watch([selectedModelByApplication, selectedModelsByApplication, modelValues], () => {
-  clearApplicationDrafts(activeGuide.value.id);
-  if (
-    activeGuide.value.multipleModels
-    && (!selectedModel.value || !selectedModels.value.includes(selectedModel.value))
-  ) {
-    selectedModel.value = selectedModels.value[0] ?? null;
-  }
-}, { deep: true });
 
 onMounted(() => {
   const value = new URLSearchParams(window.location.search).get("app");

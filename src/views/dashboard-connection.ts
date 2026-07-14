@@ -74,6 +74,19 @@ export function resolveConnectionUrls(
   };
 }
 
+export function isGeminiCliBaseUrlAllowed(rootUrl: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(rootUrl);
+  } catch {
+    return false;
+  }
+  if (url.protocol === "https:") return true;
+  if (url.protocol !== "http:") return false;
+  const hostname = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+}
+
 function isInsecureHttp(rootUrl: string): boolean {
   const url = new URL(rootUrl);
   if (url.protocol !== "http:") return false;

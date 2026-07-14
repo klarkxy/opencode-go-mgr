@@ -146,6 +146,7 @@ export const deDEMessages = {
   "{error}。教程正文仍可阅读，但为避免复制错误地址，动态配置复制已禁用。": "{error}. Die Anleitungen können weiterhin gelesen werden, aber das Kopieren der dynamischen Konfiguration ist deaktiviert, um falsche URLs zu vermeiden.",
   "当前使用非本机 HTTP 地址": "Eine nicht lokale HTTP-URL wird verwendet",
   "Gateway Key 与请求内容会以明文传输。仅在可信局域网内使用，公网接入请配置 HTTPS。": "Gateway Key und Anfrageinhalte werden im Klartext übertragen. Verwenden Sie dies nur in einem vertrauenswürdigen LAN und richten Sie für öffentlichen Zugriff HTTPS ein.",
+  "Gemini CLI 的远程 Base URL 必须使用 HTTPS；仅 localhost、127.0.0.1 和 [::1] 可使用 HTTP。": "Remote Base-URLs für Gemini CLI müssen HTTPS verwenden; HTTP ist nur für localhost, 127.0.0.1 und [::1] zulässig.",
   "选择下游应用": "Client-Anwendung auswählen",
   "官方文档": "Offizielle Dokumentation",
   "配置步骤": "Einrichtungsschritte",

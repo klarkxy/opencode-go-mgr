@@ -6,8 +6,10 @@ import {
   buildChatboxConfig,
   buildChatboxUrl,
   recommendClaudeCodeModel,
+  reconcileApplicationModelSelection,
 } from "./application-guides.ts";
 import {
+  isGeminiCliBaseUrlAllowed,
   maskConnectionKey,
   normalizeClientRootUrl,
   resolveConnectionUrls,
@@ -87,6 +89,63 @@ test("connection URL derivation handles configured, development, and production 
   assert.equal(resolveConnectionUrls("http://127.0.0.8:9042", "https://ignored", 9042, false).insecureHttp, false);
   assert.equal(resolveConnectionUrls("http://192.168.1.8:9042", "https://ignored", 9042, false).insecureHttp, true);
   assert.equal(resolveConnectionUrls("https://192.168.1.8:9042", "https://ignored", 9042, false).insecureHttp, false);
+});
+
+test("Gemini CLI base URL compatibility allows HTTPS and exact loopback HTTP only", () => {
+  for (const value of [
+    "https://ocg.example.com",
+    "https://192.168.1.8:9042/ocg",
+    "http://localhost:9042",
+    "http://127.0.0.1:9042",
+    "http://[::1]:9042",
+  ]) {
+    assert.equal(isGeminiCliBaseUrlAllowed(value), true, value);
+  }
+  for (const value of [
+    "http://192.168.1.8:9042",
+    "http://127.0.0.8:9042",
+    "http://gateway.localhost:9042",
+    "ftp://localhost:9042",
+    "not-a-url",
+  ]) {
+    assert.equal(isGeminiCliBaseUrlAllowed(value), false, value);
+  }
+});
+
+test("model refresh preserves valid selections and falls back only when needed", () => {
+  const available = ["model-a", "model-b", "model-c"];
+  assert.deepEqual(
+    reconcileApplicationModelSelection(
+      ["model-a", "removed-model", "model-c", "model-a"],
+      "model-c",
+      available,
+      available,
+      true,
+    ),
+    { selectedModels: ["model-a", "model-c"], selectedModel: "model-c" },
+  );
+  assert.deepEqual(
+    reconcileApplicationModelSelection(
+      ["removed-model"],
+      "removed-model",
+      available,
+      ["model-b", "model-c"],
+      true,
+    ),
+    { selectedModels: ["model-b", "model-c"], selectedModel: "model-b" },
+  );
+  assert.deepEqual(
+    reconcileApplicationModelSelection(undefined, undefined, available, ["model-b"], true),
+    { selectedModels: ["model-b"], selectedModel: "model-b" },
+  );
+  assert.deepEqual(
+    reconcileApplicationModelSelection([], "model-c", available, available, false),
+    { selectedModels: [], selectedModel: "model-c" },
+  );
+  assert.deepEqual(
+    reconcileApplicationModelSelection([], "removed-model", available, available, false),
+    { selectedModels: [], selectedModel: "model-a" },
+  );
 });
 
 test("application catalog has thirteen verified clients and never displays a complete key", () => {

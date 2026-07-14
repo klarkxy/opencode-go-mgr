@@ -264,6 +264,18 @@ fn validate_request_features(
 }
 
 fn validate_gemini_request(body: &Value) -> Result<(), ProtocolError> {
+    match body.get("safetySettings") {
+        None | Some(Value::Null) => {}
+        Some(Value::Array(settings)) if settings.is_empty() => {}
+        Some(Value::Array(_)) => {
+            return Err(ProtocolError::new(
+                "Gemini safetySettings cannot be preserved by protocol conversion",
+            ));
+        }
+        Some(_) => {
+            return Err(ProtocolError::new("Gemini safetySettings must be an array"));
+        }
+    }
     if body
         .get("cachedContent")
         .is_some_and(|value| !value.is_null())
@@ -488,27 +500,84 @@ fn validate_gemini_request(body: &Value) -> Result<(), ProtocolError> {
     }
 
     let generation = body.get("generationConfig").unwrap_or(&Value::Null);
-    if generation
-        .get("candidateCount")
-        .and_then(Value::as_u64)
-        .is_some_and(|count| count != 1)
-    {
-        return Err(ProtocolError::new(
-            "Gemini candidateCount other than 1 is not supported",
-        ));
+    if let Some(config) = generation.as_object() {
+        const SUPPORTED_FIELDS: &[&str] = &[
+            "candidateCount",
+            "maxOutputTokens",
+            "responseJsonSchema",
+            "responseMimeType",
+            "responseModalities",
+            "responseSchema",
+            "stopSequences",
+            "temperature",
+            "thinkingConfig",
+            "topK",
+            "topP",
+        ];
+        if let Some((field, _)) = config
+            .iter()
+            .find(|(field, value)| !value.is_null() && !SUPPORTED_FIELDS.contains(&field.as_str()))
+        {
+            return Err(ProtocolError::new(format!(
+                "Gemini generationConfig.{field} cannot be preserved by protocol conversion"
+            )));
+        }
+        if config
+            .get("topK")
+            .is_some_and(|value| !value.is_null() && !value.is_number())
+        {
+            return Err(ProtocolError::new(
+                "Gemini generationConfig.topK must be a number",
+            ));
+        }
+        if config
+            .get("thinkingConfig")
+            .is_some_and(|value| !value.is_null() && !value.is_object())
+        {
+            return Err(ProtocolError::new(
+                "Gemini generationConfig.thinkingConfig must be an object",
+            ));
+        }
+        if config
+            .get("responseMimeType")
+            .is_some_and(|value| !value.is_null() && !value.is_string())
+        {
+            return Err(ProtocolError::new(
+                "Gemini generationConfig.responseMimeType must be a string",
+            ));
+        }
     }
-    if generation
-        .get("responseModalities")
-        .and_then(Value::as_array)
-        .is_some_and(|modalities| {
-            modalities
+    match generation.get("candidateCount") {
+        None | Some(Value::Null) => {}
+        Some(value) if value.as_u64() == Some(1) => {}
+        Some(value) if value.as_u64().is_some() => {
+            return Err(ProtocolError::new(
+                "Gemini candidateCount other than 1 is not supported",
+            ));
+        }
+        Some(_) => {
+            return Err(ProtocolError::new(
+                "Gemini generationConfig.candidateCount must be an unsigned integer",
+            ));
+        }
+    }
+    match generation.get("responseModalities") {
+        None | Some(Value::Null) => {}
+        Some(Value::Array(modalities))
+            if modalities
                 .iter()
-                .any(|value| value.as_str() != Some("TEXT"))
-        })
-    {
-        return Err(ProtocolError::new(
-            "Gemini response modalities other than TEXT are not supported",
-        ));
+                .any(|value| value.as_str() != Some("TEXT")) =>
+        {
+            return Err(ProtocolError::new(
+                "Gemini response modalities other than TEXT are not supported",
+            ));
+        }
+        Some(Value::Array(_)) => {}
+        Some(_) => {
+            return Err(ProtocolError::new(
+                "Gemini generationConfig.responseModalities must be an array",
+            ));
+        }
     }
     let _ = gemini_output_schema(body)?;
     Ok(())
@@ -1076,6 +1145,10 @@ fn gemini_request_to_messages(body: Value) -> Result<Value, ProtocolError> {
     copy(&body, &mut out, "stream", "stream");
 
     let generation = body.get("generationConfig").unwrap_or(&Value::Null);
+    // Gemini CLI currently sends topK and thinkingConfig in its chat defaults.
+    // Neither field has one portable meaning across every supported Chat and
+    // Messages upstream, so they are accepted as compatibility hints but are
+    // intentionally not forwarded as provider-specific request fields.
     copy(generation, &mut out, "temperature", "temperature");
     copy(generation, &mut out, "topP", "top_p");
     copy(generation, &mut out, "stopSequences", "stop_sequences");
@@ -3032,10 +3105,69 @@ mod tests {
             json!({"contents":[{"role":"user","parts":[{"text":"hi"}]}],"tools":[{"functionDeclarations":[{"name":"x","parameters":{},"parametersJsonSchema":{}}]}]}),
             json!({"contents":[{"role":"user","parts":[{"text":"hi"}]}],"toolConfig":{"functionCallingConfig":{"mode":"VALIDATED"}}}),
             json!({"contents":[{"role":"user","parts":[{"text":"hi"}]}],"cachedContent":"cachedContents/1"}),
+            json!({"contents":[{"role":"user","parts":[{"text":"hi"}]}],"safetySettings":{}}),
+            json!({"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"seed":7}}),
+            json!({"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"presencePenalty":0.5}}),
+            json!({"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"frequencyPenalty":0.5}}),
+            json!({"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"responseLogprobs":true}}),
+            json!({"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"logprobs":4}}),
+            json!({"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"mediaResolution":"MEDIA_RESOLUTION_HIGH"}}),
+            json!({"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"topK":"64"}}),
+            json!({"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"thinkingConfig":true}}),
+            json!({"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"candidateCount":"1"}}),
+            json!({"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"responseModalities":"TEXT"}}),
+            json!({"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"responseMimeType":1}}),
         ];
         for request in cases {
             assert!(prepare_gemini_request("minimax-m3".into(), false, bytes(request)).is_err());
         }
+
+        let empty_safety_settings = json!({
+            "contents":[{"role":"user","parts":[{"text":"hi"}]}],
+            "safetySettings":[]
+        });
+        prepare_gemini_request("minimax-m3".into(), false, bytes(empty_safety_settings))
+            .expect("empty Gemini safety settings do not change semantics");
+
+        let safety_error = prepare_gemini_request(
+            "minimax-m3".into(),
+            false,
+            bytes(json!({
+                "contents":[{"role":"user","parts":[{"text":"hi"}]}],
+                "safetySettings":[{
+                    "category":"HARM_CATEGORY_HATE_SPEECH",
+                    "threshold":"BLOCK_LOW_AND_ABOVE"
+                }]
+            })),
+        )
+        .expect_err("non-empty Gemini safety settings cannot be silently discarded");
+        assert_eq!(safety_error.status, StatusCode::BAD_REQUEST);
+        assert!(safety_error.message.contains("cannot be preserved"));
+    }
+
+    #[test]
+    fn gemini_cli_generation_hints_are_accepted_but_not_leaked_upstream() {
+        let plan = prepare_gemini_request(
+            "minimax-m3".into(),
+            false,
+            bytes(json!({
+                "contents":[{"role":"user","parts":[{"text":"hi"}]}],
+                "generationConfig":{
+                    "temperature":1,
+                    "topP":0.95,
+                    "topK":64,
+                    "thinkingConfig":{"includeThoughts":true}
+                }
+            })),
+        )
+        .expect("Gemini CLI defaults must remain compatible");
+        let body: Value = serde_json::from_slice(&plan.body).unwrap();
+        assert_eq!(body["temperature"], 1);
+        assert_eq!(body["top_p"], 0.95);
+        assert!(body.get("topK").is_none());
+        assert!(body.get("top_k").is_none());
+        assert!(body.get("thinkingConfig").is_none());
+        assert!(body.get("thinking").is_none());
     }
 
     #[test]

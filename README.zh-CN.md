@@ -7,9 +7,9 @@
 </p>
 
 OCG Manager 是一个本地 OpenCode‑Go 多账号运维控制台。它把 OpenCode‑Go 账号
-Key 保存在本地 SQLite，并通过 OpenAI 兼容 Gateway `http://127.0.0.1:9042/v1`
-暴露给客户端使用；管理面板也由这个 Gateway 提供。桌面端是 Tauri v2 托盘
-应用，覆盖 Windows、macOS、Linux；同步发布无头 CLI。
+Key 保存在本地 SQLite，并通过 OpenAI、Anthropic 与 Gemini 兼容 Gateway 暴露
+给客户端使用；管理面板也由这个 Gateway 提供。桌面端是 Tauri v2 托盘应用，
+覆盖 Windows、macOS、Linux；同步发布无头 CLI。
 
 <p align="center">
   <img src="assets/opencode娘.png" alt="OpenCode-Go 娘" width="360">
@@ -17,10 +17,11 @@ Key 保存在本地 SQLite，并通过 OpenAI 兼容 Gateway `http://127.0.0.1:9
 
 ## 主要特性
 
-- **OpenAI / Anthropic 兼容 Gateway**：同一端口同时支持
+- **OpenAI / Anthropic / Gemini 兼容 Gateway**：同一端口同时支持
   `POST /v1/chat/completions`、`POST /v1/responses`、`POST /v1/messages`、
-  `GET /v1/models`，按模型原生协议转发到 OpenCode‑Go，并把响应转换回客户
-  端协议。
+  `GET /v1/models`、Claude Desktop 专用的 `/claude-desktop/v1/*`，以及 Gemini
+  `/v1beta/models/{model}:generateContent` / `:streamGenerateContent`。Gateway
+  按模型原生协议转发到 OpenCode‑Go，并把响应转换回客户端协议。
 - **本地多账号轮询**：按账号列表顺序尝试，自动跳过已禁用、冷却中或本次
   请求已失败的账号，单次请求内完成快速切换。
 - **本地用量估算**：5 小时、本周、本月进度条基于 Gateway 实际转发的请求
@@ -31,6 +32,9 @@ Key 保存在本地 SQLite，并通过 OpenAI 兼容 Gateway `http://127.0.0.1:9
   AppImage 与 `.deb` 共用同一份 Tauri v2 代码与单实例锁。
 - **同步发布无头 CLI**：`ocg-manager-cli` 自带管理面板 `dist/`，适合服务
   器、Docker、远程 Gateway。
+- **13 个应用配置教程**：面板可直接生成 Claude Code、Claude Desktop、
+  Codex、Gemini CLI、OpenCode、OpenClaw、Hermes、Cherry Studio、VS Code
+  Copilot Chat、Cline、Roo Code、Continue 与 Chatbox 的配置片段。
 - **手动检查更新**：设置页可检查 GitHub 最新 Release 并打开发布页，不会
   自动下载或安装。
 - **无远端同步、无遥测**：每个节点独立管理自己的数据；不提供云服务、
@@ -50,10 +54,10 @@ Key 保存在本地 SQLite，并通过 OpenAI 兼容 Gateway `http://127.0.0.1:9
 目标为 `linux/amd64`。
 
 ```bash
-git clone --branch v1.2.1 --depth 1 https://github.com/klarkxy/opencode-go-mgr.git
+git clone --branch v1.3.0 --depth 1 https://github.com/klarkxy/opencode-go-mgr.git
 cd opencode-go-mgr
 cp .env.example .env
-# 编辑 .env：选择首次管理员创建方式，并把 OCG_IMAGE 固定到 1.2.1。
+# 编辑 .env：选择首次管理员创建方式，并把 OCG_IMAGE 固定到 1.3.0。
 docker compose pull
 docker compose up -d --no-build
 docker compose ps
@@ -110,9 +114,11 @@ curl http://127.0.0.1:9042/v1/chat/completions \
 
 ## 模型与协议
 
-每个已知模型都映射到自己的原生 OpenCode‑Go 协议；客户端用其他协议访问
-时会自动转换，涵盖文本、system、图像、工具调用与结果、推理内容、完成状
-态、错误、usage 字段。
+每个已知模型都映射到自己的原生 OpenCode‑Go 协议；客户端可通过 Chat
+Completions、Responses、Messages 或 Gemini generateContent 访问，Gateway 会
+自动转换文本、system、图像、工具调用与结果、完成状态、错误和 usage 字段。
+Claude Desktop 使用 `/claude-desktop/v1/messages`，把 Sonnet、Opus、Haiku
+别名改写为面板中保存的实际模型。
 
 - **OpenAI Chat Completions**：`glm-5.2`、`glm-5.1`、`kimi-k2.7-code`、
   `kimi-k2.6`、`deepseek-v4-pro`、`deepseek-v4-flash`、`mimo-v2.5`、
@@ -120,9 +126,13 @@ curl http://127.0.0.1:9042/v1/chat/completions \
 - **Anthropic Messages**：`minimax-m3`、`minimax-m2.7`、`minimax-m2.5`、
   `qwen3.7-max`、`qwen3.7-plus`、`qwen3.6-plus`。
 
-未知模型保留请求自身的 Chat Completions 或 Messages 协议。Responses 端点
-的未知模型会直接 `400` 拒绝——Gateway 不会靠试探选协议，否则可能把同
-一请求重复计费。
+未知模型保留请求自身的 Chat Completions 或 Messages 协议。Responses 与 Gemini
+端点的未知模型会直接 `400` 拒绝——Gateway 不会靠试探选协议，否则可能把同
+一请求重复计费。Gemini 是客户端兼容层，不会把请求转发到 Google：非空
+`safetySettings` 因无法跨协议保真而返回 `400`；只有 `topK` 与
+`thinkingConfig` 作为兼容提示接受且不保证与实际 Chat/Messages 上游语义等价，
+其他未明确映射的非空 `generationConfig` 字段返回 `400`。完整限制见
+[用户指南的协议转换章节](docs/USER.zh-CN.md#协议转换)。
 
 ## 文档
 

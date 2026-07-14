@@ -146,6 +146,7 @@ export const esESMessages = {
   "{error}。教程正文仍可阅读，但为避免复制错误地址，动态配置复制已禁用。": "{error}. Puedes seguir leyendo las guías, pero se ha desactivado la copia de la configuración dinámica para evitar URL incorrectas.",
   "当前使用非本机 HTTP 地址": "Se está usando una URL HTTP no local",
   "Gateway Key 与请求内容会以明文传输。仅在可信局域网内使用，公网接入请配置 HTTPS。": "La Gateway Key y el contenido de las solicitudes se transmitirán en texto sin cifrar. Úsalo solo en una red local de confianza; configura HTTPS para el acceso público.",
+  "Gemini CLI 的远程 Base URL 必须使用 HTTPS；仅 localhost、127.0.0.1 和 [::1] 可使用 HTTP。": "Las URL base remotas de Gemini CLI deben usar HTTPS; solo localhost, 127.0.0.1 y [::1] pueden usar HTTP.",
   "选择下游应用": "Seleccionar una aplicación cliente",
   "官方文档": "Documentación oficial",
   "配置步骤": "Pasos de configuración",

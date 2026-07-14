@@ -45,6 +45,43 @@ export interface ApplicationGuide {
   quickActions?: readonly GuideAction[];
 }
 
+export interface ApplicationModelSelection {
+  selectedModels: string[];
+  selectedModel: string | null;
+}
+
+export function reconcileApplicationModelSelection(
+  currentModels: readonly string[] | undefined,
+  currentModel: string | null | undefined,
+  availableModels: readonly string[],
+  defaultModels: readonly string[],
+  multipleModels: boolean,
+): ApplicationModelSelection {
+  const available = new Set(availableModels);
+  if (!multipleModels) {
+    return {
+      selectedModels: [],
+      selectedModel: currentModel && available.has(currentModel)
+        ? currentModel
+        : availableModels[0] ?? null,
+    };
+  }
+
+  const uniqueValid = (models: readonly string[]) => [...new Set(
+    models.filter((model) => available.has(model)),
+  )];
+  const preservedModels = uniqueValid(currentModels ?? []);
+  const selectedModels = preservedModels.length
+    ? preservedModels
+    : uniqueValid(defaultModels);
+  return {
+    selectedModels,
+    selectedModel: currentModel && selectedModels.includes(currentModel)
+      ? currentModel
+      : selectedModels[0] ?? null,
+  };
+}
+
 function models(context: GuideContext): readonly string[] {
   return context.modelIds.length ? context.modelIds : [context.modelId];
 }
@@ -268,6 +305,7 @@ export const APPLICATION_GUIDES = [
     ],
     notes: [
       "模型能力由实际上游决定；Agent 工具调用需要所选模型正确支持 tools。",
+      "Gemini CLI 的远程 Base URL 必须使用 HTTPS；仅 localhost、127.0.0.1 和 [::1] 可使用 HTTP。",
     ],
     snippets: (context) => [
       keyedSnippet(

@@ -157,6 +157,30 @@ mod tests {
                 .expect("authorized Gemini generation route should complete");
             assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
         }
+        let safety_response = client
+            .post(format!("{root}/v1beta/models/minimax-m3:generateContent"))
+            .header("x-goog-api-key", "gateway-test-key")
+            .json(&json!({
+                "contents":[{"role":"user","parts":[{"text":"hello"}]}],
+                "safetySettings":[{
+                    "category":"HARM_CATEGORY_HATE_SPEECH",
+                    "threshold":"BLOCK_LOW_AND_ABOVE"
+                }]
+            }))
+            .send()
+            .await
+            .expect("unsupported Gemini safety policy should complete");
+        assert_eq!(safety_response.status(), StatusCode::BAD_REQUEST);
+        let safety_error: serde_json::Value = safety_response
+            .json()
+            .await
+            .expect("Gemini safety error should be Google JSON");
+        assert_eq!(safety_error["error"]["status"], "INVALID_ARGUMENT");
+        assert!(
+            safety_error["error"]["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("cannot be preserved"))
+        );
         for path in [
             "/v1beta/models/minimax-m3:countTokens",
             "/v1/models/minimax-m3:embedContent",
