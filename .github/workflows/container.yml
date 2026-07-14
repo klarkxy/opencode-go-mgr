@@ -1,0 +1,190 @@
+name: Publish container image
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing semver tag to publish, for example v1.2.0
+        required: true
+        type: string
+      publish_latest:
+        description: Also update the latest tag
+        required: true
+        default: false
+        type: boolean
+
+permissions: {}
+
+concurrency:
+  group: ghcr-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish GHCR image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+    env:
+      SMOKE_IMAGE: ocg-manager:smoke-${{ github.run_id }}
+      SMOKE_CONTAINER: ocg-manager-smoke-${{ github.run_id }}
+      SMOKE_VOLUME: ocg-manager-smoke-${{ github.run_id }}
+
+    steps:
+      - name: Resolve release
+        id: release
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$RELEASE_TAG" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Expected a semver tag, got: $RELEASE_TAG" >&2
+            exit 1
+          fi
+
+          echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Check out release tag
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ steps.release.outputs.tag }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Resolve release commit
+        id: commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "full_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "short_sha=$(git rev-parse --short=12 HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Build image for smoke test
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          load: true
+          tags: ${{ env.SMOKE_IMAGE }}
+          cache-from: type=gha,scope=ocg-manager-linux-amd64
+          provenance: false
+          sbom: false
+
+      - name: Smoke-test container
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          docker volume create "$SMOKE_VOLUME" >/dev/null
+          docker run --detach \
+            --name "$SMOKE_CONTAINER" \
+            --publish 127.0.0.1:19042:9042 \
+            --volume "$SMOKE_VOLUME:/data" \
+            --read-only \
+            --tmpfs /tmp \
+            --cap-drop ALL \
+            --security-opt no-new-privileges:true \
+            --health-interval 2s \
+            --health-timeout 2s \
+            --health-start-period 1s \
+            --health-retries 15 \
+            "$SMOKE_IMAGE" >/dev/null
+
+          status=starting
+          for _ in $(seq 1 45); do
+            status=$(docker inspect --format '{{.State.Health.Status}}' "$SMOKE_CONTAINER")
+            if [[ "$status" == healthy ]]; then
+              break
+            fi
+            if [[ "$status" == unhealthy ]]; then
+              echo "Container became unhealthy." >&2
+              exit 1
+            fi
+            sleep 2
+          done
+          if [[ "$status" != healthy ]]; then
+            echo "Container did not become healthy; last status: $status" >&2
+            exit 1
+          fi
+
+          curl --fail --silent --show-error --max-time 10 \
+            http://127.0.0.1:19042/dashboard/ > "$RUNNER_TEMP/dashboard.html"
+          grep -q 'id="app"' "$RUNNER_TEMP/dashboard.html"
+
+          curl --fail --silent --show-error --max-time 10 \
+            http://127.0.0.1:19042/dashboard/api/auth/status \
+            > "$RUNNER_TEMP/auth-status.json"
+
+          settings_status=$(curl --silent --show-error --max-time 10 \
+            --output /dev/null --write-out '%{http_code}' \
+            http://127.0.0.1:19042/dashboard/api/settings)
+          if [[ "$settings_status" != 401 ]]; then
+            echo "Expected unauthenticated settings request to return 401, got $settings_status" >&2
+            exit 1
+          fi
+
+      - name: Clean up smoke test
+        if: always()
+        shell: bash
+        run: |
+          docker rm --force "$SMOKE_CONTAINER" >/dev/null 2>&1 || true
+          docker volume rm "$SMOKE_VOLUME" >/dev/null 2>&1 || true
+
+      - name: Log in to GHCR
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate image metadata
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ steps.release.outputs.image }}
+          flavor: latest=false
+          tags: |
+            type=semver,pattern={{version}},value=${{ steps.release.outputs.tag }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ steps.release.outputs.tag }}
+            type=raw,value=latest,enable=${{ (github.event_name == 'release' && !github.event.release.prerelease) || inputs.publish_latest }}
+            type=raw,value=sha-${{ steps.commit.outputs.short_sha }},priority=100
+          labels: |
+            org.opencontainers.image.title=OCG Manager
+            org.opencontainers.image.description=OpenCode-Go multi-account local manager and gateway
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ steps.commit.outputs.full_sha }}
+
+      - name: Build and push image
+        id: push
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=ocg-manager-linux-amd64
+          cache-to: type=gha,mode=max,scope=ocg-manager-linux-amd64
+          provenance: mode=max
+          sbom: true
+
+      - name: Generate signed GitHub provenance
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        with:
+          subject-name: ${{ steps.release.outputs.image }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true

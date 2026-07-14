@@ -5,7 +5,7 @@ services:
       args:
         NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
         CARGO_REGISTRY: ${CARGO_REGISTRY:-sparse+https://index.crates.io/}
-    image: ocg-manager:local
+    image: ${OCG_IMAGE:-ghcr.io/klarkxy/opencode-go-mgr:latest}
     restart: unless-stopped
     environment:
       - OCG_ADMIN_USERNAME

@@ -49,6 +49,10 @@ the artifact's SHA-256 before installing. On PowerShell use
 `Get-FileHash <file> -Algorithm SHA256`; on macOS use `shasum -a 256 <file>`;
 on Linux use `sha256sum <file>`.
 
+The published headless container is
+`ghcr.io/klarkxy/opencode-go-mgr`. See the [Docker guide](docs/USER.md#docker)
+for Compose, persistence, upgrades, and local source builds.
+
 ## Quick Start
 
 The default gateway address and the header that carries the local key:

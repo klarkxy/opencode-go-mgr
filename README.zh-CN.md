@@ -44,6 +44,9 @@ Key 保存在本地 SQLite，并通过 OpenAI 兼容 Gateway `http://127.0.0.1:9
 `Get-FileHash <文件> -Algorithm SHA256`，macOS 使用
 `shasum -a 256 <文件>`，Linux 使用 `sha256sum <文件>`。
 
+无头容器发布在 `ghcr.io/klarkxy/opencode-go-mgr`。Compose、持久化、升级和
+本地源码构建方法见[用户指南的 Docker 章节](docs/USER.zh-CN.md#docker)。
+
 ## 快速开始
 
 默认 Gateway 地址和本地鉴权头：
