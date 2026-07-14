@@ -377,6 +377,12 @@ SSE stream) back to the client protocol. Conversion covers text, system
 instructions, images, tool calls and tool results, reasoning content,
 completion status, errors, and usage fields.
 
+Gateway protocol endpoints accept JSON request bodies up to 16 MiB. This
+transport limit is separate from each model's context window. If a reverse
+proxy is in front of OCG Manager, configure it to allow request bodies of at
+least 16 MiB or it may return `413 Payload Too Large` before the gateway sees
+the request.
+
 Gemini `generateContent` and `streamGenerateContent` are client-only formats:
 the gateway never sends Gemini wire data upstream. It converts `contents`,
 text-only `systemInstruction`, supported `inlineData` images,
@@ -518,7 +524,7 @@ ARM64 image. Run the Compose commands from a checkout containing
 `compose.yaml` and `.env.example` (preferably the matching release tag):
 
 ```bash
-git clone --branch v1.3.0 --depth 1 https://github.com/klarkxy/opencode-go-mgr.git
+git clone --branch v1.3.1 --depth 1 https://github.com/klarkxy/opencode-go-mgr.git
 cd opencode-go-mgr
 cp .env.example .env
 # PowerShell: Copy-Item .env.example .env
@@ -530,7 +536,7 @@ docker compose ps
 
 The default image is `ghcr.io/klarkxy/opencode-go-mgr:latest`. For repeatable
 production deployments, set `OCG_IMAGE` in `.env` to a full release tag such
-as `ghcr.io/klarkxy/opencode-go-mgr:1.3.0`. The full version and
+as `ghcr.io/klarkxy/opencode-go-mgr:1.3.1`. The full version and
 `sha-<commit>` tags identify one release and are intended not to move;
 `1.3` and `latest` move forward. Only a digest such as
 `ghcr.io/klarkxy/opencode-go-mgr@sha256:...` is technically immutable. To build the current checkout
@@ -610,9 +616,9 @@ Each stable image includes an SPDX SBOM, BuildKit SLSA provenance, and a
 GitHub signed provenance attestation. Inspect and verify a release with:
 
 ```bash
-docker buildx imagetools inspect ghcr.io/klarkxy/opencode-go-mgr:1.3.0
+docker buildx imagetools inspect ghcr.io/klarkxy/opencode-go-mgr:1.3.1
 gh attestation verify \
-  oci://ghcr.io/klarkxy/opencode-go-mgr:1.3.0 \
+  oci://ghcr.io/klarkxy/opencode-go-mgr:1.3.1 \
   --repo klarkxy/opencode-go-mgr
 ```
 

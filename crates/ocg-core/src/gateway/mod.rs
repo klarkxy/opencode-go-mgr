@@ -9,10 +9,15 @@ pub mod selector;
 use crate::state::{CoreState, GatewayHandle};
 use anyhow::Result;
 use axum::Router;
+use axum::extract::DefaultBodyLimit;
 use axum::routing::{get, post};
 use std::net::SocketAddr;
 use tokio::sync::oneshot;
 use tower_http::cors::{Any, CorsLayer};
+
+// 1M-token conversations exceed Axum's 2 MiB Bytes default; keep a bounded cap before auth.
+const MAX_GATEWAY_REQUEST_BODY_BYTES: usize = 16 * 1024 * 1024;
+const _: () = assert!(MAX_GATEWAY_REQUEST_BODY_BYTES > 2 * 1024 * 1024);
 
 pub fn build_router(state: CoreState) -> Router {
     let cors = CorsLayer::new()
@@ -41,7 +46,8 @@ pub fn build_router(state: CoreState) -> Router {
             "/v1/models/{*model_action}",
             post(handler::gemini_model_action),
         )
-        .layer(cors);
+        .layer(cors)
+        .layer(DefaultBodyLimit::max(MAX_GATEWAY_REQUEST_BODY_BYTES));
 
     Router::new()
         .merge(gateway_api)
@@ -98,7 +104,7 @@ pub fn stop_gateway(handle: GatewayHandle) {
 
 #[cfg(test)]
 mod tests {
-    use super::start_gateway_on;
+    use super::{MAX_GATEWAY_REQUEST_BODY_BYTES, start_gateway_on};
     use crate::crypto::{KeyCipher, StaticKeyCipher};
     use crate::db::Database;
     use crate::state::CoreStateInner;
@@ -107,6 +113,66 @@ mod tests {
     use std::fs;
     use std::net::SocketAddr;
     use std::sync::Arc;
+
+    #[tokio::test]
+    async fn gateway_request_body_limit_accepts_16_mib_and_rejects_larger() {
+        let mut dir = std::env::temp_dir();
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock should be valid")
+            .as_nanos();
+        dir.push(format!("ocg-gateway-body-limit-{nanos}"));
+        fs::create_dir_all(&dir).expect("test data directory should be created");
+        let db = Database::open(dir.clone()).expect("test database should open");
+        let cipher: Arc<dyn KeyCipher + Send + Sync> = Arc::new(StaticKeyCipher::new("test"));
+        let state =
+            Arc::new(CoreStateInner::new(db, dir.clone(), cipher).expect("state should load"));
+        let mut config = state.config();
+        config.gateway_key = "gateway-test-key".to_string();
+        state.set_config(config).expect("test config should save");
+        let handle = start_gateway_on(state.clone(), SocketAddr::from(([127, 0, 0, 1], 0)))
+            .await
+            .expect("test gateway should start");
+        let root = format!("http://127.0.0.1:{}", handle.port);
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .build()
+            .expect("test client should build");
+
+        let mut accepted_body = vec![b' '; MAX_GATEWAY_REQUEST_BODY_BYTES];
+        accepted_body[MAX_GATEWAY_REQUEST_BODY_BYTES - 1] = b'x';
+        let accepted = client
+            .post(format!("{root}/v1/chat/completions"))
+            .bearer_auth("gateway-test-key")
+            .body(accepted_body)
+            .send()
+            .await
+            .expect("request at the body limit should complete");
+        assert_eq!(accepted.status(), StatusCode::BAD_REQUEST);
+        let accepted_error: serde_json::Value = accepted
+            .json()
+            .await
+            .expect("accepted request should reach protocol JSON parsing");
+        assert!(
+            accepted_error["error"]["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("invalid JSON request"))
+        );
+
+        let rejected = client
+            .post(format!("{root}/v1/chat/completions"))
+            .bearer_auth("gateway-test-key")
+            .body(vec![b'x'; MAX_GATEWAY_REQUEST_BODY_BYTES + 1])
+            .send()
+            .await
+            .expect("request above the body limit should complete");
+        assert_eq!(rejected.status(), StatusCode::PAYLOAD_TOO_LARGE);
+
+        let _ = handle.shutdown.send(());
+        handle.task.await.expect("test gateway should stop");
+        drop(state);
+        fs::remove_dir_all(dir).expect("test data directory should be removed");
+    }
 
     #[tokio::test]
     async fn claude_desktop_routes_are_wired_and_protected() {
