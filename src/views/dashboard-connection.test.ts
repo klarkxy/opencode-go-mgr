@@ -278,10 +278,10 @@ test("settings expose the downstream display root and bounded request timeouts",
   assert.match(settings, /\{\{ automaticClientRootFeedback \}\}/);
   assert.match(settings, /config\.client_root_url/);
   assert.match(settings, /client_root_url_from_env: false/);
-  assert.match(settings, /get: \(\) => config\.value\.client_root_url \|\| automaticClientRootUrls\.value\.rootUrl/);
+  assert.match(settings, /get: \(\) => config\.value\.client_root_url,/);
+  assert.match(settings, /:placeholder="config\.client_root_url_from_env \? '' : automaticClientRootUrls\.rootUrl"/);
   assert.doesNotMatch(settings, /config\.value\.client_root_url = resolveConnectionUrls/);
   assert.match(settings, /非本机 HTTP 会明文传输 Gateway Key 与请求内容/);
-  assert.match(settings, /仅用于下游教程、展示和复制/);
   assert.match(settings, /请求超时/);
   assert.match(settings, /config\.connect_timeout_secs"\s+:min="1"\s+:max="300"\s+:precision="0"/);
   assert.match(settings, /config\.non_stream_timeout_secs"\s+:min="1"\s+:max="3600"\s+:precision="0"/);
@@ -304,9 +304,7 @@ test("settings expose supported Windows auto-start safely", async () => {
 
   assert.match(settings, /v-if="config\.auto_start_supported"/);
   assert.match(settings, /v-model:value="config\.auto_start"/);
-  assert.match(settings, /登录 Windows 后在托盘后台启动，不自动打开 Dashboard/);
   assert.match(settings, /:aria-label="t\('随 Windows 登录自动启动 OCG Manager'\)"/);
-  assert.match(settings, /aria-describedby="startup-help"/);
   assert.match(settings, /:disabled="!loaded \|\| saving \|\| regenerating"/);
   assert.match(settings, /:loading="regenerating"\s+:disabled="saving"/);
   assert.match(settings, /config\.value\.auto_start = persistedAutoStart/);

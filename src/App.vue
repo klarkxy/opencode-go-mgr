@@ -523,7 +523,7 @@ onUnmounted(() => {
 .auth-kicker {
   margin: 20px 0 6px;
   color: var(--ocg-primary);
-  font-size: 16px;
+  font-size: var(--ocg-font-size);
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -542,7 +542,7 @@ onUnmounted(() => {
 .auth-error {
   margin: 0 0 12px;
   color: var(--ocg-error);
-  font-size: 16px;
+  font-size: var(--ocg-font-size);
 }
 .auth-character {
   position: absolute;
@@ -581,7 +581,7 @@ onUnmounted(() => {
 }
 .brand-name {
   color: var(--ocg-ink);
-  font-size: 16px;
+  font-size: var(--ocg-font-size);
   font-weight: 650;
 }
 .app-header {
@@ -594,7 +594,7 @@ onUnmounted(() => {
 }
 .desktop-title {
   color: var(--ocg-ink);
-  font-size: 16px;
+  font-size: var(--ocg-font-size);
   font-weight: 650;
 }
 .header-actions {

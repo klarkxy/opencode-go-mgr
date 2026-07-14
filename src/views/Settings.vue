@@ -4,7 +4,6 @@
       <div class="settings-head">
         <div>
           <h2 id="forwarding-title">↗ {{ t("转发") }}</h2>
-          <p>{{ t("上游连接与访问凭据") }}</p>
         </div>
       </div>
       <n-form :model="config" label-placement="top" :show-feedback="false">
@@ -19,6 +18,7 @@
               v-model:value="clientRootInputValue"
               :readonly="config.client_root_url_from_env"
               :clearable="!config.client_root_url_from_env && !!config.client_root_url"
+              :placeholder="config.client_root_url_from_env ? '' : automaticClientRootUrls.rootUrl"
               class="mono"
               :input-props="{
                 'aria-label': t('下游访问根地址（可选）'),
@@ -33,7 +33,6 @@
               <span v-else-if="!config.client_root_url.trim()" class="sr-only">
                 {{ automaticClientRootFeedback }}
               </span>
-              {{ t("仅用于下游教程、展示和复制。") }}
             </p>
           </div>
         </n-form-item>
@@ -114,7 +113,6 @@
               />
               <n-button size="small" secondary @click="cancelGatewayKeyEdit">{{ t("取消") }}</n-button>
             </div>
-            <p>{{ t("需要修改时点击编辑图标。") }}</p>
           </div>
         </n-form-item>
         <div
@@ -123,11 +121,9 @@
           aria-labelledby="startup-title"
         >
           <h3 id="startup-title">{{ t("开机启动") }}</h3>
-          <p id="startup-help">{{ t("登录 Windows 后在托盘后台启动，不自动打开 Dashboard。") }}</p>
           <n-switch
             v-model:value="config.auto_start"
             :aria-label="t('随 Windows 登录自动启动 OCG Manager')"
-            aria-describedby="startup-help"
             :disabled="!loaded || saving || regenerating"
             :loading="saving"
           >
@@ -137,7 +133,6 @@
         </div>
         <div class="settings-subsection" aria-labelledby="request-timeout-title">
           <h3 id="request-timeout-title">{{ t("请求超时") }}</h3>
-          <p>{{ t("分别控制连接建立、非流式响应完成和流式数据停顿的等待上限。") }}</p>
           <n-form-item :label="t('连接超时')">
             <n-input-number
               v-model:value="config.connect_timeout_secs"
@@ -223,7 +218,6 @@
         <div class="settings-head">
           <div>
             <h2 id="update-title">↻ {{ t("检查更新") }}</h2>
-            <p>{{ t("从 GitHub Releases 检查最新公开版本，不会自动下载或安装。") }}</p>
           </div>
         </div>
         <n-button
@@ -357,7 +351,7 @@ const automaticClientRootFeedback = computed(() => t(
 ));
 
 const clientRootInputValue = computed({
-  get: () => config.value.client_root_url || automaticClientRootUrls.value.rootUrl,
+  get: () => config.value.client_root_url,
   set: (value: string) => {
     if (!config.value.client_root_url_from_env) config.value.client_root_url = value;
   },
@@ -535,7 +529,7 @@ onUnmounted(cleanup);
 .settings-head p {
   margin: 4px 0 0;
   color: var(--ocg-subtle);
-  font-size: 16px;
+  font-size: var(--ocg-font-size);
 }
 .key-field {
   display: grid;
@@ -548,12 +542,6 @@ onUnmounted(cleanup);
   display: grid;
   gap: 6px;
   width: 100%;
-}
-.key-stack > p {
-  margin: 0;
-  color: var(--ocg-subtle);
-  font-size: 16px;
-  line-height: 1.5;
 }
 .key-display {
   display: flex;
@@ -584,7 +572,7 @@ onUnmounted(cleanup);
 .client-root-field > p {
   margin: 6px 0 0;
   color: var(--ocg-subtle);
-  font-size: 16px;
+  font-size: var(--ocg-font-size);
   line-height: 1.5;
 }
 .settings-subsection {
@@ -596,11 +584,6 @@ onUnmounted(cleanup);
   margin: 0;
   color: var(--ocg-ink);
   font: 700 18px/1.3 "Bahnschrift", "Segoe UI Variable Display", sans-serif;
-}
-.settings-subsection > p {
-  margin: 4px 0 14px;
-  color: var(--ocg-subtle);
-  font-size: 16px;
 }
 .theme-grid {
   display: grid;
@@ -655,7 +638,7 @@ onUnmounted(cleanup);
   position: absolute;
   top: 5px;
   right: 5px;
-  font-size: 16px;
+  font-size: var(--ocg-font-size);
 }
 .update-result {
   margin-top: 14px;
@@ -681,7 +664,7 @@ onUnmounted(cleanup);
 }
 .update-versions dt {
   color: var(--ocg-subtle);
-  font-size: 16px;
+  font-size: var(--ocg-font-size);
 }
 .update-versions dd {
   margin: 0;

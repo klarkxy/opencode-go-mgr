@@ -25,6 +25,7 @@
           :pagination="gatewayPagination"
           :scroll-x="920"
           size="small"
+          @update:page="changeGatewayPage"
         />
       </n-tab-pane>
       <n-tab-pane name="forward" :tab="t('请求日志')">
@@ -122,8 +123,12 @@ const forwardLoading = ref(false);
 const statusFilter = ref<string | null>(query.get("status"));
 const accountFilter = ref<string | null>(query.get("account"));
 const forwardPage = ref(1);
+const gatewayPage = ref(1);
 const pageSize = 20;
-const gatewayPagination = { pageSize };
+const gatewayPagination = computed(() => ({
+  page: gatewayPage.value,
+  pageSize,
+}));
 const emptySummary = (): ForwardLogSummary => ({
   total_requests: 0,
   prompt_tokens: 0,
@@ -222,6 +227,7 @@ async function loadGatewayLogs() {
   gatewayLoading.value = true;
   try {
     gatewayLogs.value = await tauriApi.getGatewayLogs(200);
+    gatewayPage.value = 1;
   } catch (e) {
     message.error(t("加载运行日志失败: {error}", { error: String(e) }));
   } finally {
@@ -262,6 +268,10 @@ async function loadAccounts() {
 function changeForwardPage(page: number) {
   forwardPage.value = page;
   void loadForwardLogs();
+}
+
+function changeGatewayPage(page: number) {
+  gatewayPage.value = page;
 }
 
 watch(activeTab, syncQueryState);

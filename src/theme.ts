@@ -224,6 +224,9 @@ export function getThemeTokens(theme: ThemeName, osTheme: string | null | undefi
 export function applyTheme(root: HTMLElement, resolved: ResolvedTheme, tokens: ThemeTokens): void {
   root.dataset.theme = resolved;
   root.style.colorScheme = tokens.colorScheme;
+  // 基准字号：全 UI 统一 16px，视觉层级靠字重/颜色而非字号缩放（见 toNaiveThemeOverrides 注释）。
+  // 收口为 token 后，若需整体调整基准字号只需改这一处。
+  root.style.setProperty("--ocg-font-size", "16px");
   const values: Record<string, string> = {
     "--ocg-canvas": tokens.canvas,
     "--ocg-surface": tokens.surface,

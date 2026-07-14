@@ -137,7 +137,6 @@
       <div class="card-head chart-head">
         <div>
           <h3 class="card-title">{{ t("每日消耗") }}</h3>
-          <p class="card-desc">{{ t("每日消耗趋势") }}</p>
         </div>
         <div class="chart-stats" :aria-label="t('图表摘要')">
           <span>{{ t("模型：{count}", { count: formatNumber(legendModels.length) }) }}</span>
@@ -199,6 +198,7 @@ import type { Account, DailyModelCost, DashboardSummary, UsageWindow } from "../
 import { CHART_PALETTE } from "../theme";
 import { t } from "../i18n/index.ts";
 import { formatCost, formatNumber, useClipboard } from "../utils/format.ts";
+import { mapWithConcurrency } from "../utils/async.ts";
 import { maskConnectionKey, resolveConnectionUrls } from "./dashboard-connection";
 
 type ConnectionTarget = "api" | "key" | "upstream";
@@ -294,8 +294,15 @@ onMounted(async () => {
   ]);
   if (loadedAccounts.status === "fulfilled") {
     accounts.value = loadedAccounts.value;
-    const usage = await Promise.allSettled(loadedAccounts.value.map(async (account) => [account.id, await tauriApi.getAccountUsage(account.id)] as const));
-    usageMap.value = Object.fromEntries(usage.flatMap((result) => result.status === "fulfilled" ? [result.value] : []));
+    // 限流并发拉取每账号用量，避免账号多时 N 次请求同时打到后端
+    const settled = await mapWithConcurrency(
+      loadedAccounts.value,
+      4,
+      async (account) => [account.id, await tauriApi.getAccountUsage(account.id)] as const,
+    );
+    usageMap.value = Object.fromEntries(
+      settled.flatMap((result) => (result.status === "fulfilled" ? [result.value] : [])),
+    );
   }
   if (settings.status === "fulfilled") serviceConfig.value = settings.value;
   if (loadedSummary.status === "fulfilled") summary.value = loadedSummary.value;
@@ -415,7 +422,7 @@ onUnmounted(cleanup);
 .connection-warning {
   margin: 10px 2px 0;
   color: var(--ocg-warning);
-  font-size: 16px;
+  font-size: var(--ocg-font-size);
   line-height: 1.5;
 }
 .hero-character {
@@ -475,12 +482,12 @@ onUnmounted(cleanup);
 }
 .kpi-card small {
   color: var(--ocg-subtle);
-  font-size: 16px;
+  font-size: var(--ocg-font-size);
 }
 .kpi-card span:last-child {
   margin-top: 3px;
   color: var(--ocg-subtle);
-  font-size: 16px;
+  font-size: var(--ocg-font-size);
 }
 
 .card {
@@ -504,7 +511,7 @@ onUnmounted(cleanup);
 .card-desc {
   margin: 3px 0 0;
   color: var(--ocg-subtle);
-  font-size: 16px;
+  font-size: var(--ocg-font-size);
 }
 .chart-card {
   padding-bottom: 12px;
@@ -515,7 +522,7 @@ onUnmounted(cleanup);
   justify-content: flex-end;
   gap: 8px 16px;
   color: var(--ocg-subtle);
-  font-size: 16px;
+  font-size: var(--ocg-font-size);
 }
 .chart-stats b {
   color: var(--ocg-ink);
@@ -533,7 +540,7 @@ onUnmounted(cleanup);
   align-items: center;
   gap: 5px;
   color: var(--ocg-muted);
-  font-size: 16px;
+  font-size: var(--ocg-font-size);
 }
 .legend-dot {
   width: 7px;
@@ -570,13 +577,13 @@ onUnmounted(cleanup);
 .account-top strong {
   overflow: hidden;
   color: var(--ocg-ink);
-  font-size: 16px;
+  font-size: var(--ocg-font-size);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .account-status {
   flex: 0 0 auto;
-  font-size: 16px;
+  font-size: var(--ocg-font-size);
   font-weight: 650;
 }
 .account-status.active { color: var(--ocg-success); }
@@ -584,7 +591,7 @@ onUnmounted(cleanup);
 .account-status.disabled { color: var(--ocg-subtle); }
 .account-usage {
   color: var(--ocg-subtle);
-  font-size: 16px;
+  font-size: var(--ocg-font-size);
   line-height: 1.5;
 }
 

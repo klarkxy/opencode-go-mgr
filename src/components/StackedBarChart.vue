@@ -327,13 +327,18 @@ function updateTooltip(bi: number, e: MouseEvent) {
     .filter((r) => r.cost > 0)
     .sort((a, b) => b.cost - a.cost)
     .map((r) => ({ ...r, color: modelColor(r.model, models) }));
+  const rect = rootRef.value?.getBoundingClientRect();
+  // 用视口坐标相对容器定位，避免 SVG <g transform> 下 offset 语义不一致
+  const x = rect ? e.clientX - rect.left + 14 : e.offsetX + 14;
+  const y = rect ? e.clientY - rect.top + 14 : e.offsetY + 14;
+  const maxX = rect ? rect.width - 184 : x;
   tooltip.value = {
     show: true,
     title: formatChartDate(d.date),
     total: d.total,
     rows,
-    x: e.offsetX + 14,
-    y: e.offsetY + 14,
+    x: Math.min(x, Math.max(0, maxX)),
+    y,
   };
 }
 
@@ -357,7 +362,7 @@ function updateTooltip(bi: number, e: MouseEvent) {
 }
 .axis-text {
   fill: var(--n-text-color-3, rgba(127, 127, 127, 0.9));
-  font-size: 16px;
+  font-size: var(--ocg-font-size);
 }
 .bar-seg {
   transition: opacity 0.15s ease;
@@ -374,7 +379,7 @@ function updateTooltip(bi: number, e: MouseEvent) {
   border-radius: 8px;
   background: var(--n-color-popover, #fff);
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
-  font-size: 16px;
+  font-size: var(--ocg-font-size);
 }
 .tooltip-title {
   font-weight: 600;
@@ -383,7 +388,7 @@ function updateTooltip(bi: number, e: MouseEvent) {
 .tooltip-total {
   color: var(--n-text-color-3, #888);
   margin-bottom: 6px;
-  font-size: 16px;
+  font-size: var(--ocg-font-size);
 }
 .tooltip-row {
   display: flex;

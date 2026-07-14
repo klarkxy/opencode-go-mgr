@@ -76,6 +76,7 @@ test("theme tokens drive CSS and Naive UI from the same values", () => {
 
     assert.equal(root.dataset.theme, resolved);
     const expectedProperties = {
+      "--ocg-font-size": "16px",
       "--ocg-canvas": tokens.canvas,
       "--ocg-surface": tokens.surface,
       "--ocg-surface-raised": tokens.surfaceRaised,

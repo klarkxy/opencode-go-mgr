@@ -27,7 +27,6 @@
             <div class="connection-head">
               <div>
                 <h2 id="connection-panel-title">{{ t("当前节点接入轨") }}</h2>
-                <p>{{ t("地址随设置实时生成；Key 始终脱敏展示。") }}</p>
               </div>
               <n-tag v-if="settingsLoaded" type="success" :bordered="false">{{ t("已同步设置") }}</n-tag>
               <n-tag v-else-if="settingsLoading" :bordered="false">{{ t("正在读取设置") }}</n-tag>
@@ -107,7 +106,6 @@
             <div class="model-row">
               <div>
                 <strong>{{ t("模型") }}</strong>
-                <p>{{ t("自动读取 /v1/models，并仅显示当前节点可用模型。") }}</p>
               </div>
               <n-select
                 v-model:value="selectedModel"
@@ -213,11 +211,6 @@
                   <pre><code>{{ snippet.display }}</code></pre>
                 </article>
               </div>
-            </section>
-
-            <section class="guide-section verification" :aria-labelledby="`${activeGuide.id}-verify`">
-              <h2 :id="`${activeGuide.id}-verify`">{{ t("验证方法") }}</h2>
-              <p>{{ t("在客户端发送一次测试消息，再到 OCG Manager 的“请求日志”确认模型、账号和成功状态。") }}</p>
             </section>
 
             <section class="guide-section" :aria-labelledby="`${activeGuide.id}-notes`">
@@ -496,13 +489,6 @@ onUnmounted(() => {
   font: 700 18px/1.3 "Bahnschrift", "Segoe UI Variable Display", sans-serif;
 }
 
-.connection-head p,
-.model-row p {
-  margin: 4px 0 0;
-  color: var(--ocg-subtle);
-  font-size: 16px;
-}
-
 .connection-track {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -613,7 +599,7 @@ onUnmounted(() => {
 .guide-head p {
   margin: 8px 0 0;
   color: var(--ocg-muted);
-  font-size: 16px;
+  font-size: var(--ocg-font-size);
   line-height: 1.65;
 }
 
@@ -626,7 +612,7 @@ onUnmounted(() => {
   border: 1px solid var(--ocg-border);
   border-radius: 8px;
   color: var(--ocg-primary);
-  font-size: 16px;
+  font-size: var(--ocg-font-size);
   font-weight: 650;
   text-decoration: none;
 }
@@ -660,26 +646,8 @@ onUnmounted(() => {
   margin: 0;
   padding-left: 24px;
   color: var(--ocg-muted);
-  font-size: 16px;
+  font-size: var(--ocg-font-size);
   line-height: 1.65;
-}
-
-.verification {
-  padding: 16px;
-  border: 1px solid color-mix(in srgb, var(--ocg-success) 28%, var(--ocg-border));
-  border-radius: 10px;
-  background: var(--ocg-success-soft);
-}
-
-.verification h2 {
-  color: var(--ocg-success);
-}
-
-.verification p {
-  margin: 0;
-  color: var(--ocg-ink);
-  font-size: 16px;
-  line-height: 1.6;
 }
 
 .snippet-grid {
@@ -706,7 +674,7 @@ onUnmounted(() => {
   min-width: 0;
   overflow: hidden;
   color: var(--ocg-ink);
-  font-size: 16px;
+  font-size: var(--ocg-font-size);
   text-overflow: ellipsis;
   white-space: nowrap;
 }

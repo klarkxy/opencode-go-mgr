@@ -139,7 +139,6 @@
                 :precision="1"
                 size="tiny"
                 :show-button="false"
-                :loading="usageEdits[account.id][limit.key].saving"
                 :disabled="usageLoading[account.id] || usageEdits[account.id][limit.key].saving"
                 :status="usageEdits[account.id][limit.key].error ? 'error' : undefined"
                 :input-props="{
@@ -349,6 +348,7 @@ import {
 import type { UsageEditState, UsageKey } from "./accounts-usage";
 import { t } from "../i18n/index.ts";
 import { formatCost } from "../utils/format.ts";
+import { mapWithConcurrency } from "../utils/async.ts";
 
 type AccountDraft = {
   name: string;
@@ -412,6 +412,40 @@ function draftFromAccount(account: Account): AccountDraft {
     key: "",
     clearPassword: false,
   };
+}
+
+// 单账号操作后就地更新，避免触发全量重载（旧实现每次都 loadAccounts → O(N) 用量重拉）
+function replaceAccount(account: Account): void {
+  accounts.value = accounts.value.map((item) => (item.id === account.id ? account : item));
+  drafts.value[account.id] = draftFromAccount(account);
+}
+
+function addAccount(account: Account): void {
+  accounts.value = [...accounts.value, account];
+  drafts.value[account.id] = draftFromAccount(account);
+}
+
+function removeAccountState(id: string): void {
+  accounts.value = accounts.value.filter((item) => item.id !== id);
+  delete drafts.value[id];
+  delete usageMap.value[id];
+  delete usageEdits.value[id];
+  delete usageLoading.value[id];
+  delete usageLoadErrors.value[id];
+  delete expanded.value[id];
+  delete pinging.value[id];
+}
+
+// 用一次 getAccounts 刷新列表状态（如 ping 后的冷却变更），仅重载受影响账号的用量
+async function refreshAccountState(id: string): Promise<void> {
+  const loaded = await tauriApi.getAccounts();
+  const nextDrafts: Record<string, AccountDraft> = {};
+  for (const account of loaded) {
+    nextDrafts[account.id] = drafts.value[account.id] || draftFromAccount(account);
+  }
+  accounts.value = loaded;
+  drafts.value = nextDrafts;
+  await loadAccountUsage(id);
 }
 
 function getUsage(accountId: string): UsageWindow {
@@ -533,7 +567,11 @@ async function loadAccounts() {
     }
     accounts.value = loaded;
     drafts.value = nextDrafts;
-    await Promise.all(loaded.map((account) => loadAccountUsage(account.id)));
+    // 限流并发拉取用量，避免账号多时 N 次请求同时打到后端
+    const settled = await mapWithConcurrency(loaded, 4, (account) => loadAccountUsage(account.id));
+    if (settled.some((r) => r.status === "rejected")) {
+      message.warning(t("用量加载失败"));
+    }
   } catch (e) {
     message.error(t("加载账号失败: {error}", { error: String(e) }));
   }
@@ -561,7 +599,7 @@ async function createAccount() {
   }
   busy.value = true;
   try {
-    await tauriApi.createAccount(input);
+    const created = await tauriApi.createAccount(input);
     newAccount.value = {
       name: "",
       username: "",
@@ -571,7 +609,8 @@ async function createAccount() {
     };
     showCreateModal.value = false;
     message.success(t("账号已添加"));
-    await loadAccounts();
+    addAccount(created);
+    await loadAccountUsage(created.id);
   } catch (e) {
     message.error(t("保存失败: {error}", { error: String(e) }));
   } finally {
@@ -590,8 +629,8 @@ async function saveAccount(account: Account) {
   try {
     const saved = await tauriApi.updateAccount(account.id, update);
     drafts.value[account.id] = draftFromAccount(saved);
+    replaceAccount(saved);
     message.success(t("账号已更新"));
-    await loadAccounts();
   } catch (e) {
     message.error(t("保存失败: {error}", { error: String(e) }));
   } finally {
@@ -610,14 +649,15 @@ async function pingAccount(id: string) {
       : t("Ping 失败: {error}", { error: String(e) }));
   } finally {
     pinging.value[id] = false;
-    await loadAccounts();
+    // ping 可能改变冷却状态，仅刷新该账号而非全量重载
+    await refreshAccountState(id);
   }
 }
 
 async function toggleAccount(id: string) {
   try {
-    await tauriApi.toggleAccount(id);
-    await loadAccounts();
+    const updated = await tauriApi.toggleAccount(id);
+    replaceAccount(updated);
   } catch (e) {
     message.error(t("切换失败: {error}", { error: String(e) }));
   }
@@ -627,7 +667,7 @@ async function deleteAccount(id: string) {
   try {
     await tauriApi.deleteAccount(id);
     message.success(t("账号已删除"));
-    await loadAccounts();
+    removeAccountState(id);
   } catch (e) {
     message.error(t("删除失败: {error}", { error: String(e) }));
   }
@@ -635,9 +675,9 @@ async function deleteAccount(id: string) {
 
 async function resetCooldown(id: string) {
   try {
-    await tauriApi.resetAccountCooldown(id);
+    const updated = await tauriApi.resetAccountCooldown(id);
+    replaceAccount(updated);
     message.success(t("已重置冷却"));
-    await loadAccounts();
   } catch (e) {
     message.error(t("重置失败: {error}", { error: String(e) }));
   }
@@ -750,17 +790,11 @@ onUnmounted(() => window.clearInterval(clock));
   font-size: 12px;
 }
 
-.usage-hint {
-  margin: 8px 0 0;
-  color: var(--n-text-color-3);
-  font-size: 12px;
-}
-
 .usage-meta {
   display: flex;
   justify-content: space-between;
   gap: 12px;
-  font-size: 16px;
+  font-size: var(--ocg-font-size);
   color: var(--n-text-color-2);
 }
 
