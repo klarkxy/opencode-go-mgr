@@ -1,3 +1,5 @@
+[简体中文](USER.zh-CN.md)
+
 # User Guide
 
 This guide is for people running OCG Manager as a desktop app, a headless
@@ -573,5 +575,4 @@ intentionally want to delete all stored accounts, credentials, and keys.
 ---
 
 [中文用户指南](USER.zh-CN.md) · [Maintainer guide](MAINTAINER.md) ·
-[维护者指南](MAINTAINER.zh-CN.md) · [Security policy](../SECURITY.md) ·
-[Back to README](../README.md)
+[维护者指南](MAINTAINER.zh-CN.md) · [Back to README](../README.md)

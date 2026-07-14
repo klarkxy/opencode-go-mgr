@@ -1,3 +1,5 @@
+[简体中文](README.zh-CN.md)
+
 # OCG Manager
 
 <p align="center">
@@ -124,7 +126,6 @@ that could double‑bill the request.
 - [中文 README](README.zh-CN.md) · [English README](README.md)
 - [User guide](docs/USER.md) · [用户指南](docs/USER.zh-CN.md)
 - [Maintainer guide](docs/MAINTAINER.md) · [维护者指南](docs/MAINTAINER.zh-CN.md)
-- [Security policy](SECURITY.md)
 - [OpenCode‑Go anti‑abuse statement](OPENCODE_GO_ANTI_ABUSE.md) ·
   [OpenCode‑Go 防滥用声明](OPENCODE_GO_ANTI_ABUSE.zh-CN.md)
 
@@ -165,3 +166,7 @@ can check for a new release manually.
 ## License
 
 See [LICENSE](LICENSE).
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=klarkxy/opencode-go-mgr&type=Date)](https://www.star-history.com/#klarkxy/opencode-go-mgr&Date)

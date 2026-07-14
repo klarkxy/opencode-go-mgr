@@ -1,3 +1,5 @@
+[English](OPENCODE_GO_ANTI_ABUSE.md)
+
 # OpenCode-Go 防滥用声明
 
 OCG Manager 只用于合法的本地账号管理和 Gateway 路由。它不是用于滥用 OpenCode-Go、规避限制、批量养号、绕过验证或隐藏未授权使用的工具。

@@ -1,3 +1,5 @@
+[English](README.md)
+
 # OCG Manager
 
 <p align="center">
@@ -109,7 +111,6 @@ curl http://127.0.0.1:9042/v1/chat/completions \
 - [User guide](docs/USER.md) · [用户指南](docs/USER.zh-CN.md)
 - [Maintainer guide](docs/MAINTAINER.md) ·
   [维护者指南](docs/MAINTAINER.zh-CN.md)
-- [安全政策](SECURITY.md)
 - [OpenCode‑Go anti‑abuse statement](OPENCODE_GO_ANTI_ABUSE.md) ·
   [OpenCode‑Go 防滥用声明](OPENCODE_GO_ANTI_ABUSE.zh-CN.md)
 
@@ -146,3 +147,7 @@ Gatekeeper 提示，以及不支持清单（ARM64、32 位 x86、RPM、Snap、�
 ## 许可证
 
 见 [LICENSE](LICENSE)。
+
+## Star 历史
+
+[![Star History Chart](https://api.star-history.com/svg?repos=klarkxy/opencode-go-mgr&type=Date)](https://www.star-history.com/#klarkxy/opencode-go-mgr&Date)

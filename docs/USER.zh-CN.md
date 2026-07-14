@@ -1,3 +1,5 @@
+[English](USER.md)
+
 # 用户指南
 
 本指南面向把 OCG Manager 当作桌面应用、无头 Gateway 或 Docker 服务运行的使用者，
@@ -470,4 +472,4 @@ ocg.example.com {
 
 [English user guide](USER.md) · [中文用户指南](USER.zh-CN.md) ·
 [Maintainer guide](MAINTAINER.md) · [维护者指南](MAINTAINER.zh-CN.md) ·
-[安全政策](../SECURITY.md) · [回到 README](../README.zh-CN.md)
+[回到 README](../README.zh-CN.md)

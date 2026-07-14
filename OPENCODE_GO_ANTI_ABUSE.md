@@ -1,3 +1,5 @@
+[简体中文](OPENCODE_GO_ANTI_ABUSE.zh-CN.md)
+
 # OpenCode-Go Anti-Abuse Statement
 
 OCG Manager is built for legitimate local account management and gateway routing. It is not a tool for abusing OpenCode-Go, evading limits, farming accounts, bypassing verification, or hiding unauthorized use.

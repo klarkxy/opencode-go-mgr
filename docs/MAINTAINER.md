@@ -1,3 +1,5 @@
+[简体中文](MAINTAINER.zh-CN.md)
+
 # Maintainer Guide
 
 This guide is for people changing code, building releases, debugging the
@@ -394,5 +396,4 @@ covers most of them; the manual parts need a real desktop.
 ---
 
 [中文维护者指南](MAINTAINER.zh-CN.md) · [User guide](USER.md) ·
-[用户指南](USER.zh-CN.md) · [Security policy](../SECURITY.md) ·
-[Back to README](../README.md)
+[用户指南](USER.zh-CN.md) · [Back to README](../README.md)

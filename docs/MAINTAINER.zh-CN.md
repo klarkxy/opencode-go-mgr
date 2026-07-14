@@ -1,3 +1,5 @@
+[English](MAINTAINER.md)
+
 # 维护者指南
 
 本指南面向修改代码、构建发布、调试 Gateway 以及验证桌面端安装包的开发者。
@@ -352,5 +354,4 @@ Linux ARM64、32 位 x86、RPM、Snap、应用商店包以及自动下载/安装
 ---
 
 [English maintainer guide](MAINTAINER.md) · [中文维护者指南](MAINTAINER.zh-CN.md) ·
-[User guide](USER.md) · [用户指南](USER.zh-CN.md) · [安全政策](../SECURITY.md) ·
-[回到 README](../README.zh-CN.md)
+[User guide](USER.md) · [用户指南](USER.zh-CN.md) · [回到 README](../README.zh-CN.md)
