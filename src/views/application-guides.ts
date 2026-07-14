@@ -10,6 +10,8 @@ export interface GuideContext {
   displayKey: string;
   actualKey: string;
   modelId: string;
+  modelIds: readonly string[];
+  modelValues: Readonly<Record<string, string>>;
   iconUrl: string;
 }
 
@@ -31,14 +33,20 @@ export interface ApplicationGuide {
   id: string;
   name: string;
   protocol: string;
-  endpointKind: "messages" | "responses" | "chat";
+  endpointKind: "messages" | "responses" | "chat" | "gemini";
   officialUrl: string;
   badge?: string;
   summary: MessageKey;
   steps: readonly MessageKey[];
   notes: readonly MessageKey[];
   snippets: (context: GuideContext) => GuideSnippet[];
+  modelFields?: readonly string[];
+  multipleModels?: boolean;
   quickActions?: readonly GuideAction[];
+}
+
+function models(context: GuideContext): readonly string[] {
+  return context.modelIds.length ? context.modelIds : [context.modelId];
 }
 
 function keyedSnippet(
@@ -61,16 +69,6 @@ function encodePayload(payload: unknown): string {
   return encodeURIComponent(base64);
 }
 
-export function buildCherryStudioUrl(context: GuideContext): string {
-  return `cherrystudio://providers/api-keys?v=1&data=${encodePayload({
-    id: "ocg-manager",
-    name: "OCG Manager",
-    type: "openai",
-    baseUrl: context.rootUrl,
-    apiKey: context.actualKey,
-  })}`;
-}
-
 export function buildChatboxConfig(context: GuideContext) {
   return {
     id: `ocg-manager-${encodeURIComponent(context.rootUrl)}`,
@@ -82,12 +80,12 @@ export function buildChatboxConfig(context: GuideContext) {
       apiHost: context.rootUrl,
       apiPath: "/v1/chat/completions",
       apiKey: context.actualKey,
-      models: [{
-        modelId: context.modelId,
-        nickname: context.modelId,
+      models: models(context).map((modelId) => ({
+        modelId,
+        nickname: modelId,
         type: "chat" as const,
         capabilities: ["tool_use"] as const,
-      }],
+      })),
     },
   };
 }
@@ -113,6 +111,15 @@ export const APPLICATION_GUIDES = [
       "Claude Code 使用 Anthropic Messages 协议，因此不要给 ANTHROPIC_BASE_URL 追加 /v1。",
       "模型能力由实际上游决定；Agent 工具调用需要所选模型正确支持 tools。",
     ],
+    modelFields: [
+      "ANTHROPIC_MODEL",
+      "ANTHROPIC_DEFAULT_FABLE_MODEL",
+      "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+      "ANTHROPIC_DEFAULT_SONNET_MODEL",
+      "ANTHROPIC_DEFAULT_OPUS_MODEL",
+      "CLAUDE_CODE_SUBAGENT_MODEL",
+      "ANTHROPIC_CUSTOM_MODEL_OPTION",
+    ],
     snippets: (context) => [
       keyedSnippet(context, "~/.claude/settings.json", "json", (key) =>
         JSON.stringify(
@@ -120,15 +127,46 @@ export const APPLICATION_GUIDES = [
             env: {
               ANTHROPIC_BASE_URL: context.rootUrl,
               ANTHROPIC_AUTH_TOKEN: key,
-              ANTHROPIC_MODEL: context.modelId,
-              ANTHROPIC_DEFAULT_FABLE_MODEL: context.modelId,
-              ANTHROPIC_DEFAULT_HAIKU_MODEL: context.modelId,
-              ANTHROPIC_DEFAULT_SONNET_MODEL: context.modelId,
-              ANTHROPIC_DEFAULT_OPUS_MODEL: context.modelId,
-              CLAUDE_CODE_SUBAGENT_MODEL: context.modelId,
-              ANTHROPIC_CUSTOM_MODEL_OPTION: context.modelId,
+              CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: "1",
+              ANTHROPIC_MODEL: context.modelValues.ANTHROPIC_MODEL || context.modelId,
+              ANTHROPIC_DEFAULT_FABLE_MODEL: context.modelValues.ANTHROPIC_DEFAULT_FABLE_MODEL || context.modelId,
+              ANTHROPIC_DEFAULT_HAIKU_MODEL: context.modelValues.ANTHROPIC_DEFAULT_HAIKU_MODEL || context.modelId,
+              ANTHROPIC_DEFAULT_SONNET_MODEL: context.modelValues.ANTHROPIC_DEFAULT_SONNET_MODEL || context.modelId,
+              ANTHROPIC_DEFAULT_OPUS_MODEL: context.modelValues.ANTHROPIC_DEFAULT_OPUS_MODEL || context.modelId,
+              CLAUDE_CODE_SUBAGENT_MODEL: context.modelValues.CLAUDE_CODE_SUBAGENT_MODEL || context.modelId,
+              ANTHROPIC_CUSTOM_MODEL_OPTION: context.modelValues.ANTHROPIC_CUSTOM_MODEL_OPTION || context.modelId,
             },
-            model: context.modelId,
+            model: context.modelValues.ANTHROPIC_MODEL || context.modelId,
+          },
+          null,
+          2,
+        ),
+      ),
+    ],
+  },
+  {
+    id: "claude-desktop",
+    name: "Claude Desktop",
+    protocol: "Anthropic Messages",
+    endpointKind: "messages",
+    officialUrl: "https://github.com/farion1231/cc-switch/blob/main/docs/user-manual/en/2-providers/2.6-claude-desktop.md",
+    summary: "通过 Anthropic 兼容入口连接 OCG Manager，地址使用不带 /v1 的根地址。",
+    steps: [
+      "填写下方 Base URL、Key 和模型 ID。",
+      "发送一条测试任务，再到 OCG Manager 的请求日志确认成功记录。",
+    ],
+    notes: [
+      "模型能力由实际上游决定；Agent 工具调用需要所选模型正确支持 tools。",
+    ],
+    modelFields: ["sonnet", "opus", "haiku"],
+    snippets: (context) => [
+      keyedSnippet(context, "Claude Desktop 3P profile", "json", (key) =>
+        JSON.stringify(
+          {
+            inferenceProvider: "gateway",
+            inferenceGatewayBaseUrl: `${context.rootUrl}/claude-desktop`,
+            inferenceGatewayAuthScheme: "bearer",
+            inferenceGatewayApiKey: key,
           },
           null,
           2,
@@ -141,7 +179,7 @@ export const APPLICATION_GUIDES = [
     name: "Codex",
     protocol: "OpenAI Responses",
     endpointKind: "responses",
-    officialUrl: "https://learn.chatgpt.com/docs/config-file/config-advanced#custom-model-providers",
+    officialUrl: "https://developers.openai.com/codex/config-reference/",
     badge: "Responses",
     summary: "注册 OCG Manager 为 Codex 自定义模型提供商，通过 Responses 接口调用。",
     steps: [
@@ -153,12 +191,13 @@ export const APPLICATION_GUIDES = [
       "OCG Manager 当前提供无状态 Responses 转发，不要依赖 previous_response_id 延续服务端状态。",
       "模型能力由实际上游决定；Agent 工具调用需要所选模型正确支持 tools。",
     ],
+    modelFields: ["model", "review_model"],
     snippets: (context) => [
       {
         label: "~/.codex/config.toml",
         language: "toml",
-        display: `model = ${JSON.stringify(context.modelId)}\nmodel_provider = "ocg"\n\n[model_providers.ocg]\nname = "OCG Manager"\nbase_url = "${context.apiBaseUrl}"\nenv_key = "OCG_API_KEY"\nwire_api = "responses"`,
-        copy: `model = ${JSON.stringify(context.modelId)}\nmodel_provider = "ocg"\n\n[model_providers.ocg]\nname = "OCG Manager"\nbase_url = "${context.apiBaseUrl}"\nenv_key = "OCG_API_KEY"\nwire_api = "responses"`,
+        display: `model = ${JSON.stringify(context.modelValues.model || context.modelId)}\nreview_model = ${JSON.stringify(context.modelValues.review_model || context.modelId)}\nmodel_provider = "ocg"\n\n[model_providers.ocg]\nname = "OCG Manager"\nbase_url = "${context.apiBaseUrl}"\nenv_key = "OCG_API_KEY"\nwire_api = "responses"`,
+        copy: `model = ${JSON.stringify(context.modelValues.model || context.modelId)}\nreview_model = ${JSON.stringify(context.modelValues.review_model || context.modelId)}\nmodel_provider = "ocg"\n\n[model_providers.ocg]\nname = "OCG Manager"\nbase_url = "${context.apiBaseUrl}"\nenv_key = "OCG_API_KEY"\nwire_api = "responses"`,
       },
       keyedSnippet(
         context,
@@ -172,6 +211,81 @@ export const APPLICATION_GUIDES = [
         "bash",
         (key) => `export OCG_API_KEY=${JSON.stringify(key)}`,
       ),
+    ],
+  },
+  {
+    id: "gemini-cli",
+    name: "Gemini CLI",
+    protocol: "Gemini generateContent",
+    endpointKind: "gemini",
+    officialUrl: "https://github.com/google-gemini/gemini-cli/blob/main/docs/reference/configuration.md",
+    summary: "填写下方 Base URL、Key 和模型 ID。",
+    steps: [
+      "填写下方 Base URL、Key 和模型 ID。",
+      "发送一条测试任务，再到 OCG Manager 的请求日志确认成功记录。",
+    ],
+    notes: [
+      "模型能力由实际上游决定；Agent 工具调用需要所选模型正确支持 tools。",
+    ],
+    snippets: (context) => [
+      keyedSnippet(
+        context,
+        "~/.gemini/.env",
+        "dotenv",
+        (key) => `GEMINI_API_KEY=${JSON.stringify(key)}\nGOOGLE_GEMINI_BASE_URL=${context.rootUrl}\nGOOGLE_GENAI_API_VERSION=v1beta`,
+      ),
+      {
+        label: "~/.gemini/settings.json",
+        language: "json",
+        display: JSON.stringify(
+          {
+            $schema: "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/schemas/settings.schema.json",
+            model: { name: context.modelId },
+            modelConfigs: {
+              customOverrides: [
+                {
+                  match: { overrideScope: "core" },
+                  modelConfig: { model: context.modelId },
+                },
+              ],
+            },
+            agents: {
+              overrides: Object.fromEntries(
+                ["codebase_investigator", "cli_help", "generalist", "browser_agent"].map((agent) => [
+                  agent,
+                  { modelConfig: { model: context.modelId } },
+                ]),
+              ),
+            },
+          },
+          null,
+          2,
+        ),
+        copy: JSON.stringify(
+          {
+            $schema: "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/schemas/settings.schema.json",
+            model: { name: context.modelId },
+            modelConfigs: {
+              customOverrides: [
+                {
+                  match: { overrideScope: "core" },
+                  modelConfig: { model: context.modelId },
+                },
+              ],
+            },
+            agents: {
+              overrides: Object.fromEntries(
+                ["codebase_investigator", "cli_help", "generalist", "browser_agent"].map((agent) => [
+                  agent,
+                  { modelConfig: { model: context.modelId } },
+                ]),
+              ),
+            },
+          },
+          null,
+          2,
+        ),
+      },
     ],
   },
   {
@@ -200,7 +314,7 @@ export const APPLICATION_GUIDES = [
                 npm: "@ai-sdk/openai-compatible",
                 name: "OCG Manager",
                 options: { baseURL: context.apiBaseUrl, apiKey: "{env:OCG_API_KEY}" },
-                models: { [context.modelId]: { name: context.modelId } },
+                models: Object.fromEntries(models(context).map((modelId) => [modelId, { name: modelId }])),
               },
             },
             model: `ocg/${context.modelId}`,
@@ -222,6 +336,84 @@ export const APPLICATION_GUIDES = [
         (key) => `export OCG_API_KEY=${JSON.stringify(key)}`,
       ),
     ],
+    multipleModels: true,
+  },
+  {
+    id: "openclaw",
+    name: "OpenClaw",
+    protocol: "OpenAI Chat Completions",
+    endpointKind: "chat",
+    officialUrl: "https://docs.openclaw.ai/concepts/model-providers",
+    summary: "选择 OpenAI Compatible provider，将对话请求转发到 OCG Manager。",
+    steps: [
+      "填写下方 Base URL、Key 和模型 ID。",
+      "发送一条测试任务，再到 OCG Manager 的请求日志确认成功记录。",
+    ],
+    notes: [
+      "baseURL 必须使用带 /v1 的 API Base URL。",
+      "模型能力由实际上游决定；Agent 工具调用需要所选模型正确支持 tools。",
+    ],
+    snippets: (context) => {
+      const config = JSON.stringify(
+        {
+          models: {
+            mode: "merge",
+            providers: {
+              ocg: {
+                baseUrl: context.apiBaseUrl,
+                apiKey: "${OCG_API_KEY}",
+                api: "openai-completions",
+                models: models(context).map((modelId) => ({ id: modelId, name: modelId })),
+              },
+            },
+          },
+          agents: {
+            defaults: {
+              model: { primary: `ocg/${context.modelId}` },
+              models: Object.fromEntries(models(context).map((modelId) => [`ocg/${modelId}`, {}])),
+            },
+          },
+        },
+        null,
+        2,
+      );
+      return [
+        { label: "~/.openclaw/openclaw.json", language: "json5", display: config, copy: config },
+        keyedSnippet(
+          context,
+          "~/.openclaw/.env",
+          "dotenv",
+          (key) => `OCG_API_KEY=${JSON.stringify(key)}`,
+        ),
+      ];
+    },
+    multipleModels: true,
+  },
+  {
+    id: "hermes",
+    name: "Hermes",
+    protocol: "OpenAI Chat Completions",
+    endpointKind: "chat",
+    officialUrl: "https://hermes-agent.nousresearch.com/docs/integrations/providers",
+    summary: "选择 OpenAI Compatible provider，将对话请求转发到 OCG Manager。",
+    steps: [
+      "填写下方 Base URL、Key 和模型 ID。",
+      "发送一条测试任务，再到 OCG Manager 的请求日志确认成功记录。",
+    ],
+    notes: [
+      "baseURL 必须使用带 /v1 的 API Base URL。",
+      "模型能力由实际上游决定；Agent 工具调用需要所选模型正确支持 tools。",
+    ],
+    snippets: (context) => [
+      {
+        label: "~/.hermes/config.yaml",
+        language: "yaml",
+        display: `custom_providers:\n  - name: ocg\n    base_url: ${JSON.stringify(context.apiBaseUrl)}\n    key_env: OCG_API_KEY\n    api_mode: chat_completions\n    models:\n${models(context).map((modelId) => `      ${JSON.stringify(modelId)}: {}`).join("\n")}\n\nmodel:\n  default: ${JSON.stringify(context.modelId)}\n  provider: custom:ocg`,
+        copy: `custom_providers:\n  - name: ocg\n    base_url: ${JSON.stringify(context.apiBaseUrl)}\n    key_env: OCG_API_KEY\n    api_mode: chat_completions\n    models:\n${models(context).map((modelId) => `      ${JSON.stringify(modelId)}: {}`).join("\n")}\n\nmodel:\n  default: ${JSON.stringify(context.modelId)}\n  provider: custom:ocg`,
+      },
+      keyedSnippet(context, "~/.hermes/.env", "dotenv", (key) => `OCG_API_KEY=${JSON.stringify(key)}`),
+    ],
+    multipleModels: true,
   },
   {
     id: "cherry-studio",
@@ -245,16 +437,11 @@ export const APPLICATION_GUIDES = [
           t("服务商类型: OpenAI\nAPI 地址: {url}\nAPI Key: {key}\n模型 ID: {model}", {
             url: context.rootUrl,
             key,
-            model: context.modelId,
+            model: models(context).join(", "),
           }),
       ),
     ],
-    quickActions: [{
-      id: "cherry-import",
-      kind: "launch",
-      label: "一键导入",
-      build: buildCherryStudioUrl,
-    }],
+    multipleModels: true,
   },
   {
     id: "vscode-copilot",
@@ -281,21 +468,22 @@ export const APPLICATION_GUIDES = [
             vendor: "customendpoint",
             apiKey: key,
             apiType: "chat-completions",
-            models: [{
-              id: context.modelId,
-              name: context.modelId,
+            models: models(context).map((modelId) => ({
+              id: modelId,
+              name: modelId,
               url: context.chatCompletionsUrl,
               toolCalling: true,
               vision: false,
               maxInputTokens: 32768,
               maxOutputTokens: 8192,
-            }],
+            })),
           }],
           null,
           2,
         ),
       ),
     ],
+    multipleModels: true,
   },
   {
     id: "cline",
@@ -363,9 +551,10 @@ export const APPLICATION_GUIDES = [
         "Continue YAML",
         "yaml",
         (key) =>
-          `name: OCG Manager\nversion: 1.0.0\nschema: v1\nmodels:\n  - name: ${JSON.stringify(`${context.modelId} (OCG)`)}\n    provider: openai\n    model: ${JSON.stringify(context.modelId)}\n    apiBase: ${JSON.stringify(context.apiBaseUrl)}\n    apiKey: ${JSON.stringify(key)}\n    useResponsesApi: false\n    capabilities:\n      - tool_use`,
+          `name: OCG Manager\nversion: 1.0.0\nschema: v1\nmodels:\n${models(context).map((modelId) => `  - name: ${JSON.stringify(`${modelId} (OCG)`)}\n    provider: openai\n    model: ${JSON.stringify(modelId)}\n    apiBase: ${JSON.stringify(context.apiBaseUrl)}\n    apiKey: ${JSON.stringify(key)}\n    useResponsesApi: false\n    capabilities:\n      - tool_use`).join("\n")}`,
       ),
     ],
+    multipleModels: true,
   },
   {
     id: "chatbox",
@@ -385,7 +574,7 @@ export const APPLICATION_GUIDES = [
         context,
         t("Provider 参数"),
         "text",
-        (key) => `API Host: ${context.rootUrl}\nAPI Key: ${key}\nModel ID: ${context.modelId}`,
+        (key) => `API Host: ${context.rootUrl}\nAPI Key: ${key}\nModel IDs: ${models(context).join(", ")}`,
       ),
     ],
     quickActions: [
@@ -402,6 +591,7 @@ export const APPLICATION_GUIDES = [
         build: buildChatboxUrl,
       },
     ],
+    multipleModels: true,
   },
 ] as const satisfies readonly ApplicationGuide[];
 

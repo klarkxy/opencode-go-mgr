@@ -23,9 +23,6 @@
       <template #header>
         <div class="account-title">
           <span>{{ account.name }}</span>
-          <n-tag :type="account.enabled ? 'success' : 'default'" size="small">
-            {{ account.enabled ? t("已启用") : t("已禁用") }}
-          </n-tag>
           <n-tooltip v-if="accountIsCooling(account)" :disabled="!account.last_error">
             <template #trigger>
               <n-tag type="error" size="small">{{ t("熔断 · 剩 {time}", { time: formatRemaining(account) }) }}</n-tag>

@@ -7,35 +7,6 @@
         </div>
       </div>
       <n-form :model="config" label-placement="top" :show-feedback="false">
-        <n-form-item
-          :label="t('下游访问根地址（可选）')"
-          :show-feedback="true"
-          :validation-status="clientRootPreview.status"
-          :feedback="clientRootPreview.feedback"
-        >
-          <div class="client-root-field">
-            <n-input
-              v-model:value="clientRootInputValue"
-              :readonly="config.client_root_url_from_env"
-              :clearable="!config.client_root_url_from_env && !!config.client_root_url"
-              :placeholder="config.client_root_url_from_env ? '' : automaticClientRootUrls.rootUrl"
-              class="mono"
-              :input-props="{
-                'aria-label': t('下游访问根地址（可选）'),
-                'aria-describedby': 'client-root-help',
-              }"
-              @blur="normalizeClientRootInput"
-            />
-            <p id="client-root-help">
-              <template v-if="config.client_root_url_from_env">
-                {{ t("由环境变量 OCG_CLIENT_ROOT_URL 管理；修改环境变量并重启后生效。") }}<br />
-              </template>
-              <span v-else-if="!config.client_root_url.trim()" class="sr-only">
-                {{ automaticClientRootFeedback }}
-              </span>
-            </p>
-          </div>
-        </n-form-item>
         <n-form-item :label="t('上游地址')">
           <n-input
             v-model:value="config.upstream_base_url"
@@ -43,78 +14,109 @@
             placeholder="https://opencode.ai/zen/go"
           />
         </n-form-item>
-        <n-form-item label="Key">
-          <div class="key-stack">
-            <div class="key-field">
-              <div class="key-display" :aria-label="t('已脱敏 Key')">
-                <code>{{ maskedSettingsKey }}</code>
-              </div>
-              <n-tooltip trigger="hover">
-                <template #trigger>
-                  <n-button
-                    circle
-                    quaternary
-                    :aria-label="t('复制 Key')"
-                    :disabled="!config.gateway_key"
-                    @click="copyKey"
-                  >
-                    <template #icon>
-                      <n-icon :component="keyCopied ? CheckOutlined : CopyOutlined" />
-                    </template>
-                  </n-button>
-                </template>
-                {{ t("复制 Key") }}
-              </n-tooltip>
-              <n-tooltip trigger="hover">
-                <template #trigger>
-                  <n-button
-                    circle
-                    quaternary
-                    :aria-label="t('设置自定义 Key')"
-                    :disabled="saving || regenerating"
-                    @click="startGatewayKeyEdit"
-                  >
-                    <template #icon><n-icon :component="EditOutlined" /></template>
-                  </n-button>
-                </template>
-                {{ t("设置自定义 Key") }}
-              </n-tooltip>
-              <n-popconfirm
-                :positive-text="t('生成新 Key')"
-                :negative-text="t('取消')"
-                @positive-click="regenerateKey"
-              >
-                <template #trigger>
-                  <n-tooltip trigger="hover">
-                    <template #trigger>
-                      <n-button
-                        circle
-                        quaternary
-                        :aria-label="t('刷新 Key')"
-                        :loading="regenerating"
-                        :disabled="saving"
-                      >
-                        <template #icon><n-icon :component="ReloadOutlined" /></template>
-                      </n-button>
-                    </template>
-                    {{ t("刷新 Key") }}
-                  </n-tooltip>
-                </template>
-                {{ t("旧 Key 将立即失效，继续生成新 Key？") }}
-              </n-popconfirm>
-            </div>
-            <div v-if="editingGatewayKey" class="key-editor">
+        <div class="downstream-grid">
+          <n-form-item
+            :label="t('下游访问根地址（可选）')"
+            :show-feedback="true"
+            :validation-status="clientRootPreview.status"
+            :feedback="clientRootPreview.feedback"
+          >
+            <div class="client-root-field">
               <n-input
-                v-model:value="gatewayKeyDraft"
-                type="password"
+                v-model:value="clientRootInputValue"
+                :readonly="config.client_root_url_from_env"
+                :clearable="!config.client_root_url_from_env && !!config.client_root_url"
+                :placeholder="config.client_root_url_from_env ? '' : automaticClientRootUrls.rootUrl"
                 class="mono"
-                :input-props="{ 'aria-label': t('新 Key') }"
-                :placeholder="t('输入新 Key，然后保存设置')"
+                :input-props="{
+                  'aria-label': t('下游访问根地址（可选）'),
+                  'aria-describedby': 'client-root-help',
+                }"
+                @blur="normalizeClientRootInput"
               />
-              <n-button size="small" secondary @click="cancelGatewayKeyEdit">{{ t("取消") }}</n-button>
+              <p id="client-root-help">
+                <template v-if="config.client_root_url_from_env">
+                  {{ t("由环境变量 OCG_CLIENT_ROOT_URL 管理；修改环境变量并重启后生效。") }}<br />
+                </template>
+                <span v-else-if="!config.client_root_url.trim()" class="sr-only">
+                  {{ automaticClientRootFeedback }}
+                </span>
+              </p>
             </div>
-          </div>
-        </n-form-item>
+          </n-form-item>
+          <n-form-item label="Key">
+            <div class="key-stack">
+              <div class="key-field">
+                <div class="key-display" :aria-label="t('已脱敏 Key')">
+                  <code>{{ maskedSettingsKey }}</code>
+                </div>
+                <n-tooltip trigger="hover">
+                  <template #trigger>
+                    <n-button
+                      circle
+                      quaternary
+                      :aria-label="t('复制 Key')"
+                      :disabled="!config.gateway_key"
+                      @click="copyKey"
+                    >
+                      <template #icon>
+                        <n-icon :component="keyCopied ? CheckOutlined : CopyOutlined" />
+                      </template>
+                    </n-button>
+                  </template>
+                  {{ t("复制 Key") }}
+                </n-tooltip>
+                <n-tooltip trigger="hover">
+                  <template #trigger>
+                    <n-button
+                      circle
+                      quaternary
+                      :aria-label="t('设置自定义 Key')"
+                      :disabled="saving || regenerating"
+                      @click="startGatewayKeyEdit"
+                    >
+                      <template #icon><n-icon :component="EditOutlined" /></template>
+                    </n-button>
+                  </template>
+                  {{ t("设置自定义 Key") }}
+                </n-tooltip>
+                <n-popconfirm
+                  :positive-text="t('生成新 Key')"
+                  :negative-text="t('取消')"
+                  @positive-click="regenerateKey"
+                >
+                  <template #trigger>
+                    <n-tooltip trigger="hover">
+                      <template #trigger>
+                        <n-button
+                          circle
+                          quaternary
+                          :aria-label="t('刷新 Key')"
+                          :loading="regenerating"
+                          :disabled="saving"
+                        >
+                          <template #icon><n-icon :component="ReloadOutlined" /></template>
+                        </n-button>
+                      </template>
+                      {{ t("刷新 Key") }}
+                    </n-tooltip>
+                  </template>
+                  {{ t("旧 Key 将立即失效，继续生成新 Key？") }}
+                </n-popconfirm>
+              </div>
+              <div v-if="editingGatewayKey" class="key-editor">
+                <n-input
+                  v-model:value="gatewayKeyDraft"
+                  type="password"
+                  class="mono"
+                  :input-props="{ 'aria-label': t('新 Key') }"
+                  :placeholder="t('输入新 Key，然后保存设置')"
+                />
+                <n-button size="small" secondary @click="cancelGatewayKeyEdit">{{ t("取消") }}</n-button>
+              </div>
+            </div>
+          </n-form-item>
+        </div>
         <div
           v-if="config.auto_start_supported"
           class="settings-subsection"
@@ -498,7 +500,7 @@ onUnmounted(cleanup);
 <style scoped>
 .settings-grid {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
   max-width: 1080px;
   margin: 0 auto;
@@ -512,8 +514,17 @@ onUnmounted(cleanup);
 }
 .settings-side {
   display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   align-self: start;
   gap: 16px;
+}
+.downstream-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 16px;
+  padding-top: 18px;
+  border-top: 1px solid var(--ocg-border);
 }
 .settings-head {
   display: flex;
@@ -675,7 +686,8 @@ onUnmounted(cleanup);
 }
 
 @media (max-width: 800px) {
-  .settings-grid {
+  .settings-side,
+  .downstream-grid {
     grid-template-columns: 1fr;
   }
 }

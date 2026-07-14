@@ -48,6 +48,12 @@ export interface UpdateCheckResult {
   release_url: string;
 }
 
+export interface ClaudeDesktopModels {
+  sonnet: string;
+  opus: string;
+  haiku: string;
+}
+
 export interface GatewayLog {
   id: number;
   level: string;
@@ -228,6 +234,12 @@ export const tauriApi = {
 
   getSettings: () => request<AppConfig>("/settings"),
   getApplicationModels: () => request<string[]>("/application-models"),
+  getClaudeDesktopModels: () => request<ClaudeDesktopModels>("/claude-desktop/models"),
+  updateClaudeDesktopModels: (models: ClaudeDesktopModels) =>
+    request<ClaudeDesktopModels>("/claude-desktop/models", {
+      method: "PUT",
+      body: jsonBody(models),
+    }),
   updateSettings: async (config: AppConfig) => {
     await request<unknown>("/settings", { method: "POST", body: jsonBody(config) });
   },

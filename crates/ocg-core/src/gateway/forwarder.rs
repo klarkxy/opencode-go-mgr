@@ -60,6 +60,7 @@ async fn forward_request_impl(
             header.as_str(),
             "authorization"
                 | "x-api-key"
+                | "x-goog-api-key"
                 | "cookie"
                 | "proxy-authorization"
                 | "host"
@@ -97,10 +98,14 @@ async fn forward_request_impl(
         reqwest::header::HeaderValue::from_static("identity"),
     );
 
+    let upstream_path = plan
+        .upstream
+        .upstream_path()
+        .ok_or_else(|| anyhow::anyhow!("Gemini is a client-only protocol"))?;
     let url = format!(
         "{}{}",
         config.upstream_base_url.trim_end_matches('/'),
-        plan.upstream.path()
+        upstream_path
     );
 
     let model = plan.model.clone();
@@ -953,6 +958,7 @@ fn process_chunk_for_usage(st: &mut StreamState, format: ApiFormat, chunk: &byte
                             event_type,
                             Some("response.completed" | "response.incomplete")
                         ),
+                        ApiFormat::Gemini => false,
                     };
                 if is_terminal {
                     st.terminal = true;
@@ -973,6 +979,7 @@ fn has_usage(format: ApiFormat, payload: &Value) -> bool {
         ApiFormat::Responses => payload
             .get("usage")
             .or_else(|| payload.pointer("/response/usage")),
+        ApiFormat::Gemini => payload.get("usageMetadata"),
     }
     .is_some_and(Value::is_object)
 }

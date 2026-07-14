@@ -7,6 +7,10 @@ export function maskConnectionKey(key: string): string {
   return `${key.slice(0, 4)}…${key.slice(-4)}`;
 }
 
+export function restoreMaskedConnectionKey(value: string, maskedKey: string, actualKey: string): string {
+  return value.replaceAll(maskedKey, () => actualKey);
+}
+
 export interface ConnectionUrls {
   rootUrl: string;
   apiBaseUrl: string;

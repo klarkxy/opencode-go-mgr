@@ -241,7 +241,7 @@ impl StreamConverter {
                 ));
             }
             let events = self.finish_input();
-            output.extend(self.encode_all(events));
+            output.extend(self.encode_all(events)?);
         }
         Ok(output)
     }
@@ -268,6 +268,12 @@ impl StreamConverter {
                     "type":"response.failed",
                     "sequence_number":self.output.sequence,
                     "response":self.failed_response_object("server_error", message)
+                }),
+            )],
+            ApiFormat::Gemini => vec![sse_json(
+                None,
+                &json!({
+                    "error":{"code":500,"message":message,"status":"INTERNAL"}
                 }),
             )],
         }
@@ -298,23 +304,27 @@ impl StreamConverter {
                     ApiFormat::Messages => self.decode_messages(value),
                     ApiFormat::ChatCompletions => self.decode_chat(value),
                     ApiFormat::Responses => self.decode_responses(event_name.as_deref(), value),
+                    ApiFormat::Gemini => {
+                        return Err(ProtocolError::new("Gemini is a client-only stream format"));
+                    }
                 }
             };
-            output.extend(self.encode_all(events));
+            output.extend(self.encode_all(events)?);
         }
         Ok(output)
     }
 
-    fn encode_all(&mut self, events: Vec<PivotEvent>) -> Vec<Bytes> {
+    fn encode_all(&mut self, events: Vec<PivotEvent>) -> Result<Vec<Bytes>, ProtocolError> {
         let mut output = Vec::new();
         for event in events {
             output.extend(match self.target {
                 ApiFormat::Messages => self.encode_messages(event),
                 ApiFormat::ChatCompletions => self.encode_chat(event),
                 ApiFormat::Responses => self.encode_responses(event),
+                ApiFormat::Gemini => self.encode_gemini(event)?,
             });
         }
-        output
+        Ok(output)
     }
 
     fn start_if_needed(&mut self, value: &Value) -> Vec<PivotEvent> {
@@ -1075,6 +1085,153 @@ impl StreamConverter {
         frames
     }
 
+    fn encode_gemini(&mut self, event: PivotEvent) -> Result<Vec<Bytes>, ProtocolError> {
+        match event {
+            PivotEvent::Start { id, model, usage } => {
+                self.output.id = id;
+                self.output.model = model;
+                self.output.usage.merge(usage);
+                Ok(Vec::new())
+            }
+            PivotEvent::BlockStart { index, kind } => {
+                self.output.blocks.insert(
+                    index,
+                    OutputBlock {
+                        kind,
+                        content: String::new(),
+                        tool_index: None,
+                        output_index: None,
+                        custom_input_emitted: 0,
+                        closed: false,
+                    },
+                );
+                Ok(Vec::new())
+            }
+            PivotEvent::TextDelta { index, text } => {
+                if let Some(block) = self.output.blocks.get_mut(&index) {
+                    block.content.push_str(&text);
+                }
+                if text.is_empty() {
+                    Ok(Vec::new())
+                } else {
+                    Ok(vec![self.gemini_chunk(
+                        vec![json!({ "text": text })],
+                        None,
+                        false,
+                    )])
+                }
+            }
+            PivotEvent::ReasoningDelta { index, text } => {
+                if let Some(block) = self.output.blocks.get_mut(&index) {
+                    block.content.push_str(&text);
+                }
+                Ok(Vec::new())
+            }
+            PivotEvent::SignatureDelta { .. } => Ok(Vec::new()),
+            PivotEvent::ArgumentsDelta { index, arguments } => {
+                if let Some(block) = self.output.blocks.get_mut(&index) {
+                    block.content.push_str(&arguments);
+                }
+                Ok(Vec::new())
+            }
+            PivotEvent::BlockStop { index } => {
+                if let Some(block) = self.output.blocks.get_mut(&index) {
+                    block.closed = true;
+                }
+                Ok(Vec::new())
+            }
+            PivotEvent::MessageDelta { stop_reason, usage } => {
+                self.output.stop_reason = Some(stop_reason);
+                self.output.usage.merge(usage);
+                Ok(Vec::new())
+            }
+            PivotEvent::Stop => {
+                if self.output.terminal {
+                    return Ok(Vec::new());
+                }
+                let mut has_text = false;
+                let mut tool_parts = Vec::new();
+                for block in self.output.blocks.values() {
+                    match &block.kind {
+                        BlockKind::Text => has_text |= !block.content.is_empty(),
+                        BlockKind::Tool { id, name } => {
+                            let args = if block.content.trim().is_empty() {
+                                json!({})
+                            } else {
+                                serde_json::from_str::<Value>(&block.content).map_err(|error| {
+                                    ProtocolError::new(format!(
+                                        "upstream tool arguments are invalid JSON: {error}"
+                                    ))
+                                })?
+                            };
+                            if !args.is_object() {
+                                return Err(ProtocolError::new(
+                                    "upstream tool arguments must be a JSON object",
+                                ));
+                            }
+                            tool_parts.push(json!({
+                                "functionCall": { "id": id, "name": name, "args": args },
+                                "thoughtSignature": "skip_thought_signature_validator"
+                            }));
+                        }
+                        BlockKind::Reasoning => {}
+                    }
+                }
+                let stop_reason = self.output.stop_reason.as_deref().unwrap_or("end_turn");
+                let finish_reason = match stop_reason {
+                    "max_tokens" | "model_context_window_exceeded" => "MAX_TOKENS",
+                    "refusal" => "SAFETY",
+                    "end_turn" | "stop_sequence" | "tool_use" => "STOP",
+                    _ => "OTHER",
+                };
+                if !has_text && tool_parts.is_empty() && finish_reason == "STOP" {
+                    return Err(ProtocolError::new(
+                        "upstream stream ended without text or a function call",
+                    ));
+                }
+                self.output.terminal = true;
+                Ok(vec![self.gemini_chunk(
+                    tool_parts,
+                    Some(finish_reason),
+                    true,
+                )])
+            }
+            PivotEvent::Error { message, .. } => {
+                self.output.terminal = true;
+                Ok(vec![sse_json(
+                    None,
+                    &json!({
+                        "error":{"code":500,"message":message,"status":"INTERNAL"}
+                    }),
+                )])
+            }
+        }
+    }
+
+    fn gemini_chunk(
+        &self,
+        parts: Vec<Value>,
+        finish_reason: Option<&str>,
+        include_usage: bool,
+    ) -> Bytes {
+        let mut candidate = json!({ "index": 0 });
+        if !parts.is_empty() {
+            candidate["content"] = json!({ "role": "model", "parts": parts });
+        }
+        if let Some(reason) = finish_reason {
+            candidate["finishReason"] = json!(reason);
+        }
+        let mut response = json!({
+            "candidates": [candidate],
+            "modelVersion": if self.output.model.is_empty() { &self.model } else { &self.output.model },
+            "responseId": if self.output.id.is_empty() { "ocg_response" } else { &self.output.id }
+        });
+        if include_usage && self.output.usage.seen {
+            response["usageMetadata"] = gemini_usage_json(&self.output.usage);
+        }
+        sse_json(None, &response)
+    }
+
     fn encode_responses(&mut self, event: PivotEvent) -> Vec<Bytes> {
         match event {
             PivotEvent::Start { id, model, usage } => {
@@ -1652,6 +1809,16 @@ fn responses_usage_json(usage: &Usage) -> Value {
     })
 }
 
+fn gemini_usage_json(usage: &Usage) -> Value {
+    json!({
+        "promptTokenCount": usage.input,
+        "candidatesTokenCount": usage.output,
+        "totalTokenCount": usage.input.saturating_add(usage.output),
+        "cachedContentTokenCount": usage.cached,
+        "thoughtsTokenCount": 0
+    })
+}
+
 fn chat_stop_to_anthropic(reason: &str) -> &'static str {
     match reason {
         "length" => "max_tokens",
@@ -1762,6 +1929,56 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn chat_to_gemini_streams_text_usage_and_finishes_without_done_sentinel() {
+        let source = concat!(
+            "data: {\"id\":\"resp_1\",\"model\":\"deepseek-v4-flash\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Hel\"},\"finish_reason\":null}]}\n\n",
+            "data: {\"id\":\"resp_1\",\"model\":\"deepseek-v4-flash\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"lo\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":2,\"prompt_tokens_details\":{\"cached_tokens\":1}}}\n\n",
+            "data: [DONE]\n\n"
+        );
+        let output = convert(ApiFormat::Gemini, ApiFormat::ChatCompletions, source);
+        assert!(output.contains("\"text\":\"Hel\""));
+        assert!(output.contains("\"text\":\"lo\""));
+        assert!(output.contains("\"finishReason\":\"STOP\""));
+        assert!(output.contains("\"promptTokenCount\":7"));
+        assert!(output.contains("\"candidatesTokenCount\":2"));
+        assert!(!output.contains("[DONE]"));
+        assert_eq!(output.matches("\"responseId\":\"resp_1\"").count(), 3);
+    }
+
+    #[test]
+    fn messages_to_gemini_buffers_parallel_function_calls_until_valid_json() {
+        let source = concat!(
+            "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_2\",\"model\":\"minimax-m3\",\"usage\":{\"input_tokens\":12}}}\n\n",
+            "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"call_a\",\"name\":\"read_file\",\"input\":{}}}\n\n",
+            "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"path\\\":\\\"Cargo.toml\\\"}\"}}\n\n",
+            "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+            "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"tool_use\",\"id\":\"call_b\",\"name\":\"list_dir\",\"input\":{}}}\n\n",
+            "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{}\"}}\n\n",
+            "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":1}\n\n",
+            "event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"},\"usage\":{\"output_tokens\":3}}\n\n",
+            "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+        );
+        let output = convert(ApiFormat::Gemini, ApiFormat::Messages, source);
+        assert_eq!(output.matches("\"functionCall\"").count(), 2);
+        assert!(output.contains("\"id\":\"call_a\""));
+        assert!(output.contains("\"path\":\"Cargo.toml\""));
+        assert!(output.contains("skip_thought_signature_validator"));
+        assert!(output.contains("\"finishReason\":\"STOP\""));
+        assert!(output.contains("\"promptTokenCount\":12"));
+        assert!(!output.contains("[DONE]"));
+    }
+
+    #[test]
+    fn gemini_stream_errors_use_google_envelope_without_done() {
+        let converter = StreamConverter::new(&plan(ApiFormat::Gemini, ApiFormat::Messages));
+        let output = String::from_utf8(converter.error_event("boom").concat()).unwrap();
+        assert!(output.contains("\"code\":500"));
+        assert!(output.contains("\"status\":\"INTERNAL\""));
+        assert!(output.contains("\"message\":\"boom\""));
+        assert!(!output.contains("[DONE]"));
     }
 
     #[test]

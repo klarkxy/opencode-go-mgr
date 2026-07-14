@@ -7,14 +7,15 @@ import { locale, t } from "../i18n/index.ts";
  * locale-aware formatting consistent.
  */
 
-/** Format a number as USD currency with adaptive decimal places. */
-export function formatCost(value: number): string {
-  const digits = value !== 0 && value < 0.01 ? 4 : 2;
+/** Format a number as USD currency with adaptive or caller-specified decimal places. */
+export function formatCost(value: number, digits?: number): string {
+  const fractionDigits = digits ?? (value !== 0 && value < 0.01 ? 4 : 2);
   return new Intl.NumberFormat(locale.value, {
     style: "currency",
     currency: "USD",
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits,
+    currencyDisplay: "narrowSymbol",
+    minimumFractionDigits: fractionDigits,
+    maximumFractionDigits: fractionDigits,
   }).format(value);
 }
 

@@ -108,7 +108,7 @@ import { tauriApi } from "../api/tauri";
 import type { Account, ForwardLog, ForwardLogSummary, GatewayLog } from "../api/tauri";
 import { t } from "../i18n/index.ts";
 import { locale } from "../i18n/index.ts";
-import { formatNumber } from "../utils/format.ts";
+import { formatCost, formatNumber } from "../utils/format.ts";
 
 type LogTab = "gateway" | "forward";
 
@@ -150,13 +150,6 @@ const dateFormatter = computed(() => new Intl.DateTimeFormat(locale.value, {
   minute: "2-digit",
   second: "2-digit",
 }));
-const costFormatter = computed(() => new Intl.NumberFormat(locale.value, {
-  style: "currency",
-  currency: "USD",
-  minimumFractionDigits: 5,
-  maximumFractionDigits: 5,
-}));
-
 const statusMeta = computed<Record<string, { label: string; type: "success" | "warning" | "error" | "default" }>>(() => ({
   success: { label: t("成功"), type: "success" },
   success_no_usage: { label: t("成功·无用量"), type: "success" },
@@ -195,7 +188,7 @@ const forwardColumns = computed(() => [
   { title: t("输入"), key: "prompt_tokens", width: 92, align: "right" as const, render: (row: ForwardLog) => formatNumber(row.prompt_tokens) },
   { title: t("输出"), key: "completion_tokens", width: 92, align: "right" as const, render: (row: ForwardLog) => formatNumber(row.completion_tokens) },
   { title: t("缓存"), key: "cached_tokens", width: 92, align: "right" as const, render: (row: ForwardLog) => formatNumber(row.cached_tokens) },
-  { title: t("成本"), key: "cost", width: 112, align: "right" as const, render: (row: ForwardLog) => costFormatter.value.format(row.cost) },
+  { title: t("成本"), key: "cost", width: 112, align: "right" as const, render: (row: ForwardLog) => formatCost(row.cost, 5) },
   { title: t("错误"), key: "error_message", minWidth: 220, ellipsis: { tooltip: true } },
 ]);
 
@@ -204,7 +197,7 @@ const forwardSummary: DataTableCreateSummary<ForwardLog> = () => ({
   prompt_tokens: { value: formatNumber(forwardTotals.value.prompt_tokens) },
   completion_tokens: { value: formatNumber(forwardTotals.value.completion_tokens) },
   cached_tokens: { value: formatNumber(forwardTotals.value.cached_tokens) },
-  cost: { value: costFormatter.value.format(forwardTotals.value.cost) },
+  cost: { value: formatCost(forwardTotals.value.cost, 5) },
   error_message: { value: "" },
 });
 
