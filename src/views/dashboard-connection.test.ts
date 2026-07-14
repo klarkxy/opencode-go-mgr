@@ -5,12 +5,15 @@ import {
   APPLICATION_GUIDES,
   buildChatboxConfig,
   buildChatboxUrl,
-  buildCherryStudioUrl,
+  recommendClaudeCodeModel,
+  reconcileApplicationModelSelection,
 } from "./application-guides.ts";
 import {
+  isGeminiCliBaseUrlAllowed,
   maskConnectionKey,
   normalizeClientRootUrl,
   resolveConnectionUrls,
+  restoreMaskedConnectionKey,
   writeConnectionValue,
 } from "./dashboard-connection.ts";
 
@@ -23,6 +26,12 @@ test("connection helpers mask display values and copy the complete value", async
   await writeConnectionValue(async (value) => { copied = value; }, "ocg-secret-value");
   assert.equal(copied, "ocg-secret-value");
   await assert.rejects(() => writeConnectionValue(undefined, "value"), /剪贴板/);
+
+  const specialKey = "ocg-$&-$$-$'-$`-tail";
+  assert.equal(
+    restoreMaskedConnectionKey('apiKey = "ocg-…tail"', "ocg-…tail", specialKey),
+    `apiKey = "${specialKey}"`,
+  );
 });
 
 test("client root normalization accepts roots and strips only a terminal v1", () => {
@@ -82,24 +91,109 @@ test("connection URL derivation handles configured, development, and production 
   assert.equal(resolveConnectionUrls("https://192.168.1.8:9042", "https://ignored", 9042, false).insecureHttp, false);
 });
 
-test("application catalog has nine verified clients and never displays a complete key", () => {
-  assert.equal(APPLICATION_GUIDES.length, 9);
-  assert.equal(new Set(APPLICATION_GUIDES.map((guide) => guide.id)).size, 9);
+test("Gemini CLI base URL compatibility allows HTTPS and exact loopback HTTP only", () => {
+  for (const value of [
+    "https://ocg.example.com",
+    "https://192.168.1.8:9042/ocg",
+    "http://localhost:9042",
+    "http://127.0.0.1:9042",
+    "http://[::1]:9042",
+  ]) {
+    assert.equal(isGeminiCliBaseUrlAllowed(value), true, value);
+  }
+  for (const value of [
+    "http://192.168.1.8:9042",
+    "http://127.0.0.8:9042",
+    "http://gateway.localhost:9042",
+    "ftp://localhost:9042",
+    "not-a-url",
+  ]) {
+    assert.equal(isGeminiCliBaseUrlAllowed(value), false, value);
+  }
+});
+
+test("model refresh preserves valid selections and falls back only when needed", () => {
+  const available = ["model-a", "model-b", "model-c"];
+  assert.deepEqual(
+    reconcileApplicationModelSelection(
+      ["model-a", "removed-model", "model-c", "model-a"],
+      "model-c",
+      available,
+      available,
+      true,
+    ),
+    { selectedModels: ["model-a", "model-c"], selectedModel: "model-c" },
+  );
+  assert.deepEqual(
+    reconcileApplicationModelSelection(
+      ["removed-model"],
+      "removed-model",
+      available,
+      ["model-b", "model-c"],
+      true,
+    ),
+    { selectedModels: ["model-b", "model-c"], selectedModel: "model-b" },
+  );
+  assert.deepEqual(
+    reconcileApplicationModelSelection(undefined, undefined, available, ["model-b"], true),
+    { selectedModels: ["model-b"], selectedModel: "model-b" },
+  );
+  assert.deepEqual(
+    reconcileApplicationModelSelection([], "model-c", available, available, false),
+    { selectedModels: [], selectedModel: "model-c" },
+  );
+  assert.deepEqual(
+    reconcileApplicationModelSelection([], "removed-model", available, available, false),
+    { selectedModels: [], selectedModel: "model-a" },
+  );
+});
+
+test("application catalog has thirteen verified clients and never displays a complete key", () => {
+  assert.equal(APPLICATION_GUIDES.length, 13);
+  assert.equal(new Set(APPLICATION_GUIDES.map((guide) => guide.id)).size, 13);
   assert.ok(APPLICATION_GUIDES.every((guide) => String(guide.id) !== "trae"));
+  for (const appId of [
+    "claude-code",
+    "claude-desktop",
+    "codex",
+    "gemini-cli",
+    "opencode",
+    "openclaw",
+    "hermes",
+  ]) {
+    assert.ok(APPLICATION_GUIDES.some((guide) => guide.id === appId), appId);
+  }
 
   const actualKey = "ocg-this-is-the-complete-secret-key";
   const urls = resolveConnectionUrls("https://edge.example.com/ocg", "https://ignored", 9042, false);
+  const modelValues = {
+    ANTHROPIC_MODEL: "verified-model",
+    ANTHROPIC_DEFAULT_FABLE_MODEL: "second-model",
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: "verified-model",
+    ANTHROPIC_DEFAULT_SONNET_MODEL: "second-model",
+    ANTHROPIC_DEFAULT_OPUS_MODEL: "verified-model",
+    CLAUDE_CODE_SUBAGENT_MODEL: "second-model",
+    ANTHROPIC_CUSTOM_MODEL_OPTION: "verified-model",
+    model: "verified-model",
+    review_model: "second-model",
+  };
   const context = {
     ...urls,
     displayKey: maskConnectionKey(actualKey),
     actualKey,
     modelId: "verified-model",
+    modelIds: ["verified-model", "second-model"],
+    modelValues,
     iconUrl: "https://edge.example.com/dashboard/ocg.png",
   };
   const expectedAddress = new Map([
     ["claude-code", urls.rootUrl],
+    ["claude-desktop", `${urls.rootUrl}/claude-desktop`],
     ["codex", urls.apiBaseUrl],
+    ["gemini-cli", urls.rootUrl],
     ["opencode", urls.apiBaseUrl],
+    ["openclaw", urls.apiBaseUrl],
+    ["hermes", urls.apiBaseUrl],
     ["cherry-studio", urls.rootUrl],
     ["vscode-copilot", urls.chatCompletionsUrl],
     ["cline", urls.apiBaseUrl],
@@ -113,7 +207,9 @@ test("application catalog has nine verified clients and never displays a complet
     assert.ok(snippets.length > 0, guide.id);
     assert.ok(snippets.every((snippet) => !snippet.display.includes(actualKey)), `${guide.id} display`);
     assert.ok(snippets.some((snippet) => snippet.copy.includes(actualKey)), `${guide.id} copy`);
-    assert.ok(snippets.some((snippet) => snippet.copy.includes(context.modelId)), `${guide.id} model`);
+    if (guide.id !== "claude-desktop") {
+      assert.ok(snippets.some((snippet) => snippet.copy.includes(context.modelId)), `${guide.id} model`);
+    }
     assert.ok(
       snippets.some((snippet) => snippet.copy.includes(expectedAddress.get(guide.id)!)),
       `${guide.id} address`,
@@ -123,6 +219,7 @@ test("application catalog has nine verified clients and never displays a complet
   const claudeGuide = APPLICATION_GUIDES.find((guide) => guide.id === "claude-code");
   assert.ok(claudeGuide);
   const claudeSettings = JSON.parse(claudeGuide.snippets(context)[0].copy);
+  assert.equal(claudeSettings.env.CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY, "1");
   for (const variable of [
     "ANTHROPIC_MODEL",
     "ANTHROPIC_DEFAULT_FABLE_MODEL",
@@ -131,9 +228,51 @@ test("application catalog has nine verified clients and never displays a complet
     "ANTHROPIC_DEFAULT_OPUS_MODEL",
     "CLAUDE_CODE_SUBAGENT_MODEL",
   ]) {
-    assert.equal(claudeSettings.env[variable], context.modelId, variable);
+    assert.equal(claudeSettings.env[variable], modelValues[variable as keyof typeof modelValues], variable);
   }
-  assert.equal(claudeSettings.env.ANTHROPIC_CUSTOM_MODEL_OPTION, context.modelId);
+  assert.equal(claudeSettings.env.ANTHROPIC_CUSTOM_MODEL_OPTION, modelValues.ANTHROPIC_CUSTOM_MODEL_OPTION);
+
+  const codex = APPLICATION_GUIDES.find((guide) => guide.id === "codex");
+  assert.ok(codex);
+  assert.deepEqual(codex.modelFields, ["model", "review_model"]);
+  const codexConfig = codex.snippets(context)[0].copy;
+  assert.match(codexConfig, /model = "verified-model"/);
+  assert.match(codexConfig, /review_model = "second-model"/);
+
+  const claudeDesktop = APPLICATION_GUIDES.find((guide) => guide.id === "claude-desktop");
+  assert.ok(claudeDesktop);
+  assert.deepEqual(claudeDesktop.modelFields, ["sonnet", "opus", "haiku"]);
+  const desktopProfile = JSON.parse(claudeDesktop.snippets(context)[0].copy);
+  assert.equal(desktopProfile.inferenceGatewayBaseUrl, `${urls.rootUrl}/claude-desktop`);
+  assert.equal(desktopProfile.inferenceGatewayApiKey, actualKey);
+
+  const gemini = APPLICATION_GUIDES.find((guide) => guide.id === "gemini-cli");
+  assert.ok(gemini);
+  const geminiSnippets = gemini.snippets(context);
+  const geminiEnv = geminiSnippets[0].copy;
+  assert.match(geminiEnv, new RegExp(`GOOGLE_GEMINI_BASE_URL=${urls.rootUrl}`));
+  assert.match(geminiEnv, /GOOGLE_GENAI_API_VERSION=v1beta/);
+  assert.doesNotMatch(geminiEnv, /GEMINI_MODEL=/);
+  const geminiSettings = JSON.parse(geminiSnippets[1].copy);
+  assert.equal(geminiSettings.model.name, context.modelId);
+  assert.deepEqual(geminiSettings.modelConfigs.customOverrides, [
+    {
+      match: { overrideScope: "core" },
+      modelConfig: { model: context.modelId },
+    },
+  ]);
+  assert.deepEqual(Object.keys(geminiSettings.agents.overrides), [
+    "codebase_investigator",
+    "cli_help",
+    "generalist",
+    "browser_agent",
+  ]);
+  for (const agent of Object.values(geminiSettings.agents.overrides) as Array<{
+    modelConfig: { model: string };
+  }>) {
+    assert.equal(agent.modelConfig.model, context.modelId);
+  }
+  assert.doesNotMatch(geminiSnippets[1].copy, /"model":\s*"gemini-/);
 
   for (const appId of ["codex", "opencode"]) {
     const guide = APPLICATION_GUIDES.find((candidate) => candidate.id === appId);
@@ -146,16 +285,81 @@ test("application catalog has nine verified clients and never displays a complet
   assert.ok(openCode);
   const openCodeConfig = JSON.parse(openCode.snippets(context)[0].copy);
   assert.equal(openCodeConfig.provider.ocg.options.apiKey, "{env:OCG_API_KEY}");
+  assert.deepEqual(Object.keys(openCodeConfig.provider.ocg.models), context.modelIds);
   assert.doesNotMatch(openCode.snippets(context)[0].copy, new RegExp(actualKey));
+
+  const openClaw = APPLICATION_GUIDES.find((guide) => guide.id === "openclaw");
+  assert.ok(openClaw);
+  const openClawSnippets = openClaw.snippets(context);
+  const openClawConfig = JSON.parse(openClawSnippets[0].copy);
+  assert.equal(openClawConfig.models.providers.ocg.apiKey, "${OCG_API_KEY}");
+  assert.doesNotMatch(openClawSnippets[0].copy, new RegExp(actualKey));
+  assert.equal(openClawSnippets[1].copy, `OCG_API_KEY=${JSON.stringify(actualKey)}`);
+
+  for (const appId of [
+    "opencode",
+    "openclaw",
+    "hermes",
+    "cherry-studio",
+    "vscode-copilot",
+    "continue",
+    "chatbox",
+  ]) {
+    const guide = APPLICATION_GUIDES.find((candidate) => candidate.id === appId);
+    assert.ok(guide && "multipleModels" in guide && guide.multipleModels, appId);
+    const config = guide.snippets(context).map(({ copy }) => copy).join("\n");
+    assert.ok(context.modelIds.every((modelId) => config.includes(modelId)), appId);
+  }
 });
 
-test("Cherry Studio and Chatbox imports encode the exact key and selected model", () => {
+test("Claude Code defaults balance model capability and cost with safe fallbacks", () => {
+  const models = [
+    "glm-5.2",
+    "kimi-k2.7-code",
+    "deepseek-v4-flash",
+    "minimax-m3",
+    "qwen3.7-max",
+    "qwen3.7-plus",
+  ];
+  assert.equal(recommendClaudeCodeModel("ANTHROPIC_MODEL", models), "qwen3.7-plus");
+  assert.equal(recommendClaudeCodeModel("ANTHROPIC_DEFAULT_FABLE_MODEL", models), "qwen3.7-max");
+  assert.equal(recommendClaudeCodeModel("ANTHROPIC_DEFAULT_HAIKU_MODEL", models), "deepseek-v4-flash");
+  assert.equal(recommendClaudeCodeModel("ANTHROPIC_DEFAULT_SONNET_MODEL", models), "qwen3.7-plus");
+  assert.equal(recommendClaudeCodeModel("ANTHROPIC_DEFAULT_OPUS_MODEL", models), "glm-5.2");
+  assert.equal(recommendClaudeCodeModel("CLAUDE_CODE_SUBAGENT_MODEL", models), "minimax-m3");
+  assert.equal(recommendClaudeCodeModel("ANTHROPIC_CUSTOM_MODEL_OPTION", models), "kimi-k2.7-code");
+  assert.equal(recommendClaudeCodeModel("ANTHROPIC_DEFAULT_HAIKU_MODEL", ["mimo-v2.5"]), "mimo-v2.5");
+  assert.equal(recommendClaudeCodeModel("unknown", ["fallback-model"]), "fallback-model");
+  assert.equal(recommendClaudeCodeModel("ANTHROPIC_MODEL", []), "");
+});
+
+test("dotenv snippets quote keys containing comments and replacement tokens", () => {
+  const actualKey = "ocg-$&-$$-#fragment";
+  const urls = resolveConnectionUrls("https://edge.example.com/ocg", "https://ignored", 9042, false);
+  const context = {
+    ...urls,
+    displayKey: maskConnectionKey(actualKey),
+    actualKey,
+    modelId: "selected-model",
+    modelIds: ["selected-model"],
+    modelValues: {},
+    iconUrl: "https://edge.example.com/dashboard/ocg.png",
+  };
+  const gemini = APPLICATION_GUIDES.find((guide) => guide.id === "gemini-cli")!;
+  const hermes = APPLICATION_GUIDES.find((guide) => guide.id === "hermes")!;
+  assert.ok(gemini.snippets(context)[0].copy.startsWith(`GEMINI_API_KEY=${JSON.stringify(actualKey)}\n`));
+  assert.equal(hermes.snippets(context)[1].copy, `OCG_API_KEY=${JSON.stringify(actualKey)}`);
+});
+
+test("Chatbox import encodes the exact key and every selected model", () => {
   const urls = resolveConnectionUrls("https://edge.example.com/ocg", "https://ignored", 9042, false);
   const context = {
     ...urls,
     displayKey: "ocg-…7890",
     actualKey: "ocg-secret-key",
     modelId: "selected-model",
+    modelIds: ["selected-model", "second-model"],
+    modelValues: {},
     iconUrl: "https://edge.example.com/dashboard/ocg.png",
   };
   const decode = (value: string, parameter: string) => {
@@ -164,23 +368,13 @@ test("Cherry Studio and Chatbox imports encode the exact key and selected model"
     return JSON.parse(Buffer.from(encoded, "base64").toString("utf8"));
   };
 
-  const cherryUrl = buildCherryStudioUrl(context);
-  assert.equal(new URL(cherryUrl).protocol, "cherrystudio:");
-  assert.deepEqual(decode(cherryUrl, "data"), {
-    id: "ocg-manager",
-    name: "OCG Manager",
-    type: "openai",
-    baseUrl: context.rootUrl,
-    apiKey: context.actualKey,
-  });
-  assert.doesNotMatch(cherryUrl, /sk-ocg-/);
-
   const chatboxConfig = buildChatboxConfig(context);
   assert.equal(chatboxConfig.id, `ocg-manager-${encodeURIComponent(context.rootUrl)}`);
   assert.equal(chatboxConfig.settings.apiHost, context.rootUrl);
   assert.equal(chatboxConfig.settings.apiPath, "/v1/chat/completions");
   assert.equal(chatboxConfig.settings.apiKey, context.actualKey);
   assert.equal(chatboxConfig.settings.models[0].modelId, context.modelId);
+  assert.deepEqual(chatboxConfig.settings.models.map(({ modelId }) => modelId), context.modelIds);
   assert.deepEqual(chatboxConfig.settings.models[0].capabilities, ["tool_use"]);
   const chatboxUrl = buildChatboxUrl(context);
   assert.equal(new URL(chatboxUrl).protocol, "chatbox:");
@@ -194,23 +388,54 @@ test("generated VS Code and Continue configs use their current complete shapes",
     displayKey: "ocg-…7890",
     actualKey: "ocg-secret-key",
     modelId: "selected-model",
+    modelIds: ["selected-model", "second-model"],
+    modelValues: {},
     iconUrl: "https://edge.example.com/dashboard/ocg.png",
   };
+  const vscodeWindows = new Map<string, number>([
+    ["glm-5.2", 1_000_000],
+    ["glm-5.1", 202_752],
+    ["kimi-k2.7-code", 262_144],
+    ["kimi-k2.6", 262_144],
+    ["deepseek-v4-pro", 1_000_000],
+    ["deepseek-v4-flash", 1_000_000],
+    ["mimo-v2.5", 1_000_000],
+    ["mimo-v2.5-pro", 1_048_576],
+    ["minimax-m3", 1_000_000],
+    ["minimax-m2.7", 204_800],
+    ["minimax-m2.5", 204_800],
+    ["qwen3.7-max", 1_000_000],
+    ["qwen3.7-plus", 1_000_000],
+    ["qwen3.6-plus", 1_000_000],
+  ]);
+  const vscodeContext = {
+    ...context,
+    modelId: "glm-5.2",
+    modelIds: [...vscodeWindows.keys()],
+  };
   const vscode = APPLICATION_GUIDES.find((guide) => guide.id === "vscode-copilot")!;
-  const vscodeConfig = JSON.parse(vscode.snippets(context)[0].copy);
+  const vscodeConfig = JSON.parse(vscode.snippets(vscodeContext)[0].copy);
   assert.equal(vscodeConfig[0].vendor, "customendpoint");
   assert.equal(vscodeConfig[0].apiType, "chat-completions");
   assert.equal(vscodeConfig[0].models[0].url, urls.chatCompletionsUrl);
-  assert.equal(vscodeConfig[0].models[0].id, context.modelId);
+  assert.equal(vscodeConfig[0].models[0].id, vscodeContext.modelId);
   assert.equal(vscodeConfig[0].models[0].toolCalling, true);
   assert.equal(vscodeConfig[0].models[0].vision, false);
-  assert.equal(vscodeConfig[0].models[0].maxInputTokens, 32768);
-  assert.equal(vscodeConfig[0].models[0].maxOutputTokens, 8192);
+  assert.deepEqual(vscodeConfig[0].models.map((model: { id: string }) => model.id), vscodeContext.modelIds);
+  for (const model of vscodeConfig[0].models) {
+    assert.equal(
+      model.maxInputTokens + model.maxOutputTokens,
+      vscodeWindows.get(model.id),
+      model.id,
+    );
+    assert.equal(model.maxOutputTokens, model.id === "glm-5.1" ? 32_768 : 65_536, model.id);
+  }
 
   const continueGuide = APPLICATION_GUIDES.find((guide) => guide.id === "continue")!;
   const yaml = continueGuide.snippets(context)[0].copy;
   assert.match(yaml, /^name: OCG Manager\nversion: 1\.0\.0\nschema: v1\nmodels:/);
   assert.match(yaml, /model: "selected-model"/);
+  assert.match(yaml, /model: "second-model"/);
   assert.match(yaml, /useResponsesApi: false/);
   assert.match(yaml, /capabilities:\n\s+- tool_use/);
 });
@@ -225,6 +450,8 @@ test("dashboard keeps the connection center first and protects key regeneration"
   assert.match(template, /:aria-label="t\('刷新 Key'\)"/);
   assert.match(template, /\{\{ maskedKey \}\}/);
   assert.doesNotMatch(template, /<code>\{\{ serviceConfig\.gateway_key \}\}<\/code>/);
+  assert.match(template, /class="account-usage-row"/);
+  assert.match(source, /grid-template-columns: minmax\(3\.5em, auto\) minmax\(0, 1fr\)/);
 });
 
 test("dashboard and settings keep partial data safe", async () => {
@@ -243,6 +470,12 @@ test("dashboard and settings keep partial data safe", async () => {
 test("applications view uses deep-linked subpages and a responsive second navigation", async () => {
   const applications = await readFile(new URL("./Applications.vue", import.meta.url), "utf8");
   const app = await readFile(new URL("../App.vue", import.meta.url), "utf8");
+  const restoreDefaults = applications.slice(
+    applications.indexOf("function restoreApplicationDefaults"),
+    applications.indexOf("async function copySnippet"),
+  );
+  const modelRowStart = applications.indexOf('<div class="model-row">');
+  const modelRow = applications.slice(modelRowStart, applications.indexOf("</section>", modelRowStart));
 
   assert.match(applications, /DEFAULT_APPLICATION: ApplicationId = "claude-code"/);
   assert.match(applications, /url\.searchParams\.set\("app", value\)/);
@@ -252,6 +485,32 @@ test("applications view uses deep-linked subpages and a responsive second naviga
   assert.match(applications, /<n-menu/);
   assert.match(applications, /<n-select/);
   assert.match(applications, /tauriApi\.getApplicationModels\(\)/);
+  assert.match(applications, /tauriApi\.getClaudeDesktopModels\(\)/);
+  assert.match(applications, /Promise\.allSettled/);
+  assert.match(applications, /const claudeDesktopModelsLoaded = ref\(false\)/);
+  assert.match(applications, /activeGuide\.value\.id !== "claude-desktop" \|\| claudeDesktopModelsLoaded\.value/);
+  assert.match(applications, /if \(guide\.id === "claude-desktop"\) continue/);
+  assert.match(applications, /if \(!claudeDesktopModelsLoaded\.value\)[\s\S]*?return;/);
+  assert.match(applications, /@click="loadModels"/);
+  assert.match(modelRow, /@click="restoreApplicationDefaults"/);
+  assert.equal(applications.match(/@click="restoreApplicationDefaults"/g)?.length, 1);
+  assert.match(app, /<KeepAlive>\s*<Applications v-if="activeKey === 'apps'" \/>\s*<\/KeepAlive>/);
+  assert.match(applications, /modelsInitialized\.value = true/);
+  assert.match(applications, /onActivated\(\(\) => \{[\s\S]*?loadSettings\(!modelsInitialized\.value\)/);
+  assert.match(applications, /applicationModelIds\.value = modelIds/);
+  assert.match(applications, /selectedModelsByApplication\.value\[currentApplication\.value\]/);
+  assert.match(applications, /selectedModelByApplication\.value\[currentApplication\.value\]/);
+  assert.match(restoreDefaults, /recommendClaudeCodeModel\(field, models\)/);
+  assert.match(restoreDefaults, /selectedModels\.value = \[\.\.\.models\]/);
+  assert.match(restoreDefaults, /selectedModel\.value = models\[0\] \?\? null/);
+  assert.match(restoreDefaults, /claudeDesktopDefaults\.value/);
+  assert.match(restoreDefaults, /clearApplicationDrafts\(guide\.id\)/);
+  assert.match(applications, /key\.startsWith\(prefix\)/);
+  assert.doesNotMatch(restoreDefaults, /loadModels|tauriApi\./);
+  assert.match(applications, /tauriApi\.updateClaudeDesktopModels/);
+  assert.match(applications, /v-model:value="selectedModels"/);
+  assert.match(applications, /type="textarea"/);
+  assert.match(applications, /restoreMaskedConnectionKey\(draft, guideContext\.value\.displayKey, guideContext\.value\.actualKey\)/);
   assert.doesNotMatch(applications, /Authorization: `Bearer/);
   assert.doesNotMatch(applications, /\s+tag(?:\s|>)/);
   assert.doesNotMatch(applications, /fetch\(`\$\{connectionUrls\.value\.apiBaseUrl\}/);
@@ -272,6 +531,8 @@ test("settings expose the downstream display root and bounded request timeouts",
   const dashboard = await readFile(new URL("./Dashboard.vue", import.meta.url), "utf8");
 
   assert.match(settings, /下游访问根地址（可选）/);
+  assert.ok(settings.indexOf("t('上游地址')") < settings.indexOf('class="downstream-grid"'));
+  assert.match(settings, /\.downstream-grid \{[\s\S]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/);
   assert.match(settings, /v-model:value="clientRootInputValue"/);
   assert.match(settings, /:readonly="config\.client_root_url_from_env"/);
   assert.match(settings, /:clearable="!config\.client_root_url_from_env && !!config\.client_root_url"/);
@@ -298,6 +559,14 @@ test("settings expose the downstream display root and bounded request timeouts",
   assert.match(api, /non_stream_timeout_secs: number/);
   assert.match(api, /stream_idle_timeout_secs: number/);
   assert.doesNotMatch(dashboard, /ref<AppConfig>/);
+});
+
+test("accounts keep one enabled control instead of a duplicate status badge", async () => {
+  const accounts = await readFile(new URL("./Accounts.vue", import.meta.url), "utf8");
+  const template = accounts.slice(accounts.indexOf("<template>"), accounts.indexOf("<script setup"));
+
+  assert.match(template, /:value="account\.enabled"/);
+  assert.doesNotMatch(template, /account\.enabled \? t\("已启用"\) : t\("已禁用"\)/);
 });
 
 test("settings expose supported Windows auto-start safely", async () => {

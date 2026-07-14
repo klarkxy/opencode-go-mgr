@@ -37,6 +37,10 @@ pub fn api_router(state: CoreState) -> Router<CoreState> {
             post(reset_account_cooldown),
         )
         .route("/settings", get(get_settings).post(update_settings))
+        .route(
+            "/claude-desktop/models",
+            get(get_claude_desktop_models).put(update_claude_desktop_models),
+        )
         .route("/settings/check-update", get(check_update))
         .route(
             "/settings/regenerate-gateway-key",
@@ -694,6 +698,24 @@ async fn get_settings(State(state): State<CoreState>) -> Json<SettingsResponse> 
     })
 }
 
+async fn get_claude_desktop_models(State(state): State<CoreState>) -> Json<ClaudeDesktopModels> {
+    Json(state.config().claude_desktop_models.resolved())
+}
+
+async fn update_claude_desktop_models(
+    State(state): State<CoreState>,
+    Json(mut models): Json<ClaudeDesktopModels>,
+) -> Result<Json<ClaudeDesktopModels>, ApiError> {
+    let _settings_update = state.settings_update.lock();
+    models.normalize();
+    models.validate().map_err(ApiError::bad_request)?;
+    let response = models.resolved();
+    let mut config = state.config();
+    config.claude_desktop_models = models;
+    state.set_config(config).map_err(ApiError::internal)?;
+    Ok(Json(response))
+}
+
 const GITHUB_LATEST_RELEASE_API: &str =
     "https://api.github.com/repos/klarkxy/opencode-go-mgr/releases/latest";
 const GITHUB_LATEST_RELEASE_URL: &str =
@@ -787,11 +809,12 @@ async fn update_settings(
     if config.gateway_key.is_empty() {
         return Err(ApiError::bad_request("gateway key is required"));
     }
-    config.validate_timeouts().map_err(ApiError::bad_request)?;
+    let previous_config = state.config();
+    config.claude_desktop_models = previous_config.claude_desktop_models.clone();
+    config.validate().map_err(ApiError::bad_request)?;
     validate_upstream_url(&config.upstream_base_url)?;
     config.client_root_url =
         normalize_client_root_url(&config.client_root_url).map_err(ApiError::bad_request)?;
-    let previous_config = state.config();
     let next_auto_start = config.auto_start;
     let auto_start_supported = state.auto_start_supported();
     if !auto_start_supported && next_auto_start != previous_config.auto_start {
@@ -1003,11 +1026,11 @@ fn is_loopback(url: &reqwest::Url) -> bool {
 mod tests {
     use super::{
         AccountUsageUpdate, asset_path, dashboard_account, dashboard_summary, is_update_available,
-        parse_stable_version, update_account_usage,
+        parse_stable_version, update_account_usage, update_settings,
     };
     use crate::crypto::{KeyCipher, StaticKeyCipher};
     use crate::db::Database;
-    use crate::models::Account;
+    use crate::models::{Account, AppConfig, ClaudeDesktopModels};
     use crate::state::CoreStateInner;
     use axum::Json;
     use axum::extract::{Path as AxumPath, State};
@@ -1163,6 +1186,37 @@ mod tests {
             .0;
         assert_eq!(summary.available_accounts, 1);
 
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn regular_settings_update_preserves_claude_desktop_models() {
+        let dir = temp_data_dir("preserve-claude-desktop-models");
+        let cipher: Arc<dyn KeyCipher + Send + Sync> = Arc::new(StaticKeyCipher::new("test"));
+        let db = Database::open(dir.clone()).unwrap();
+        let state = Arc::new(CoreStateInner::new(db, dir.clone(), cipher).unwrap());
+        let configured = ClaudeDesktopModels {
+            sonnet: "glm-5.2".to_string(),
+            opus: String::new(),
+            haiku: "mimo-v2.5".to_string(),
+        };
+        let mut persisted = state.config();
+        persisted.claude_desktop_models = configured.clone();
+        state.set_config(persisted).unwrap();
+
+        let _ = update_settings(
+            State(state.clone()),
+            Json(AppConfig {
+                gateway_key: "updated-gateway-key".to_string(),
+                connect_timeout_secs: 45,
+                ..AppConfig::default()
+            }),
+        )
+        .await
+        .expect("regular settings should save");
+
+        assert_eq!(state.config().claude_desktop_models, configured);
+        drop(state);
         fs::remove_dir_all(dir).unwrap();
     }
 

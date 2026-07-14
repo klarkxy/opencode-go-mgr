@@ -8,7 +8,7 @@
 - 前端：Vue 3 + TypeScript + naive-ui，源码在 `src/`。
 - 前端 API：`src/api/tauri.ts` 是历史命名，当前封装 HTTP `/dashboard/api`，不是 Tauri `invoke()`。
 - Rust workspace：`crates/ocg-core`、`crates/ocg-cli`、`src-tauri`。
-- 核心 Gateway：Axum + Tokio + reqwest，默认监听 `127.0.0.1:9042`。
+- 核心 Gateway：Axum + Tokio + reqwest，默认监听 `127.0.0.1:9042`；同一端口提供 OpenAI Chat Completions / Responses、Anthropic Messages、Gemini `generateContent` 客户端入口与 Claude Desktop 别名入口。
 - 持久化：SQLite，GUI 数据目录为 Windows `%USERPROFILE%\.ocg-mgr` 或 macOS/Linux `~/.ocg-mgr`，CLI 默认 `~/.ocg-mgr-cli`。
 - 桌面端：Tauri v2 跨平台托盘应用，主窗口默认隐藏；托盘/单实例逻辑用系统浏览器打开 `http://127.0.0.1:<port>/dashboard/`，回环监听自动跳过登录。
 - Tauri commands 仍注册在 `src-tauri/src/commands/`，但不是当前 Vue dashboard 的主调用路径。
@@ -18,17 +18,19 @@
 - 公开 GitHub Release 发布后，`.github/workflows/container.yml` 会构建并冒烟验证 `linux/amd64` 镜像，发布到 `ghcr.io/klarkxy/opencode-go-mgr`；Compose 默认使用该镜像，本地源码构建需设置 `OCG_IMAGE=ocg-manager:local` 后执行 `docker compose up -d --build`。
 - 容器固定以 UID/GID `10001` 运行并内置 `LICENSE`；Compose 透传可选的 `OCG_MANAGER_ENCRYPTION_KEY` 以支持显式密钥恢复，正常部署仍优先保留卷内 `.encryption-key`。
 - 下游访问根地址优先使用非空 `OCG_CLIENT_ROOT_URL`，其次是 SQLite 手工值，最后由前端按生产 origin / 开发 Gateway 端口自动推导；环境变量覆盖只读且不得写回 SQLite。
+- Gemini 客户端使用 `/v1beta/models/{model}:generateContent` 或 `:streamGenerateContent`（也接受 `/v1/models/...`），可用 `x-goog-api-key` 鉴权；Gemini 只是客户端格式，Gateway 始终转换到已知模型的原生上游协议。
+- Claude Desktop 使用 `/claude-desktop/v1/messages` 与 `/claude-desktop/v1/models`；`sonnet`、`opus`、`haiku` 映射保存在 `AppConfig.claude_desktop_models`，由受保护的 `GET/PUT /dashboard/api/claude-desktop/models` 管理。
 
 ## 关键文件
 
-- `crates/ocg-core/src/gateway/`：OpenAI/Anthropic 兼容路由、转发、选择器、冷却、费用统计。
+- `crates/ocg-core/src/gateway/`：OpenAI / Anthropic / Gemini 客户端协议路由与转换、Claude Desktop 别名改写、转发、选择器、冷却、费用统计。
 - `crates/ocg-core/src/dashboard.rs`：当前 Vue 面板使用的 `/dashboard/api`。
 - `crates/ocg-core/src/db.rs`：SQLite schema、迁移、查询。
 - `crates/ocg-core/src/models.rs`：共享 serde 类型和 `AppConfig`。
 - `crates/ocg-cli/src/main.rs`：CLI `serve`、`key`、`status`。
 - `src-tauri/src/lib.rs`：Tauri 启动、Gateway 启动、托盘、命令注册。
 - `src-tauri/src/tray.rs`：托盘菜单和 dashboard 打开逻辑。
-- `src/views/`：Dashboard / Accounts / Logs / Settings。
+- `src/views/`：Dashboard / Accounts / Applications / Logs / Settings。
 
 ## 常用命令
 
@@ -63,7 +65,8 @@ pnpm run build
 
 ## 当前已知缺口
 
-- `/embeddings` 和 Gemini 协议转换未实现。
+- `/embeddings` 与 Gemini `embedContent` 未实现；Gemini `countTokens` 返回 `501`，供 Gemini CLI 回退本地估算。
+- Gemini `generateContent` / `streamGenerateContent` 已实现，但非空 `safetySettings`、`cachedContent`、`fileData`、Google Search、`urlContext` 及未明确支持的非空 `generationConfig` 字段会返回 `400`。`topK` 与 `thinkingConfig` 只能视为跨协议兼容提示，不能承诺与 Gemini 原生后端语义等价。
 - 流式 usage 依赖上游 usage chunk；没有 chunk 时会记为 `success_no_usage`。
 - Tauri 隔离浏览器 command 存在，但当前 HTTP dashboard 没有按钮调用它。
 - `src-tauri/src/commands/*` 与 `crates/ocg-core/src/dashboard.rs` 有部分重复逻辑；当前不要大拆，除非同时迁移缺失行为并补验证。

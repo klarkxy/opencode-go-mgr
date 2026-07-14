@@ -1,5 +1,8 @@
 use axum::http::StatusCode;
-use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+use base64::{
+    Engine as _,
+    engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD},
+};
 use bytes::Bytes;
 use serde_json::{Map, Value, json};
 use std::fmt;
@@ -11,14 +14,18 @@ pub enum ApiFormat {
     ChatCompletions,
     Responses,
     Messages,
+    /// Google Gemini generateContent wire format. This is client-only: OCG
+    /// always translates it to a model's known native upstream protocol.
+    Gemini,
 }
 
 impl ApiFormat {
-    pub fn path(self) -> &'static str {
+    pub fn upstream_path(self) -> Option<&'static str> {
         match self {
-            Self::ChatCompletions => "/v1/chat/completions",
-            Self::Responses => "/v1/responses",
-            Self::Messages => "/v1/messages",
+            Self::ChatCompletions => Some("/v1/chat/completions"),
+            Self::Responses => Some("/v1/responses"),
+            Self::Messages => Some("/v1/messages"),
+            Self::Gemini => None,
         }
     }
 }
@@ -117,17 +124,45 @@ pub fn prepare_request(client: ApiFormat, body: Bytes) -> Result<RequestPlan, Pr
         .filter(|model| !model.is_empty())
         .ok_or_else(|| ProtocolError::new("request model is required"))?
         .to_string();
-    let upstream = native_format(&model).unwrap_or(client);
-    if client == ApiFormat::Responses && native_format(&model).is_none() {
-        return Err(ProtocolError::new(format!(
-            "unknown model `{model}` cannot be routed from the Responses endpoint"
-        )));
-    }
-    validate_request_features(client, upstream, &parsed)?;
     let stream = parsed
         .get("stream")
         .and_then(Value::as_bool)
         .unwrap_or(false);
+    prepare_parsed_request(client, parsed, model, stream)
+}
+
+pub fn prepare_gemini_request(
+    model: String,
+    stream: bool,
+    body: Bytes,
+) -> Result<RequestPlan, ProtocolError> {
+    if model.trim().is_empty() {
+        return Err(ProtocolError::new("request model is required"));
+    }
+    let mut parsed: Value = serde_json::from_slice(&body)
+        .map_err(|error| ProtocolError::new(format!("invalid JSON request: {error}")))?;
+    let object = parsed
+        .as_object_mut()
+        .ok_or_else(|| ProtocolError::new("Gemini request must be a JSON object"))?;
+    object.insert("model".into(), json!(model));
+    object.insert("stream".into(), json!(stream));
+    prepare_parsed_request(ApiFormat::Gemini, parsed, model, stream)
+}
+
+fn prepare_parsed_request(
+    client: ApiFormat,
+    parsed: Value,
+    model: String,
+    stream: bool,
+) -> Result<RequestPlan, ProtocolError> {
+    let upstream = native_format(&model).unwrap_or(client);
+    if matches!(client, ApiFormat::Responses | ApiFormat::Gemini) && native_format(&model).is_none()
+    {
+        return Err(ProtocolError::new(format!(
+            "unknown model `{model}` cannot be routed from this endpoint"
+        )));
+    }
+    validate_request_features(client, upstream, &parsed)?;
     let tool_context = if client == ApiFormat::Responses {
         responses_tool_context(&parsed)?
     } else {
@@ -196,6 +231,10 @@ fn validate_request_features(
         }
     }
 
+    if client == ApiFormat::Gemini {
+        validate_gemini_request(body)?;
+    }
+
     if client == upstream {
         return Ok(());
     }
@@ -203,12 +242,14 @@ fn validate_request_features(
         ApiFormat::Responses => unsupported_output_format(body.pointer("/text/format")),
         ApiFormat::ChatCompletions => unsupported_output_format(body.get("response_format")),
         ApiFormat::Messages => unsupported_output_format(body.pointer("/output_config/format")),
+        ApiFormat::Gemini => false,
     };
     if unsupported_format {
         let field = match client {
             ApiFormat::Responses => "Responses text.format",
             ApiFormat::ChatCompletions => "Chat Completions response_format",
             ApiFormat::Messages => "Messages output_config.format",
+            ApiFormat::Gemini => "Gemini generationConfig.responseJsonSchema",
         };
         return Err(ProtocolError::new(format!(
             "{field} cannot be preserved by protocol conversion"
@@ -220,6 +261,346 @@ fn validate_request_features(
         ));
     }
     Ok(())
+}
+
+fn validate_gemini_request(body: &Value) -> Result<(), ProtocolError> {
+    match body.get("safetySettings") {
+        None | Some(Value::Null) => {}
+        Some(Value::Array(settings)) if settings.is_empty() => {}
+        Some(Value::Array(_)) => {
+            return Err(ProtocolError::new(
+                "Gemini safetySettings cannot be preserved by protocol conversion",
+            ));
+        }
+        Some(_) => {
+            return Err(ProtocolError::new("Gemini safetySettings must be an array"));
+        }
+    }
+    if body
+        .get("cachedContent")
+        .is_some_and(|value| !value.is_null())
+    {
+        return Err(ProtocolError::new(
+            "Gemini cachedContent is not supported by this stateless gateway",
+        ));
+    }
+    if body.get("tools").is_some_and(|tools| !tools.is_array()) {
+        return Err(ProtocolError::new("Gemini tools must be an array"));
+    }
+    if body
+        .get("generationConfig")
+        .is_some_and(|config| !config.is_object())
+    {
+        return Err(ProtocolError::new(
+            "Gemini generationConfig must be an object",
+        ));
+    }
+    let contents = body
+        .get("contents")
+        .and_then(Value::as_array)
+        .ok_or_else(|| ProtocolError::new("Gemini contents must be an array"))?;
+    if contents.is_empty() {
+        return Err(ProtocolError::new("Gemini contents cannot be empty"));
+    }
+    for content in contents {
+        let role = content
+            .get("role")
+            .and_then(Value::as_str)
+            .unwrap_or("user");
+        if !matches!(role, "user" | "model") {
+            return Err(ProtocolError::new(format!(
+                "Gemini content role `{role}` is not supported"
+            )));
+        }
+        let parts = content
+            .get("parts")
+            .and_then(Value::as_array)
+            .ok_or_else(|| ProtocolError::new("Gemini content parts must be an array"))?;
+        for part in parts {
+            if part.get("fileData").is_some() || part.get("file_data").is_some() {
+                return Err(ProtocolError::new(
+                    "Gemini fileData is not supported; use inlineData for images",
+                ));
+            }
+            if let Some(data) = part.get("inlineData").or_else(|| part.get("inline_data")) {
+                let media_type = data
+                    .get("mimeType")
+                    .or_else(|| data.get("mime_type"))
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                if !matches!(
+                    media_type,
+                    "image/png" | "image/jpeg" | "image/gif" | "image/webp"
+                ) {
+                    return Err(ProtocolError::new(
+                        "Gemini inlineData supports PNG, JPEG, GIF, and WebP images only",
+                    ));
+                }
+                let encoded = data.get("data").and_then(Value::as_str).unwrap_or_default();
+                if encoded.is_empty() {
+                    return Err(ProtocolError::new("Gemini inlineData.data is required"));
+                }
+                if STANDARD.decode(encoded).is_err() {
+                    return Err(ProtocolError::new(
+                        "Gemini inlineData.data must be valid base64",
+                    ));
+                }
+            }
+            if let Some(call) = part
+                .get("functionCall")
+                .or_else(|| part.get("function_call"))
+            {
+                if call
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .is_none_or(str::is_empty)
+                {
+                    return Err(ProtocolError::new("Gemini functionCall.name is required"));
+                }
+                if call.get("args").is_some_and(|args| !args.is_object()) {
+                    return Err(ProtocolError::new(
+                        "Gemini functionCall.args must be an object",
+                    ));
+                }
+            }
+            if let Some(response) = part
+                .get("functionResponse")
+                .or_else(|| part.get("function_response"))
+            {
+                if response
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .is_none_or(str::is_empty)
+                {
+                    return Err(ProtocolError::new(
+                        "Gemini functionResponse.name is required",
+                    ));
+                }
+                if response.get("parts").is_some() {
+                    return Err(ProtocolError::new(
+                        "Gemini multimodal functionResponse.parts is not supported",
+                    ));
+                }
+            }
+            if !part.is_object()
+                || !part.as_object().is_some_and(|object| {
+                    object.contains_key("text")
+                        || object.contains_key("inlineData")
+                        || object.contains_key("inline_data")
+                        || object.contains_key("functionCall")
+                        || object.contains_key("function_call")
+                        || object.contains_key("functionResponse")
+                        || object.contains_key("function_response")
+                })
+            {
+                return Err(ProtocolError::new(
+                    "Gemini content part type is not supported",
+                ));
+            }
+        }
+    }
+
+    if let Some(system) = body.get("systemInstruction") {
+        let valid = system
+            .get("parts")
+            .and_then(Value::as_array)
+            .is_some_and(|parts| {
+                !parts.is_empty()
+                    && parts
+                        .iter()
+                        .all(|part| part.get("text").and_then(Value::as_str).is_some())
+            });
+        if !valid {
+            return Err(ProtocolError::new(
+                "Gemini systemInstruction currently supports text parts only",
+            ));
+        }
+    }
+
+    for tool in array(body, "tools") {
+        let Some(object) = tool.as_object() else {
+            return Err(ProtocolError::new("Gemini tools must be objects"));
+        };
+        if object.contains_key("googleSearch")
+            || object.contains_key("google_search")
+            || object.contains_key("googleSearchRetrieval")
+        {
+            return Err(ProtocolError::new(
+                "Gemini Google Search tools are not supported by this gateway",
+            ));
+        }
+        if object.contains_key("urlContext") || object.contains_key("url_context") {
+            return Err(ProtocolError::new(
+                "Gemini urlContext is not supported by this gateway",
+            ));
+        }
+        if object.len() != 1 || !object.contains_key("functionDeclarations") {
+            return Err(ProtocolError::new(
+                "only Gemini functionDeclarations tools are supported",
+            ));
+        }
+        let declarations = tool
+            .get("functionDeclarations")
+            .and_then(Value::as_array)
+            .filter(|declarations| !declarations.is_empty())
+            .ok_or_else(|| {
+                ProtocolError::new("Gemini functionDeclarations must be a non-empty array")
+            })?;
+        for declaration in declarations {
+            if declaration.get("parameters").is_some()
+                && declaration.get("parametersJsonSchema").is_some()
+            {
+                return Err(ProtocolError::new(
+                    "Gemini function declarations cannot contain both parameters and parametersJsonSchema",
+                ));
+            }
+            if declaration.get("response").is_some()
+                || declaration.get("responseJsonSchema").is_some()
+                || declaration.get("behavior").is_some()
+            {
+                return Err(ProtocolError::new(
+                    "Gemini function response schemas and behavior are not supported",
+                ));
+            }
+        }
+    }
+
+    if let Some(config) = body.pointer("/toolConfig/functionCallingConfig") {
+        let mode = config
+            .get("mode")
+            .and_then(Value::as_str)
+            .unwrap_or("AUTO")
+            .to_ascii_uppercase();
+        if mode == "VALIDATED" {
+            return Err(ProtocolError::new(
+                "Gemini VALIDATED function calling has no safe cross-protocol equivalent",
+            ));
+        }
+        if mode == "ANY"
+            && array(body, "tools")
+                .iter()
+                .flat_map(|tool| array(tool, "functionDeclarations"))
+                .next()
+                .is_none()
+        {
+            return Err(ProtocolError::new(
+                "Gemini function calling mode ANY requires a declared function",
+            ));
+        }
+        if config
+            .get("allowedFunctionNames")
+            .and_then(Value::as_array)
+            .is_some_and(|names| !names.is_empty())
+            && mode != "ANY"
+        {
+            return Err(ProtocolError::new(
+                "Gemini allowedFunctionNames is supported only with mode ANY",
+            ));
+        }
+    }
+
+    let generation = body.get("generationConfig").unwrap_or(&Value::Null);
+    if let Some(config) = generation.as_object() {
+        const SUPPORTED_FIELDS: &[&str] = &[
+            "candidateCount",
+            "maxOutputTokens",
+            "responseJsonSchema",
+            "responseMimeType",
+            "responseModalities",
+            "responseSchema",
+            "stopSequences",
+            "temperature",
+            "thinkingConfig",
+            "topK",
+            "topP",
+        ];
+        if let Some((field, _)) = config
+            .iter()
+            .find(|(field, value)| !value.is_null() && !SUPPORTED_FIELDS.contains(&field.as_str()))
+        {
+            return Err(ProtocolError::new(format!(
+                "Gemini generationConfig.{field} cannot be preserved by protocol conversion"
+            )));
+        }
+        if config
+            .get("topK")
+            .is_some_and(|value| !value.is_null() && !value.is_number())
+        {
+            return Err(ProtocolError::new(
+                "Gemini generationConfig.topK must be a number",
+            ));
+        }
+        if config
+            .get("thinkingConfig")
+            .is_some_and(|value| !value.is_null() && !value.is_object())
+        {
+            return Err(ProtocolError::new(
+                "Gemini generationConfig.thinkingConfig must be an object",
+            ));
+        }
+        if config
+            .get("responseMimeType")
+            .is_some_and(|value| !value.is_null() && !value.is_string())
+        {
+            return Err(ProtocolError::new(
+                "Gemini generationConfig.responseMimeType must be a string",
+            ));
+        }
+    }
+    match generation.get("candidateCount") {
+        None | Some(Value::Null) => {}
+        Some(value) if value.as_u64() == Some(1) => {}
+        Some(value) if value.as_u64().is_some() => {
+            return Err(ProtocolError::new(
+                "Gemini candidateCount other than 1 is not supported",
+            ));
+        }
+        Some(_) => {
+            return Err(ProtocolError::new(
+                "Gemini generationConfig.candidateCount must be an unsigned integer",
+            ));
+        }
+    }
+    match generation.get("responseModalities") {
+        None | Some(Value::Null) => {}
+        Some(Value::Array(modalities))
+            if modalities
+                .iter()
+                .any(|value| value.as_str() != Some("TEXT")) =>
+        {
+            return Err(ProtocolError::new(
+                "Gemini response modalities other than TEXT are not supported",
+            ));
+        }
+        Some(Value::Array(_)) => {}
+        Some(_) => {
+            return Err(ProtocolError::new(
+                "Gemini generationConfig.responseModalities must be an array",
+            ));
+        }
+    }
+    let _ = gemini_output_schema(body)?;
+    Ok(())
+}
+
+fn gemini_output_schema(body: &Value) -> Result<Option<Value>, ProtocolError> {
+    let generation = body.get("generationConfig").unwrap_or(&Value::Null);
+    let mime = generation.get("responseMimeType").and_then(Value::as_str);
+    let schema = generation
+        .get("responseJsonSchema")
+        .or_else(|| generation.get("responseSchema"))
+        .filter(|value| !value.is_null())
+        .cloned();
+    match (mime, schema) {
+        (None | Some("text/plain"), None) => Ok(None),
+        (None | Some("application/json"), Some(schema)) => Ok(Some(schema)),
+        (Some("application/json"), None) => Err(ProtocolError::new(
+            "Gemini application/json output requires responseJsonSchema",
+        )),
+        (Some(other), _) => Err(ProtocolError::new(format!(
+            "Gemini responseMimeType `{other}` is not supported"
+        ))),
+    }
 }
 
 fn unsupported_output_format(format: Option<&Value>) -> bool {
@@ -296,7 +677,16 @@ fn transform_between_with_tools(
         (ApiFormat::Responses, ApiFormat::ChatCompletions) => {
             messages_response_to_chat(&responses_response_to_messages(body)?)
         }
-        _ => unreachable!(),
+        (ApiFormat::Messages, ApiFormat::Gemini) => messages_response_to_gemini(body),
+        (ApiFormat::ChatCompletions, ApiFormat::Gemini) => {
+            messages_response_to_gemini(&chat_response_to_messages(body)?)
+        }
+        (ApiFormat::Responses, ApiFormat::Gemini) => {
+            messages_response_to_gemini(&responses_response_to_messages(body)?)
+        }
+        _ => Err(ProtocolError::new(
+            "Gemini is a client-only format and cannot be used as an upstream protocol",
+        )),
     }
 }
 
@@ -306,6 +696,13 @@ pub fn format_error(
     message: &str,
     upstream: Option<&Value>,
 ) -> Value {
+    if format == ApiFormat::Gemini {
+        let upstream_message = upstream
+            .and_then(|value| value.pointer("/error/message"))
+            .and_then(Value::as_str)
+            .unwrap_or(message);
+        return gemini_error_body(status, upstream_message);
+    }
     let upstream_error = upstream.and_then(|value| value.get("error"));
     let message = upstream_error
         .and_then(|error| error.get("message"))
@@ -335,6 +732,36 @@ pub fn error_body(format: ApiFormat, kind: &str, message: &str) -> Value {
         ApiFormat::Responses => json!({
             "error": { "message": message, "type": kind, "code": kind }
         }),
+        ApiFormat::Gemini => json!({
+            "error": { "code": 500, "message": message, "status": gemini_status_for_kind(kind) }
+        }),
+    }
+}
+
+fn gemini_error_body(status: StatusCode, message: &str) -> Value {
+    let status_name = match status.as_u16() {
+        400 => "INVALID_ARGUMENT",
+        401 => "UNAUTHENTICATED",
+        403 => "PERMISSION_DENIED",
+        404 => "NOT_FOUND",
+        408 => "DEADLINE_EXCEEDED",
+        429 => "RESOURCE_EXHAUSTED",
+        501 => "UNIMPLEMENTED",
+        502..=504 => "UNAVAILABLE",
+        _ => "INTERNAL",
+    };
+    json!({
+        "error": { "code": status.as_u16(), "message": message, "status": status_name }
+    })
+}
+
+fn gemini_status_for_kind(kind: &str) -> &'static str {
+    match kind {
+        "authentication_error" => "UNAUTHENTICATED",
+        "permission_error" => "PERMISSION_DENIED",
+        "rate_limit_error" => "RESOURCE_EXHAUSTED",
+        "invalid_request_error" => "INVALID_ARGUMENT",
+        _ => "INTERNAL",
     }
 }
 
@@ -347,6 +774,7 @@ pub fn extract_usage(format: ApiFormat, payload: &Value) -> UsageCounts {
         ApiFormat::Responses => payload
             .get("usage")
             .or_else(|| payload.pointer("/response/usage")),
+        ApiFormat::Gemini => payload.get("usageMetadata"),
     };
     let Some(usage) = usage else {
         return UsageCounts::default();
@@ -377,6 +805,11 @@ pub fn extract_usage(format: ApiFormat, payload: &Value) -> UsageCounts {
                 .and_then(Value::as_u64)
                 .unwrap_or(0),
         },
+        ApiFormat::Gemini => UsageCounts {
+            input_tokens: uint(usage, "promptTokenCount"),
+            output_tokens: uint(usage, "candidatesTokenCount"),
+            cached_tokens: uint(usage, "cachedContentTokenCount"),
+        },
     }
 }
 
@@ -404,6 +837,11 @@ fn convert_request(
     body: Value,
     namespace_tools: &[NamespaceToolMapping],
 ) -> Result<Value, ProtocolError> {
+    let gemini_schema = if client == ApiFormat::Gemini {
+        gemini_output_schema(&body)?
+    } else {
+        None
+    };
     let converted = match (client, upstream) {
         (a, b) if a == b => body,
         (ApiFormat::Messages, ApiFormat::ChatCompletions) => messages_request_to_chat(body)?,
@@ -418,10 +856,47 @@ fn convert_request(
         (ApiFormat::Responses, ApiFormat::ChatCompletions) => {
             messages_request_to_chat(responses_request_to_messages(body, true, namespace_tools)?)?
         }
-        _ => unreachable!(),
+        (ApiFormat::Gemini, ApiFormat::Messages) => gemini_request_to_messages(body)?,
+        (ApiFormat::Gemini, ApiFormat::ChatCompletions) => {
+            messages_request_to_chat(gemini_request_to_messages(body)?)?
+        }
+        _ => {
+            return Err(ProtocolError::new(
+                "Gemini is a client-only format and requires a known native upstream protocol",
+            ));
+        }
     };
 
     let mut converted = converted;
+    if let Some(schema) = gemini_schema {
+        match upstream {
+            ApiFormat::Messages => {
+                converted["output_config"] = json!({
+                    "format": { "type": "json_schema", "schema": schema }
+                });
+            }
+            ApiFormat::ChatCompletions => {
+                converted["response_format"] = json!({
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "gemini_response",
+                        "strict": true,
+                        "schema": schema
+                    }
+                });
+            }
+            ApiFormat::Responses => {
+                converted["text"] = json!({
+                    "format": { "type": "json_schema", "name": "gemini_response", "schema": schema }
+                });
+            }
+            ApiFormat::Gemini => {
+                return Err(ProtocolError::new(
+                    "Gemini cannot be used as an upstream protocol",
+                ));
+            }
+        }
+    }
     if upstream == ApiFormat::ChatCompletions && client != ApiFormat::ChatCompletions {
         backfill_chat_tool_reasoning(&mut converted);
         return Ok(converted);
@@ -430,7 +905,7 @@ fn convert_request(
         return Ok(converted);
     }
     let mut converted = normalize_messages_system_roles(converted)?;
-    if client == ApiFormat::Responses
+    if matches!(client, ApiFormat::Responses | ApiFormat::Gemini)
         && let Some(messages) = converted.get_mut("messages").and_then(Value::as_array_mut)
     {
         ensure_leading_user_message(messages);
@@ -662,6 +1137,206 @@ fn append_system_blocks(target: &mut Vec<Value>, content: Option<&Value>) {
         }
         _ => {}
     }
+}
+
+fn gemini_request_to_messages(body: Value) -> Result<Value, ProtocolError> {
+    let mut out = Map::new();
+    copy(&body, &mut out, "model", "model");
+    copy(&body, &mut out, "stream", "stream");
+
+    let generation = body.get("generationConfig").unwrap_or(&Value::Null);
+    // Gemini CLI currently sends topK and thinkingConfig in its chat defaults.
+    // Neither field has one portable meaning across every supported Chat and
+    // Messages upstream, so they are accepted as compatibility hints but are
+    // intentionally not forwarded as provider-specific request fields.
+    copy(generation, &mut out, "temperature", "temperature");
+    copy(generation, &mut out, "topP", "top_p");
+    copy(generation, &mut out, "stopSequences", "stop_sequences");
+    out.insert(
+        "max_tokens".into(),
+        generation
+            .get("maxOutputTokens")
+            .cloned()
+            .unwrap_or_else(|| json!(8192)),
+    );
+
+    if let Some(system) = body.get("systemInstruction") {
+        let text = array(system, "parts")
+            .iter()
+            .filter_map(|part| part.get("text").and_then(Value::as_str))
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        if !text.is_empty() {
+            out.insert("system".into(), json!(text));
+        }
+    }
+
+    let mut messages = Vec::new();
+    for content in array(&body, "contents") {
+        let role = if content.get("role").and_then(Value::as_str) == Some("model") {
+            "assistant"
+        } else {
+            "user"
+        };
+        let mut blocks = Vec::new();
+        for part in array(content, "parts") {
+            if part.get("thought").and_then(Value::as_bool) == Some(true) {
+                // Thought signatures are provider-specific and cannot be replayed
+                // safely across protocols. Gemini CLI keeps the visible answer and
+                // tool calls independently, so dropping thought history is safe.
+                continue;
+            }
+            if let Some(text) = part.get("text").and_then(Value::as_str) {
+                if !text.is_empty() {
+                    blocks.push(json!({ "type": "text", "text": text }));
+                }
+                continue;
+            }
+            if let Some(data) = part.get("inlineData").or_else(|| part.get("inline_data")) {
+                let media_type = data
+                    .get("mimeType")
+                    .or_else(|| data.get("mime_type"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("image/png");
+                let encoded = data.get("data").and_then(Value::as_str).unwrap_or_default();
+                blocks.push(json!({
+                    "type": "image",
+                    "source": { "type": "base64", "media_type": media_type, "data": encoded }
+                }));
+                continue;
+            }
+            if let Some(call) = part
+                .get("functionCall")
+                .or_else(|| part.get("function_call"))
+            {
+                let name = call.get("name").and_then(Value::as_str).unwrap_or("tool");
+                let id = call
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .filter(|id| !id.is_empty())
+                    .unwrap_or(name);
+                blocks.push(json!({
+                    "type": "tool_use",
+                    "id": id,
+                    "name": name,
+                    "input": call.get("args").cloned().unwrap_or_else(empty_object)
+                }));
+                continue;
+            }
+            if let Some(response) = part
+                .get("functionResponse")
+                .or_else(|| part.get("function_response"))
+            {
+                let name = response
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .unwrap_or("tool");
+                let id = response
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .filter(|id| !id.is_empty())
+                    .unwrap_or(name);
+                let payload = response.get("response").filter(|value| !value.is_null());
+                let mut block = json!({
+                    "type": "tool_result",
+                    "tool_use_id": id,
+                    "content": json_string(payload)
+                });
+                if response.get("isError").and_then(Value::as_bool) == Some(true) {
+                    block["is_error"] = json!(true);
+                }
+                blocks.push(block);
+            }
+        }
+        push_message(&mut messages, role, blocks);
+    }
+    drop_empty_messages(&mut messages);
+    if messages.is_empty() {
+        return Err(ProtocolError::new(
+            "Gemini contents cannot be converted to an empty message history",
+        ));
+    }
+    out.insert("messages".into(), Value::Array(messages));
+
+    let function_config = body.pointer("/toolConfig/functionCallingConfig");
+    let allowed_names = function_config
+        .and_then(|config| config.get("allowedFunctionNames"))
+        .and_then(Value::as_array)
+        .map(|names| {
+            names
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let mut tools = Vec::new();
+    for tool in array(&body, "tools") {
+        for declaration in array(tool, "functionDeclarations") {
+            let name = declaration
+                .get("name")
+                .and_then(Value::as_str)
+                .filter(|name| !name.is_empty())
+                .ok_or_else(|| {
+                    ProtocolError::new("Gemini function declaration name is required")
+                })?;
+            if !allowed_names.is_empty() && !allowed_names.iter().any(|allowed| allowed == name) {
+                continue;
+            }
+            tools.push(json!({
+                "name": name,
+                "description": declaration.get("description").cloned().unwrap_or(Value::Null),
+                "input_schema": declaration
+                    .get("parametersJsonSchema")
+                    .or_else(|| declaration.get("parameters"))
+                    .cloned()
+                    .unwrap_or_else(empty_schema)
+            }));
+        }
+    }
+    if !allowed_names.is_empty() {
+        for name in &allowed_names {
+            if !tools
+                .iter()
+                .any(|tool| tool.get("name").and_then(Value::as_str) == Some(name))
+            {
+                return Err(ProtocolError::new(format!(
+                    "Gemini allowed function `{name}` is not declared"
+                )));
+            }
+        }
+    }
+    if !tools.is_empty() {
+        out.insert("tools".into(), Value::Array(tools));
+    }
+    if let Some(config) = function_config {
+        let mode = config
+            .get("mode")
+            .and_then(Value::as_str)
+            .unwrap_or("AUTO")
+            .to_ascii_uppercase();
+        let choice = match mode.as_str() {
+            "AUTO" => json!({ "type": "auto" }),
+            "ANY" if allowed_names.len() == 1 => {
+                json!({ "type": "tool", "name": allowed_names[0] })
+            }
+            "ANY" => json!({ "type": "any" }),
+            "NONE" => {
+                out.remove("tools");
+                Value::Null
+            }
+            _ => {
+                return Err(ProtocolError::new(format!(
+                    "Gemini function calling mode `{mode}` is not supported"
+                )));
+            }
+        };
+        if !choice.is_null() {
+            out.insert("tool_choice".into(), choice);
+        }
+    }
+    finish_anthropic_request_options(&mut out, None, None);
+    Ok(Value::Object(out))
 }
 
 fn messages_request_to_chat(body: Value) -> Result<Value, ProtocolError> {
@@ -1117,6 +1792,94 @@ fn chat_response_to_messages(body: &Value) -> Result<Value, ProtocolError> {
         "stop_sequence": null,
         "usage": chat_usage_to_anthropic(body.get("usage"))
     }))
+}
+
+fn messages_response_to_gemini(body: &Value) -> Result<Value, ProtocolError> {
+    let blocks = body
+        .get("content")
+        .and_then(Value::as_array)
+        .ok_or_else(|| ProtocolError::new("Messages response has no content"))?;
+    let mut parts = Vec::new();
+    for block in blocks {
+        match block.get("type").and_then(Value::as_str) {
+            Some("text") => {
+                if let Some(text) = block.get("text").and_then(Value::as_str) {
+                    if !text.is_empty() {
+                        parts.push(json!({ "text": text }));
+                    }
+                }
+            }
+            Some("tool_use") => {
+                let name = block.get("name").and_then(Value::as_str).unwrap_or("tool");
+                let id = block
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .filter(|id| !id.is_empty())
+                    .unwrap_or(name);
+                parts.push(json!({
+                    "functionCall": {
+                        "id": id,
+                        "name": name,
+                        "args": block.get("input").cloned().unwrap_or_else(empty_object)
+                    }
+                }));
+            }
+            // Provider-specific reasoning signatures cannot be represented
+            // safely as Gemini thought signatures, so do not replay them.
+            Some("thinking" | "redacted_thinking") => {}
+            _ => {}
+        }
+    }
+
+    let stop_reason = body
+        .get("stop_reason")
+        .and_then(Value::as_str)
+        .unwrap_or("end_turn");
+    let finish_reason = match stop_reason {
+        "max_tokens" | "model_context_window_exceeded" => "MAX_TOKENS",
+        "refusal" => "SAFETY",
+        _ => "STOP",
+    };
+    let mut candidate = json!({
+        "content": { "role": "model", "parts": parts },
+        "finishReason": finish_reason,
+        "index": 0
+    });
+    if stop_reason == "refusal" {
+        candidate["finishMessage"] = json!("upstream model refused the request");
+    }
+
+    let usage = body.get("usage").unwrap_or(&Value::Null);
+    let cached = uint(usage, "cache_read_input_tokens");
+    let created = uint(usage, "cache_creation_input_tokens");
+    let input = uint(usage, "input_tokens")
+        .saturating_add(cached)
+        .saturating_add(created);
+    let output = uint(usage, "output_tokens");
+    let mut response = json!({
+        "candidates": [candidate],
+        "usageMetadata": {
+            "promptTokenCount": input,
+            "candidatesTokenCount": output,
+            "totalTokenCount": input.saturating_add(output),
+            "cachedContentTokenCount": cached
+        }
+    });
+    if let Some(model) = body
+        .get("model")
+        .and_then(Value::as_str)
+        .filter(|model| !model.is_empty())
+    {
+        response["modelVersion"] = json!(model);
+    }
+    if let Some(id) = body
+        .get("id")
+        .and_then(Value::as_str)
+        .filter(|id| !id.is_empty())
+    {
+        response["responseId"] = json!(id);
+    }
+    Ok(response)
 }
 
 fn messages_response_to_chat(body: &Value) -> Result<Value, ProtocolError> {
@@ -2207,6 +2970,226 @@ mod tests {
                 "qwen3.7-plus",
                 "qwen3.6-plus",
             ]
+        );
+    }
+
+    #[test]
+    fn gemini_request_converts_text_image_tools_and_json_schema_to_messages() {
+        let request = json!({
+            "systemInstruction":{"parts":[{"text":"Be concise."}]},
+            "contents":[
+                {"role":"user","parts":[
+                    {"text":"Read this image."},
+                    {"inlineData":{"mimeType":"image/png","data":"aGVsbG8="}}
+                ]},
+                {"role":"model","parts":[
+                    {"functionCall":{"id":"call_1","name":"read_file","args":{"path":"Cargo.toml"}}}
+                ]},
+                {"role":"user","parts":[
+                    {"functionResponse":{"id":"call_1","name":"read_file","response":{"output":"ok"}}}
+                ]}
+            ],
+            "tools":[{"functionDeclarations":[{
+                "name":"read_file","description":"Read a file",
+                "parametersJsonSchema":{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}
+            }]}],
+            "toolConfig":{"functionCallingConfig":{"mode":"ANY","allowedFunctionNames":["read_file"]}},
+            "generationConfig":{
+                "maxOutputTokens":512,"temperature":0.2,"topP":0.95,
+                "stopSequences":["<END>"],"responseMimeType":"application/json",
+                "responseJsonSchema":{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}
+            }
+        });
+        let plan = prepare_gemini_request("minimax-m3".into(), false, bytes(request))
+            .expect("Gemini request should convert");
+        assert_eq!(plan.client, ApiFormat::Gemini);
+        assert_eq!(plan.upstream, ApiFormat::Messages);
+        let body: Value = serde_json::from_slice(&plan.body).unwrap();
+        assert_eq!(body["model"], "minimax-m3");
+        assert_eq!(body["system"], "Be concise.");
+        assert_eq!(
+            body["messages"][0]["content"][0]["text"],
+            "Read this image."
+        );
+        assert_eq!(body["messages"][0]["content"][1]["type"], "image");
+        assert_eq!(body["messages"][1]["content"][0]["id"], "call_1");
+        assert_eq!(body["messages"][2]["content"][0]["tool_use_id"], "call_1");
+        assert_eq!(
+            body["messages"][2]["content"][0]["content"],
+            "{\"output\":\"ok\"}"
+        );
+        assert_eq!(body["tools"][0]["input_schema"]["required"][0], "path");
+        assert_eq!(body["tool_choice"]["type"], "tool");
+        assert_eq!(body["tool_choice"]["name"], "read_file");
+        assert_eq!(body["max_tokens"], 512);
+        assert_eq!(body["output_config"]["format"]["type"], "json_schema");
+    }
+
+    #[test]
+    fn gemini_request_converts_to_chat_and_preserves_structured_output() {
+        let plan = prepare_gemini_request(
+            "deepseek-v4-flash".into(),
+            true,
+            bytes(json!({
+                "contents":[{"role":"user","parts":[
+                    {"text":"describe"},
+                    {"inlineData":{"mimeType":"image/jpeg","data":"aGVsbG8="}}
+                ]}],
+                "generationConfig":{
+                    "responseMimeType":"application/json",
+                    "responseJsonSchema":{"type":"object","properties":{"answer":{"type":"string"}}}
+                }
+            })),
+        )
+        .expect("Gemini chat-native request should convert");
+        assert_eq!(plan.upstream, ApiFormat::ChatCompletions);
+        assert!(plan.stream);
+        let body: Value = serde_json::from_slice(&plan.body).unwrap();
+        assert_eq!(body["messages"][0]["content"][0]["type"], "text");
+        assert!(
+            body["messages"][0]["content"][1]["image_url"]["url"]
+                .as_str()
+                .unwrap()
+                .starts_with("data:image/jpeg;base64,")
+        );
+        assert_eq!(body["response_format"]["type"], "json_schema");
+        assert_eq!(body["stream_options"]["include_usage"], true);
+    }
+
+    #[test]
+    fn gemini_response_converts_text_tools_finish_and_usage() {
+        let response = transform_between(
+            ApiFormat::Messages,
+            ApiFormat::Gemini,
+            &json!({
+                "id":"msg_1","model":"minimax-m3","stop_reason":"tool_use",
+                "content":[
+                    {"type":"text","text":"Checking."},
+                    {"type":"tool_use","id":"call_2","name":"read_file","input":{"path":"Cargo.toml"}}
+                ],
+                "usage":{"input_tokens":10,"cache_read_input_tokens":2,"output_tokens":3}
+            }),
+        )
+        .expect("Messages response should convert to Gemini");
+        assert_eq!(response["candidates"][0]["finishReason"], "STOP");
+        assert_eq!(
+            response["candidates"][0]["content"]["parts"][0]["text"],
+            "Checking."
+        );
+        assert_eq!(
+            response["candidates"][0]["content"]["parts"][1]["functionCall"]["id"],
+            "call_2"
+        );
+        assert_eq!(response["usageMetadata"]["promptTokenCount"], 12);
+        assert_eq!(response["usageMetadata"]["candidatesTokenCount"], 3);
+        assert_eq!(response["usageMetadata"]["totalTokenCount"], 15);
+        assert_eq!(response["responseId"], "msg_1");
+    }
+
+    #[test]
+    fn gemini_rejects_unknown_models_and_unsupported_features() {
+        let unknown = prepare_gemini_request(
+            "gemini-3-pro-preview".into(),
+            false,
+            bytes(json!({"contents":[{"role":"user","parts":[{"text":"hi"}]}]})),
+        )
+        .expect_err("Gemini cannot become an upstream protocol");
+        assert!(unknown.message.contains("unknown model"));
+
+        let cases = [
+            json!({"contents":[{"role":"user","parts":[{"fileData":{"mimeType":"image/png","fileUri":"x"}}]}]}),
+            json!({"contents":[{"role":"user","parts":[{"inlineData":{"mimeType":"image/svg+xml","data":"aGVsbG8="}}]}]}),
+            json!({"contents":[{"role":"user","parts":[{"inlineData":{"mimeType":"image/png","data":"not base64"}}]}]}),
+            json!({"contents":[{"role":"user","parts":[{"text":"hi"}]}],"tools":[{"googleSearch":{}}]}),
+            json!({"contents":[{"role":"user","parts":[{"text":"hi"}]}],"tools":[{"urlContext":{}}]}),
+            json!({"contents":[{"role":"user","parts":[{"text":"hi"}]}],"tools":[{"functionDeclarations":[{"name":"x","parameters":{},"parametersJsonSchema":{}}]}]}),
+            json!({"contents":[{"role":"user","parts":[{"text":"hi"}]}],"toolConfig":{"functionCallingConfig":{"mode":"VALIDATED"}}}),
+            json!({"contents":[{"role":"user","parts":[{"text":"hi"}]}],"cachedContent":"cachedContents/1"}),
+            json!({"contents":[{"role":"user","parts":[{"text":"hi"}]}],"safetySettings":{}}),
+            json!({"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"seed":7}}),
+            json!({"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"presencePenalty":0.5}}),
+            json!({"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"frequencyPenalty":0.5}}),
+            json!({"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"responseLogprobs":true}}),
+            json!({"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"logprobs":4}}),
+            json!({"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"mediaResolution":"MEDIA_RESOLUTION_HIGH"}}),
+            json!({"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"topK":"64"}}),
+            json!({"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"thinkingConfig":true}}),
+            json!({"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"candidateCount":"1"}}),
+            json!({"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"responseModalities":"TEXT"}}),
+            json!({"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"responseMimeType":1}}),
+        ];
+        for request in cases {
+            assert!(prepare_gemini_request("minimax-m3".into(), false, bytes(request)).is_err());
+        }
+
+        let empty_safety_settings = json!({
+            "contents":[{"role":"user","parts":[{"text":"hi"}]}],
+            "safetySettings":[]
+        });
+        prepare_gemini_request("minimax-m3".into(), false, bytes(empty_safety_settings))
+            .expect("empty Gemini safety settings do not change semantics");
+
+        let safety_error = prepare_gemini_request(
+            "minimax-m3".into(),
+            false,
+            bytes(json!({
+                "contents":[{"role":"user","parts":[{"text":"hi"}]}],
+                "safetySettings":[{
+                    "category":"HARM_CATEGORY_HATE_SPEECH",
+                    "threshold":"BLOCK_LOW_AND_ABOVE"
+                }]
+            })),
+        )
+        .expect_err("non-empty Gemini safety settings cannot be silently discarded");
+        assert_eq!(safety_error.status, StatusCode::BAD_REQUEST);
+        assert!(safety_error.message.contains("cannot be preserved"));
+    }
+
+    #[test]
+    fn gemini_cli_generation_hints_are_accepted_but_not_leaked_upstream() {
+        let plan = prepare_gemini_request(
+            "minimax-m3".into(),
+            false,
+            bytes(json!({
+                "contents":[{"role":"user","parts":[{"text":"hi"}]}],
+                "generationConfig":{
+                    "temperature":1,
+                    "topP":0.95,
+                    "topK":64,
+                    "thinkingConfig":{"includeThoughts":true}
+                }
+            })),
+        )
+        .expect("Gemini CLI defaults must remain compatible");
+        let body: Value = serde_json::from_slice(&plan.body).unwrap();
+        assert_eq!(body["temperature"], 1);
+        assert_eq!(body["top_p"], 0.95);
+        assert!(body.get("topK").is_none());
+        assert!(body.get("top_k").is_none());
+        assert!(body.get("thinkingConfig").is_none());
+        assert!(body.get("thinking").is_none());
+    }
+
+    #[test]
+    fn gemini_error_and_usage_use_google_envelopes() {
+        let body = format_error(
+            ApiFormat::Gemini,
+            StatusCode::UNAUTHORIZED,
+            "invalid gateway key",
+            None,
+        );
+        assert_eq!(body["error"]["code"], 401);
+        assert_eq!(body["error"]["status"], "UNAUTHENTICATED");
+        assert_eq!(
+            extract_usage(
+                ApiFormat::Gemini,
+                &json!({"usageMetadata":{"promptTokenCount":9,"candidatesTokenCount":3,"cachedContentTokenCount":2}}),
+            ),
+            UsageCounts {
+                input_tokens: 9,
+                output_tokens: 3,
+                cached_tokens: 2
+            }
         );
     }
 

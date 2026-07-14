@@ -147,15 +147,23 @@ Pair them with `pnpm run build:web` for a final smoke test.
 
 - The gateway is `crates/ocg-core/src/gateway/`: Axum + Tokio + reqwest,
   bound to `127.0.0.1:9042` by default.
-- The handler parses the client's `Authorization: Bearer <gateway-key>`,
-  validates it against the configured key, selects an enabled account,
-  rewrites auth for upstream, and records logs, usage, cooldown, and
+- The handler accepts the configured Gateway Key as
+  `Authorization: Bearer`, `x-api-key`, or `x-goog-api-key`, selects an enabled
+  account, rewrites auth for upstream, and records logs, usage, cooldown, and
   errors in SQLite.
 - `protocol.rs` and `protocol_stream.rs` convert between Chat Completions,
-  Responses, and Anthropic Messages. `selector.rs` picks the next account
-  and skips disabled / cooled‑down / already‑failed accounts. `limit.rs`
-  parses the upstream 429 reset phrase. `cost.rs` aggregates token counts
-  into the local 5‑hour / weekly / monthly windows.
+  Responses, Anthropic Messages, and the client-side Gemini format. Gemini is
+  never an upstream protocol: `/v1beta/models/{model}:generateContent` and
+  `:streamGenerateContent` (plus their `/v1/models/...` aliases) are converted
+  to the known model's native Chat Completions or Messages path and back into
+  Google JSON/SSE envelopes. `selector.rs` picks the next account and skips
+  disabled / cooled-down / already-failed accounts. `limit.rs` parses the
+  upstream 429 reset phrase. `cost.rs` aggregates token counts into the local
+  5-hour / weekly / monthly windows.
+- Claude Desktop has isolated `/claude-desktop/v1/messages` and
+  `/claude-desktop/v1/models` routes. Its three advertised Claude aliases are
+  rewritten from `AppConfig.claude_desktop_models` before entering the normal
+  Messages preparation path.
 
 ### Dashboard
 
@@ -172,6 +180,12 @@ Pair them with `pnpm run build:web` for a final smoke test.
   current and latest versions plus the release page URL; the gateway never
   downloads or installs release artifacts. This outbound request runs only
   when the user clicks the check button; it is not telemetry.
+- The Applications view is generated from 13 guides: Claude Code, Claude
+  Desktop, Codex, Gemini CLI, OpenCode, OpenClaw, Hermes, Cherry Studio,
+  VS Code Copilot Chat, Cline, Roo Code, Continue, and Chatbox. Its ordinary
+  model selections and edited snippets are in-memory view state. Claude
+  Desktop mappings are durable and use the protected
+  `GET/PUT /dashboard/api/claude-desktop/models` endpoint.
 - Docker may bootstrap the first administrator with
   `OCG_ADMIN_USERNAME` and `OCG_ADMIN_PASSWORD`; otherwise the first
   registration wins.
@@ -184,6 +198,11 @@ Pair them with `pnpm run build:web` for a final smoke test.
   obfuscation and `.encryption-key` management.
 - `crates/ocg-core/src/state.rs` is the `CoreStateInner` shared by the
   gateway, dashboard, and CLI.
+- `AppConfig` uses serde defaults for backward-compatible loading. A pre-1.3
+  config without `claude_desktop_models` receives the default Sonnet target
+  `minimax-m3` and is canonically rewritten to SQLite. Model updates are
+  serialized by `settings_update`; an ordinary settings save preserves the
+  dedicated Claude Desktop mapping.
 
 ### Per‑Node Boundaries
 
@@ -381,6 +400,21 @@ covers most of them; the manual parts need a real desktop.
 
 - [ ] `pnpm run test`, `pnpm run design:lint`, `pnpm run build` are
       green on the three runners.
+- [ ] Exercise Gemini `generateContent` and `streamGenerateContent` with
+      `x-goog-api-key` against both a Chat-native and a Messages-native model;
+      confirm Google JSON/SSE error and usage envelopes. Confirm `countTokens`
+      and `embedContent` return the documented `501` response.
+- [ ] Confirm a non-empty Gemini `safetySettings` request returns `400`, while
+      `null` and `[]` remain accepted. Exercise representative unsupported
+      `cachedContent`, `fileData`, Google Search, and `urlContext` requests so
+      they fail before any upstream request is billed. Treat `topK` and
+      `thinkingConfig` as compatibility hints only; do not assert native
+      Gemini-equivalent semantics in smoke tests.
+- [ ] Exercise authenticated Claude Desktop model discovery and Messages alias
+      rewriting. Save all three mappings through the dashboard API, restart
+      with the same data directory, and verify the mappings survive. On a
+      non-loopback dashboard, verify the mapping API returns `401` without a
+      valid session.
 - [ ] `git diff --check` is clean, the previous-tag diff contains only the
       intended release scope, and all four version manifests plus the three
       local Cargo lock entries agree.
@@ -427,6 +461,15 @@ covers most of them; the manual parts need a real desktop.
   `conversation`, `store: true`, and `background: true` return `400`
   rather than being silently ignored. This is intentional — see
   `protocol.rs` and the User guide.
+- Gemini is a compatibility input, not a native upstream. Only
+  `generateContent` and `streamGenerateContent` forward requests;
+  `countTokens` and `embedContent` return `501`. Non-empty safety policy,
+  cached content, file-backed media, Google-hosted tools, and other semantics
+  that cannot survive conversion are rejected with `400`. `topK` and
+  `thinkingConfig` may be accepted for client compatibility but are not a
+  promise of equivalent behavior on Chat Completions or Messages upstreams.
+  Every other non-null `generationConfig` field must be mapped or rejected;
+  never add a silent pass-through exception.
 
 ## Coding Conventions
 

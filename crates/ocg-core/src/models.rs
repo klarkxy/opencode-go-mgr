@@ -49,6 +49,7 @@ pub struct AppConfig {
     pub connect_timeout_secs: u64,
     pub non_stream_timeout_secs: u64,
     pub stream_idle_timeout_secs: u64,
+    pub claude_desktop_models: ClaudeDesktopModels,
 }
 
 impl Default for AppConfig {
@@ -62,9 +63,101 @@ impl Default for AppConfig {
             connect_timeout_secs: 30,
             non_stream_timeout_secs: 120,
             stream_idle_timeout_secs: 300,
+            claude_desktop_models: ClaudeDesktopModels::default(),
         }
     }
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClaudeDesktopModels {
+    pub sonnet: String,
+    pub opus: String,
+    pub haiku: String,
+}
+
+impl Default for ClaudeDesktopModels {
+    fn default() -> Self {
+        Self {
+            sonnet: "minimax-m3".to_string(),
+            opus: String::new(),
+            haiku: String::new(),
+        }
+    }
+}
+
+impl ClaudeDesktopModels {
+    pub fn normalize(&mut self) {
+        self.sonnet = self.sonnet.trim().to_string();
+        self.opus = self.opus.trim().to_string();
+        self.haiku = self.haiku.trim().to_string();
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        if self.first_configured().is_none() {
+            return Err("at least one Claude Desktop model is required".to_string());
+        }
+        for (role, model) in [
+            ("sonnet", self.sonnet.as_str()),
+            ("opus", self.opus.as_str()),
+            ("haiku", self.haiku.as_str()),
+        ] {
+            if !model.is_empty()
+                && !crate::gateway::protocol::supported_model_ids()
+                    .any(|supported| supported == model)
+            {
+                return Err(format!("unsupported Claude Desktop {role} model `{model}`"));
+            }
+        }
+        Ok(())
+    }
+
+    pub fn resolved(&self) -> Self {
+        let fallback = self.first_configured().unwrap_or_default();
+        Self {
+            sonnet: if self.sonnet.is_empty() {
+                fallback.to_string()
+            } else {
+                self.sonnet.clone()
+            },
+            opus: if self.opus.is_empty() {
+                fallback.to_string()
+            } else {
+                self.opus.clone()
+            },
+            haiku: if self.haiku.is_empty() {
+                fallback.to_string()
+            } else {
+                self.haiku.clone()
+            },
+        }
+    }
+
+    pub(crate) fn model_for_alias(&self, alias: &str) -> Option<&str> {
+        let configured = match alias {
+            CLAUDE_DESKTOP_SONNET_ALIAS => self.sonnet.as_str(),
+            CLAUDE_DESKTOP_OPUS_ALIAS => self.opus.as_str(),
+            CLAUDE_DESKTOP_HAIKU_ALIAS => self.haiku.as_str(),
+            _ => return None,
+        };
+        (!configured.is_empty())
+            .then_some(configured)
+            .or_else(|| self.first_configured())
+    }
+
+    fn first_configured(&self) -> Option<&str> {
+        [
+            self.sonnet.as_str(),
+            self.opus.as_str(),
+            self.haiku.as_str(),
+        ]
+        .into_iter()
+        .find(|model| !model.is_empty())
+    }
+}
+
+pub const CLAUDE_DESKTOP_SONNET_ALIAS: &str = "claude-sonnet-4-6";
+pub const CLAUDE_DESKTOP_OPUS_ALIAS: &str = "claude-opus-4-6";
+pub const CLAUDE_DESKTOP_HAIKU_ALIAS: &str = "claude-haiku-4-5-20251001";
 
 /// Validates and canonicalizes the optional URL shown to downstream clients.
 pub fn normalize_client_root_url(value: &str) -> Result<String, String> {
@@ -113,6 +206,11 @@ pub fn normalize_client_root_url(value: &str) -> Result<String, String> {
 }
 
 impl AppConfig {
+    pub fn validate(&self) -> Result<(), String> {
+        self.validate_timeouts()?;
+        self.claude_desktop_models.validate()
+    }
+
     pub fn validate_timeouts(&self) -> Result<(), String> {
         for (name, value, max) in [
             ("connect_timeout_secs", self.connect_timeout_secs, 300),
@@ -225,4 +323,52 @@ pub struct DailyModelCost {
     pub date: String,
     pub model: String,
     pub cost: f64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        CLAUDE_DESKTOP_HAIKU_ALIAS, CLAUDE_DESKTOP_OPUS_ALIAS, CLAUDE_DESKTOP_SONNET_ALIAS,
+        ClaudeDesktopModels,
+    };
+
+    #[test]
+    fn claude_desktop_models_map_aliases_and_inherit_by_role_priority() {
+        let models = ClaudeDesktopModels {
+            sonnet: String::new(),
+            opus: "glm-5.2".to_string(),
+            haiku: "mimo-v2.5".to_string(),
+        };
+
+        assert_eq!(
+            models.model_for_alias(CLAUDE_DESKTOP_SONNET_ALIAS),
+            Some("glm-5.2")
+        );
+        assert_eq!(
+            models.model_for_alias(CLAUDE_DESKTOP_OPUS_ALIAS),
+            Some("glm-5.2")
+        );
+        assert_eq!(
+            models.model_for_alias(CLAUDE_DESKTOP_HAIKU_ALIAS),
+            Some("mimo-v2.5")
+        );
+        assert_eq!(models.model_for_alias("claude-unknown"), None);
+    }
+
+    #[test]
+    fn claude_desktop_models_reject_unknown_and_all_empty_values() {
+        let empty = ClaudeDesktopModels {
+            sonnet: String::new(),
+            opus: String::new(),
+            haiku: String::new(),
+        };
+        assert!(empty.validate().is_err());
+
+        let unknown = ClaudeDesktopModels {
+            sonnet: "not-a-supported-model".to_string(),
+            ..ClaudeDesktopModels::default()
+        };
+        assert!(unknown.validate().is_err());
+        assert!(ClaudeDesktopModels::default().validate().is_ok());
+    }
 }

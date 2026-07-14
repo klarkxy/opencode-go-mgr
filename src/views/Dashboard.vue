@@ -171,7 +171,13 @@
               :class="account.enabled ? (isCoolingDown(account) ? 'cooling' : 'active') : 'disabled'"
             >{{ statusLabel(account) }}</span>
           </div>
-          <div class="account-usage mono">{{ getUsageText(account.id) }}</div>
+          <div v-if="usageMap[account.id]" class="account-usage mono">
+            <div v-for="row in getUsageRows(account.id)" :key="row.label" class="account-usage-row">
+              <span>{{ row.label }}</span>
+              <strong>{{ row.value }}</strong>
+            </div>
+          </div>
+          <div v-else class="account-usage-empty">{{ t("暂无用量") }}</div>
         </article>
       </div>
     </section>
@@ -254,14 +260,14 @@ function statusLabel(account: Account): string {
   return isCoolingDown(account) ? t("冷却中") : t("可用");
 }
 
-function getUsageText(accountId: string): string {
+function getUsageRows(accountId: string): Array<{ label: string; value: string }> {
   const usage = usageMap.value[accountId];
-  if (!usage) return t("暂无用量");
-  return t("5h {five} · 周 {week} · 月 {month}", {
-    five: formatCost(usage.window_5h),
-    week: formatCost(usage.window_week),
-    month: formatCost(usage.window_month),
-  });
+  if (!usage) return [];
+  return [
+    { label: t("5小时"), value: formatCost(usage.window_5h) },
+    { label: t("本周"), value: formatCost(usage.window_week) },
+    { label: t("本月"), value: formatCost(usage.window_month) },
+  ];
 }
 
 async function copyConnection(target: ConnectionTarget, value: string, label: string) {
@@ -590,9 +596,28 @@ onUnmounted(cleanup);
 .account-status.cooling { color: var(--ocg-warning); }
 .account-status.disabled { color: var(--ocg-subtle); }
 .account-usage {
+  display: grid;
+  gap: 2px;
   color: var(--ocg-subtle);
   font-size: var(--ocg-font-size);
   line-height: 1.5;
+}
+.account-usage-row {
+  display: grid;
+  grid-template-columns: minmax(3.5em, auto) minmax(0, 1fr);
+  gap: 8px;
+}
+.account-usage-row strong {
+  overflow: hidden;
+  color: var(--ocg-ink);
+  font-weight: 500;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.account-usage-empty {
+  color: var(--ocg-subtle);
+  font-size: var(--ocg-font-size);
 }
 
 @media (max-width: 900px) {

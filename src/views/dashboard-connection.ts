@@ -7,6 +7,10 @@ export function maskConnectionKey(key: string): string {
   return `${key.slice(0, 4)}…${key.slice(-4)}`;
 }
 
+export function restoreMaskedConnectionKey(value: string, maskedKey: string, actualKey: string): string {
+  return value.replaceAll(maskedKey, () => actualKey);
+}
+
 export interface ConnectionUrls {
   rootUrl: string;
   apiBaseUrl: string;
@@ -68,6 +72,19 @@ export function resolveConnectionUrls(
     messagesUrl: `${apiBaseUrl}/messages`,
     insecureHttp: isInsecureHttp(rootUrl),
   };
+}
+
+export function isGeminiCliBaseUrlAllowed(rootUrl: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(rootUrl);
+  } catch {
+    return false;
+  }
+  if (url.protocol === "https:") return true;
+  if (url.protocol !== "http:") return false;
+  const hostname = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
 }
 
 function isInsecureHttp(rootUrl: string): boolean {

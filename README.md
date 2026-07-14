@@ -7,10 +7,12 @@
 </p>
 
 OCG Manager is a local, multi-account operations console for OpenCode‑Go. It
-stores your OpenCode‑Go account keys in a local SQLite database, exposes an
-OpenAI‑compatible gateway at `http://127.0.0.1:9042/v1`, and serves a Vue 3
-dashboard from that same gateway. The desktop build is a Tauri v2 tray app for
-Windows, macOS, and Linux; a headless CLI is shipped alongside the GUI.
+stores your OpenCode‑Go account keys in a local SQLite database, exposes a
+multi-protocol gateway rooted at `http://127.0.0.1:9042`, and serves a Vue 3
+dashboard from that same gateway. OpenAI and Anthropic clients use `/v1`, while
+Gemini and Claude Desktop use dedicated compatibility paths. The desktop build
+is a Tauri v2 tray app for Windows, macOS, and Linux; a headless CLI is shipped
+alongside the GUI.
 
 <p align="center">
   <img src="assets/opencode娘.png" alt="OpenCode-Go mascot" width="360">
@@ -18,10 +20,13 @@ Windows, macOS, and Linux; a headless CLI is shipped alongside the GUI.
 
 ## Highlights
 
-- **OpenAI / Anthropic compatible gateway** — `POST /v1/chat/completions`,
-  `POST /v1/responses`, `POST /v1/messages`, and `GET /v1/models` are accepted
-  on the same port. Requests are routed to the model's native OpenCode‑Go
-  protocol and the response is converted back to the client protocol.
+- **OpenAI / Anthropic / Gemini compatible gateway** — Chat Completions,
+  Responses, Messages, Gemini `generateContent` / `streamGenerateContent`, and
+  model discovery are accepted on the same port. Requests are routed to the
+  model's native OpenCode‑Go protocol and converted back to the client format.
+- **Claude Desktop aliases** — `/claude-desktop/v1/messages` and
+  `/claude-desktop/v1/models` expose the Claude model names expected by the
+  desktop client while routing each alias to a configured OpenCode‑Go model.
 - **Local multi‑account rotation** — accounts are tried in list order. Disabled
   accounts, accounts cooling down, and accounts that already failed during the
   current request are skipped, with a fast failover.
@@ -56,10 +61,10 @@ pulled without a registry login. The published image currently targets
 `linux/amd64`.
 
 ```bash
-git clone --branch v1.2.1 --depth 1 https://github.com/klarkxy/opencode-go-mgr.git
+git clone --branch v1.3.0 --depth 1 https://github.com/klarkxy/opencode-go-mgr.git
 cd opencode-go-mgr
 cp .env.example .env
-# Edit .env: choose first-run administrator setup and pin OCG_IMAGE to 1.2.1.
+# Edit .env: choose first-run administrator setup and pin OCG_IMAGE to 1.3.0.
 docker compose pull
 docker compose up -d --no-build
 docker compose ps
@@ -95,7 +100,8 @@ curl http://127.0.0.1:9042/v1/chat/completions \
 
 On a normal desktop launch, OCG Manager opens the dashboard in your system
 browser after the Gateway is ready. Add an OpenCode‑Go account, copy the
-Gateway Key, and point any OpenAI‑compatible client at
+Gateway Key, and use the **Applications** view for client-specific paths and
+configuration. OpenAI-compatible clients normally use
 `http://127.0.0.1:9042/v1`. If the browser does not open or you close the tab,
 use the tray icon to reopen the dashboard.
 
@@ -137,10 +143,28 @@ completion status, errors, and usage fields.
 - **Anthropic Messages** — `minimax-m3`, `minimax-m2.7`, `minimax-m2.5`,
   `qwen3.7-max`, `qwen3.7-plus`, `qwen3.6-plus`.
 
+Gemini is a client-only format: both
+`/v1beta/models/{model}:generateContent` and
+`:streamGenerateContent` are supported, with `/v1/models/...` accepted as an
+API-version alias. The request is converted to the selected model's known
+native protocol. Gemini clients may authenticate with `x-goog-api-key`.
+Claude Desktop uses `/claude-desktop/v1/...` and the advertised aliases
+`claude-sonnet-4-6`, `claude-opus-4-6`, and
+`claude-haiku-4-5-20251001`; each alias is rewritten to its saved model mapping.
+
 Unknown models keep the request's native Chat Completions or Messages
-protocol. An unknown model requested through the Responses endpoint is
-rejected with `400` — the gateway will not guess a protocol by trial because
-that could double‑bill the request.
+protocol. Unknown models requested through Responses or Gemini, and unknown
+Claude Desktop aliases, are rejected with `400` — the gateway will not guess a
+protocol by trial because that could double-bill the request.
+
+Gemini `countTokens` and `embedContent` currently return `501`. Non-empty
+`safetySettings`, `cachedContent`, `fileData`, Google Search, and `urlContext`
+are rejected with `400` because their semantics cannot be preserved safely.
+`topK` and `thinkingConfig` are accepted only as cross-protocol compatibility
+hints; do not assume behavior equivalent to a native Gemini backend. Other
+non-null `generationConfig` fields return `400` unless they are explicitly
+mapped by the gateway. See the
+[User guide](docs/USER.md#limits) for the complete compatibility boundary.
 
 ## Documentation
 

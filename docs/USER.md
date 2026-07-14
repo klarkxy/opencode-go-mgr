@@ -183,7 +183,6 @@ panel that always appears at the top. It contains:
   a one‑click copy. Regenerating invalidates the previous key immediately.
 - The **API Base URL** (e.g. `http://127.0.0.1:9042/v1`) with a one‑click
   copy.
-- The full **Chat Completions**, **Responses**, and **Messages** endpoints.
 - The **Upstream URL** the gateway forwards to, with a copy action.
 - An **HTTP warning** that appears whenever the resolved root URL is a
   non‑loopback `http://` URL, so the Gateway Key and request contents are
@@ -209,19 +208,34 @@ contents to the network.
 
 ### Application Guides
 
-The **Applications** view ships with per‑client configuration snippets for
-ten downstream tools: Claude Code, Codex, OpenCode, Cherry Studio, VS Code
-Copilot Chat, Trae, Cline, Roo Code, Continue, and Chatbox. Each guide
-shows the protocol the tool speaks, the official documentation URL, a short
-summary, step‑by‑step instructions, and one or more code blocks with a
-**Copy** button. Snippets are rendered twice: a *display* version that
-masks the key and a *copy* version that includes the real key, so the
-on‑screen guide stays shareable.
+The **Applications** view ships with per-client configuration snippets for
+13 downstream tools: Claude Code, Claude Desktop, Codex, Gemini CLI, OpenCode,
+OpenClaw, Hermes, Cherry Studio, VS Code Copilot Chat, Cline, Roo Code,
+Continue, and Chatbox. Each guide shows the protocol the tool speaks, the
+official documentation URL, step-by-step instructions, model selectors, and
+one or more editable code blocks with a **Copy** button. The displayed block
+masks the Gateway Key; copying restores the real key, so screenshots remain
+shareable without producing an unusable configuration.
 
-Three clients need the root URL without `/v1` (Claude Code, Cherry Studio,
-Chatbox). Five clients need the API Base URL with `/v1` (OpenCode, Trae,
-Cline, Roo Code, Continue). VS Code Copilot Chat needs the full
-`/v1/chat/completions` URL. Codex needs `/v1` plus `wire_api = "responses"`.
+- Claude Code, Cherry Studio, and Chatbox use the root URL without `/v1`.
+- Claude Desktop uses that root plus `/claude-desktop`; its client then calls
+  `/claude-desktop/v1/messages` and `/claude-desktop/v1/models`.
+- Gemini CLI uses the root URL with `GOOGLE_GENAI_API_VERSION=v1beta`. Its
+  remote Base URL must use HTTPS; only `localhost`, `127.0.0.1`, and `[::1]`
+  may use HTTP. The Applications view disables Gemini configuration copying
+  when the resolved root violates this client-side rule.
+- OpenCode, OpenClaw, Hermes, Cline, Roo Code, and Continue use the API Base
+  URL ending in `/v1`.
+- VS Code Copilot Chat needs the full `/v1/chat/completions` URL. Codex needs
+  `/v1` plus `wire_api = "responses"`.
+
+Model choices and edited snippets are cached separately per application while
+the current dashboard page remains alive. A page reload resets this in-memory
+state. **Restore defaults** resets the active application's model selection and
+snippet drafts. Claude Desktop is the exception with durable model mappings:
+before its configuration is copied, the selected `sonnet`, `opus`, and `haiku`
+targets are saved to SQLite through the protected dashboard API. Its restore
+action returns to the mapping loaded or last saved in the current page.
 
 ### Accounts
 
@@ -282,6 +296,10 @@ The gateway is served at `http://<bind>:<port>` and exposes:
 | `POST` | `/v1/responses` | OpenAI Responses |
 | `POST` | `/v1/messages` | Anthropic Messages |
 | `GET`  | `/v1/models` | OpenAI model list |
+| `POST` | `/v1beta/models/{model}:generateContent` | Gemini non-stream generation (`/v1/models/...` is also accepted) |
+| `POST` | `/v1beta/models/{model}:streamGenerateContent` | Gemini SSE generation (`/v1/models/...` is also accepted) |
+| `GET`  | `/claude-desktop/v1/models` | Claude Desktop alias model list |
+| `POST` | `/claude-desktop/v1/messages` | Claude Desktop Messages with alias rewriting |
 | `GET`  | `/dashboard/` | Vue 3 dashboard (HTML) |
 | `*`    | `/dashboard/api/...` | Dashboard JSON API |
 
@@ -293,10 +311,10 @@ endpoint; Docker checks container-internal TCP port `9042`.
 
 ### Authentication
 
-Gateway API endpoints require the **Gateway Key**, accepted as either
-`Authorization: Bearer <key>` or the Anthropic-compatible
-`x-api-key: <key>` header. Dashboard authentication depends on the
-listener bind:
+Gateway API endpoints require the **Gateway Key**, accepted as
+`Authorization: Bearer <key>`, the Anthropic-compatible
+`x-api-key: <key>`, or the Gemini-compatible `x-goog-api-key: <key>` header.
+Dashboard authentication depends on the listener bind:
 
 - **Loopback binds (the default).** Requests that come straight to the
   loopback address skip dashboard login unless they carry `Forwarded`,
@@ -316,7 +334,7 @@ has nothing to do with the OpenCode‑Go account key, which the gateway
 retrieves from SQLite and sends upstream with its own
 `Authorization: Bearer <opencode-go-key>` header.
 
-Minimal POSIX-shell checks for all three protocols:
+Minimal POSIX-shell checks for all four client formats:
 
 ```bash
 BASE=http://127.0.0.1:9042
@@ -336,7 +354,19 @@ curl "$BASE/v1/responses" -H "Authorization: Bearer $KEY" \
 curl "$BASE/v1/messages" -H "x-api-key: $KEY" \
   -H "anthropic-version: 2023-06-01" -H "Content-Type: application/json" \
   -d '{"model":"deepseek-v4-flash","max_tokens":16,"messages":[{"role":"user","content":"ping"}]}'
+
+# Gemini generateContent
+curl "$BASE/v1beta/models/deepseek-v4-flash:generateContent" \
+  -H "x-goog-api-key: $KEY" -H "Content-Type: application/json" \
+  -d '{"contents":[{"role":"user","parts":[{"text":"ping"}]}]}'
 ```
+
+Claude Desktop uses the same Gateway Key but sends one of the aliases returned
+by `GET /claude-desktop/v1/models` to
+`POST /claude-desktop/v1/messages`. The default aliases are
+`claude-sonnet-4-6`, `claude-opus-4-6`, and
+`claude-haiku-4-5-20251001`; the gateway rewrites them to the model targets
+saved from the Applications view.
 
 ### Protocol Conversion
 
@@ -346,6 +376,20 @@ request arrives in a different protocol, the gateway converts the
 SSE stream) back to the client protocol. Conversion covers text, system
 instructions, images, tool calls and tool results, reasoning content,
 completion status, errors, and usage fields.
+
+Gemini `generateContent` and `streamGenerateContent` are client-only formats:
+the gateway never sends Gemini wire data upstream. It converts `contents`,
+text-only `systemInstruction`, supported `inlineData` images,
+`functionDeclarations`, function calls/results, JSON-schema output, generation
+options, Google error envelopes, usage metadata, and SSE frames to and from the
+known model's native Chat Completions or Messages protocol. Both the `v1beta`
+and `v1` URL forms are accepted. An unknown Gemini model returns `400` because
+there is no safe native upstream protocol to choose.
+
+Claude Desktop follows the existing Messages conversion path after its
+advertised model alias has been rewritten. The `sonnet`, `opus`, and `haiku`
+mappings are serialized inside `AppConfig`; omitted roles inherit the first
+configured role, while the dashboard returns the resolved three-role mapping.
 
 The Responses endpoint is **stateless** in this gateway. The following
 fields return `400` instead of being silently ignored:
@@ -474,7 +518,7 @@ ARM64 image. Run the Compose commands from a checkout containing
 `compose.yaml` and `.env.example` (preferably the matching release tag):
 
 ```bash
-git clone --branch v1.2.1 --depth 1 https://github.com/klarkxy/opencode-go-mgr.git
+git clone --branch v1.3.0 --depth 1 https://github.com/klarkxy/opencode-go-mgr.git
 cd opencode-go-mgr
 cp .env.example .env
 # PowerShell: Copy-Item .env.example .env
@@ -486,9 +530,9 @@ docker compose ps
 
 The default image is `ghcr.io/klarkxy/opencode-go-mgr:latest`. For repeatable
 production deployments, set `OCG_IMAGE` in `.env` to a full release tag such
-as `ghcr.io/klarkxy/opencode-go-mgr:1.2.1`. The full version and
+as `ghcr.io/klarkxy/opencode-go-mgr:1.3.0`. The full version and
 `sha-<commit>` tags identify one release and are intended not to move;
-`1.2` and `latest` move forward. Only a digest such as
+`1.3` and `latest` move forward. Only a digest such as
 `ghcr.io/klarkxy/opencode-go-mgr@sha256:...` is technically immutable. To build the current checkout
 instead, set `OCG_IMAGE=ocg-manager:local` and run
 `docker compose up -d --build`. `NPM_REGISTRY` and `CARGO_REGISTRY` are build
@@ -566,9 +610,9 @@ Each stable image includes an SPDX SBOM, BuildKit SLSA provenance, and a
 GitHub signed provenance attestation. Inspect and verify a release with:
 
 ```bash
-docker buildx imagetools inspect ghcr.io/klarkxy/opencode-go-mgr:1.2.1
+docker buildx imagetools inspect ghcr.io/klarkxy/opencode-go-mgr:1.3.0
 gh attestation verify \
-  oci://ghcr.io/klarkxy/opencode-go-mgr:1.2.1 \
+  oci://ghcr.io/klarkxy/opencode-go-mgr:1.3.0 \
   --repo klarkxy/opencode-go-mgr
 ```
 
@@ -618,8 +662,26 @@ intentionally want to delete all stored accounts, credentials, and keys.
 
 ## Limits
 
-- `/embeddings` is not implemented.
-- Gemini protocol conversion is not implemented.
+- `/embeddings` is not implemented. Gemini `embedContent` is routed but
+  returns a Google-style `501 UNIMPLEMENTED` response.
+- Gemini `countTokens` also returns `501`; Gemini CLI is expected to fall back
+  to local token estimation. Only `generateContent` and
+  `streamGenerateContent` are forwarding actions.
+- Non-empty Gemini `safetySettings` return `400` because a different upstream
+  protocol cannot preserve their safety semantics. `null` and an empty array
+  are accepted because they impose no policy.
+- Gemini `cachedContent`, `fileData`, Google Search tools, `urlContext`,
+  multimodal function-response parts, function response schemas/behavior,
+  `VALIDATED` function calling, candidate counts other than one, and response
+  modalities other than `TEXT` return `400`. Use base64 `inlineData` for PNG,
+  JPEG, GIF, or WebP images.
+- Gemini `topK` and `thinkingConfig` are accepted only as cross-protocol
+  compatibility hints. A native Chat Completions or Messages upstream may
+  ignore them or implement different semantics; exact Gemini-equivalent
+  sampling and thinking behavior is not guaranteed.
+- Other non-null generation options that cannot be preserved, including
+  `seed`, presence/frequency penalties, log-probability controls, and media
+  resolution, return `400` instead of being silently discarded.
 - Responses is stateless: requests must set `store: false`.
   `previous_response_id`, `conversation`, `store: true`, and
   `background: true` return `400` instead of being silently ignored.

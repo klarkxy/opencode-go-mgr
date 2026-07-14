@@ -57,7 +57,7 @@ impl CoreStateInner {
     ) -> crate::Result<Self> {
         crate::auth::bootstrap_admin_from_env(&db)?;
         let (config, needs_persist) = load_config(&db)?;
-        config.validate_timeouts().map_err(anyhow::Error::msg)?;
+        config.validate().map_err(anyhow::Error::msg)?;
         if needs_persist {
             // Persist generated defaults and drop fields removed from AppConfig.
             save_config(&db, &config)?;
@@ -141,7 +141,8 @@ impl CoreStateInner {
         if self.client_root_url_override.is_some() {
             config.client_root_url = self.config.lock().client_root_url.clone();
         }
-        config.validate_timeouts().map_err(anyhow::Error::msg)?;
+        config.claude_desktop_models.normalize();
+        config.validate().map_err(anyhow::Error::msg)?;
         let http_client = build_http_client(&config)?;
         {
             let db = self.db.lock();
@@ -200,6 +201,7 @@ fn load_config(db: &Database) -> crate::Result<(AppConfig, bool)> {
     let mut needs_persist = false;
     if let Some(value) = db.get_setting("config")? {
         config = serde_json::from_str(&value)?;
+        config.claude_desktop_models.normalize();
         needs_persist = serde_json::to_string(&config)? != value;
     }
     if config.gateway_key.is_empty() {
@@ -308,6 +310,40 @@ mod tests {
             serde_json::from_str(&stored).expect("stored config should deserialize");
         assert_eq!(stored.client_root_url, "https://saved.example.com");
         assert_eq!(stored.connect_timeout_secs, 45);
+
+        drop(state);
+        fs::remove_dir_all(dir).expect("test data directory should be removed");
+    }
+
+    #[test]
+    fn legacy_config_gets_persisted_claude_desktop_defaults() {
+        let dir = temp_data_dir("claude-desktop-migration");
+        let db = Database::open(dir.clone()).expect("test database should open");
+        let mut legacy = serde_json::to_value(AppConfig {
+            gateway_key: "test-gateway-key".to_string(),
+            ..AppConfig::default()
+        })
+        .expect("test config should serialize");
+        legacy
+            .as_object_mut()
+            .expect("test config should be an object")
+            .remove("claude_desktop_models");
+        db.set_setting("config", &legacy.to_string())
+            .expect("legacy config should persist");
+        let cipher: Arc<dyn KeyCipher + Send + Sync> = Arc::new(StaticKeyCipher::new("state-test"));
+        let state = CoreStateInner::new(db, dir.clone(), cipher).expect("state should initialize");
+
+        assert_eq!(
+            state.config().claude_desktop_models.resolved(),
+            AppConfig::default().claude_desktop_models.resolved()
+        );
+        let stored = state
+            .db
+            .lock()
+            .get_setting("config")
+            .expect("stored config should be readable")
+            .expect("stored config should exist");
+        assert!(stored.contains("claude_desktop_models"));
 
         drop(state);
         fs::remove_dir_all(dir).expect("test data directory should be removed");

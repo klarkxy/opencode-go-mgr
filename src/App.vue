@@ -149,11 +149,13 @@
 
           <main class="app-content">
             <Dashboard v-if="activeKey === 'dashboard'" />
-            <Accounts v-else-if="activeKey === 'accounts'" />
-            <Applications v-else-if="activeKey === 'apps'" />
-            <Logs v-else-if="activeKey === 'logs'" />
+            <Accounts v-if="activeKey === 'accounts'" />
+            <KeepAlive>
+              <Applications v-if="activeKey === 'apps'" />
+            </KeepAlive>
+            <Logs v-if="activeKey === 'logs'" />
             <Settings
-              v-else-if="activeKey === 'settings'"
+              v-if="activeKey === 'settings'"
               :theme-name="themeName"
               :resolved-theme="resolvedTheme"
               @update:theme-name="themeName = $event"
