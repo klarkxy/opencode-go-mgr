@@ -109,6 +109,16 @@ test("manual editor writes on commit events instead of each value update", async
   assert.match(source, /if \(!edit \|\| edit\.saving\) return;/);
 });
 
+test("account drag keeps receiving touch pointers after keyed cards move", async () => {
+  const source = await readFile(new URL("./Accounts.vue", import.meta.url), "utf8");
+
+  assert.match(source, /window\.addEventListener\("pointermove", previewAccountDrag, \{ passive: false \}\)/);
+  assert.match(source, /window\.addEventListener\("pointerup", finishAccountDrag\)/);
+  assert.match(source, /window\.addEventListener\("pointercancel", cancelAccountDrag\)/);
+  assert.match(source, /window\.removeEventListener\("pointermove", previewAccountDrag\)/);
+  assert.doesNotMatch(source, /@lostpointercapture|@pointermove="previewAccountDrag"/);
+});
+
 test("usage API sends the selected window and percent with PATCH", async () => {
   const source = await readFile(new URL("../api/tauri.ts", import.meta.url), "utf8");
   const update = source.slice(source.indexOf("updateAccountUsage"), source.indexOf("resetAccountCooldown"));

@@ -22,8 +22,10 @@ Key 保存在本地 SQLite，并通过 OpenAI、Anthropic 与 Gemini 兼容 Gate
   `GET /v1/models`、Claude Desktop 专用的 `/claude-desktop/v1/*`，以及 Gemini
   `/v1beta/models/{model}:generateContent` / `:streamGenerateContent`。Gateway
   按模型原生协议转发到 OpenCode‑Go，并把响应转换回客户端协议。
-- **本地多账号轮询**：按账号列表顺序尝试，自动跳过已禁用、冷却中或本次
-  请求已失败的账号，单次请求内完成快速切换。
+- **可控的本地多账号轮询**：在账号页拖动卡片即可持久调整优先级；Gateway
+  按该列表顺序尝试，并自动跳过已禁用、冷却中或本次请求已失败的账号。
+- **购买周期提醒**：每个账号记录购买日期，按下一个自然月同日计算到期日，
+  在账号页和仪表盘直观显示剩余天数；提醒不会自动禁用账号。
 - **本地用量估算**：5 小时、本周、本月进度条基于 Gateway 实际转发的请求
   做本地估算。
 - **首次启动自动建管理员**：非回环监听时首位访客创建唯一管理员；桌面版

@@ -68,7 +68,8 @@ mod tests {
             key_cipher: cipher.encrypt(id).unwrap(),
             enabled,
             referral_code: None,
-            recharge_date: None,
+            purchase_date: String::new(),
+            expires_on: String::new(),
             cooldown_until: cooldown,
             last_error: None,
             created_at: Utc::now(),
@@ -96,6 +97,22 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(selected.id, "next");
+
+        drop(db);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn selects_accounts_in_the_saved_manual_order() {
+        let dir = temp_data_dir("manual-order");
+        let db = Database::open(dir.clone()).unwrap();
+        db.create_account(&account("first", true, None)).unwrap();
+        db.create_account(&account("second", true, None)).unwrap();
+        db.reorder_accounts(&["second".into(), "first".into()])
+            .unwrap();
+
+        let selected = AccountSelector::new().select(&db, None).unwrap().unwrap();
+        assert_eq!(selected.id, "second");
 
         drop(db);
         fs::remove_dir_all(dir).unwrap();

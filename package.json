@@ -9,7 +9,7 @@
     "dev": "tauri dev",
     "build": "node scripts/release.mjs",
     "build:web": "vue-tsc && vite build",
-    "test": "cargo test --workspace && node --experimental-strip-types --test src/i18n.test.ts src/views/accounts-usage.test.ts src/views/dashboard-connection.test.ts src/views/logs.test.ts src/theme.test.ts && vue-tsc --noEmit",
+    "test": "cargo test --workspace && node --experimental-strip-types --test src/i18n.test.ts src/views/account-lifecycle.test.ts src/views/accounts-usage.test.ts src/views/dashboard-connection.test.ts src/views/logs.test.ts src/theme.test.ts && vue-tsc --noEmit",
     "design:lint": "npx -y @google/design.md@0.3.0 lint DESIGN.md"
   },
   "dependencies": {

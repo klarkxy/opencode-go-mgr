@@ -87,6 +87,16 @@ async fn public_dashboard_uses_first_registration_and_session_cookie() {
     );
     assert_eq!(
         client
+            .put(format!("{base}/accounts/order"))
+            .json(&json!({ "account_ids": [] }))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        client
             .get(format!("{base}/settings/check-update"))
             .send()
             .await
@@ -112,6 +122,18 @@ async fn public_dashboard_uses_first_registration_and_session_cookie() {
             .unwrap()
             .status(),
         StatusCode::OK
+    );
+    let reordered = client
+        .put(format!("{base}/accounts/order"))
+        .header(reqwest::header::COOKIE, &cookie)
+        .json(&json!({ "account_ids": [] }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(reordered.status(), StatusCode::OK);
+    assert_eq!(
+        reordered.json::<serde_json::Value>().await.unwrap(),
+        json!([])
     );
     assert_eq!(
         client

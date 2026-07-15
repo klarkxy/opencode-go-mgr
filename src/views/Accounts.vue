@@ -3,7 +3,7 @@
   <n-space vertical :size="16" class="accounts-content">
     <n-space justify="space-between" align="center" class="accounts-toolbar">
       <n-h3 style="margin: 0">{{ t("账号") }}</n-h3>
-      <n-button type="primary" @click="showCreateModal = true">
+      <n-button type="primary" @click="openCreateModal">
         <template #icon>
           <n-icon :component="PlusOutlined" />
         </template>
@@ -11,24 +11,63 @@
       </n-button>
     </n-space>
 
+    <span id="account-order-instructions" class="sr-only">
+      {{ t("使用上下方向键调整优先级") }}
+    </span>
     <n-empty v-if="accounts.length === 0" :description="t('暂无账号')" />
 
-    <n-card
-      v-for="account in accounts"
-      :key="account.id"
-      size="small"
-      class="account-card"
-      :class="{ 'account-card--cooling': accountIsCooling(account) }"
-    >
+    <div v-if="accounts.length > 0" class="account-list">
+      <n-card
+        v-for="account in accounts"
+        :key="account.id"
+        :data-account-id="account.id"
+        size="small"
+        class="account-card"
+        :class="{
+          'account-card--cooling': accountIsCooling(account),
+          'account-card--dragging': draggingAccountId === account.id,
+        }"
+      >
       <template #header>
         <div class="account-title">
-          <span>{{ account.name }}</span>
-          <n-tooltip v-if="accountIsCooling(account)" :disabled="!account.last_error">
+          <n-tooltip trigger="hover">
             <template #trigger>
-              <n-tag type="error" size="small">{{ t("熔断 · 剩 {time}", { time: formatRemaining(account) }) }}</n-tag>
+              <n-button
+                circle
+                quaternary
+                size="small"
+                class="account-order-handle"
+                :class="{ 'account-order-handle--dragging': draggingAccountId === account.id }"
+                :disabled="orderSaving || busy || accounts.length < 2"
+                :aria-label="t('拖动调整账号 {name} 的优先级', { name: account.name })"
+                aria-describedby="account-order-instructions"
+                @click.prevent
+                @keydown="handleOrderKeydown($event, account.id)"
+                @pointerdown="startAccountDrag($event, account.id)"
+              >
+                <template #icon><n-icon :component="DragOutlined" /></template>
+              </n-button>
             </template>
-            {{ account.last_error }}
+            {{ t("拖动调整账号 {name} 的优先级", { name: account.name }) }}
           </n-tooltip>
+          <div class="account-heading">
+            <div class="account-name-row">
+              <span>{{ account.name }}</span>
+              <n-tooltip v-if="accountIsCooling(account)" :disabled="!account.last_error">
+                <template #trigger>
+                  <n-tag type="error" size="small">{{ t("熔断 · 剩 {time}", { time: formatRemaining(account) }) }}</n-tag>
+                </template>
+                {{ account.last_error }}
+              </n-tooltip>
+            </div>
+            <div class="account-lifecycle">
+              <span>{{ t("购买于 {date}", { date: account.purchase_date }) }}</span>
+              <span>{{ t("到期于 {date}", { date: account.expires_on }) }}</span>
+              <n-tag :type="accountExpiryTagType(account)" size="small" :bordered="false">
+                {{ accountExpiryLabel(account) }}
+              </n-tag>
+            </div>
+          </div>
         </div>
       </template>
       <template #header-extra>
@@ -202,6 +241,17 @@
                 :placeholder="t('OpenCode-Go 账号')"
               />
             </n-form-item>
+            <n-form-item :label="t('购买日期')">
+              <n-date-picker
+                v-model:value="drafts[account.id].purchaseDate"
+                type="date"
+                format="yyyy-MM-dd"
+                :actions="['now']"
+                :clearable="false"
+                :is-date-disabled="isPurchaseDateDisabled"
+                :aria-label="t('购买日期')"
+              />
+            </n-form-item>
             <n-form-item :label="t('密码')">
               <div class="secret-field">
                 <n-input
@@ -247,7 +297,9 @@
           </n-button>
         </n-space>
       </div>
-    </n-card>
+      </n-card>
+    </div>
+    <span class="sr-only" aria-live="polite" aria-atomic="true">{{ orderAnnouncement }}</span>
   </n-space>
 
   <n-modal
@@ -272,6 +324,17 @@
             v-model:value="newAccount.username"
             :input-props="{ 'aria-label': t('登录账号') }"
             :placeholder="t('OpenCode-Go 账号')"
+          />
+        </n-form-item>
+        <n-form-item :label="t('购买日期')">
+          <n-date-picker
+            v-model:value="newAccount.purchaseDate"
+            type="date"
+            format="yyyy-MM-dd"
+            :actions="['now']"
+            :clearable="false"
+            :is-date-disabled="isPurchaseDateDisabled"
+            :aria-label="t('购买日期')"
           />
         </n-form-item>
         <n-form-item :label="t('密码')">
@@ -309,6 +372,7 @@ import { computed, onMounted, onUnmounted, ref } from "vue";
 import {
   NButton,
   NCard,
+  NDatePicker,
   NEmpty,
   NForm,
   NFormItem,
@@ -329,6 +393,7 @@ import {
 import {
   DeleteOutlined,
   DownOutlined,
+  DragOutlined,
   PlusOutlined,
   ThunderboltOutlined,
   UpOutlined,
@@ -343,6 +408,7 @@ import {
   usagePercentFromCost,
 } from "./accounts-usage";
 import type { UsageEditState, UsageKey } from "./accounts-usage";
+import { daysUntilDate, expiryTagType, localDateString, moveItem } from "./account-lifecycle";
 import { t } from "../i18n/index.ts";
 import { formatCost } from "../utils/format.ts";
 import { mapWithConcurrency } from "../utils/async.ts";
@@ -352,10 +418,19 @@ type AccountDraft = {
   username: string;
   password: string;
   key: string;
+  purchaseDate: number | null;
   clearPassword: boolean;
 };
 
 type AccountUsageEdits = Record<UsageKey, UsageEditState>;
+
+type AccountDragState = {
+  accountId: string;
+  handle: HTMLElement;
+  moved: boolean;
+  pointerId: number;
+  previous: Account[];
+};
 
 function setUsageSliderLabel(el: HTMLElement, label: string) {
   el.querySelector<HTMLElement>("[role='slider']")?.setAttribute("aria-label", label);
@@ -383,14 +458,36 @@ const expanded = ref<Record<string, boolean>>({});
 const pinging = ref<Record<string, boolean>>({});
 const showCreateModal = ref(false);
 const busy = ref(false);
+const orderSaving = ref(false);
+const draggingAccountId = ref<string | null>(null);
+const orderAnnouncement = ref("");
 const now = ref(Date.now());
-const newAccount = ref<AccountDraft>({
-  name: "",
-  username: "",
-  password: "",
-  key: "",
-  clearPassword: false,
-});
+let accountDrag: AccountDragState | null = null;
+
+function timestampFromLocalDate(value: string): number | null {
+  const parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!parts) return null;
+  const year = Number(parts[1]);
+  const month = Number(parts[2]);
+  const day = Number(parts[3]);
+  const date = new Date(year, month - 1, day);
+  return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day
+    ? date.getTime()
+    : null;
+}
+
+function blankAccountDraft(): AccountDraft {
+  return {
+    name: "",
+    username: "",
+    password: "",
+    key: "",
+    purchaseDate: timestampFromLocalDate(localDateString()) ?? Date.now(),
+    clearPassword: false,
+  };
+}
+
+const newAccount = ref<AccountDraft>(blankAccountDraft());
 
 function blankUsage(accountId: string): UsageWindow {
   return {
@@ -407,8 +504,20 @@ function draftFromAccount(account: Account): AccountDraft {
     username: account.username,
     password: "",
     key: "",
+    purchaseDate: timestampFromLocalDate(account.purchase_date)
+      ?? timestampFromLocalDate(localDateString())
+      ?? Date.now(),
     clearPassword: false,
   };
+}
+
+function applyLoadedAccounts(loaded: Account[]): void {
+  const nextDrafts: Record<string, AccountDraft> = {};
+  for (const account of loaded) {
+    nextDrafts[account.id] = drafts.value[account.id] || draftFromAccount(account);
+  }
+  accounts.value = loaded;
+  drafts.value = nextDrafts;
 }
 
 // 单账号操作后就地更新，避免触发全量重载（旧实现每次都 loadAccounts → O(N) 用量重拉）
@@ -436,12 +545,7 @@ function removeAccountState(id: string): void {
 // 用一次 getAccounts 刷新列表状态（如 ping 后的冷却变更），仅重载受影响账号的用量
 async function refreshAccountState(id: string): Promise<void> {
   const loaded = await tauriApi.getAccounts();
-  const nextDrafts: Record<string, AccountDraft> = {};
-  for (const account of loaded) {
-    nextDrafts[account.id] = drafts.value[account.id] || draftFromAccount(account);
-  }
-  accounts.value = loaded;
-  drafts.value = nextDrafts;
+  applyLoadedAccounts(loaded);
   await loadAccountUsage(id);
 }
 
@@ -529,8 +633,165 @@ function formatRemaining(account: Account): string {
   return t("{days}天{hours}小时", { days: day, hours: hr % 24 });
 }
 
+function accountExpiryDays(account: Account): number {
+  return daysUntilDate(account.expires_on, now.value);
+}
+
+function accountExpiryTagType(account: Account) {
+  return expiryTagType(accountExpiryDays(account));
+}
+
+function accountExpiryLabel(account: Account): string {
+  const days = accountExpiryDays(account);
+  if (days > 0) return t("剩 {days} 天", { days });
+  if (days === 0) return t("今天到期");
+  return t("已到期 {days} 天", { days: Number.isFinite(days) ? Math.abs(days) : 0 });
+}
+
+function isPurchaseDateDisabled(timestamp: number): boolean {
+  return localDateString(timestamp) > localDateString(now.value);
+}
+
+function purchaseDateIsFuture(draft: AccountDraft): boolean {
+  return draft.purchaseDate !== null && isPurchaseDateDisabled(draft.purchaseDate);
+}
+
+function openCreateModal(): void {
+  newAccount.value = blankAccountDraft();
+  showCreateModal.value = true;
+}
+
 function toggleExpanded(id: string) {
   expanded.value[id] = !expanded.value[id];
+}
+
+function sameAccountOrder(left: readonly Account[], right: readonly Account[]): boolean {
+  return left.length === right.length && left.every((account, index) => account.id === right[index]?.id);
+}
+
+function clearAccountDrag(state: AccountDragState): void {
+  window.removeEventListener("pointermove", previewAccountDrag);
+  window.removeEventListener("pointerup", finishAccountDrag);
+  window.removeEventListener("pointercancel", cancelAccountDrag);
+  accountDrag = null;
+  draggingAccountId.value = null;
+  if (state.handle.hasPointerCapture(state.pointerId)) {
+    state.handle.releasePointerCapture(state.pointerId);
+  }
+}
+
+async function persistAccountOrder(previous: Account[], movedAccountId: string): Promise<void> {
+  if (sameAccountOrder(previous, accounts.value)) return;
+  orderSaving.value = true;
+  try {
+    const saved = await tauriApi.reorderAccounts(accounts.value.map(({ id }) => id));
+    applyLoadedAccounts(saved);
+    const moved = accounts.value.find(({ id }) => id === movedAccountId);
+    const position = accounts.value.findIndex(({ id }) => id === movedAccountId) + 1;
+    if (moved && position > 0) {
+      orderAnnouncement.value = t("账号 {name} 已移至第 {position} 位", {
+        name: moved.name,
+        position,
+      });
+    }
+    message.success(t("账号顺序已更新"));
+  } catch (error) {
+    if (error instanceof DashboardRequestError && error.status === 409) {
+      try {
+        const knownIds = new Set(accounts.value.map(({ id }) => id));
+        const loaded = await tauriApi.getAccounts();
+        const loadedIds = new Set(loaded.map(({ id }) => id));
+        for (const id of knownIds) {
+          if (!loadedIds.has(id)) removeAccountState(id);
+        }
+        applyLoadedAccounts(loaded);
+        await mapWithConcurrency(
+          loaded.filter(({ id }) => !knownIds.has(id)),
+          4,
+          ({ id }) => loadAccountUsage(id),
+        );
+      } catch {
+        accounts.value = previous;
+      }
+    } else {
+      accounts.value = previous;
+    }
+    const failure = t("保存账号顺序失败: {error}", { error: String(error) });
+    orderAnnouncement.value = failure;
+    message.error(failure);
+  } finally {
+    orderSaving.value = false;
+  }
+}
+
+function startAccountDrag(event: PointerEvent, accountId: string): void {
+  if (
+    orderSaving.value
+    || busy.value
+    || accounts.value.length < 2
+    || accountDrag !== null
+    || !event.isPrimary
+    || (event.pointerType === "mouse" && event.button !== 0)
+  ) return;
+  const handle = event.currentTarget as HTMLElement;
+  event.preventDefault();
+  handle.setPointerCapture(event.pointerId);
+  accountDrag = {
+    accountId,
+    handle,
+    moved: false,
+    pointerId: event.pointerId,
+    previous: [...accounts.value],
+  };
+  draggingAccountId.value = accountId;
+  window.addEventListener("pointermove", previewAccountDrag, { passive: false });
+  window.addEventListener("pointerup", finishAccountDrag);
+  window.addEventListener("pointercancel", cancelAccountDrag);
+}
+
+function previewAccountDrag(event: PointerEvent): void {
+  const state = accountDrag;
+  if (!state || state.pointerId !== event.pointerId) return;
+  event.preventDefault();
+  const target = document
+    .elementFromPoint(event.clientX, event.clientY)
+    ?.closest<HTMLElement>(".account-card[data-account-id]");
+  const targetId = target?.dataset.accountId;
+  if (!targetId || targetId === state.accountId) return;
+  const fromIndex = accounts.value.findIndex(({ id }) => id === state.accountId);
+  const toIndex = accounts.value.findIndex(({ id }) => id === targetId);
+  if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return;
+  accounts.value = moveItem(accounts.value, fromIndex, toIndex);
+  state.moved = true;
+}
+
+async function finishAccountDrag(event: PointerEvent): Promise<void> {
+  const state = accountDrag;
+  if (!state || state.pointerId !== event.pointerId) return;
+  event.preventDefault();
+  clearAccountDrag(state);
+  if (!state.moved || sameAccountOrder(state.previous, accounts.value)) return;
+  await persistAccountOrder(state.previous, state.accountId);
+}
+
+function cancelAccountDrag(event: PointerEvent): void {
+  const state = accountDrag;
+  if (!state || state.pointerId !== event.pointerId) return;
+  event.preventDefault();
+  accounts.value = state.previous;
+  clearAccountDrag(state);
+}
+
+async function handleOrderKeydown(event: KeyboardEvent, accountId: string): Promise<void> {
+  if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+  event.preventDefault();
+  if (orderSaving.value || busy.value || accounts.value.length < 2) return;
+  const fromIndex = accounts.value.findIndex(({ id }) => id === accountId);
+  const toIndex = fromIndex + (event.key === "ArrowUp" ? -1 : 1);
+  if (fromIndex < 0 || toIndex < 0 || toIndex >= accounts.value.length) return;
+  const previous = [...accounts.value];
+  accounts.value = moveItem(accounts.value, fromIndex, toIndex);
+  await persistAccountOrder(previous, accountId);
 }
 
 function trimmedDraft(draft: AccountDraft): AccountInput {
@@ -539,6 +800,7 @@ function trimmedDraft(draft: AccountDraft): AccountInput {
     username: draft.username.trim(),
     password: draft.password.trim(),
     key: draft.key.trim(),
+    purchase_date: draft.purchaseDate === null ? undefined : localDateString(draft.purchaseDate),
   };
 }
 
@@ -546,6 +808,7 @@ function trimmedUpdate(draft: AccountDraft): AccountUpdate {
   const update: AccountUpdate = {
     name: draft.name.trim(),
     username: draft.username.trim(),
+    purchase_date: draft.purchaseDate === null ? undefined : localDateString(draft.purchaseDate),
   };
   const password = draft.password.trim();
   const key = draft.key.trim();
@@ -591,16 +854,14 @@ async function createAccount() {
     message.warning(t("请填写名称和 API Key"));
     return;
   }
+  if (purchaseDateIsFuture(newAccount.value)) {
+    message.warning(t("购买日期不能晚于今天"));
+    return;
+  }
   busy.value = true;
   try {
     const created = await tauriApi.createAccount(input);
-    newAccount.value = {
-      name: "",
-      username: "",
-      password: "",
-      key: "",
-      clearPassword: false,
-    };
+    newAccount.value = blankAccountDraft();
     showCreateModal.value = false;
     message.success(t("账号已添加"));
     addAccount(created);
@@ -617,6 +878,10 @@ async function saveAccount(account: Account) {
   const update = trimmedUpdate(draft);
   if (!update.name) {
     message.warning(t("名称不能为空"));
+    return;
+  }
+  if (purchaseDateIsFuture(draft)) {
+    message.warning(t("购买日期不能晚于今天"));
     return;
   }
   busy.value = true;
@@ -688,7 +953,13 @@ onMounted(() => {
   }, 1000);
   void loadAccounts();
 });
-onUnmounted(() => window.clearInterval(clock));
+onUnmounted(() => {
+  window.clearInterval(clock);
+  if (accountDrag) {
+    accounts.value = accountDrag.previous;
+    clearAccountDrag(accountDrag);
+  }
+});
 </script>
 
 <style scoped>
@@ -705,6 +976,11 @@ onUnmounted(() => window.clearInterval(clock));
 
 .accounts-toolbar {
   min-height: 34px;
+}
+
+.account-list {
+  display: grid;
+  gap: 16px;
 }
 
 .detail-grid {
@@ -725,17 +1001,33 @@ onUnmounted(() => window.clearInterval(clock));
   width: 100%;
 }
 
+.detail-grid :deep(.n-date-picker),
+.modal-grid :deep(.n-date-picker) {
+  width: 100%;
+}
+
 .account-card :deep(.n-card-header) {
   align-items: center;
+}
+
+.account-card :deep(.n-card-header__main) {
+  min-width: 0;
 }
 
 .account-card {
   border-radius: 14px;
   box-shadow: var(--ocg-shadow-sm);
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, opacity 0.16s ease;
 }
 
 .account-card--cooling {
   border-color: rgba(208, 48, 80, 0.45);
+}
+
+.account-card--dragging {
+  border-color: var(--ocg-primary);
+  box-shadow: 0 10px 28px color-mix(in srgb, var(--ocg-primary) 18%, transparent);
+  opacity: 0.72;
 }
 
 .account-title {
@@ -743,11 +1035,51 @@ onUnmounted(() => window.clearInterval(clock));
   align-items: center;
   gap: 8px;
   min-width: 0;
+  width: 100%;
 }
 
-.account-title > span:first-child {
+.account-order-handle {
+  flex: 0 0 auto;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.account-order-handle--dragging {
+  cursor: grabbing;
+}
+
+.account-heading {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 5px;
+  min-width: 0;
+}
+
+.account-name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.account-name-row > span:first-child {
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-lifecycle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  color: var(--n-text-color-3);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.account-lifecycle > span {
   white-space: nowrap;
 }
 
@@ -824,6 +1156,24 @@ onUnmounted(() => window.clearInterval(clock));
 
   .account-card :deep(.n-card-header__extra) {
     margin-left: 8px;
+  }
+}
+
+@media (max-width: 640px) {
+  .account-card :deep(.n-card-header) {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .account-card :deep(.n-card-header__main),
+  .account-card :deep(.n-card-header__extra) {
+    width: 100%;
+  }
+
+  .account-card :deep(.n-card-header__extra) {
+    display: flex;
+    justify-content: flex-end;
+    margin-left: 0;
   }
 }
 </style>

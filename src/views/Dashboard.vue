@@ -171,6 +171,26 @@
               :class="account.enabled ? (isCoolingDown(account) ? 'cooling' : 'active') : 'disabled'"
             >{{ statusLabel(account) }}</span>
           </div>
+          <n-tooltip trigger="click">
+            <template #trigger>
+              <n-button
+                text
+                class="account-expiry"
+                :aria-label="[
+                  accountExpiryLabel(account),
+                  t('购买于 {date}', { date: account.purchase_date }),
+                  t('到期于 {date}', { date: account.expires_on }),
+                ].join('; ')"
+              >
+                <n-tag
+                  size="small"
+                  :type="accountExpiryType(account)"
+                >{{ accountExpiryLabel(account) }}</n-tag>
+              </n-button>
+            </template>
+            <div>{{ t("购买于 {date}", { date: account.purchase_date }) }}</div>
+            <div>{{ t("到期于 {date}", { date: account.expires_on }) }}</div>
+          </n-tooltip>
           <div v-if="usageMap[account.id]" class="account-usage mono">
             <div v-for="row in getUsageRows(account.id)" :key="row.label" class="account-usage-row">
               <span>{{ row.label }}</span>
@@ -186,7 +206,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import { NButton, NEmpty, NIcon, NPopconfirm, NSpin, NTooltip, useMessage } from "naive-ui";
+import { NButton, NEmpty, NIcon, NPopconfirm, NSpin, NTag, NTooltip, useMessage } from "naive-ui";
 import {
   ApiOutlined,
   CalendarOutlined,
@@ -205,6 +225,7 @@ import { CHART_PALETTE } from "../theme";
 import { t } from "../i18n/index.ts";
 import { formatCost, formatNumber, useClipboard } from "../utils/format.ts";
 import { mapWithConcurrency } from "../utils/async.ts";
+import { daysUntilDate, expiryTagType } from "./account-lifecycle";
 import { maskConnectionKey, resolveConnectionUrls } from "./dashboard-connection";
 
 type ConnectionTarget = "api" | "key" | "upstream";
@@ -217,6 +238,7 @@ const usageMap = ref<Record<string, UsageWindow>>({});
 const dailyCosts = ref<DailyModelCost[]>([]);
 const loading = ref(true);
 const refreshingKey = ref(false);
+const lifecycleNow = ref(Date.now());
 
 const serviceConfig = ref({
   gateway_port: 9042,
@@ -260,6 +282,22 @@ function statusLabel(account: Account): string {
   return isCoolingDown(account) ? t("冷却中") : t("可用");
 }
 
+function accountExpiryDays(account: Account): number {
+  return daysUntilDate(account.expires_on, lifecycleNow.value);
+}
+
+function accountExpiryLabel(account: Account): string {
+  const days = accountExpiryDays(account);
+  if (!Number.isFinite(days)) return t("未设置");
+  if (days > 0) return t("剩 {days} 天", { days });
+  if (days === 0) return t("今天到期");
+  return t("已到期 {days} 天", { days: Math.abs(days) });
+}
+
+function accountExpiryType(account: Account): "success" | "warning" | "error" {
+  return expiryTagType(accountExpiryDays(account));
+}
+
 function getUsageRows(accountId: string): Array<{ label: string; value: string }> {
   const usage = usageMap.value[accountId];
   if (!usage) return [];
@@ -291,7 +329,12 @@ async function regenerateKey() {
   }
 }
 
+let lifecycleClock: number | undefined;
+
 onMounted(async () => {
+  lifecycleClock = window.setInterval(() => {
+    lifecycleNow.value = Date.now();
+  }, 60_000);
   const [loadedAccounts, settings, loadedSummary, costs] = await Promise.allSettled([
       tauriApi.getAccounts(),
       tauriApi.getSettings(),
@@ -319,7 +362,10 @@ onMounted(async () => {
   loading.value = false;
 });
 
-onUnmounted(cleanup);
+onUnmounted(() => {
+  cleanup();
+  window.clearInterval(lifecycleClock);
+});
 </script>
 
 <style scoped>
@@ -595,6 +641,9 @@ onUnmounted(cleanup);
 .account-status.active { color: var(--ocg-success); }
 .account-status.cooling { color: var(--ocg-warning); }
 .account-status.disabled { color: var(--ocg-subtle); }
+.account-expiry {
+  margin-bottom: 7px;
+}
 .account-usage {
   display: grid;
   gap: 2px;

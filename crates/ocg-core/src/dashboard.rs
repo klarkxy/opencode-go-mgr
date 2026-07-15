@@ -1,4 +1,5 @@
 use crate::auth;
+use crate::db::ReorderAccountsError;
 use crate::gateway::{
     forwarder::forward_get,
     limit::{parse_reset, parse_usage_limit_window},
@@ -13,7 +14,7 @@ use axum::{
     http::{HeaderMap, HeaderValue, Response as HttpResponse, StatusCode, header},
     middleware::{self, Next},
     response::{IntoResponse, Response},
-    routing::{get, patch, post},
+    routing::{get, patch, post, put},
 };
 use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
@@ -22,6 +23,7 @@ use std::path::{Component, Path as FsPath, PathBuf};
 pub fn api_router(state: CoreState) -> Router<CoreState> {
     let protected = Router::new()
         .route("/accounts", get(list_accounts).post(create_account))
+        .route("/accounts/order", put(reorder_accounts))
         .route(
             "/accounts/{id}",
             patch(update_account).delete(delete_account),
@@ -341,7 +343,7 @@ impl IntoResponse for ApiError {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 struct DashboardAccount {
     id: String,
     name: String,
@@ -349,6 +351,8 @@ struct DashboardAccount {
     password: String,
     key: String,
     enabled: bool,
+    purchase_date: String,
+    expires_on: String,
     cooldown_until: Option<String>,
     last_error: Option<String>,
     created_at: String,
@@ -363,6 +367,8 @@ fn dashboard_account(account: Account) -> DashboardAccount {
         password: String::new(),
         key: String::new(),
         enabled: account.enabled,
+        purchase_date: account.purchase_date,
+        expires_on: account.expires_on,
         cooldown_until: account.cooldown_until.map(|t| t.to_rfc3339()),
         last_error: account.last_error,
         created_at: account.created_at.to_rfc3339(),
@@ -418,9 +424,15 @@ async fn create_account(
     if input.key.trim().is_empty() {
         return Err(ApiError::bad_request("key is required"));
     }
+    let purchase_date = match input.purchase_date {
+        Some(value) if !value.trim().is_empty() => normalize_purchase_date(&value)
+            .map_err(|error| ApiError::bad_request(error.to_string()))?,
+        _ => String::new(),
+    };
     let now = Utc::now();
+    let id = uuid::Uuid::new_v4().to_string();
     let account = Account {
-        id: uuid::Uuid::new_v4().to_string(),
+        id: id.clone(),
         name,
         username: clean_optional(input.username),
         password_cipher: encrypted_optional(&state, &input.password)?,
@@ -429,13 +441,14 @@ async fn create_account(
             .map_err(ApiError::internal)?,
         enabled: true,
         referral_code: clean_optional(input.referral_code),
-        recharge_date: clean_optional(input.recharge_date),
+        purchase_date,
+        expires_on: String::new(),
         cooldown_until: None,
         last_error: None,
         created_at: now,
         updated_at: now,
     };
-    {
+    let account = {
         let db = state.db.lock();
         db.create_account(&account).map_err(ApiError::internal)?;
         let _ = db.log_gateway(
@@ -443,15 +456,24 @@ async fn create_account(
             "account",
             &format!("created account {}", account.name),
         );
-    }
+        db.get_account(&id)
+            .map_err(ApiError::internal)?
+            .ok_or_else(|| ApiError::internal("created account not found"))?
+    };
     Ok(Json(dashboard_account(account)))
 }
 
 async fn update_account(
     State(state): State<CoreState>,
     Path(id): Path<String>,
-    Json(update): Json<AccountUpdate>,
+    Json(mut update): Json<AccountUpdate>,
 ) -> Result<Json<DashboardAccount>, ApiError> {
+    if let Some(value) = update.purchase_date.take() {
+        update.purchase_date = Some(
+            normalize_purchase_date(&value)
+                .map_err(|error| ApiError::bad_request(error.to_string()))?,
+        );
+    }
     let key_cipher = match update.key.as_deref().map(str::trim) {
         Some("") | None => None,
         Some(key) => Some(state.encrypt_key(key).map_err(ApiError::internal)?),
@@ -481,6 +503,38 @@ async fn update_account(
     Ok(Json(dashboard_account(account)))
 }
 
+#[derive(Deserialize)]
+struct AccountOrderInput {
+    account_ids: Vec<String>,
+}
+
+async fn reorder_accounts(
+    State(state): State<CoreState>,
+    Json(input): Json<AccountOrderInput>,
+) -> Result<Json<Vec<DashboardAccount>>, ApiError> {
+    let accounts = {
+        let db = state.db.lock();
+        db.reorder_accounts(&input.account_ids)
+            .map_err(|error| match error {
+                ReorderAccountsError::DuplicateAccountId => {
+                    ApiError::bad_request("account_ids contains duplicates")
+                }
+                ReorderAccountsError::AccountSetMismatch => ApiError::status(
+                    StatusCode::CONFLICT,
+                    "account list changed; reload accounts and try again",
+                ),
+                ReorderAccountsError::Database(error) => ApiError::internal(error),
+            })?;
+        db.list_accounts().map_err(ApiError::internal)?
+    };
+    Ok(Json(
+        accounts
+            .into_iter()
+            .map(dashboard_account)
+            .collect::<Vec<_>>(),
+    ))
+}
+
 async fn delete_account(
     State(state): State<CoreState>,
     Path(id): Path<String>,
@@ -508,7 +562,7 @@ async fn toggle_account(
         key: None,
         enabled: Some(!account.enabled),
         referral_code: None,
-        recharge_date: None,
+        purchase_date: None,
     };
     {
         let db = state.db.lock();
@@ -1054,12 +1108,16 @@ fn is_loopback(url: &reqwest::Url) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        AccountUsageUpdate, asset_path, dashboard_account, dashboard_summary, format_error_chain,
-        is_update_available, parse_stable_version, update_account_usage, update_settings,
+        AccountOrderInput, AccountUsageUpdate, asset_path, create_account, dashboard_account,
+        dashboard_summary, format_error_chain, is_update_available, parse_stable_version,
+        reorder_accounts, update_account, update_account_usage, update_settings,
     };
     use crate::crypto::{KeyCipher, StaticKeyCipher};
     use crate::db::Database;
-    use crate::models::{Account, AppConfig, ClaudeDesktopModels};
+    use crate::models::{
+        Account, AccountInput, AccountUpdate, AppConfig, ClaudeDesktopModels,
+        normalize_purchase_date, purchase_expires_on,
+    };
     use crate::state::CoreStateInner;
     use axum::Json;
     use axum::extract::{Path as AxumPath, State};
@@ -1078,6 +1136,25 @@ mod tests {
         dir.push(format!("ocg-dashboard-test-{}-{}", label, nanos));
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    fn test_account(id: &str) -> Account {
+        let now = Utc::now();
+        Account {
+            id: id.into(),
+            name: id.into(),
+            username: None,
+            password_cipher: None,
+            key_cipher: format!("cipher-{id}"),
+            enabled: true,
+            referral_code: None,
+            purchase_date: "2026-06-15".into(),
+            expires_on: "2026-07-15".into(),
+            cooldown_until: None,
+            last_error: None,
+            created_at: now,
+            updated_at: now,
+        }
     }
 
     #[test]
@@ -1113,7 +1190,8 @@ mod tests {
             key_cipher: state.encrypt_key("sk-secret").unwrap(),
             enabled: true,
             referral_code: None,
-            recharge_date: None,
+            purchase_date: "2026-01-31".into(),
+            expires_on: "2026-02-28".into(),
             cooldown_until: None,
             last_error: None,
             created_at: Utc::now(),
@@ -1125,7 +1203,192 @@ mod tests {
         assert_eq!(dto.username, "user");
         assert!(dto.password.is_empty());
         assert!(dto.key.is_empty());
+        assert_eq!(dto.purchase_date, "2026-01-31");
+        assert_eq!(dto.expires_on, "2026-02-28");
+        let json = serde_json::to_value(dto).expect("dashboard account should serialize");
+        assert!(json.get("recharge_date").is_none());
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn create_account_defaults_purchase_date_and_returns_persisted_expiry() {
+        let dir = temp_data_dir("create-default-purchase-date");
+        let cipher: Arc<dyn KeyCipher + Send + Sync> = Arc::new(StaticKeyCipher::new("test"));
+        let db = Database::open(dir.clone()).expect("test database should open");
+        let state = Arc::new(
+            CoreStateInner::new(db, dir.clone(), cipher).expect("test state should initialize"),
+        );
+
+        let account = create_account(
+            State(state.clone()),
+            Json(AccountInput {
+                name: "main".into(),
+                username: None,
+                password: None,
+                key: "sk-test".into(),
+                referral_code: None,
+                purchase_date: None,
+            }),
+        )
+        .await
+        .expect("account should be created")
+        .0;
+
+        assert_eq!(
+            normalize_purchase_date(&account.purchase_date)
+                .expect("persisted purchase date should be valid"),
+            account.purchase_date
+        );
+        assert_eq!(
+            account.expires_on,
+            purchase_expires_on(&account.purchase_date)
+                .expect("persisted purchase date should have an expiry")
+        );
+        let persisted = state
+            .db
+            .lock()
+            .get_account(&account.id)
+            .expect("created account lookup should succeed")
+            .expect("created account should exist");
+        assert_eq!(persisted.purchase_date, account.purchase_date);
+        assert_eq!(persisted.expires_on, account.expires_on);
+
+        drop(state);
+        fs::remove_dir_all(dir).expect("test directory should be removable");
+    }
+
+    #[tokio::test]
+    async fn update_account_rejects_invalid_purchase_date_as_bad_request() {
+        let dir = temp_data_dir("invalid-purchase-date");
+        let cipher: Arc<dyn KeyCipher + Send + Sync> = Arc::new(StaticKeyCipher::new("test"));
+        let db = Database::open(dir.clone()).expect("test database should open");
+        db.create_account(&test_account("acct-1"))
+            .expect("test account should be created");
+        let state = Arc::new(
+            CoreStateInner::new(db, dir.clone(), cipher).expect("test state should initialize"),
+        );
+
+        let error = update_account(
+            State(state.clone()),
+            AxumPath("acct-1".into()),
+            Json(AccountUpdate {
+                name: None,
+                username: None,
+                password: None,
+                key: None,
+                enabled: None,
+                referral_code: None,
+                purchase_date: Some("2026-02-30".into()),
+            }),
+        )
+        .await
+        .expect_err("invalid purchase date should fail");
+
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        let persisted = state
+            .db
+            .lock()
+            .get_account("acct-1")
+            .expect("account lookup should succeed")
+            .expect("account should still exist");
+        assert_eq!(persisted.purchase_date, "2026-06-15");
+
+        drop(state);
+        fs::remove_dir_all(dir).expect("test directory should be removable");
+    }
+
+    #[tokio::test]
+    async fn reorder_accounts_maps_validation_errors_and_returns_saved_order() {
+        let dir = temp_data_dir("reorder-accounts");
+        let cipher: Arc<dyn KeyCipher + Send + Sync> = Arc::new(StaticKeyCipher::new("test"));
+        let db = Database::open(dir.clone()).expect("test database should open");
+        for id in ["acct-1", "acct-2", "acct-3"] {
+            db.create_account(&test_account(id))
+                .expect("test account should be created");
+        }
+        let state = Arc::new(
+            CoreStateInner::new(db, dir.clone(), cipher).expect("test state should initialize"),
+        );
+
+        let duplicate = reorder_accounts(
+            State(state.clone()),
+            Json(AccountOrderInput {
+                account_ids: vec!["acct-1".into(), "acct-1".into(), "acct-3".into()],
+            }),
+        )
+        .await
+        .expect_err("duplicate ids should fail");
+        assert_eq!(duplicate.status, StatusCode::BAD_REQUEST);
+
+        for stale_ids in [
+            vec!["acct-1".into(), "acct-2".into()],
+            vec!["acct-1".into(), "acct-2".into(), "missing".into()],
+            Vec::new(),
+        ] {
+            let stale = reorder_accounts(
+                State(state.clone()),
+                Json(AccountOrderInput {
+                    account_ids: stale_ids,
+                }),
+            )
+            .await
+            .expect_err("stale account set should fail");
+            assert_eq!(stale.status, StatusCode::CONFLICT);
+        }
+
+        let unchanged = state
+            .db
+            .lock()
+            .list_accounts()
+            .expect("account order should load")
+            .into_iter()
+            .map(|account| account.id)
+            .collect::<Vec<_>>();
+        assert_eq!(unchanged, ["acct-1", "acct-2", "acct-3"]);
+
+        let reordered = reorder_accounts(
+            State(state.clone()),
+            Json(AccountOrderInput {
+                account_ids: vec!["acct-3".into(), "acct-1".into(), "acct-2".into()],
+            }),
+        )
+        .await
+        .expect("complete account set should be reordered")
+        .0;
+        assert_eq!(
+            reordered
+                .into_iter()
+                .map(|account| account.id)
+                .collect::<Vec<_>>(),
+            ["acct-3", "acct-1", "acct-2"]
+        );
+
+        drop(state);
+        fs::remove_dir_all(dir).expect("test directory should be removable");
+    }
+
+    #[tokio::test]
+    async fn reorder_accounts_accepts_empty_order_for_empty_database() {
+        let dir = temp_data_dir("reorder-empty-accounts");
+        let cipher: Arc<dyn KeyCipher + Send + Sync> = Arc::new(StaticKeyCipher::new("test"));
+        let db = Database::open(dir.clone()).expect("test database should open");
+        let state = Arc::new(
+            CoreStateInner::new(db, dir.clone(), cipher).expect("test state should initialize"),
+        );
+
+        let accounts = reorder_accounts(
+            State(state.clone()),
+            Json(AccountOrderInput {
+                account_ids: Vec::new(),
+            }),
+        )
+        .await
+        .expect("empty account set should accept an empty order")
+        .0;
+        assert!(accounts.is_empty());
+
+        drop(state);
+        fs::remove_dir_all(dir).expect("test directory should be removable");
     }
 
     #[tokio::test]
@@ -1141,7 +1404,8 @@ mod tests {
             key_cipher: cipher.encrypt("sk-test").unwrap(),
             enabled: true,
             referral_code: None,
-            recharge_date: None,
+            purchase_date: "2026-01-31".into(),
+            expires_on: "2026-02-28".into(),
             cooldown_until: None,
             last_error: None,
             created_at: Utc::now(),
