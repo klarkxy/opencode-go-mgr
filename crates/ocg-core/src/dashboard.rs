@@ -720,6 +720,7 @@ const GITHUB_LATEST_RELEASE_API: &str =
     "https://api.github.com/repos/klarkxy/opencode-go-mgr/releases/latest";
 const GITHUB_LATEST_RELEASE_URL: &str =
     "https://github.com/klarkxy/opencode-go-mgr/releases/latest";
+const UPDATE_CHECK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 #[derive(Deserialize)]
 struct GithubRelease {
@@ -745,7 +746,7 @@ async fn check_update(
             reqwest::header::USER_AGENT,
             concat!("ocg-manager/", env!("CARGO_PKG_VERSION")),
         )
-        .timeout(std::time::Duration::from_secs(10))
+        .timeout(UPDATE_CHECK_TIMEOUT)
         .send()
         .await
         .and_then(reqwest::Response::error_for_status)
@@ -774,10 +775,38 @@ async fn check_update(
 }
 
 fn update_check_error(error: reqwest::Error) -> ApiError {
+    let category = if error.is_timeout() {
+        format!(
+            "request timed out after {} seconds",
+            UPDATE_CHECK_TIMEOUT.as_secs()
+        )
+    } else if error.is_connect() {
+        "connection failed".to_string()
+    } else if let Some(status) = error.status() {
+        format!("GitHub returned HTTP {status}")
+    } else if error.is_decode() {
+        "GitHub returned an invalid response".to_string()
+    } else {
+        "request failed".to_string()
+    };
     ApiError::status(
         StatusCode::BAD_GATEWAY,
-        format!("failed to check GitHub releases: {error}"),
+        format!(
+            "failed to check GitHub releases ({category}): {}",
+            format_error_chain(&error)
+        ),
     )
+}
+
+fn format_error_chain(error: &(dyn std::error::Error + 'static)) -> String {
+    let mut message = error.to_string();
+    let mut source = error.source();
+    while let Some(cause) = source {
+        message.push_str(": ");
+        message.push_str(&cause.to_string());
+        source = cause.source();
+    }
+    message
 }
 
 fn parse_stable_version(version: &str) -> Option<([u64; 3], &str)> {
@@ -1025,8 +1054,8 @@ fn is_loopback(url: &reqwest::Url) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        AccountUsageUpdate, asset_path, dashboard_account, dashboard_summary, is_update_available,
-        parse_stable_version, update_account_usage, update_settings,
+        AccountUsageUpdate, asset_path, dashboard_account, dashboard_summary, format_error_chain,
+        is_update_available, parse_stable_version, update_account_usage, update_settings,
     };
     use crate::crypto::{KeyCipher, StaticKeyCipher};
     use crate::db::Database;
@@ -1224,6 +1253,15 @@ mod tests {
         parse_stable_version(version)
             .expect("test version should be valid")
             .0
+    }
+
+    #[test]
+    fn error_chain_includes_transport_root_cause() {
+        let error = anyhow::Error::msg("root cause").context("outer error");
+        assert_eq!(
+            format_error_chain(error.as_ref()),
+            "outer error: root cause"
+        );
     }
 
     #[test]

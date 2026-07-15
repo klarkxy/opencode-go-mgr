@@ -58,13 +58,16 @@ on Linux use `sha256sum <file>`.
 
 The public headless image is `ghcr.io/klarkxy/opencode-go-mgr` and can be
 pulled without a registry login. The published image currently targets
-`linux/amd64`.
+`linux/amd64`. For a pull-only deployment without the source tree, use the
+included [`compose.example.yaml`](compose.example.yaml) (also attached to each
+Release), save it as `compose.yaml`, and optionally create a neighboring
+`.env` file.
 
 ```bash
-git clone --branch v1.3.1 --depth 1 https://github.com/klarkxy/opencode-go-mgr.git
+git clone --branch v1.3.2 --depth 1 https://github.com/klarkxy/opencode-go-mgr.git
 cd opencode-go-mgr
 cp .env.example .env
-# Edit .env: choose first-run administrator setup and pin OCG_IMAGE to 1.3.1.
+# Edit .env: choose first-run administrator setup and pin OCG_IMAGE to 1.3.2.
 docker compose pull
 docker compose up -d --no-build
 docker compose ps

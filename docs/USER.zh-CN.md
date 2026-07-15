@@ -448,11 +448,13 @@ ocg-manager-cli
 ## Docker
 
 GHCR 上的公开无头镜像无需登录即可拉取。它是 Linux 容器，目前只发布
-`linux/amd64`，没有原生 ARM64 镜像。请在包含 `compose.yaml` 与
-`.env.example` 的仓库目录中运行（建议检出对应 Release tag）：
+`linux/amd64`，没有原生 ARM64 镜像。每个 Release 也会附带只拉取镜像的
+`compose.example.yaml`；把它保存为 `compose.yaml`，并按需在同目录创建 `.env`。
+示例默认固定对应的发布版本，也可用 `OCG_IMAGE` 覆盖。或者在包含
+`compose.yaml` 与 `.env.example` 的仓库目录中运行（建议检出对应 Release tag）：
 
 ```bash
-git clone --branch v1.3.1 --depth 1 https://github.com/klarkxy/opencode-go-mgr.git
+git clone --branch v1.3.2 --depth 1 https://github.com/klarkxy/opencode-go-mgr.git
 cd opencode-go-mgr
 cp .env.example .env
 # PowerShell：Copy-Item .env.example .env
@@ -462,9 +464,11 @@ docker compose up -d --no-build
 docker compose ps
 ```
 
-默认镜像是 `ghcr.io/klarkxy/opencode-go-mgr:latest`。生产部署建议在 `.env`
-中用 `OCG_IMAGE` 固定完整版本标签，例如
-`ghcr.io/klarkxy/opencode-go-mgr:1.3.1`。完整版本与 `sha-<commit>` 标签用于
+仓库内支持源码构建的 `compose.yaml` 默认使用
+`ghcr.io/klarkxy/opencode-go-mgr:latest`；Release 中的
+`compose.example.yaml` 默认固定对应的完整版本。生产部署建议在 `.env` 中用
+`OCG_IMAGE` 固定完整版本标签，例如
+`ghcr.io/klarkxy/opencode-go-mgr:1.3.2`。完整版本与 `sha-<commit>` 标签用于
 标识单次发布，按发布策略不应移动；`1.3` 与 `latest` 会继续移动。技术上只有
 `ghcr.io/klarkxy/opencode-go-mgr@sha256:...` digest 真正不可变。需要调试当前源码时，设置
 `OCG_IMAGE=ocg-manager:local`，再执行 `docker compose up -d --build`。
@@ -526,9 +530,9 @@ curl --fail http://127.0.0.1:9042/dashboard/
 provenance attestation。可这样检查发布版本：
 
 ```bash
-docker buildx imagetools inspect ghcr.io/klarkxy/opencode-go-mgr:1.3.1
+docker buildx imagetools inspect ghcr.io/klarkxy/opencode-go-mgr:1.3.2
 gh attestation verify \
-  oci://ghcr.io/klarkxy/opencode-go-mgr:1.3.1 \
+  oci://ghcr.io/klarkxy/opencode-go-mgr:1.3.2 \
   --repo klarkxy/opencode-go-mgr
 ```
 

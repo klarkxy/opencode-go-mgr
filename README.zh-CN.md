@@ -51,13 +51,15 @@ Key 保存在本地 SQLite，并通过 OpenAI、Anthropic 与 Gemini 兼容 Gate
 ### Docker 快速启动
 
 公开无头镜像为 `ghcr.io/klarkxy/opencode-go-mgr`，匿名即可拉取；当前发布
-目标为 `linux/amd64`。
+目标为 `linux/amd64`。如果不需要源码，可使用仓库中的
+[`compose.example.yaml`](compose.example.yaml)（每个 Release 也会附带），保存为
+`compose.yaml`，并按需在同目录创建 `.env`。
 
 ```bash
-git clone --branch v1.3.1 --depth 1 https://github.com/klarkxy/opencode-go-mgr.git
+git clone --branch v1.3.2 --depth 1 https://github.com/klarkxy/opencode-go-mgr.git
 cd opencode-go-mgr
 cp .env.example .env
-# 编辑 .env：选择首次管理员创建方式，并把 OCG_IMAGE 固定到 1.3.1。
+# 编辑 .env：选择首次管理员创建方式，并把 OCG_IMAGE 固定到 1.3.2。
 docker compose pull
 docker compose up -d --no-build
 docker compose ps

@@ -45,7 +45,8 @@ ocg-manager/
 ├── DESIGN.md          Design system source of truth (linted in CI)
 ├── .github/workflows/ Cross-platform release workflow
 ├── Dockerfile         Multi-stage headless gateway image
-└── compose.yaml       Compose service definition
+├── compose.yaml       Source-build and image Compose service definition
+└── compose.example.yaml  Pull-only Compose example attached to each Release
 ```
 
 `src/api/tauri.ts` is a historical name; it wraps HTTP `/dashboard/api`, not
@@ -237,6 +238,7 @@ ocg-manager-cli_<version>_macos-universal.tar.gz
 ocg-manager_<version>_linux-x64.AppImage
 ocg-manager_<version>_linux-x64.deb
 ocg-manager-cli_<version>_linux-x64.tar.gz
+compose.example.yaml
 SHA256SUMS
 ```
 
@@ -245,8 +247,8 @@ ship the CLI executable alone: `serve` needs the sibling dashboard
 assets. Windows has no portable GUI artifact.
 
 The `linux/amd64` container is published separately as
-`ghcr.io/klarkxy/opencode-go-mgr`; it is not one of the seven platform
-payloads or the `SHA256SUMS` file attached to the GitHub Release (eight
+`ghcr.io/klarkxy/opencode-go-mgr`; the GitHub Release contains the seven
+platform payloads, the pull-only Compose example, and `SHA256SUMS` (nine
 attachments total). The runtime image includes `LICENSE` at
 `/usr/share/licenses/ocg-manager/LICENSE`.
 
@@ -308,8 +310,9 @@ Each runner also runs a smoke flow on the freshly built bundle:
   WEBKIT_DISABLE_COMPOSITING_MODE=1` and wait for the dashboard.
 
 When a `v*` tag is pushed, a downstream `draft-release` job downloads the
-three per-runner Actions artifacts, assembles the seven platform payloads in
-`release/`, regenerates `SHA256SUMS` over all seven, and creates or updates a
+three per-runner Actions artifacts, assembles the seven platform payloads and
+`compose.example.yaml` in `release/`, regenerates `SHA256SUMS` over all eight,
+and creates or updates a
 **draft** GitHub Release. It never publishes the release. After reviewing the
 draft and the native smoke results, publish the release in GitHub or run
 `gh release edit vX.Y.Z --draft=false`.
@@ -383,8 +386,9 @@ checks manually when changing uncovered paths.
    `git tag -a vX.Y.Z -m "OCG Manager vX.Y.Z"`, then push the tag. Never tag a
    branch commit that will later be squash-merged.
 5. Wait for every `release.yml` matrix job and `draft-release` to pass. Review
-   the draft's seven payloads, `SHA256SUMS`, smoke logs, platform warnings, and
-   notes generated from the previous-tag diff.
+   the draft's seven platform payloads, `compose.example.yaml`, `SHA256SUMS`,
+   smoke logs, platform warnings, and notes generated from the previous-tag
+   diff.
 6. Publish the draft in GitHub or run
    `gh release edit vX.Y.Z --draft=false`, then verify the public release.
 7. Wait for `container.yml`, verify the GHCR package is public, inspect its
@@ -420,7 +424,7 @@ covers most of them; the manual parts need a real desktop.
       local Cargo lock entries agree.
 - [ ] Each runner's `release/SHA256SUMS` matches every payload in that
       directory; the aggregated release checksum matches all seven platform
-      payloads.
+      payloads plus `compose.example.yaml`.
 - [ ] On Windows, run the installer once, confirm SmartScreen warning
       text, open the dashboard, add an account, send one request.
 - [ ] On macOS, mount the DMG, confirm the **Open Anyway** flow works,
