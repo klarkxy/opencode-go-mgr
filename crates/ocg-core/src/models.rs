@@ -1,4 +1,6 @@
-use chrono::{DateTime, Utc};
+use std::fmt;
+
+use chrono::{DateTime, Datelike, Local, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -10,7 +12,10 @@ pub struct Account {
     pub key_cipher: String,
     pub enabled: bool,
     pub referral_code: Option<String>,
-    pub recharge_date: Option<String>,
+    #[serde(alias = "recharge_date")]
+    pub purchase_date: String,
+    #[serde(default)]
+    pub expires_on: String,
     pub cooldown_until: Option<DateTime<Utc>>, // None = 可用
     pub last_error: Option<String>,
     pub created_at: DateTime<Utc>,
@@ -24,7 +29,8 @@ pub struct AccountInput {
     pub password: Option<String>,
     pub key: String,
     pub referral_code: Option<String>,
-    pub recharge_date: Option<String>,
+    #[serde(alias = "recharge_date")]
+    pub purchase_date: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,7 +41,66 @@ pub struct AccountUpdate {
     pub key: Option<String>,
     pub enabled: Option<bool>,
     pub referral_code: Option<String>,
-    pub recharge_date: Option<String>,
+    #[serde(alias = "recharge_date")]
+    pub purchase_date: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PurchaseDateError;
+
+impl fmt::Display for PurchaseDateError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("purchase date must use the YYYY-MM-DD format")
+    }
+}
+
+impl std::error::Error for PurchaseDateError {}
+
+/// Returns the current calendar date in the process's local timezone.
+pub fn local_today() -> String {
+    format_date(Local::now().date_naive())
+}
+
+/// Validates a purchase date and returns its canonical `YYYY-MM-DD` representation.
+pub fn normalize_purchase_date(value: &str) -> Result<String, PurchaseDateError> {
+    let parsed = NaiveDate::parse_from_str(value, "%Y-%m-%d").map_err(|_| PurchaseDateError)?;
+    let normalized = format_date(parsed);
+    if normalized != value {
+        return Err(PurchaseDateError);
+    }
+    Ok(normalized)
+}
+
+/// Calculates the natural-month expiry date, clamping to the target month's last day.
+pub fn purchase_expires_on(value: &str) -> Result<String, PurchaseDateError> {
+    let normalized = normalize_purchase_date(value)?;
+    let purchase =
+        NaiveDate::parse_from_str(&normalized, "%Y-%m-%d").map_err(|_| PurchaseDateError)?;
+    let (target_year, target_month) = next_month(purchase.year(), purchase.month())?;
+    let (following_year, following_month) = next_month(target_year, target_month)?;
+    let target_last_day = NaiveDate::from_ymd_opt(following_year, following_month, 1)
+        .and_then(|date| date.pred_opt())
+        .ok_or(PurchaseDateError)?
+        .day();
+    let expires = NaiveDate::from_ymd_opt(
+        target_year,
+        target_month,
+        purchase.day().min(target_last_day),
+    )
+    .ok_or(PurchaseDateError)?;
+    Ok(format_date(expires))
+}
+
+fn next_month(year: i32, month: u32) -> Result<(i32, u32), PurchaseDateError> {
+    if month == 12 {
+        Ok((year.checked_add(1).ok_or(PurchaseDateError)?, 1))
+    } else {
+        Ok((year, month + 1))
+    }
+}
+
+fn format_date(date: NaiveDate) -> String {
+    date.format("%Y-%m-%d").to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -328,8 +393,9 @@ pub struct DailyModelCost {
 #[cfg(test)]
 mod tests {
     use super::{
-        CLAUDE_DESKTOP_HAIKU_ALIAS, CLAUDE_DESKTOP_OPUS_ALIAS, CLAUDE_DESKTOP_SONNET_ALIAS,
-        ClaudeDesktopModels,
+        AccountInput, CLAUDE_DESKTOP_HAIKU_ALIAS, CLAUDE_DESKTOP_OPUS_ALIAS,
+        CLAUDE_DESKTOP_SONNET_ALIAS, ClaudeDesktopModels, normalize_purchase_date,
+        purchase_expires_on,
     };
 
     #[test]
@@ -370,5 +436,50 @@ mod tests {
         };
         assert!(unknown.validate().is_err());
         assert!(ClaudeDesktopModels::default().validate().is_ok());
+    }
+
+    #[test]
+    fn purchase_dates_require_canonical_calendar_dates() {
+        assert_eq!(
+            normalize_purchase_date("2026-07-15").expect("valid date should normalize"),
+            "2026-07-15"
+        );
+        for invalid in ["2026-7-15", " 2026-07-15", "2026-07-15 ", "2026-02-29", ""] {
+            assert!(
+                normalize_purchase_date(invalid).is_err(),
+                "{invalid:?} should be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn purchase_expiry_uses_the_next_natural_month() {
+        for (purchase, expected) in [
+            ("2026-01-15", "2026-02-15"),
+            ("2026-01-31", "2026-02-28"),
+            ("2024-01-31", "2024-02-29"),
+            ("2024-02-29", "2024-03-29"),
+            ("2026-12-31", "2027-01-31"),
+        ] {
+            assert_eq!(
+                purchase_expires_on(purchase).expect("valid date should have an expiry"),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn account_input_accepts_legacy_recharge_date_but_serializes_the_new_name() {
+        let input: AccountInput = serde_json::from_value(serde_json::json!({
+            "name": "legacy",
+            "key": "key",
+            "recharge_date": "2026-07-15"
+        }))
+        .expect("legacy input should deserialize");
+        assert_eq!(input.purchase_date.as_deref(), Some("2026-07-15"));
+
+        let json = serde_json::to_value(input).expect("input should serialize");
+        assert_eq!(json["purchase_date"], "2026-07-15");
+        assert!(json.get("recharge_date").is_none());
     }
 }

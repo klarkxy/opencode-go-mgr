@@ -1,11 +1,48 @@
 use crate::models::*;
 use anyhow::Result;
 use chrono::{DateTime, Duration, Utc};
-use rusqlite::{Connection, OptionalExtension, params, params_from_iter, types::Value};
-use std::path::PathBuf;
+use rusqlite::{
+    Connection, OptionalExtension, Row, params, params_from_iter,
+    types::{Type, Value},
+};
+use std::{collections::HashSet, fmt, path::PathBuf};
 
 pub struct Database {
     conn: Connection,
+}
+
+#[derive(Debug)]
+pub enum ReorderAccountsError {
+    DuplicateAccountId,
+    AccountSetMismatch,
+    Database(rusqlite::Error),
+}
+
+impl fmt::Display for ReorderAccountsError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::DuplicateAccountId => f.write_str("account_ids must not contain duplicates"),
+            Self::AccountSetMismatch => {
+                f.write_str("account set changed; reload the account list and retry")
+            }
+            Self::Database(error) => write!(f, "failed to reorder accounts: {error}"),
+        }
+    }
+}
+
+impl std::error::Error for ReorderAccountsError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Database(error) => Some(error),
+            Self::DuplicateAccountId | Self::AccountSetMismatch => None,
+        }
+    }
+}
+
+impl From<rusqlite::Error> for ReorderAccountsError {
+    fn from(error: rusqlite::Error) -> Self {
+        Self::Database(error)
+    }
 }
 
 impl Database {
@@ -109,15 +146,61 @@ impl Database {
             )?;
         }
 
+        if version < 5 {
+            tx.execute(
+                "ALTER TABLE accounts ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0",
+                [],
+            )?;
+
+            let accounts = {
+                let mut stmt = tx.prepare(
+                    "SELECT id, recharge_date, created_at
+                     FROM accounts
+                     ORDER BY created_at ASC, id ASC",
+                )?;
+                let rows = stmt.query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                })?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()?
+            };
+
+            for (sort_order, (id, recharge_date, created_at)) in accounts.into_iter().enumerate() {
+                let purchase_date = match recharge_date {
+                    Some(value) if normalize_purchase_date(&value).is_ok() => value,
+                    _ => migration_fallback_purchase_date(&created_at)?,
+                };
+                tx.execute(
+                    "UPDATE accounts
+                     SET recharge_date = ?1, sort_order = ?2
+                     WHERE id = ?3",
+                    params![purchase_date, sort_order as i64, id],
+                )?;
+            }
+
+            tx.execute(
+                "INSERT OR REPLACE INTO schema_version (version) VALUES (5)",
+                [],
+            )?;
+        }
+
         tx.commit()?;
         Ok(())
     }
 
     // Accounts
     pub fn create_account(&self, account: &Account) -> Result<()> {
+        let purchase_date = if account.purchase_date.trim().is_empty() {
+            local_today()
+        } else {
+            normalize_purchase_date(&account.purchase_date)?
+        };
         self.conn.execute(
-            "INSERT INTO accounts (id, name, username, password_cipher, key_cipher, enabled, referral_code, recharge_date, cooldown_until, last_error, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            "INSERT INTO accounts (id, name, username, password_cipher, key_cipher, enabled, referral_code, recharge_date, sort_order, cooldown_until, last_error, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, (SELECT COALESCE(MAX(sort_order), -1) + 1 FROM accounts), ?9, ?10, ?11, ?12)",
             params![
                 account.id,
                 account.name,
@@ -126,7 +209,7 @@ impl Database {
                 account.key_cipher,
                 account.enabled as i32,
                 account.referral_code,
-                account.recharge_date,
+                purchase_date,
                 account.cooldown_until.map(|t| t.to_rfc3339()),
                 account.last_error,
                 account.created_at.to_rfc3339(),
@@ -158,10 +241,9 @@ impl Database {
             Some(s) => Some(s.clone()),             // set to new value
             None => existing.referral_code.clone(), // not provided, keep existing
         };
-        let recharge_date = match &update.recharge_date {
-            Some(s) if s.is_empty() => None,
-            Some(s) => Some(s.clone()),
-            None => existing.recharge_date.clone(),
+        let purchase_date = match &update.purchase_date {
+            Some(value) => normalize_purchase_date(value)?,
+            None => existing.purchase_date.clone(),
         };
         let key = key_cipher.unwrap_or(&existing.key_cipher);
         let password = match password_cipher {
@@ -180,7 +262,7 @@ impl Database {
                 key,
                 enabled as i32,
                 referral_code,
-                recharge_date,
+                purchase_date,
                 Utc::now().to_rfc3339(),
                 id,
             ],
@@ -199,48 +281,52 @@ impl Database {
         let mut stmt = self.conn.prepare(
             "SELECT id, name, username, password_cipher, key_cipher, enabled, referral_code, recharge_date, cooldown_until, last_error, created_at, updated_at FROM accounts WHERE id = ?1"
         )?;
-        let account = stmt
-            .query_row([id], |row| {
-                Ok(Account {
-                    id: row.get(0)?,
-                    name: row.get(1)?,
-                    username: row.get(2)?,
-                    password_cipher: row.get(3)?,
-                    key_cipher: row.get(4)?,
-                    enabled: row.get::<_, i32>(5)? != 0,
-                    referral_code: row.get(6)?,
-                    recharge_date: row.get(7)?,
-                    cooldown_until: row.get::<_, Option<String>>(8)?.map(parse_datetime),
-                    last_error: row.get(9)?,
-                    created_at: parse_datetime(row.get::<_, String>(10)?),
-                    updated_at: parse_datetime(row.get::<_, String>(11)?),
-                })
-            })
-            .optional()?;
+        let account = stmt.query_row([id], account_from_row).optional()?;
         Ok(account)
     }
 
     pub fn list_accounts(&self) -> Result<Vec<Account>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, username, password_cipher, key_cipher, enabled, referral_code, recharge_date, cooldown_until, last_error, created_at, updated_at FROM accounts ORDER BY created_at"
+            "SELECT id, name, username, password_cipher, key_cipher, enabled, referral_code, recharge_date, cooldown_until, last_error, created_at, updated_at FROM accounts ORDER BY sort_order ASC, created_at ASC, id ASC"
         )?;
-        let rows = stmt.query_map([], |row| {
-            Ok(Account {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                username: row.get(2)?,
-                password_cipher: row.get(3)?,
-                key_cipher: row.get(4)?,
-                enabled: row.get::<_, i32>(5)? != 0,
-                referral_code: row.get(6)?,
-                recharge_date: row.get(7)?,
-                cooldown_until: row.get::<_, Option<String>>(8)?.map(parse_datetime),
-                last_error: row.get(9)?,
-                created_at: parse_datetime(row.get::<_, String>(10)?),
-                updated_at: parse_datetime(row.get::<_, String>(11)?),
-            })
-        })?;
+        let rows = stmt.query_map([], account_from_row)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.into())
+    }
+
+    pub fn reorder_accounts(
+        &self,
+        account_ids: &[String],
+    ) -> std::result::Result<(), ReorderAccountsError> {
+        let tx = self.conn.unchecked_transaction()?;
+        let mut requested_ids = HashSet::with_capacity(account_ids.len());
+        if account_ids
+            .iter()
+            .any(|id| !requested_ids.insert(id.as_str()))
+        {
+            return Err(ReorderAccountsError::DuplicateAccountId);
+        }
+
+        let current_ids = {
+            let mut stmt = tx.prepare("SELECT id FROM accounts")?;
+            let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        if current_ids.len() != account_ids.len()
+            || current_ids
+                .iter()
+                .any(|id| !requested_ids.contains(id.as_str()))
+        {
+            return Err(ReorderAccountsError::AccountSetMismatch);
+        }
+
+        for (sort_order, id) in account_ids.iter().enumerate() {
+            tx.execute(
+                "UPDATE accounts SET sort_order = ?1 WHERE id = ?2",
+                params![sort_order as i64, id],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
     }
 
     // Settings
@@ -709,6 +795,39 @@ fn forward_log_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ForwardLog>
     })
 }
 
+fn account_from_row(row: &Row<'_>) -> rusqlite::Result<Account> {
+    let purchase_date = row.get::<_, String>(7)?;
+    let expires_on = purchase_expires_on(&purchase_date).map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(7, Type::Text, Box::new(error))
+    })?;
+    Ok(Account {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        username: row.get(2)?,
+        password_cipher: row.get(3)?,
+        key_cipher: row.get(4)?,
+        enabled: row.get::<_, i32>(5)? != 0,
+        referral_code: row.get(6)?,
+        purchase_date,
+        expires_on,
+        cooldown_until: row.get::<_, Option<String>>(8)?.map(parse_datetime),
+        last_error: row.get(9)?,
+        created_at: parse_datetime(row.get::<_, String>(10)?),
+        updated_at: parse_datetime(row.get::<_, String>(11)?),
+    })
+}
+
+fn migration_fallback_purchase_date(created_at: &str) -> Result<String> {
+    let created_at = DateTime::parse_from_rfc3339(created_at).map_err(|error| {
+        anyhow::anyhow!("invalid account created_at {created_at:?} during v5 migration: {error}")
+    })?;
+    Ok(created_at
+        .with_timezone(&Utc)
+        .date_naive()
+        .format("%Y-%m-%d")
+        .to_string())
+}
+
 fn parse_datetime(s: String) -> DateTime<Utc> {
     DateTime::parse_from_rfc3339(&s)
         .map(|dt| dt.with_timezone(&Utc))
@@ -743,7 +862,8 @@ mod tests {
             key_cipher: "cipher".into(),
             enabled: true,
             referral_code: None,
-            recharge_date: None,
+            purchase_date: String::new(),
+            expires_on: String::new(),
             cooldown_until: None,
             last_error: None,
             created_at: Utc::now(),
@@ -825,13 +945,245 @@ mod tests {
             })
             .expect("schema version should be readable");
         let usage = db.account_usage("old").expect("usage should load");
-        assert_eq!(version, 4);
+        assert_eq!(version, 5);
+        assert_eq!(
+            db.get_account("old")
+                .expect("account should load")
+                .expect("account should exist")
+                .purchase_date,
+            now[..10]
+        );
         assert_cost(usage.window_5h, 2.5);
         assert_cost(usage.window_week, 2.5);
         assert_cost(usage.window_month, 2.5);
 
         drop(db);
         fs::remove_dir_all(dir).expect("test data dir should be removed");
+    }
+
+    #[test]
+    fn v5_migration_backfills_dates_and_stable_dense_order() {
+        let dir = temp_data_dir("v5-migration");
+        let conn = Connection::open(dir.join("data.sqlite")).expect("v4 db should open");
+        conn.execute_batch(
+            "CREATE TABLE schema_version (version INTEGER PRIMARY KEY);
+             INSERT INTO schema_version (version) VALUES (4);
+             CREATE TABLE accounts (
+                 id TEXT PRIMARY KEY,
+                 name TEXT NOT NULL,
+                 key_cipher TEXT NOT NULL,
+                 enabled INTEGER NOT NULL DEFAULT 1,
+                 referral_code TEXT,
+                 recharge_date TEXT,
+                 created_at TEXT NOT NULL,
+                 updated_at TEXT NOT NULL,
+                 cooldown_until TEXT,
+                 last_error TEXT,
+                 username TEXT,
+                 password_cipher TEXT,
+                 usage_5h_baseline_percent REAL,
+                 usage_5h_anchor_success_cost REAL,
+                 usage_week_baseline_percent REAL,
+                 usage_week_anchor_success_cost REAL,
+                 usage_month_baseline_percent REAL,
+                 usage_month_anchor_success_cost REAL
+             );",
+        )
+        .expect("v4 schema should be created");
+        let shared_created_at = "2026-01-02T01:30:00+02:00";
+        for (id, recharge_date, created_at) in [
+            ("a", Some("2025-12-31"), shared_created_at),
+            ("b", None, shared_created_at),
+            ("c", Some(""), shared_created_at),
+            ("d", Some("2026-2-3"), "2026-02-04T04:00:00Z"),
+        ] {
+            conn.execute(
+                "INSERT INTO accounts
+                 (id, name, key_cipher, recharge_date, created_at, updated_at)
+                 VALUES (?1, ?1, 'cipher', ?2, ?3, ?3)",
+                params![id, recharge_date, created_at],
+            )
+            .expect("v4 account should be inserted");
+        }
+        drop(conn);
+
+        let db = Database::open(dir.clone()).expect("v4 db should migrate");
+        let accounts = db.list_accounts().expect("migrated accounts should load");
+        assert_eq!(
+            accounts
+                .iter()
+                .map(|account| account.id.as_str())
+                .collect::<Vec<_>>(),
+            ["a", "b", "c", "d"]
+        );
+        assert_eq!(accounts[0].purchase_date, "2025-12-31");
+        assert_eq!(accounts[1].purchase_date, "2026-01-01");
+        assert_eq!(accounts[2].purchase_date, "2026-01-01");
+        assert_eq!(accounts[3].purchase_date, "2026-02-04");
+        let sort_orders = db
+            .conn
+            .prepare("SELECT sort_order FROM accounts ORDER BY sort_order")
+            .expect("sort query should prepare")
+            .query_map([], |row| row.get::<_, i64>(0))
+            .expect("sort query should run")
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .expect("sort orders should load");
+        assert_eq!(sort_orders, [0, 1, 2, 3]);
+        drop(db);
+
+        let reopened = Database::open(dir.clone()).expect("migrated db should reopen");
+        assert_eq!(
+            reopened
+                .list_accounts()
+                .expect("reopened accounts should load")
+                .iter()
+                .map(|account| account.id.as_str())
+                .collect::<Vec<_>>(),
+            ["a", "b", "c", "d"]
+        );
+
+        drop(reopened);
+        fs::remove_dir_all(dir).expect("test data dir should be removed");
+    }
+
+    #[test]
+    fn account_creation_defaults_dates_and_appends_to_saved_order() {
+        let dir = temp_data_dir("create-order");
+        let db = Database::open(dir.clone()).expect("db should open");
+        let mut first = account("first");
+        first.created_at = Utc::now() + Duration::days(1);
+        db.create_account(&first)
+            .expect("first account should save");
+        let mut second = account("second");
+        second.created_at = Utc::now() - Duration::days(1);
+        second.purchase_date = "2024-01-31".to_string();
+        db.create_account(&second)
+            .expect("second account should save");
+
+        let accounts = db.list_accounts().expect("accounts should load");
+        assert_eq!(
+            accounts
+                .iter()
+                .map(|account| account.id.as_str())
+                .collect::<Vec<_>>(),
+            ["first", "second"]
+        );
+        assert_eq!(accounts[0].purchase_date, local_today());
+        assert_eq!(
+            accounts[0].expires_on,
+            purchase_expires_on(&accounts[0].purchase_date)
+                .expect("default date should have an expiry")
+        );
+        assert_eq!(accounts[1].expires_on, "2024-02-29");
+
+        let mut invalid = account("invalid");
+        invalid.purchase_date = "2026-2-03".to_string();
+        assert!(db.create_account(&invalid).is_err());
+        assert!(
+            db.get_account("invalid")
+                .expect("invalid account lookup should work")
+                .is_none()
+        );
+
+        drop(db);
+        fs::remove_dir_all(dir).expect("test data dir should be removed");
+    }
+
+    #[test]
+    fn reorder_accounts_validates_atomically_and_persists_dense_order() {
+        let dir = temp_data_dir("reorder");
+        let db = Database::open(dir.clone()).expect("db should open");
+        for id in ["a", "b", "c"] {
+            db.create_account(&account(id))
+                .expect("account should be created");
+        }
+
+        db.reorder_accounts(&["c".into(), "a".into(), "b".into()])
+            .expect("valid reorder should save");
+        assert_eq!(account_ids(&db), ["c", "a", "b"]);
+
+        let duplicate = db
+            .reorder_accounts(&["c".into(), "c".into(), "b".into()])
+            .expect_err("duplicates should fail");
+        assert!(matches!(
+            duplicate,
+            ReorderAccountsError::DuplicateAccountId
+        ));
+        assert_eq!(account_ids(&db), ["c", "a", "b"]);
+
+        for stale in [
+            vec!["c".into(), "a".into()],
+            vec!["c".into(), "a".into(), "missing".into()],
+            Vec::<String>::new(),
+        ] {
+            let error = db
+                .reorder_accounts(&stale)
+                .expect_err("stale account set should fail");
+            assert!(matches!(error, ReorderAccountsError::AccountSetMismatch));
+            assert_eq!(account_ids(&db), ["c", "a", "b"]);
+        }
+
+        let sort_orders = db
+            .conn
+            .prepare("SELECT sort_order FROM accounts ORDER BY sort_order")
+            .expect("sort query should prepare")
+            .query_map([], |row| row.get::<_, i64>(0))
+            .expect("sort query should run")
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .expect("sort orders should load");
+        assert_eq!(sort_orders, [0, 1, 2]);
+        drop(db);
+
+        let reopened = Database::open(dir.clone()).expect("db should reopen");
+        assert_eq!(account_ids(&reopened), ["c", "a", "b"]);
+        drop(reopened);
+
+        let empty_dir = temp_data_dir("reorder-empty");
+        let empty = Database::open(empty_dir.clone()).expect("empty db should open");
+        empty
+            .reorder_accounts(&[])
+            .expect("empty order should be valid for an empty database");
+        drop(empty);
+
+        fs::remove_dir_all(dir).expect("test data dir should be removed");
+        fs::remove_dir_all(empty_dir).expect("empty test data dir should be removed");
+    }
+
+    #[test]
+    fn reorder_accounts_rolls_back_when_an_update_fails_mid_transaction() {
+        let dir = temp_data_dir("reorder-write-failure");
+        let db = Database::open(dir.clone()).expect("db should open");
+        for id in ["a", "b", "c"] {
+            db.create_account(&account(id))
+                .expect("account should be created");
+        }
+        db.conn
+            .execute_batch(
+                "CREATE TRIGGER reject_b_sort_update
+                 BEFORE UPDATE OF sort_order ON accounts
+                 WHEN NEW.id = 'b'
+                 BEGIN
+                     SELECT RAISE(ABORT, 'forced reorder failure');
+                 END;",
+            )
+            .expect("failure trigger should be installed");
+
+        let error = db
+            .reorder_accounts(&["c".into(), "a".into(), "b".into()])
+            .expect_err("the trigger should interrupt the reorder");
+        assert!(matches!(error, ReorderAccountsError::Database(_)));
+        assert_eq!(account_ids(&db), ["a", "b", "c"]);
+
+        drop(db);
+        fs::remove_dir_all(dir).expect("test data dir should be removed");
+    }
+
+    fn account_ids(db: &Database) -> Vec<String> {
+        db.list_accounts()
+            .expect("accounts should load")
+            .into_iter()
+            .map(|account| account.id)
+            .collect()
     }
 
     #[test]

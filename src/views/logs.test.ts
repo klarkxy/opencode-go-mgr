@@ -64,6 +64,66 @@ test("dashboard request errors preserve status for localized handling", async ()
   );
 });
 
+test("account API sends purchase dates and the complete reorder payload", async () => {
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { location: { pathname: "/dashboard" }, dispatchEvent() {} },
+  });
+
+  const requests: Array<{ url: string; method: string; body: unknown }> = [];
+  const account = {
+    id: "account-2",
+    name: "Second",
+    username: "",
+    password: "",
+    key: "",
+    enabled: true,
+    purchase_date: "2026-07-15",
+    expires_on: "2026-08-15",
+    cooldown_until: null,
+    last_error: null,
+    created_at: "2026-07-15T00:00:00Z",
+    updated_at: "2026-07-15T00:00:00Z",
+  };
+  Object.defineProperty(globalThis, "fetch", {
+    configurable: true,
+    value: async (input: string, init: RequestInit = {}) => {
+      requests.push({
+        url: input,
+        method: init.method ?? "GET",
+        body: init.body ? JSON.parse(String(init.body)) : null,
+      });
+      const response = input.endsWith("/accounts/order") ? [account] : account;
+      return new Response(JSON.stringify(response), {
+        headers: { "Content-Type": "application/json" },
+      });
+    },
+  });
+
+  const created = await tauriApi.createAccount({
+    name: "Second",
+    key: "sk-test",
+    purchase_date: "2026-07-15",
+  });
+  const reordered = await tauriApi.reorderAccounts(["account-2", "account-1"]);
+
+  assert.equal(created.purchase_date, "2026-07-15");
+  assert.equal(created.expires_on, "2026-08-15");
+  assert.equal(reordered[0]?.id, "account-2");
+  assert.deepEqual(requests, [
+    {
+      url: "/dashboard/api/accounts",
+      method: "POST",
+      body: { name: "Second", key: "sk-test", purchase_date: "2026-07-15" },
+    },
+    {
+      url: "/dashboard/api/accounts/order",
+      method: "PUT",
+      body: { account_ids: ["account-2", "account-1"] },
+    },
+  ]);
+});
+
 test("logs view uses remote totals, refresh controls, loading, and a useful empty state", async () => {
   const source = await readFile(new URL("./Logs.vue", import.meta.url), "utf8");
   const template = source.slice(source.indexOf("<template>"), source.indexOf("<script setup"));

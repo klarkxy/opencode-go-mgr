@@ -251,6 +251,19 @@ selecting the account. You can paste an OpenCode‑Go `username` and
 obfuscated on disk. The gateway uses the password to refresh upstream
 sessions when needed.
 
+Each account also records a **purchase date**. New accounts default to the
+browser's current date, and the value remains editable in both the create form
+and expanded account details. Expiry is the same day in the next natural month,
+clamped to that month's last day when necessary: `2026-01-31` expires on
+`2026-02-28`. Accounts and Dashboard show days remaining, due today, or days
+expired. This is informational only and never disables an account or prevents
+the gateway from selecting it.
+
+Use the drag handle on an account card to persist its priority with a mouse,
+touchscreen, or pen. When the handle has keyboard focus, the Up and Down arrow
+keys move the account as well. Dashboard, the Logs account filter, CLI listings,
+and the gateway selector all consume this same SQLite-backed order.
+
 You can also reset a cooldown manually from this view. The bar snaps back
 to its local estimate as soon as the cooldown is cleared.
 
@@ -413,7 +426,8 @@ and forcing one returns `400`.
 
 ### Account Selection And Failover
 
-Accounts are tried in **list order**. The selector skips:
+Accounts are tried in **list order**, which can be reordered and persisted from
+the Accounts view. The selector skips:
 
 - Disabled accounts.
 - Accounts that are cooling down.
@@ -527,7 +541,7 @@ it. Alternatively, run the Compose commands from a checkout containing
 `compose.yaml` and `.env.example` (preferably the matching release tag):
 
 ```bash
-git clone --branch v1.3.2 --depth 1 https://github.com/klarkxy/opencode-go-mgr.git
+git clone --branch v1.4.0 --depth 1 https://github.com/klarkxy/opencode-go-mgr.git
 cd opencode-go-mgr
 cp .env.example .env
 # PowerShell: Copy-Item .env.example .env
@@ -541,9 +555,9 @@ The repository's source-capable `compose.yaml` defaults to
 `ghcr.io/klarkxy/opencode-go-mgr:latest`; the Release
 `compose.example.yaml` defaults to its matching full version. For repeatable
 production deployments, set `OCG_IMAGE` in `.env` to a full release tag such
-as `ghcr.io/klarkxy/opencode-go-mgr:1.3.2`. The full version and
+as `ghcr.io/klarkxy/opencode-go-mgr:1.4.0`. The full version and
 `sha-<commit>` tags identify one release and are intended not to move;
-`1.3` and `latest` move forward. Only a digest such as
+`1.4` and `latest` move forward. Only a digest such as
 `ghcr.io/klarkxy/opencode-go-mgr@sha256:...` is technically immutable. To build the current checkout
 instead, set `OCG_IMAGE=ocg-manager:local` and run
 `docker compose up -d --build`. `NPM_REGISTRY` and `CARGO_REGISTRY` are build
@@ -621,9 +635,9 @@ Each stable image includes an SPDX SBOM, BuildKit SLSA provenance, and a
 GitHub signed provenance attestation. Inspect and verify a release with:
 
 ```bash
-docker buildx imagetools inspect ghcr.io/klarkxy/opencode-go-mgr:1.3.2
+docker buildx imagetools inspect ghcr.io/klarkxy/opencode-go-mgr:1.4.0
 gh attestation verify \
-  oci://ghcr.io/klarkxy/opencode-go-mgr:1.3.2 \
+  oci://ghcr.io/klarkxy/opencode-go-mgr:1.4.0 \
   --repo klarkxy/opencode-go-mgr
 ```
 

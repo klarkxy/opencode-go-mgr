@@ -7,6 +7,8 @@ export interface Account {
   password: string;
   key: string;
   enabled: boolean;
+  purchase_date: string;
+  expires_on: string;
   cooldown_until: string | null;
   last_error: string | null;
   created_at: string;
@@ -18,6 +20,7 @@ export interface AccountInput {
   username?: string;
   password?: string;
   key: string;
+  purchase_date?: string;
 }
 
 export interface AccountUpdate {
@@ -26,6 +29,7 @@ export interface AccountUpdate {
   password?: string;
   key?: string;
   enabled?: boolean;
+  purchase_date?: string;
 }
 
 export interface AppConfig {
@@ -214,6 +218,11 @@ export const tauriApi = {
     request<Account>("/accounts", { method: "POST", body: jsonBody(input) }),
   updateAccount: (id: string, update: AccountUpdate) =>
     request<Account>(`/accounts/${id}`, { method: "PATCH", body: jsonBody(update) }),
+  reorderAccounts: (accountIds: string[]) =>
+    request<Account[]>("/accounts/order", {
+      method: "PUT",
+      body: jsonBody({ account_ids: accountIds }),
+    }),
   deleteAccount: (id: string) => request<void>(`/accounts/${id}`, { method: "DELETE" }),
   toggleAccount: (id: string) => request<Account>(`/accounts/${id}/toggle`, { method: "POST" }),
   testAccount: async (id: string) => {

@@ -27,9 +27,12 @@ alongside the GUI.
 - **Claude Desktop aliases** — `/claude-desktop/v1/messages` and
   `/claude-desktop/v1/models` expose the Claude model names expected by the
   desktop client while routing each alias to a configured OpenCode‑Go model.
-- **Local multi‑account rotation** — accounts are tried in list order. Disabled
-  accounts, accounts cooling down, and accounts that already failed during the
-  current request are skipped, with a fast failover.
+- **Controllable local multi-account rotation** — drag account cards to persist
+  their priority. The gateway follows that list order while skipping disabled,
+  cooling, or already-failed accounts for fast failover.
+- **Purchase-cycle reminders** — each account records its purchase date and an
+  expiry date one natural month later. Accounts and Dashboard show the remaining
+  days without automatically disabling an expired account.
 - **Local cost accounting** — 5‑hour, weekly, and monthly usage bars are
   estimated from the requests the gateway actually forwards.
 - **Dashboard first run** — the first visitor on a non‑loopback bind creates
@@ -64,10 +67,10 @@ Release), save it as `compose.yaml`, and optionally create a neighboring
 `.env` file.
 
 ```bash
-git clone --branch v1.3.2 --depth 1 https://github.com/klarkxy/opencode-go-mgr.git
+git clone --branch v1.4.0 --depth 1 https://github.com/klarkxy/opencode-go-mgr.git
 cd opencode-go-mgr
 cp .env.example .env
-# Edit .env: choose first-run administrator setup and pin OCG_IMAGE to 1.3.2.
+# Edit .env: choose first-run administrator setup and pin OCG_IMAGE to 1.4.0.
 docker compose pull
 docker compose up -d --no-build
 docker compose ps

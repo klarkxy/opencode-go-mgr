@@ -255,7 +255,8 @@ fn build_state(base_url: String, keys: &[&str]) -> (Arc<CoreStateInner>, PathBuf
             key_cipher: state.encrypt_key(key).unwrap(),
             enabled: true,
             referral_code: None,
-            recharge_date: None,
+            purchase_date: String::new(),
+            expires_on: String::new(),
             cooldown_until: None,
             last_error: None,
             created_at: now + chrono::Duration::seconds(idx as i64),
@@ -532,7 +533,7 @@ async fn application_models_skips_an_account_with_a_broken_key() {
                 key: None,
                 enabled: None,
                 referral_code: None,
-                recharge_date: None,
+                purchase_date: None,
             },
             Some("not-a-valid-ciphertext"),
             None,
@@ -1001,6 +1002,82 @@ async fn converted_messages_request_keeps_retry_and_account_fallback() {
     );
     assert!(calls.iter().all(|call| call.path == "/v1/chat/completions"));
     drop(calls);
+
+    gateway::stop_gateway(gateway_handle);
+    let _ = stop_mock.send(());
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn manual_order_drives_fallback_while_ineligible_accounts_are_skipped() {
+    let replies = HashMap::from([
+        (
+            "key-2".to_string(),
+            VecDeque::from([
+                MockReply {
+                    status: 500,
+                    body: r#"{"error":"temporary"}"#,
+                },
+                MockReply {
+                    status: 500,
+                    body: r#"{"error":"still temporary"}"#,
+                },
+            ]),
+        ),
+        (
+            "key-1".to_string(),
+            VecDeque::from([MockReply {
+                status: 200,
+                body: SUCCESS_BODY,
+            }]),
+        ),
+    ]);
+    let (base_url, calls, stop_mock) = start_mock_upstream(replies).await;
+    let (state, dir) = build_state(base_url, &["key-1", "key-2", "key-3", "key-4"]);
+    {
+        let db = state.db.lock();
+        db.reorder_accounts(&[
+            "acct-4".into(),
+            "acct-3".into(),
+            "acct-2".into(),
+            "acct-1".into(),
+        ])
+        .unwrap();
+        db.update_account(
+            "acct-4",
+            &AccountUpdate {
+                name: None,
+                username: None,
+                password: None,
+                key: None,
+                enabled: Some(false),
+                referral_code: None,
+                purchase_date: None,
+            },
+            None,
+            None,
+        )
+        .unwrap();
+        db.set_account_cooldown(
+            "acct-3",
+            Some(Utc::now() + Duration::hours(1)),
+            Some("test cooldown"),
+        )
+        .unwrap();
+    }
+    let (port, gateway_handle) = start_gateway(state).await;
+
+    let (status, _) = chat(port).await;
+    assert_eq!(status, 200);
+    assert_eq!(
+        calls
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|call| call.key.as_str())
+            .collect::<Vec<_>>(),
+        ["key-2", "key-2", "key-1"]
+    );
 
     gateway::stop_gateway(gateway_handle);
     let _ = stop_mock.send(());

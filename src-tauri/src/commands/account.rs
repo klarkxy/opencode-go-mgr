@@ -36,7 +36,8 @@ pub fn create_account(state: State<'_, AppState>, input: AccountInput) -> Result
             .map_err(|e| e.to_string())?,
         enabled: true,
         referral_code: input.referral_code,
-        recharge_date: input.recharge_date,
+        purchase_date: input.purchase_date.unwrap_or_default(),
+        expires_on: String::new(),
         cooldown_until: None,
         last_error: None,
         created_at: now,
@@ -44,6 +45,10 @@ pub fn create_account(state: State<'_, AppState>, input: AccountInput) -> Result
     };
     let db = state.core.db.lock();
     db.create_account(&account).map_err(|e| e.to_string())?;
+    let account = db
+        .get_account(&id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "created account not found".to_string())?;
     let _ = db.log_gateway(
         "info",
         "account",
@@ -129,7 +134,7 @@ pub fn toggle_account(state: State<'_, AppState>, id: String) -> Result<Account,
         key: None,
         enabled: Some(!account.enabled),
         referral_code: None,
-        recharge_date: None,
+        purchase_date: None,
     };
     {
         let db = state.core.db.lock();

@@ -264,13 +264,17 @@ async fn key_command(
                 key_cipher,
                 enabled: true,
                 referral_code: None,
-                recharge_date: None,
+                purchase_date: String::new(),
+                expires_on: String::new(),
                 cooldown_until: None,
                 last_error: None,
                 created_at: now,
                 updated_at: now,
             };
             db.create_account(&account)?;
+            let account = db
+                .get_account(&id)?
+                .ok_or_else(|| anyhow::anyhow!("created key not found: {}", id))?;
             db.log_gateway(
                 "info",
                 "account",
@@ -328,7 +332,7 @@ fn toggle_account(state: &Arc<CoreStateInner>, id: &str, enabled: bool) -> Resul
         key: None,
         enabled: Some(enabled),
         referral_code: None,
-        recharge_date: None,
+        purchase_date: None,
     };
     db.update_account(id, &update, None, None)?;
     db.log_gateway(
