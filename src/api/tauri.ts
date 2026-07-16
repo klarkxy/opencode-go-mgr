@@ -99,6 +99,11 @@ export interface ForwardLogQuery {
   offset?: number;
   status?: string | null;
   account_id?: string | null;
+  model?: string | null;
+  start_time?: string | null;
+  end_time?: string | null;
+  sort_by?: string | null;
+  sort_order?: string | null;
 }
 
 export interface UsageWindow {
@@ -267,8 +272,14 @@ export const tauriApi = {
     });
     if (query.status) params.set("status", query.status);
     if (query.account_id) params.set("account_id", query.account_id);
+    if (query.model) params.set("model", query.model);
+    if (query.start_time) params.set("start_time", query.start_time);
+    if (query.end_time) params.set("end_time", query.end_time);
+    if (query.sort_by) params.set("sort_by", query.sort_by);
+    if (query.sort_order) params.set("sort_order", query.sort_order);
     return request<ForwardLogPage>(`/logs/forward?${params}`);
   },
+  getForwardLogModels: () => request<string[]>("/logs/forward/models"),
 
   getDashboardSummary: () => request<DashboardSummary>("/dashboard/summary"),
   getDailyCostByModel: (days?: number) =>

@@ -52,6 +52,7 @@ pub fn api_router(state: CoreState) -> Router<CoreState> {
         .route("/application-models", get(application_models))
         .route("/logs/gateway", get(gateway_logs))
         .route("/logs/forward", get(forward_logs))
+        .route("/logs/forward/models", get(forward_log_models))
         .route("/dashboard/summary", get(dashboard_summary))
         .route("/dashboard/daily-cost-by-model", get(daily_cost_by_model))
         .route_layer(middleware::from_fn_with_state(
@@ -995,6 +996,11 @@ struct ForwardLogQuery {
     offset: Option<i64>,
     status: Option<String>,
     account_id: Option<String>,
+    model: Option<String>,
+    start_time: Option<String>,
+    end_time: Option<String>,
+    sort_by: Option<String>,
+    sort_order: Option<String>,
 }
 
 async fn gateway_logs(
@@ -1021,7 +1027,23 @@ async fn forward_logs(
             q.offset.unwrap_or(0),
             q.status.as_deref(),
             q.account_id.as_deref(),
+            q.model.as_deref(),
+            q.start_time.as_deref(),
+            q.end_time.as_deref(),
+            q.sort_by.as_deref(),
+            q.sort_order.as_deref(),
         )
+        .map(Json)
+        .map_err(ApiError::internal)
+}
+
+async fn forward_log_models(
+    State(state): State<CoreState>,
+) -> Result<Json<Vec<String>>, ApiError> {
+    state
+        .db
+        .lock()
+        .list_forward_log_models()
         .map(Json)
         .map_err(ApiError::internal)
 }

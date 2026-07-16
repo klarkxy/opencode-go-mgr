@@ -29,6 +29,28 @@
         />
       </n-tab-pane>
       <n-tab-pane name="forward" :tab="t('请求日志')">
+        <div class="stats-row">
+          <div class="stat-card">
+            <div class="stat-label">{{ t("请求数") }}</div>
+            <div class="stat-value">{{ formatNumber(forwardTotals.total_requests) }}</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">{{ t("输入") }}</div>
+            <div class="stat-value">{{ formatNumber(forwardTotals.prompt_tokens) }}</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">{{ t("输出") }}</div>
+            <div class="stat-value">{{ formatNumber(forwardTotals.completion_tokens) }}</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">{{ t("缓存") }}</div>
+            <div class="stat-value">{{ formatNumber(forwardTotals.cached_tokens) }}</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">{{ t("成本") }}</div>
+            <div class="stat-value">{{ formatCost(forwardTotals.cost, 5) }}</div>
+          </div>
+        </div>
         <div class="filter-bar">
           <n-select
             v-model:value="statusFilter"
@@ -42,8 +64,43 @@
             :placeholder="t('账号')"
             clearable
           />
+          <n-select
+            v-model:value="modelFilter"
+            :options="modelOptions"
+            :placeholder="t('模型')"
+            clearable
+          />
+          <n-date-picker
+            v-model:value="timeRange"
+            type="datetimerange"
+            clearable
+            :placeholder="t('选择时间范围')"
+            class="time-range-picker"
+          />
+          <n-select
+            v-model:value="sortBy"
+            :options="sortOptions"
+            :placeholder="t('排序')"
+            :consistent-menu-width="false"
+            class="sort-select"
+          />
+          <n-tooltip trigger="hover">
+            <template #trigger>
+              <n-button
+                circle
+                quaternary
+                :aria-label="sortOrder === 'asc' ? t('升序') : t('降序')"
+                @click="toggleSortOrder"
+              >
+                <template #icon>
+                  <n-icon :component="sortOrder === 'asc' ? ArrowUpOutlined : ArrowDownOutlined" />
+                </template>
+              </n-button>
+            </template>
+            {{ sortOrder === "asc" ? t("升序") : t("降序") }}
+          </n-tooltip>
           <div class="filter-actions">
-            <n-tooltip v-if="statusFilter || accountFilter" trigger="hover">
+            <n-tooltip v-if="hasFilters" trigger="hover">
               <template #trigger>
                 <n-button circle quaternary :aria-label="t('清除筛选')" @click="clearFilters">
                   <template #icon><n-icon :component="ClearOutlined" /></template>
@@ -73,10 +130,8 @@
           :loading="forwardLoading"
           :pagination="forwardPagination"
           :scroll-x="1280"
-          :summary="forwardSummary"
           remote
           size="small"
-          summary-placement="bottom"
           @update:page="changeForwardPage"
         >
           <template #empty>
@@ -93,6 +148,7 @@ import { computed, h, onMounted, ref, watch } from "vue";
 import {
   NButton,
   NDataTable,
+  NDatePicker,
   NEmpty,
   NIcon,
   NSelect,
@@ -102,8 +158,7 @@ import {
   NTooltip,
   useMessage,
 } from "naive-ui";
-import type { DataTableCreateSummary } from "naive-ui";
-import { ClearOutlined, ReloadOutlined } from "@vicons/antd";
+import { ArrowDownOutlined, ArrowUpOutlined, ClearOutlined, ReloadOutlined } from "@vicons/antd";
 import { tauriApi } from "../api/tauri";
 import type { Account, ForwardLog, ForwardLogSummary, GatewayLog } from "../api/tauri";
 import { t } from "../i18n/index.ts";
@@ -111,6 +166,7 @@ import { locale } from "../i18n/index.ts";
 import { formatCost, formatNumber } from "../utils/format.ts";
 
 type LogTab = "gateway" | "forward";
+type SortOrder = "asc" | "desc";
 
 const query = new URLSearchParams(window.location.search);
 const message = useMessage();
@@ -118,10 +174,23 @@ const activeTab = ref<LogTab>(query.get("tab") === "forward" ? "forward" : "gate
 const gatewayLogs = ref<GatewayLog[]>([]);
 const forwardLogs = ref<ForwardLog[]>([]);
 const accounts = ref<Account[]>([]);
+const models = ref<string[]>([]);
 const gatewayLoading = ref(false);
 const forwardLoading = ref(false);
 const statusFilter = ref<string | null>(query.get("status"));
 const accountFilter = ref<string | null>(query.get("account"));
+const modelFilter = ref<string | null>(query.get("model"));
+const sortBy = ref<string>(query.get("sort") || "timestamp");
+const sortOrder = ref<SortOrder>((query.get("order") as SortOrder) || "desc");
+const timeRange = ref<[number, number] | null>((() => {
+  const start = query.get("start");
+  const end = query.get("end");
+  if (!start || !end) return null;
+  const startMs = Date.parse(start);
+  const endMs = Date.parse(end);
+  if (Number.isNaN(startMs) || Number.isNaN(endMs)) return null;
+  return [startMs, endMs];
+})());
 const forwardPage = ref(1);
 const gatewayPage = ref(1);
 const pageSize = 20;
@@ -159,10 +228,28 @@ const statusMeta = computed<Record<string, { label: string; type: "success" | "w
 }));
 const statusOptions = computed(() => Object.entries(statusMeta.value).map(([value, meta]) => ({ label: meta.label, value })));
 const accountOptions = computed(() => accounts.value.map((account) => ({ label: account.name, value: account.id })));
+const modelOptions = computed(() => models.value.map((model) => ({ label: model, value: model })));
+const sortOptions = computed(() => [
+  { label: t("时间"), value: "timestamp" },
+  { label: t("输入"), value: "prompt_tokens" },
+  { label: t("输出"), value: "completion_tokens" },
+  { label: t("缓存"), value: "cached_tokens" },
+  { label: t("成本"), value: "cost" },
+]);
+const hasFilters = computed(() =>
+  !!statusFilter.value
+  || !!accountFilter.value
+  || !!modelFilter.value
+  || !!timeRange.value,
+);
 
 function formatDate(value: string): string {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : dateFormatter.value.format(date);
+}
+
+function toIsoString(ms: number): string {
+  return new Date(ms).toISOString();
 }
 
 const gatewayColumns = computed(() => [
@@ -192,18 +279,17 @@ const forwardColumns = computed(() => [
   { title: t("错误"), key: "error_message", minWidth: 220, ellipsis: { tooltip: true } },
 ]);
 
-const forwardSummary: DataTableCreateSummary<ForwardLog> = () => ({
-  timestamp: { value: t("请求数：{count}", { count: formatNumber(forwardTotals.value.total_requests) }), colSpan: 5 },
-  prompt_tokens: { value: formatNumber(forwardTotals.value.prompt_tokens) },
-  completion_tokens: { value: formatNumber(forwardTotals.value.completion_tokens) },
-  cached_tokens: { value: formatNumber(forwardTotals.value.cached_tokens) },
-  cost: { value: formatCost(forwardTotals.value.cost, 5) },
-  error_message: { value: "" },
-});
-
 function clearFilters() {
   statusFilter.value = null;
   accountFilter.value = null;
+  modelFilter.value = null;
+  timeRange.value = null;
+  sortBy.value = "timestamp";
+  sortOrder.value = "desc";
+}
+
+function toggleSortOrder() {
+  sortOrder.value = sortOrder.value === "asc" ? "desc" : "asc";
 }
 
 function syncQueryState() {
@@ -213,6 +299,19 @@ function syncQueryState() {
   else url.searchParams.delete("status");
   if (accountFilter.value) url.searchParams.set("account", accountFilter.value);
   else url.searchParams.delete("account");
+  if (modelFilter.value) url.searchParams.set("model", modelFilter.value);
+  else url.searchParams.delete("model");
+  if (timeRange.value) {
+    url.searchParams.set("start", toIsoString(timeRange.value[0]));
+    url.searchParams.set("end", toIsoString(timeRange.value[1]));
+  } else {
+    url.searchParams.delete("start");
+    url.searchParams.delete("end");
+  }
+  if (sortBy.value) url.searchParams.set("sort", sortBy.value);
+  else url.searchParams.delete("sort");
+  if (sortOrder.value) url.searchParams.set("order", sortOrder.value);
+  else url.searchParams.delete("order");
   window.history.replaceState(null, "", url);
 }
 
@@ -239,6 +338,11 @@ async function loadForwardLogs() {
       offset: (forwardPage.value - 1) * pageSize,
       status: statusFilter.value,
       account_id: accountFilter.value,
+      model: modelFilter.value,
+      start_time: timeRange.value ? toIsoString(timeRange.value[0]) : null,
+      end_time: timeRange.value ? toIsoString(timeRange.value[1]) : null,
+      sort_by: sortBy.value,
+      sort_order: sortOrder.value,
     });
     if (request !== forwardRequest) return;
     forwardLogs.value = result.items;
@@ -258,6 +362,14 @@ async function loadAccounts() {
   }
 }
 
+async function loadForwardLogModels() {
+  try {
+    models.value = await tauriApi.getForwardLogModels();
+  } catch (e) {
+    message.error(t("加载模型筛选失败: {error}", { error: String(e) }));
+  }
+}
+
 function changeForwardPage(page: number) {
   forwardPage.value = page;
   void loadForwardLogs();
@@ -268,16 +380,20 @@ function changeGatewayPage(page: number) {
 }
 
 watch(activeTab, syncQueryState);
-watch([statusFilter, accountFilter], () => {
-  forwardPage.value = 1;
-  syncQueryState();
-  void loadForwardLogs();
-});
+watch(
+  [statusFilter, accountFilter, modelFilter, timeRange, sortBy, sortOrder],
+  () => {
+    forwardPage.value = 1;
+    syncQueryState();
+    void loadForwardLogs();
+  },
+);
 
 onMounted(() => {
   void loadGatewayLogs();
   void loadForwardLogs();
   void loadAccounts();
+  void loadForwardLogModels();
 });
 </script>
 
@@ -291,12 +407,43 @@ onMounted(() => {
   background: var(--ocg-surface);
   box-shadow: var(--ocg-shadow-sm);
 }
+.stats-row {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.stat-card {
+  padding: 12px 14px;
+  border: 1px solid var(--ocg-border);
+  border-radius: 10px;
+  background: var(--ocg-bg);
+}
+.stat-label {
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: var(--ocg-text-secondary);
+}
+.stat-value {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--ocg-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .filter-bar {
   display: grid;
-  grid-template-columns: 150px 180px 1fr;
+  grid-template-columns: 140px 180px 180px 320px 120px auto 1fr;
   align-items: center;
   gap: 8px;
   margin-bottom: 12px;
+}
+.time-range-picker {
+  min-width: 0;
+}
+.sort-select {
+  min-width: 110px;
 }
 .log-toolbar,
 .filter-actions {
@@ -308,12 +455,40 @@ onMounted(() => {
   margin-bottom: 8px;
 }
 
+@media (max-width: 1200px) {
+  .filter-bar {
+    grid-template-columns: repeat(4, 1fr) auto;
+  }
+  .time-range-picker {
+    grid-column: span 2;
+  }
+}
+
+@media (max-width: 760px) {
+  .stats-row {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+  }
+  .filter-bar {
+    grid-template-columns: 1fr 1fr auto;
+  }
+  .time-range-picker {
+    grid-column: span 2;
+  }
+}
+
 @media (max-width: 560px) {
   .logs-card {
     padding: 2px 12px 12px;
   }
+  .stats-row {
+    grid-template-columns: repeat(2, 1fr);
+  }
   .filter-bar {
     grid-template-columns: 1fr 1fr auto;
+  }
+  .time-range-picker {
+    grid-column: span 2;
   }
 }
 </style>

@@ -124,18 +124,23 @@ test("account API sends purchase dates and the complete reorder payload", async 
   ]);
 });
 
-test("logs view uses remote totals, refresh controls, loading, and a useful empty state", async () => {
+test("logs view shows top stats, extra filters, sorting, and a useful empty state", async () => {
   const source = await readFile(new URL("./Logs.vue", import.meta.url), "utf8");
   const template = source.slice(source.indexOf("<template>"), source.indexOf("<script setup"));
 
-  assert.match(template, /:summary="forwardSummary"/);
-  assert.match(template, /summary-placement="bottom"/);
+  assert.match(template, /class="stats-row"/);
+  assert.match(template, /class="filter-bar"/);
   assert.match(template, /\bremote\b/);
+  assert.match(template, /v-model:value="modelFilter"/);
+  assert.match(template, /v-model:value="timeRange"/);
+  assert.match(template, /v-model:value="sortBy"/);
   assert.match(template, /:aria-label="t\('刷新运行日志'\)"/);
   assert.match(template, /:aria-label="t\('刷新请求日志'\)"/);
   assert.match(template, /t\('仅记录经本机 API 转发的请求，账号 Ping 见运行日志'\)/);
   assert.match(template, /:loading="gatewayLoading"/);
   assert.match(template, /:loading="forwardLoading"/);
+  assert.doesNotMatch(template, /:summary="forwardSummary"/);
+  assert.doesNotMatch(template, /summary-placement="bottom"/);
   assert.doesNotMatch(source, /getForwardLogs\(200\)|filteredForwardLogs/);
   assert.match(source, /const request = \+\+forwardRequest/);
   assert.match(source, /request !== forwardRequest/);
