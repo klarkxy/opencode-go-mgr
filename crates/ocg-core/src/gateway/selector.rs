@@ -25,16 +25,21 @@ impl AccountSelector {
             if exclude_ids.iter().any(|excluded| account.id == *excluded) {
                 continue;
             }
-            if let Some(until) = account.cooldown_until {
-                if until > now {
-                    continue;
-                }
+            if is_account_cooling(&account, now) {
+                continue;
             }
             return Ok(Some(account));
         }
 
         Ok(None)
     }
+}
+
+fn is_account_cooling(account: &Account, now: chrono::DateTime<Utc>) -> bool {
+    account.cooldown_5h_until.is_some_and(|until| until > now)
+        || account.cooldown_week_until.is_some_and(|until| until > now)
+        || account.cooldown_month_until.is_some_and(|until| until > now)
+        || account.cooldown_until.is_some_and(|until| until > now)
 }
 
 #[cfg(test)]
@@ -71,6 +76,9 @@ mod tests {
             purchase_date: String::new(),
             expires_on: String::new(),
             cooldown_until: cooldown,
+            cooldown_5h_until: None,
+            cooldown_week_until: None,
+            cooldown_month_until: None,
             last_error: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
@@ -113,6 +121,26 @@ mod tests {
 
         let selected = AccountSelector::new().select(&db, None).unwrap().unwrap();
         assert_eq!(selected.id, "second");
+
+        drop(db);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn account_with_any_future_window_cooling_is_skipped() {
+        let dir = temp_data_dir("per-window-cooling");
+        let db = Database::open(dir.clone()).unwrap();
+        let mut expired_5h = account("expired-5h", true, None);
+        expired_5h.cooldown_5h_until = Some(Utc::now() - Duration::hours(1));
+        expired_5h.cooldown_week_until = Some(Utc::now() + Duration::hours(1));
+        db.create_account(&expired_5h).unwrap();
+        db.create_account(&account("next", true, None)).unwrap();
+
+        let selected = AccountSelector::new()
+            .select(&db, None)
+            .unwrap()
+            .unwrap();
+        assert_eq!(selected.id, "next");
 
         drop(db);
         fs::remove_dir_all(dir).unwrap();

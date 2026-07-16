@@ -18,15 +18,25 @@ test("fills only the active 5-hour, weekly, or monthly limit", () => {
   ];
 
   for (const [key, last_error] of cases) {
+    const field =
+      key === "window_5h"
+        ? "cooldown_5h_until"
+        : key === "window_week"
+          ? "cooldown_week_until"
+          : "cooldown_month_until";
     assert.equal(
-      isUsageLimitReached({ cooldown_until: "2099-01-01T00:00:00Z", last_error }, key),
+      isUsageLimitReached({ [field]: "2099-01-01T00:00:00Z", last_error } as Parameters<
+        typeof isUsageLimitReached
+      >[0], key),
       true,
     );
   }
   assert.equal(
     isUsageLimitReached(
       {
-        cooldown_until: "2099-01-01T00:00:00Z",
+        cooldown_5h_until: null,
+        cooldown_week_until: "2099-01-01T00:00:00Z",
+        cooldown_month_until: null,
         last_error: "Weekly usage limit reached. Resets in 4 days.",
       },
       "window_month",
@@ -36,7 +46,9 @@ test("fills only the active 5-hour, weekly, or monthly limit", () => {
   assert.equal(
     isUsageLimitReached(
       {
-        cooldown_until: "2000-01-01T00:00:00Z",
+        cooldown_5h_until: null,
+        cooldown_week_until: "2000-01-01T00:00:00Z",
+        cooldown_month_until: null,
         last_error: "Weekly usage limit reached. Resets in 4 days.",
       },
       "window_week",
@@ -47,13 +59,24 @@ test("fills only the active 5-hour, weekly, or monthly limit", () => {
 
 test("shows local estimated saturation as a warning, not a real breaker", () => {
   assert.equal(
-    usageProgressStatus({ cooldown_until: null, last_error: null }, "window_week", 100),
+    usageProgressStatus(
+      {
+        cooldown_5h_until: null,
+        cooldown_week_until: null,
+        cooldown_month_until: null,
+        last_error: null,
+      },
+      "window_week",
+      100,
+    ),
     "warning",
   );
   assert.equal(
     usageProgressStatus(
       {
-        cooldown_until: "2099-01-01T00:00:00Z",
+        cooldown_5h_until: null,
+        cooldown_week_until: "2099-01-01T00:00:00Z",
+        cooldown_month_until: null,
         last_error: "Weekly usage limit reached. Resets in 4 days.",
       },
       "window_week",

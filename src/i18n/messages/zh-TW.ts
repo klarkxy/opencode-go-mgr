@@ -129,6 +129,7 @@ export const zhTWMessages = {
   "{hours}小时{minutes}分钟": "{hours}小時{minutes}分鐘",
   "{minutes}分钟": "{minutes}分鐘",
   "{seconds}秒": "{seconds}秒",
+  "重置于 {time}": "將於 {time} 後重置",
   "用量加载失败": "用量載入失敗",
   "重试": "重試",
   "用量保存失败: {error}": "用量儲存失敗：{error}",

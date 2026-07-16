@@ -129,6 +129,7 @@ export const frFRMessages = {
   "{hours}小时{minutes}分钟": "{hours} h {minutes} min",
   "{minutes}分钟": "{minutes} min",
   "{seconds}秒": "{seconds} s",
+  "重置于 {time}": "Réinitialisation dans {time}",
   "用量加载失败": "Échec du chargement de l’utilisation",
   "重试": "Réessayer",
   "用量保存失败: {error}": "Échec de l’enregistrement de l’utilisation : {error}",
