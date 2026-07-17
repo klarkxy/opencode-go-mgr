@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   resolveFileSignerEnvironment,
+  resolveMacosBundleTargets,
   resolveUpdaterBuildPlan,
   verifyUpdaterSignature,
 } from "./generate-updater-manifest.mjs";
@@ -312,7 +313,7 @@ async function main() {
       "--target",
       "universal-apple-darwin",
       "--bundles",
-      "dmg",
+      resolveMacosBundleTargets(updaterPlan.enabled),
       ...buildConfigArgs,
     ], { env: tauriBuildEnvironment });
     stageArtifact(

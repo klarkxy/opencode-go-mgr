@@ -293,8 +293,10 @@ signatures, the pull-only Compose example, `latest.json`, and `SHA256SUMS`
 4. Rejects unsupported host/architecture pairs
    (`process.platform`/`process.arch`).
 5. Invokes `@tauri-apps/cli` with the exact bundle path for the platform
-   (`nsis` on Windows, `appimage,deb` on Linux, `dmg` with
-   `--target universal-apple-darwin` on macOS).
+   (`nsis` on Windows and `appimage,deb` on Linux). macOS uses `dmg` with
+   `--target universal-apple-darwin` for unsigned local builds and `app,dmg`
+   when updater signing is enabled, because Tauri only emits the updater
+   archive for the `app` target.
 6. Cryptographically verifies every payload/signature pair against the actual
    `TAURI_UPDATER_PUBLIC_KEY` before staging it, then collects the NSIS and
    AppImage signatures plus the macOS `.app.tar.gz`/signature. It explicitly

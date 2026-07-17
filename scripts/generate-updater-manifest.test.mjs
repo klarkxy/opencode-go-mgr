@@ -7,6 +7,7 @@ import test from "node:test";
 import {
   buildUpdaterManifest,
   resolveFileSignerEnvironment,
+  resolveMacosBundleTargets,
   resolveUpdaterBuildPlan,
   verifyUpdaterSignature,
   writeUpdaterManifest,
@@ -132,6 +133,11 @@ test("updater build plan preserves unsigned local builds", () => {
     publicKey: undefined,
   });
   assert.equal(resolveUpdaterBuildPlan({ TAURI_UPDATER_PUBLIC_KEY: "public" }).enabled, false);
+});
+
+test("macOS signed builds include the app bundle required by Tauri updater artifacts", () => {
+  assert.equal(resolveMacosBundleTargets(false), "dmg");
+  assert.equal(resolveMacosBundleTargets(true), "app,dmg");
 });
 
 test("updater build plan accepts TAURI_SIGNING_PRIVATE_KEY content or path with a public key", () => {

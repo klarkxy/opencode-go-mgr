@@ -270,8 +270,9 @@ SHA256SUMS
    示该结果只适合冒烟，不是可发布的升级版本。
 4. 拒绝不支持的 host/arch 组合（`process.platform`/`process.arch`）。
 5. 用绝对 bundle 路径调用 `@tauri-apps/cli`：Windows 走 `nsis`，
-   Linux 走 `appimage,deb`，macOS 走 `--target universal-apple-darwin
-   --bundles dmg`。
+   Linux 走 `appimage,deb`。macOS 普通本地构建走
+   `--target universal-apple-darwin --bundles dmg`；启用升级签名时走
+   `--bundles app,dmg`，因为 Tauri 只有在构建 `app` target 时才会生成升级压缩包。
 6. 每份 payload/签名在暂存前都使用实际 `TAURI_UPDATER_PUBLIC_KEY` 做密码学
    验证，再收集 NSIS、AppImage 签名与 macOS `.app.tar.gz`/签名；deb 不是
    Tauri 原生升级产物，因此显式执行 `tauri signer sign`。公私钥即使都非空但

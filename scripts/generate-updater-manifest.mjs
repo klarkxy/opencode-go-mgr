@@ -54,6 +54,10 @@ export function resolveUpdaterBuildPlan(env = process.env) {
   };
 }
 
+export function resolveMacosBundleTargets(updaterEnabled) {
+  return updaterEnabled ? "app,dmg" : "dmg";
+}
+
 export function resolveFileSignerEnvironment(env = process.env, pathExists = existsSync) {
   const normalized = { ...env };
   delete normalized.TAURI_SIGNING_PRIVATE_KEY_PATH;
