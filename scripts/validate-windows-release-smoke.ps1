@@ -6,7 +6,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $resolvedWorkflow = (Resolve-Path -LiteralPath $WorkflowPath).Path
-$workflow = Get-Content -LiteralPath $resolvedWorkflow -Raw
+$workflow = (Get-Content -LiteralPath $resolvedWorkflow -Raw) -replace "`r`n", "`n"
 $stepName = [regex]::Escape('Smoke installed GUI and overwrite bootstrap (Windows)')
 $pattern = "(?m)^      - name: $stepName[\s\S]*?^        run: \|\r?\n(?<body>(?:(?:^          [^\r\n]*|^[ \t]*$)(?:\r?\n|$))+)"
 $match = [regex]::Match($workflow, $pattern)

@@ -145,8 +145,13 @@ test("Windows release smoke waits only for bounded installer processes", () => {
     new URL("../.github/workflows/release.yml", import.meta.url),
     "utf8",
   );
+  const validator = readFileSync(
+    new URL("./validate-windows-release-smoke.ps1", import.meta.url),
+    "utf8",
+  );
   assert.match(workflow, /function Invoke-Installer/);
   assert.match(workflow, /run: \.\/scripts\/validate-windows-release-smoke\.ps1/);
+  assert.match(validator, /-replace "`r`n", "`n"/);
   assert.match(workflow, /\.WaitForExit\(1000 \* \$TimeoutSeconds\)/);
   assert.match(workflow, /\.WaitForExit\(30000\)/);
   assert.match(workflow, /\.Kill\(\$true\)/);
