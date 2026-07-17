@@ -338,79 +338,88 @@ async fn forward_request_impl(
         let st_map = st.clone();
         let converter_map = converter.clone();
 
-        let mapped = stream.flat_map(move |result| {
-            let chunks = match result {
-                Ok(chunk) => {
-                    let stopped = {
-                        let state = st_map.lock();
-                        state.error || state.terminal
-                    } || converter_map.lock().is_terminal();
-                    if stopped {
-                        Vec::new()
-                    } else {
-                        process_chunk_for_usage(&mut st_map.lock(), upstream_format, &chunk);
-                        let converted = converter_map.lock().process_chunk(chunk);
-                        match converted {
-                            Ok(chunks) => chunks,
-                            Err(error) => {
-                                let msg = format!("stream conversion failed: {}", error.message);
-                                {
-                                    let mut state = st_map.lock();
-                                    state.error = true;
-                                    state.error_message = Some(msg.clone());
+        let mapped = stream
+            .flat_map(move |result| {
+                let (chunks, stop) = match result {
+                    Ok(chunk) => {
+                        let stopped = {
+                            let state = st_map.lock();
+                            state.error || state.terminal
+                        } || converter_map.lock().is_terminal();
+                        if stopped {
+                            (Vec::new(), true)
+                        } else {
+                            process_chunk_for_usage(&mut st_map.lock(), upstream_format, &chunk);
+                            let converted = converter_map.lock().process_chunk(chunk);
+                            match converted {
+                                Ok(chunks) => (chunks, false),
+                                Err(error) => {
+                                    let msg =
+                                        format!("stream conversion failed: {}", error.message);
+                                    {
+                                        let mut state = st_map.lock();
+                                        state.error = true;
+                                        state.error_message = Some(msg.clone());
+                                    }
+                                    let chunks = converter_map.lock().error_event(&msg);
+                                    let db = state_h.db.lock();
+                                    let _ = db.update_forward_log(
+                                        initial_id,
+                                        "error",
+                                        None,
+                                        ForwardMetrics::default(),
+                                        Some(&msg),
+                                    );
+                                    (chunks, true)
                                 }
-                                let chunks = converter_map.lock().error_event(&msg);
-                                let db = state_h.db.lock();
-                                let _ = db.update_forward_log(
-                                    initial_id,
-                                    "error",
-                                    None,
-                                    ForwardMetrics::default(),
-                                    Some(&msg),
-                                );
-                                chunks
                             }
                         }
                     }
-                }
-                Err(e) => {
-                    if converter_map.lock().is_terminal() {
-                        return futures_util::stream::iter(Vec::new());
+                    Err(e) => {
+                        if converter_map.lock().is_terminal() {
+                            (Vec::new(), true)
+                        } else {
+                            // Update the streaming row to "error" rather than inserting a new
+                            // row, then report the failure in the caller's SSE protocol.
+                            let msg = if e.is_timeout() {
+                                format!(
+                                    "stream error: upstream stream idle timeout after {}s",
+                                    stream_idle_timeout_secs
+                                )
+                            } else {
+                                format!("stream error: {e}")
+                            };
+                            {
+                                let mut state = st_map.lock();
+                                state.error = true;
+                                state.error_message = Some(msg.clone());
+                            }
+                            let chunks = converter_map.lock().error_event(&msg);
+                            let db = state_h.db.lock();
+                            let _ = db.update_forward_log(
+                                initial_id,
+                                "error",
+                                None,
+                                ForwardMetrics::default(),
+                                Some(&msg),
+                            );
+                            (chunks, true)
+                        }
                     }
-                    // Update the streaming row to "error" rather than inserting a new
-                    // row, then report the failure in the caller's SSE protocol.
-                    let msg = if e.is_timeout() {
-                        format!(
-                            "stream error: upstream stream idle timeout after {}s",
-                            stream_idle_timeout_secs
-                        )
-                    } else {
-                        format!("stream error: {e}")
-                    };
-                    {
-                        let mut state = st_map.lock();
-                        state.error = true;
-                        state.error_message = Some(msg.clone());
-                    }
-                    let chunks = converter_map.lock().error_event(&msg);
-                    let db = state_h.db.lock();
-                    let _ = db.update_forward_log(
-                        initial_id,
-                        "error",
-                        None,
-                        ForwardMetrics::default(),
-                        Some(&msg),
-                    );
-                    chunks
-                }
-            };
-            futures_util::stream::iter(
-                chunks
+                };
+                let mut items = chunks
                     .into_iter()
-                    .map(Ok::<bytes::Bytes, std::io::Error>)
-                    .collect::<Vec<_>>(),
-            )
-        });
+                    .map(|chunk| Some(Ok::<bytes::Bytes, std::io::Error>(chunk)))
+                    .collect::<Vec<_>>();
+                if stop {
+                    // The sentinel lets flat_map drain every generated error chunk, then
+                    // stops without polling the stalled upstream body for another item.
+                    items.push(None);
+                }
+                futures_util::stream::iter(items)
+            })
+            .take_while(|item| futures_util::future::ready(item.is_some()))
+            .map(|item| item.expect("stream stop sentinel should be filtered"));
 
         // Finalizer runs once, after the real stream is fully drained. It updates
         // the streaming row with final token counts and cost (or marks
