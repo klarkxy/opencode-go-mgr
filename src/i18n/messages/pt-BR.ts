@@ -254,6 +254,12 @@ export const ptBRMessages = {
   "加载运行日志失败: {error}": "Falha ao carregar os logs de execução: {error}",
   "加载请求日志失败: {error}": "Falha ao carregar os logs de requisições: {error}",
   "加载账号筛选失败: {error}": "Falha ao carregar o filtro de contas: {error}",
+  "加载模型筛选失败: {error}": "Failed to load the model filter: {error}",
+  "选择时间范围": "Select time range",
+  "排序": "Sort",
+  "升序": "Ascending",
+  "降序": "Descending",
+  "请求数": "Requisições",
 
   "转发": "Encaminhamento",
   "下游访问根地址（可选）": "URL raiz downstream (opcional)",

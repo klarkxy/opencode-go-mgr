@@ -404,7 +404,7 @@ async fn model_discovery_does_not_create_inference_logs() {
     let logs = state
         .db
         .lock()
-        .query_forward_logs(10, 0, None, None)
+        .query_forward_logs(10, 0, None, None, None, None, None, None, None)
         .unwrap();
     assert!(logs.items.is_empty());
     assert_eq!(logs.summary.total_requests, 0);
@@ -435,7 +435,7 @@ async fn model_discovery_keeps_rate_limit_cooldown_without_logging() {
     let logs = state
         .db
         .lock()
-        .query_forward_logs(10, 0, None, None)
+        .query_forward_logs(10, 0, None, None, None, None, None, None, None)
         .unwrap();
     assert_eq!(logs.summary.total_requests, 0);
 
@@ -586,7 +586,7 @@ async fn application_models_intersects_upstream_models_in_upstream_order() {
         state
             .db
             .lock()
-            .query_forward_logs(10, 0, None, None)
+            .query_forward_logs(10, 0, None, None, None, None, None, None, None)
             .unwrap()
             .summary
             .total_requests,

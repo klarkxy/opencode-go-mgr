@@ -187,6 +187,14 @@ impl Database {
             )?;
         }
 
+        if version < 6 {
+            tx.execute_batch(
+                "CREATE INDEX IF NOT EXISTS idx_forward_logs_model ON forward_logs(model);
+                CREATE INDEX IF NOT EXISTS idx_forward_logs_status ON forward_logs(status);
+                INSERT OR REPLACE INTO schema_version (version) VALUES (6)",
+            )?;
+        }
+
         tx.commit()?;
         Ok(())
     }
@@ -471,10 +479,17 @@ impl Database {
         offset: i64,
         status: Option<&str>,
         account_id: Option<&str>,
+        model: Option<&str>,
+        start_time: Option<&str>,
+        end_time: Option<&str>,
+        sort_by: Option<&str>,
+        sort_order: Option<&str>,
     ) -> Result<ForwardLogPage> {
         let limit = limit.clamp(1, 200);
         let offset = offset.max(0);
-        let (filter, filter_params) = forward_log_filter(status, account_id);
+        let (filter, filter_params) =
+            forward_log_filter(status, account_id, model, start_time, end_time);
+        let order_clause = forward_log_order(sort_by, sort_order);
         let summary_sql = format!(
             "SELECT COUNT(*),
                     COALESCE(SUM(prompt_tokens), 0),
@@ -500,7 +515,7 @@ impl Database {
         let items_sql = format!(
             "SELECT id, timestamp, model, account_id, account_name, status, http_status, prompt_tokens, completion_tokens, cached_tokens, cost, error_message
              FROM forward_logs{filter}
-             ORDER BY id DESC
+             {order_clause}
              LIMIT ? OFFSET ?"
         );
         let mut item_params = filter_params;
@@ -512,6 +527,14 @@ impl Database {
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(ForwardLogPage { items, summary })
+    }
+
+    pub fn list_forward_log_models(&self) -> Result<Vec<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT DISTINCT model FROM forward_logs ORDER BY model ASC")?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.into())
     }
 
     // Cooldown
@@ -761,10 +784,22 @@ fn effective_usage(
     })
 }
 
-fn forward_log_filter(status: Option<&str>, account_id: Option<&str>) -> (String, Vec<Value>) {
+fn forward_log_filter(
+    status: Option<&str>,
+    account_id: Option<&str>,
+    model: Option<&str>,
+    start_time: Option<&str>,
+    end_time: Option<&str>,
+) -> (String, Vec<Value>) {
     let mut filter = String::new();
     let mut params = Vec::new();
-    for (clause, value) in [("status = ?", status), ("account_id = ?", account_id)] {
+    for (clause, value) in [
+        ("status = ?", status),
+        ("account_id = ?", account_id),
+        ("model = ?", model),
+        ("timestamp >= ?", start_time),
+        ("timestamp <= ?", end_time),
+    ] {
         if let Some(value) = value {
             filter.push_str(if params.is_empty() {
                 " WHERE "
@@ -776,6 +811,21 @@ fn forward_log_filter(status: Option<&str>, account_id: Option<&str>) -> (String
         }
     }
     (filter, params)
+}
+
+fn forward_log_order(sort_by: Option<&str>, sort_order: Option<&str>) -> String {
+    let column = match sort_by {
+        Some("timestamp") => "timestamp",
+        Some("prompt_tokens") => "prompt_tokens",
+        Some("completion_tokens") => "completion_tokens",
+        Some("cached_tokens") => "cached_tokens",
+        Some("cost") => "cost",
+        Some("model") => "model",
+        Some("status") => "status",
+        _ => "id",
+    };
+    let direction = if sort_order == Some("asc") { "ASC" } else { "DESC" };
+    format!("ORDER BY {column} {direction}, id DESC")
 }
 
 fn forward_log_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ForwardLog> {

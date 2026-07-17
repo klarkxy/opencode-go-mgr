@@ -254,6 +254,12 @@ export const esESMessages = {
   "加载运行日志失败: {error}": "No se pudieron cargar los registros de ejecución: {error}",
   "加载请求日志失败: {error}": "No se pudieron cargar los registros de solicitudes: {error}",
   "加载账号筛选失败: {error}": "No se pudo cargar el filtro de cuentas: {error}",
+  "加载模型筛选失败: {error}": "Failed to load the model filter: {error}",
+  "选择时间范围": "Select time range",
+  "排序": "Sort",
+  "升序": "Ascending",
+  "降序": "Descending",
+  "请求数": "Solicitudes",
 
   "转发": "Reenvío",
   "下游访问根地址（可选）": "URL raíz cliente (opcional)",

@@ -254,6 +254,12 @@ export const frFRMessages = {
   "加载运行日志失败: {error}": "Échec du chargement des journaux d’exécution : {error}",
   "加载请求日志失败: {error}": "Échec du chargement des journaux des requêtes : {error}",
   "加载账号筛选失败: {error}": "Échec du chargement du filtre de compte : {error}",
+  "加载模型筛选失败: {error}": "Failed to load the model filter: {error}",
+  "选择时间范围": "Select time range",
+  "排序": "Sort",
+  "升序": "Ascending",
+  "降序": "Descending",
+  "请求数": "Requêtes",
 
   "转发": "Transfert",
   "下游访问根地址（可选）": "URL racine cliente (facultatif)",
