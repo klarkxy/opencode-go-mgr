@@ -232,11 +232,13 @@ jobs:
           $candidateVersion = (Get-Content package.json -Raw | ConvertFrom-Json).version
           $candidateInstaller = (Get-Item release/*windows-x64-setup.exe).FullName
           $installDir = Join-Path $env:RUNNER_TEMP ocg-manager-install
-          $profile = Join-Path $env:RUNNER_TEMP ocg-manager-home
-          New-Item -ItemType Directory -Force $profile | Out-Null
-          $env:USERPROFILE = $profile
-          $env:HOME = $profile
+          # NSIS restarts through RunAsUser, which restores the real user's
+          # environment instead of a synthetic USERPROFILE inherited by the
+          # installer. Keep the full lifecycle on this disposable runner's
+          # actual profile so the pre-update and restarted apps share state.
+          $profile = $env:USERPROFILE
           $data = Join-Path $profile .ocg-mgr
+          if (Test-Path $data) { throw "Hosted runner profile is not clean: $data" }
           $sentinel = Join-Path $data preserve-me
           $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
           $settingsUrl = 'http://127.0.0.1:9042/dashboard/api/settings'
@@ -306,6 +308,10 @@ jobs:
               $updateStatus = Wait-Dashboard -ExpectedVersion $candidateVersion -Attempts 90
               if ($updateStatus.current_version -ne $candidateVersion) {
                 throw "Unexpected updated GUI version: $($updateStatus.current_version)"
+              }
+              $updatedSettings = Invoke-RestMethod $settingsUrl
+              if (!$updatedSettings.auto_start) {
+                throw 'Overwrite update did not preserve the auto-start setting'
               }
               if ((Get-Content $sentinel -Raw).Trim() -ne "preserved-from-$latestTag") {
                 throw 'Overwrite update did not preserve the data sentinel'

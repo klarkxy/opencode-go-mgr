@@ -158,6 +158,10 @@ test("Windows release smoke waits only for bounded installer processes", () => {
   assert.doesNotMatch(workflow, /Start-Process \$candidateInstaller[^\r\n]*-Wait/);
   assert.doesNotMatch(workflow, /Start-Process \$previousInstaller[^\r\n]*-Wait/);
   assert.match(workflow, /Start-Process \$uninstaller\.FullName[^\r\n]*-Wait/);
+  assert.match(workflow, /\$profile = \$env:USERPROFILE/);
+  assert.doesNotMatch(workflow, /\$env:USERPROFILE\s*=/);
+  assert.doesNotMatch(workflow, /\$env:HOME\s*=/);
+  assert.match(workflow, /Overwrite update did not preserve the auto-start setting/);
 });
 
 test("updater build plan accepts TAURI_SIGNING_PRIVATE_KEY content or path with a public key", () => {
