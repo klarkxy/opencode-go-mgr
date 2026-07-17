@@ -11,6 +11,18 @@ pub struct Database {
     conn: Connection,
 }
 
+pub struct ForwardLogQueryOptions<'a> {
+    pub limit: i64,
+    pub offset: i64,
+    pub status: Option<&'a str>,
+    pub account_id: Option<&'a str>,
+    pub model: Option<&'a str>,
+    pub start_time: Option<&'a str>,
+    pub end_time: Option<&'a str>,
+    pub sort_by: Option<&'a str>,
+    pub sort_order: Option<&'a str>,
+}
+
 #[derive(Debug)]
 pub enum ReorderAccountsError {
     DuplicateAccountId,
@@ -550,21 +562,18 @@ impl Database {
 
     pub fn query_forward_logs(
         &self,
-        limit: i64,
-        offset: i64,
-        status: Option<&str>,
-        account_id: Option<&str>,
-        model: Option<&str>,
-        start_time: Option<&str>,
-        end_time: Option<&str>,
-        sort_by: Option<&str>,
-        sort_order: Option<&str>,
+        options: ForwardLogQueryOptions<'_>,
     ) -> Result<ForwardLogPage> {
-        let limit = limit.clamp(1, 200);
-        let offset = offset.max(0);
-        let (filter, filter_params) =
-            forward_log_filter(status, account_id, model, start_time, end_time);
-        let order_clause = forward_log_order(sort_by, sort_order);
+        let limit = options.limit.clamp(1, 200);
+        let offset = options.offset.max(0);
+        let (filter, filter_params) = forward_log_filter(
+            options.status,
+            options.account_id,
+            options.model,
+            options.start_time,
+            options.end_time,
+        );
+        let order_clause = forward_log_order(options.sort_by, options.sort_order);
         let summary_sql = format!(
             "SELECT COUNT(*),
                     COALESCE(SUM(prompt_tokens), 0),
@@ -1094,7 +1103,7 @@ mod tests {
     }
 
     fn create_v6_database(
-        dir: &PathBuf,
+        dir: &std::path::Path,
         extra_cooldown_columns: &str,
         extra_indexes: &str,
     ) -> Connection {
@@ -1802,17 +1811,17 @@ mod tests {
             .expect("outside log should save");
 
         let page = db
-            .query_forward_logs(
-                20,
-                0,
-                None,
-                None,
-                None,
-                Some("2026-07-17T12:00:00+08:00"),
-                Some("2026-07-17T12:30:00+08:00"),
-                Some("cost"),
-                Some("asc"),
-            )
+            .query_forward_logs(ForwardLogQueryOptions {
+                limit: 20,
+                offset: 0,
+                status: None,
+                account_id: None,
+                model: None,
+                start_time: Some("2026-07-17T12:00:00+08:00"),
+                end_time: Some("2026-07-17T12:30:00+08:00"),
+                sort_by: Some("cost"),
+                sort_order: Some("asc"),
+            })
             .expect("offset filter should query");
         assert_eq!(page.summary.total_requests, 1);
         assert_eq!(page.items.len(), 1);

@@ -286,6 +286,12 @@ test("application catalog has thirteen verified clients and never displays a com
   const openCodeConfig = JSON.parse(openCode.snippets(context)[0].copy);
   assert.equal(openCodeConfig.provider.ocg.options.apiKey, "{env:OCG_API_KEY}");
   assert.deepEqual(Object.keys(openCodeConfig.provider.ocg.models), context.modelIds);
+  for (const modelId of context.modelIds) {
+    assert.deepEqual(openCodeConfig.provider.ocg.models[modelId], {
+      name: modelId,
+      reasoning: true,
+    });
+  }
   assert.doesNotMatch(openCode.snippets(context)[0].copy, new RegExp(actualKey));
 
   const openClaw = APPLICATION_GUIDES.find((guide) => guide.id === "openclaw");

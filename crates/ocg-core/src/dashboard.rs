@@ -1,5 +1,5 @@
 use crate::auth;
-use crate::db::ReorderAccountsError;
+use crate::db::{ForwardLogQueryOptions, ReorderAccountsError};
 use crate::gateway::{
     forwarder::forward_get,
     limit::{parse_reset, parse_usage_limit_window},
@@ -1086,17 +1086,17 @@ async fn forward_logs(
     state
         .db
         .lock()
-        .query_forward_logs(
-            q.limit.unwrap_or(100),
-            q.offset.unwrap_or(0),
-            q.status.as_deref(),
-            q.account_id.as_deref(),
-            q.model.as_deref(),
-            start_time.as_deref(),
-            end_time.as_deref(),
-            q.sort_by.as_deref(),
-            q.sort_order.as_deref(),
-        )
+        .query_forward_logs(ForwardLogQueryOptions {
+            limit: q.limit.unwrap_or(100),
+            offset: q.offset.unwrap_or(0),
+            status: q.status.as_deref(),
+            account_id: q.account_id.as_deref(),
+            model: q.model.as_deref(),
+            start_time: start_time.as_deref(),
+            end_time: end_time.as_deref(),
+            sort_by: q.sort_by.as_deref(),
+            sort_order: q.sort_order.as_deref(),
+        })
         .map(Json)
         .map_err(ApiError::internal)
 }

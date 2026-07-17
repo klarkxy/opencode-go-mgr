@@ -67,10 +67,10 @@ Release), save it as `compose.yaml`, and optionally create a neighboring
 `.env` file.
 
 ```bash
-git clone --branch v1.4.0 --depth 1 https://github.com/klarkxy/opencode-go-mgr.git
+git clone --branch v1.4.1 --depth 1 https://github.com/klarkxy/opencode-go-mgr.git
 cd opencode-go-mgr
 cp .env.example .env
-# Edit .env: choose first-run administrator setup and pin OCG_IMAGE to 1.4.0.
+# Edit .env: choose first-run administrator setup and pin OCG_IMAGE to 1.4.1.
 docker compose pull
 docker compose up -d --no-build
 docker compose ps
