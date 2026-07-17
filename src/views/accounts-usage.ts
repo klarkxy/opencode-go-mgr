@@ -15,12 +15,6 @@ const cooldownFields: Record<UsageKey, keyof Pick<Account, "cooldown_5h_until" |
   window_month: "cooldown_month_until",
 };
 
-const limitMarkers: Record<UsageKey, string> = {
-  window_5h: "5-hour usage limit reached",
-  window_week: "weekly usage limit reached",
-  window_month: "monthly usage limit reached",
-};
-
 export function isWindowCooling(
   account: Pick<Account, "cooldown_5h_until" | "cooldown_week_until" | "cooldown_month_until">,
   key: UsageKey,
@@ -38,10 +32,11 @@ export function resetTimeForWindow(
 }
 
 export function isCooling(
-  account: Pick<Account, "cooldown_5h_until" | "cooldown_week_until" | "cooldown_month_until">,
+  account: Pick<Account, "cooldown_until" | "cooldown_5h_until" | "cooldown_week_until" | "cooldown_month_until">,
   now = Date.now(),
 ): boolean {
   return (
+    (account.cooldown_until !== null && Date.parse(account.cooldown_until) > now) ||
     isWindowCooling(account, "window_5h", now) ||
     isWindowCooling(account, "window_week", now) ||
     isWindowCooling(account, "window_month", now)
@@ -49,14 +44,11 @@ export function isCooling(
 }
 
 export function isUsageLimitReached(
-  account: Pick<Account, "cooldown_5h_until" | "cooldown_week_until" | "cooldown_month_until" | "last_error">,
+  account: Pick<Account, "cooldown_5h_until" | "cooldown_week_until" | "cooldown_month_until">,
   key: UsageKey,
   now = Date.now(),
 ): boolean {
-  return (
-    isWindowCooling(account, key, now) &&
-    account.last_error?.toLowerCase().includes(limitMarkers[key]) === true
-  );
+  return isWindowCooling(account, key, now);
 }
 
 export function normalizeUsagePercent(value: number): number {
@@ -79,7 +71,7 @@ export function mergeUsageEdit(
 }
 
 export function usageProgressStatus(
-  account: Pick<Account, "cooldown_5h_until" | "cooldown_week_until" | "cooldown_month_until" | "last_error">,
+  account: Pick<Account, "cooldown_5h_until" | "cooldown_week_until" | "cooldown_month_until">,
   key: UsageKey,
   percent: number,
 ): "success" | "warning" | "error" {

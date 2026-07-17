@@ -37,6 +37,7 @@ pub struct RequestPlan {
     pub model: String,
     pub stream: bool,
     pub body: Bytes,
+    pub(crate) service_tier: Option<String>,
     pub(crate) custom_tools: Vec<String>,
     pub(crate) namespace_tools: Vec<NamespaceToolMapping>,
     pub(crate) response_parallel_tool_calls: bool,
@@ -84,6 +85,7 @@ pub struct UsageCounts {
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub cached_tokens: u64,
+    pub cache_creation_tokens: u64,
 }
 
 const CHAT_MODELS: &[&str] = &[
@@ -100,7 +102,9 @@ const CHAT_MODELS: &[&str] = &[
 const MESSAGE_MODELS: &[&str] = &[
     "minimax-m3",
     "minimax-m2.7",
+    "minimax-m2.7-highspeed",
     "minimax-m2.5",
+    "minimax-m2.5-highspeed",
     "qwen3.7-max",
     "qwen3.7-plus",
     "qwen3.6-plus",
@@ -178,6 +182,10 @@ fn prepare_parsed_request(
         .unwrap_or_else(|| json!("auto"));
     let response_tools = array(&parsed, "tools").to_vec();
     let converted = convert_request(client, upstream, parsed, &tool_context.namespace_tools)?;
+    let service_tier = converted
+        .get("service_tier")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
     let body = serde_json::to_vec(&converted)
         .map(Bytes::from)
         .map_err(|error| ProtocolError::new(format!("failed to encode request: {error}")))?;
@@ -187,6 +195,7 @@ fn prepare_parsed_request(
         model,
         stream,
         body,
+        service_tier,
         custom_tools: tool_context.custom_tools,
         namespace_tools: tool_context.namespace_tools,
         response_parallel_tool_calls,
@@ -787,14 +796,18 @@ pub fn extract_usage(format: ApiFormat, payload: &Value) -> UsageCounts {
                 .pointer("/prompt_tokens_details/cached_tokens")
                 .and_then(Value::as_u64)
                 .unwrap_or(0),
+            cache_creation_tokens: 0,
         },
         ApiFormat::Messages => {
             let cached = uint(usage, "cache_read_input_tokens");
             let created = uint(usage, "cache_creation_input_tokens");
             UsageCounts {
-                input_tokens: uint(usage, "input_tokens") + cached + created,
+                input_tokens: uint(usage, "input_tokens")
+                    .saturating_add(cached)
+                    .saturating_add(created),
                 output_tokens: uint(usage, "output_tokens"),
                 cached_tokens: cached,
+                cache_creation_tokens: created,
             }
         }
         ApiFormat::Responses => UsageCounts {
@@ -804,11 +817,13 @@ pub fn extract_usage(format: ApiFormat, payload: &Value) -> UsageCounts {
                 .pointer("/input_tokens_details/cached_tokens")
                 .and_then(Value::as_u64)
                 .unwrap_or(0),
+            cache_creation_tokens: 0,
         },
         ApiFormat::Gemini => UsageCounts {
             input_tokens: uint(usage, "promptTokenCount"),
             output_tokens: uint(usage, "candidatesTokenCount"),
             cached_tokens: uint(usage, "cachedContentTokenCount"),
+            cache_creation_tokens: 0,
         },
     }
 }
@@ -818,6 +833,7 @@ pub fn merge_stream_usage(format: ApiFormat, payload: &Value, counts: &mut Usage
     counts.input_tokens = counts.input_tokens.max(next.input_tokens);
     counts.output_tokens = counts.output_tokens.max(next.output_tokens);
     counts.cached_tokens = counts.cached_tokens.max(next.cached_tokens);
+    counts.cache_creation_tokens = counts.cache_creation_tokens.max(next.cache_creation_tokens);
 }
 
 fn native_format(model: &str) -> Option<ApiFormat> {
@@ -2942,6 +2958,7 @@ mod tests {
             model: "test".into(),
             stream: false,
             body: Bytes::new(),
+            service_tier: None,
             custom_tools: Vec::new(),
             namespace_tools: Vec::new(),
             response_parallel_tool_calls: true,
@@ -2965,12 +2982,30 @@ mod tests {
                 "mimo-v2.5-pro",
                 "minimax-m3",
                 "minimax-m2.7",
+                "minimax-m2.7-highspeed",
                 "minimax-m2.5",
+                "minimax-m2.5-highspeed",
                 "qwen3.7-max",
                 "qwen3.7-plus",
                 "qwen3.6-plus",
             ]
         );
+    }
+
+    #[test]
+    fn minimax_highspeed_models_route_as_messages_and_preserve_priority_tier() {
+        let plan = prepare_request(
+            ApiFormat::Messages,
+            bytes(json!({
+                "model": "minimax-m2.7-highspeed",
+                "messages": [{"role": "user", "content": "hi"}],
+                "max_tokens": 8,
+                "service_tier": "priority"
+            })),
+        )
+        .expect("highspeed model should be routable");
+        assert_eq!(plan.upstream, ApiFormat::Messages);
+        assert_eq!(plan.service_tier.as_deref(), Some("priority"));
     }
 
     #[test]
@@ -3188,7 +3223,8 @@ mod tests {
             UsageCounts {
                 input_tokens: 9,
                 output_tokens: 3,
-                cached_tokens: 2
+                cached_tokens: 2,
+                cache_creation_tokens: 0
             }
         );
     }
@@ -4023,7 +4059,7 @@ mod tests {
         let mut counts = UsageCounts::default();
         merge_stream_usage(
             ApiFormat::Messages,
-            &json!({"type":"message_start","message":{"usage":{"input_tokens":6,"cache_read_input_tokens":4}}}),
+            &json!({"type":"message_start","message":{"usage":{"input_tokens":6,"cache_read_input_tokens":4,"cache_creation_input_tokens":2}}}),
             &mut counts,
         );
         merge_stream_usage(
@@ -4034,9 +4070,10 @@ mod tests {
         assert_eq!(
             counts,
             UsageCounts {
-                input_tokens: 10,
+                input_tokens: 12,
                 output_tokens: 7,
-                cached_tokens: 4
+                cached_tokens: 4,
+                cache_creation_tokens: 2
             }
         );
 
@@ -4048,7 +4085,8 @@ mod tests {
             UsageCounts {
                 input_tokens: 9,
                 output_tokens: 3,
-                cached_tokens: 2
+                cached_tokens: 2,
+                cache_creation_tokens: 0
             }
         );
     }

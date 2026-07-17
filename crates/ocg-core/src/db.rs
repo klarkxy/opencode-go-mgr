@@ -45,6 +45,24 @@ impl From<rusqlite::Error> for ReorderAccountsError {
     }
 }
 
+fn ensure_account_text_column(tx: &rusqlite::Transaction<'_>, column: &'static str) -> Result<()> {
+    let exists = {
+        let mut stmt = tx.prepare("PRAGMA table_info(accounts)")?;
+        let columns = stmt.query_map([], |row| row.get::<_, String>(1))?;
+        columns
+            .collect::<rusqlite::Result<Vec<_>>>()?
+            .iter()
+            .any(|existing| existing == column)
+    };
+    if !exists {
+        tx.execute(
+            &format!("ALTER TABLE accounts ADD COLUMN {column} TEXT"),
+            [],
+        )?;
+    }
+    Ok(())
+}
+
 impl Database {
     pub fn open(data_dir: PathBuf) -> Result<Self> {
         std::fs::create_dir_all(&data_dir)?;
@@ -191,15 +209,60 @@ impl Database {
             tx.execute_batch(
                 "CREATE INDEX IF NOT EXISTS idx_forward_logs_model ON forward_logs(model);
                 CREATE INDEX IF NOT EXISTS idx_forward_logs_status ON forward_logs(status);
-                ALTER TABLE accounts ADD COLUMN cooldown_5h_until TEXT;
-                ALTER TABLE accounts ADD COLUMN cooldown_week_until TEXT;
-                ALTER TABLE accounts ADD COLUMN cooldown_month_until TEXT;
-                UPDATE accounts
-                SET cooldown_5h_until = CASE WHEN lower(COALESCE(last_error, '')) LIKE '%5-hour usage limit%' THEN cooldown_until ELSE NULL END,
-                    cooldown_week_until = CASE WHEN lower(COALESCE(last_error, '')) LIKE '%weekly usage limit%' THEN cooldown_until ELSE NULL END,
-                    cooldown_month_until = CASE WHEN lower(COALESCE(last_error, '')) LIKE '%monthly usage limit%' THEN cooldown_until ELSE NULL END
-                WHERE cooldown_until IS NOT NULL;
                 INSERT OR REPLACE INTO schema_version (version) VALUES (6)",
+            )?;
+        }
+
+        if version < 7 {
+            for column in [
+                "cooldown_generic_until",
+                "cooldown_5h_until",
+                "cooldown_week_until",
+                "cooldown_month_until",
+            ] {
+                ensure_account_text_column(&tx, column)?;
+            }
+            tx.execute_batch(
+                "CREATE INDEX IF NOT EXISTS idx_forward_logs_model ON forward_logs(model);
+                CREATE INDEX IF NOT EXISTS idx_forward_logs_status ON forward_logs(status);
+                CREATE INDEX IF NOT EXISTS idx_forward_logs_time_instant
+                    ON forward_logs(julianday(timestamp));
+                UPDATE accounts
+                SET cooldown_generic_until = COALESCE(cooldown_generic_until, CASE
+                        WHEN lower(COALESCE(last_error, '')) LIKE '%5-hour usage limit%'
+                          OR lower(COALESCE(last_error, '')) LIKE '%5 hour usage limit%'
+                          OR lower(COALESCE(last_error, '')) LIKE '%weekly usage limit%'
+                          OR lower(COALESCE(last_error, '')) LIKE '%monthly usage limit%'
+                        THEN NULL ELSE cooldown_until END),
+                    cooldown_5h_until = COALESCE(cooldown_5h_until, CASE
+                        WHEN lower(COALESCE(last_error, '')) LIKE '%5-hour usage limit%'
+                          OR lower(COALESCE(last_error, '')) LIKE '%5 hour usage limit%'
+                        THEN cooldown_until ELSE NULL END),
+                    cooldown_week_until = COALESCE(cooldown_week_until, CASE
+                        WHEN lower(COALESCE(last_error, '')) LIKE '%weekly usage limit%'
+                        THEN cooldown_until ELSE NULL END),
+                    cooldown_month_until = COALESCE(cooldown_month_until, CASE
+                        WHEN lower(COALESCE(last_error, '')) LIKE '%monthly usage limit%'
+                        THEN cooldown_until ELSE NULL END)
+                WHERE cooldown_until IS NOT NULL;",
+            )?;
+
+            let account_ids = {
+                let mut stmt = tx.prepare("SELECT id FROM accounts")?;
+                let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()?
+            };
+            let now = Utc::now().to_rfc3339();
+            for id in account_ids {
+                let cooldown = Self::compute_cooldown_until(&tx, &id, &now)?;
+                tx.execute(
+                    "UPDATE accounts SET cooldown_until = ?2 WHERE id = ?1",
+                    params![id, cooldown],
+                )?;
+            }
+            tx.execute(
+                "INSERT OR REPLACE INTO schema_version (version) VALUES (7)",
+                [],
             )?;
         }
 
@@ -215,8 +278,8 @@ impl Database {
             normalize_purchase_date(&account.purchase_date)?
         };
         self.conn.execute(
-            "INSERT INTO accounts (id, name, username, password_cipher, key_cipher, enabled, referral_code, recharge_date, sort_order, cooldown_until, cooldown_5h_until, cooldown_week_until, cooldown_month_until, last_error, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, (SELECT COALESCE(MAX(sort_order), -1) + 1 FROM accounts), ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+            "INSERT INTO accounts (id, name, username, password_cipher, key_cipher, enabled, referral_code, recharge_date, sort_order, cooldown_until, cooldown_generic_until, cooldown_5h_until, cooldown_week_until, cooldown_month_until, last_error, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, (SELECT COALESCE(MAX(sort_order), -1) + 1 FROM accounts), ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
             params![
                 account.id,
                 account.name,
@@ -227,6 +290,7 @@ impl Database {
                 account.referral_code,
                 purchase_date,
                 account.cooldown_until.map(|t| t.to_rfc3339()),
+                account.cooldown_generic_until.map(|t| t.to_rfc3339()),
                 account.cooldown_5h_until.map(|t| t.to_rfc3339()),
                 account.cooldown_week_until.map(|t| t.to_rfc3339()),
                 account.cooldown_month_until.map(|t| t.to_rfc3339()),
@@ -298,7 +362,7 @@ impl Database {
 
     pub fn get_account(&self, id: &str) -> Result<Option<Account>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, username, password_cipher, key_cipher, enabled, referral_code, recharge_date, cooldown_until, cooldown_5h_until, cooldown_week_until, cooldown_month_until, last_error, created_at, updated_at FROM accounts WHERE id = ?1"
+            "SELECT id, name, username, password_cipher, key_cipher, enabled, referral_code, recharge_date, cooldown_until, cooldown_generic_until, cooldown_5h_until, cooldown_week_until, cooldown_month_until, last_error, created_at, updated_at FROM accounts WHERE id = ?1"
         )?;
         let account = stmt.query_row([id], account_from_row).optional()?;
         Ok(account)
@@ -306,7 +370,7 @@ impl Database {
 
     pub fn list_accounts(&self) -> Result<Vec<Account>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, username, password_cipher, key_cipher, enabled, referral_code, recharge_date, cooldown_until, cooldown_5h_until, cooldown_week_until, cooldown_month_until, last_error, created_at, updated_at FROM accounts ORDER BY sort_order ASC, created_at ASC, id ASC"
+            "SELECT id, name, username, password_cipher, key_cipher, enabled, referral_code, recharge_date, cooldown_until, cooldown_generic_until, cooldown_5h_until, cooldown_week_until, cooldown_month_until, last_error, created_at, updated_at FROM accounts ORDER BY sort_order ASC, created_at ASC, id ASC"
         )?;
         let rows = stmt.query_map([], account_from_row)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.into())
@@ -557,15 +621,35 @@ impl Database {
         until: Option<DateTime<Utc>>,
         err: Option<&str>,
     ) -> Result<()> {
-        self.conn.execute(
-            "UPDATE accounts SET cooldown_until = ?2, cooldown_5h_until = ?2, cooldown_week_until = ?2, cooldown_month_until = ?2, last_error = ?3, updated_at = ?4 WHERE id = ?1",
-            params![
-                id,
-                until.map(|t| t.to_rfc3339()),
-                err,
-                Utc::now().to_rfc3339(),
-            ],
-        )?;
+        let now = Utc::now().to_rfc3339();
+        let tx = self.conn.unchecked_transaction()?;
+        if until.is_none() && err.is_none() {
+            tx.execute(
+                "UPDATE accounts
+                 SET cooldown_until = NULL,
+                     cooldown_generic_until = NULL,
+                     cooldown_5h_until = NULL,
+                     cooldown_week_until = NULL,
+                     cooldown_month_until = NULL,
+                     last_error = NULL,
+                     updated_at = ?2
+                 WHERE id = ?1",
+                params![id, now],
+            )?;
+        } else {
+            tx.execute(
+                "UPDATE accounts
+                 SET cooldown_generic_until = ?2, last_error = ?3, updated_at = ?4
+                 WHERE id = ?1",
+                params![id, until.map(|t| t.to_rfc3339()), err, now],
+            )?;
+            let new_cooldown = Self::compute_cooldown_until(&tx, id, &now)?;
+            tx.execute(
+                "UPDATE accounts SET cooldown_until = ?2 WHERE id = ?1",
+                params![id, new_cooldown],
+            )?;
+        }
+        tx.commit()?;
         Ok(())
     }
 
@@ -585,26 +669,27 @@ impl Database {
         let now_rfc = now.to_rfc3339();
         let tx = self.conn.unchecked_transaction()?;
 
-        // Update the per-window column, or the legacy fallback for unknown limits.
+        // Unknown upstream rate limits need their own slot so a later known window
+        // cannot overwrite a still-active generic cooldown.
         let column = match window {
             Some(UsageWindowKind::FiveHours) => "cooldown_5h_until",
             Some(UsageWindowKind::Week) => "cooldown_week_until",
             Some(UsageWindowKind::Month) => "cooldown_month_until",
-            None => "cooldown_until",
+            None => "cooldown_generic_until",
         };
         tx.execute(
-            &format!("UPDATE accounts SET {column} = ?2, last_error = ?3, updated_at = ?4 WHERE id = ?1"),
+            &format!(
+                "UPDATE accounts SET {column} = ?2, last_error = ?3, updated_at = ?4 WHERE id = ?1"
+            ),
             params![id, until.to_rfc3339(), err, now_rfc],
         )?;
 
-        // Recompute the summary cooldown_until as the nearest future window reset.
-        if window.is_some() {
-            let new_cooldown = Self::compute_cooldown_until(&tx, id, &now_rfc)?;
-            tx.execute(
-                "UPDATE accounts SET cooldown_until = ?2 WHERE id = ?1",
-                params![id, new_cooldown],
-            )?;
-        }
+        // Legacy callers use cooldown_until as the time when this account is usable.
+        let new_cooldown = Self::compute_cooldown_until(&tx, id, &now_rfc)?;
+        tx.execute(
+            "UPDATE accounts SET cooldown_until = ?2 WHERE id = ?1",
+            params![id, new_cooldown],
+        )?;
 
         if let Some(window) = window {
             tx.execute(usage_baseline_update_sql(window), params![id, 0.0, now_rfc])?;
@@ -618,9 +703,11 @@ impl Database {
         id: &str,
         now_rfc: &str,
     ) -> Result<Option<String>> {
-        let min: Option<String> = tx.query_row(
-            "SELECT MIN(until) FROM (
-                SELECT cooldown_5h_until AS until FROM accounts WHERE id = ?1
+        let max: Option<String> = tx.query_row(
+            "SELECT MAX(until) FROM (
+                SELECT cooldown_generic_until AS until FROM accounts WHERE id = ?1
+                UNION ALL
+                SELECT cooldown_5h_until FROM accounts WHERE id = ?1
                 UNION ALL
                 SELECT cooldown_week_until FROM accounts WHERE id = ?1
                 UNION ALL
@@ -629,23 +716,19 @@ impl Database {
             params![id, now_rfc],
             |row| row.get(0),
         )?;
-        Ok(min)
+        Ok(max)
     }
 
-    /// Among all enabled accounts, return the earliest per-window cooldown reset in the future.
+    /// Among all enabled accounts, return the first time any account becomes usable.
     /// `None` means no account is in cooldown.
     pub fn soonest_cooldown_reset(&self) -> Result<Option<DateTime<Utc>>> {
         let now = Utc::now().to_rfc3339();
         let res: Option<String> = self
             .conn
             .query_row(
-                "SELECT MIN(until) FROM (
-                    SELECT cooldown_5h_until AS until FROM accounts WHERE enabled = 1
-                    UNION ALL
-                    SELECT cooldown_week_until FROM accounts WHERE enabled = 1
-                    UNION ALL
-                    SELECT cooldown_month_until FROM accounts WHERE enabled = 1
-                ) WHERE until IS NOT NULL AND until > ?1",
+                "SELECT MIN(cooldown_until)
+                 FROM accounts
+                 WHERE enabled = 1 AND cooldown_until IS NOT NULL AND cooldown_until > ?1",
                 params![now],
                 |row| row.get(0),
             )
@@ -850,8 +933,8 @@ fn forward_log_filter(
         ("status = ?", status),
         ("account_id = ?", account_id),
         ("model = ?", model),
-        ("timestamp >= ?", start_time),
-        ("timestamp <= ?", end_time),
+        ("julianday(timestamp) >= julianday(?)", start_time),
+        ("julianday(timestamp) <= julianday(?)", end_time),
     ] {
         if let Some(value) = value {
             filter.push_str(if params.is_empty() {
@@ -877,7 +960,11 @@ fn forward_log_order(sort_by: Option<&str>, sort_order: Option<&str>) -> String 
         Some("status") => "status",
         _ => "id",
     };
-    let direction = if sort_order == Some("asc") { "ASC" } else { "DESC" };
+    let direction = if sort_order == Some("asc") {
+        "ASC"
+    } else {
+        "DESC"
+    };
     format!("ORDER BY {column} {direction}, id DESC")
 }
 
@@ -914,12 +1001,13 @@ fn account_from_row(row: &Row<'_>) -> rusqlite::Result<Account> {
         purchase_date,
         expires_on,
         cooldown_until: row.get::<_, Option<String>>(8)?.map(parse_datetime),
-        cooldown_5h_until: row.get::<_, Option<String>>(9)?.map(parse_datetime),
-        cooldown_week_until: row.get::<_, Option<String>>(10)?.map(parse_datetime),
-        cooldown_month_until: row.get::<_, Option<String>>(11)?.map(parse_datetime),
-        last_error: row.get(12)?,
-        created_at: parse_datetime(row.get::<_, String>(13)?),
-        updated_at: parse_datetime(row.get::<_, String>(14)?),
+        cooldown_generic_until: row.get::<_, Option<String>>(9)?.map(parse_datetime),
+        cooldown_5h_until: row.get::<_, Option<String>>(10)?.map(parse_datetime),
+        cooldown_week_until: row.get::<_, Option<String>>(11)?.map(parse_datetime),
+        cooldown_month_until: row.get::<_, Option<String>>(12)?.map(parse_datetime),
+        last_error: row.get(13)?,
+        created_at: parse_datetime(row.get::<_, String>(14)?),
+        updated_at: parse_datetime(row.get::<_, String>(15)?),
     })
 }
 
@@ -971,6 +1059,7 @@ mod tests {
             purchase_date: String::new(),
             expires_on: String::new(),
             cooldown_until: None,
+            cooldown_generic_until: None,
             cooldown_5h_until: None,
             cooldown_week_until: None,
             cooldown_month_until: None,
@@ -1004,6 +1093,142 @@ mod tests {
         );
     }
 
+    fn create_v6_database(
+        dir: &PathBuf,
+        extra_cooldown_columns: &str,
+        extra_indexes: &str,
+    ) -> Connection {
+        let conn = Connection::open(dir.join("data.sqlite")).expect("v6 db should open");
+        conn.execute_batch(&format!(
+            "CREATE TABLE schema_version (version INTEGER PRIMARY KEY);
+             INSERT INTO schema_version (version) VALUES (6);
+             CREATE TABLE accounts (
+                 id TEXT PRIMARY KEY,
+                 name TEXT NOT NULL,
+                 key_cipher TEXT NOT NULL,
+                 enabled INTEGER NOT NULL DEFAULT 1,
+                 referral_code TEXT,
+                 recharge_date TEXT,
+                 created_at TEXT NOT NULL,
+                 updated_at TEXT NOT NULL,
+                 cooldown_until TEXT,
+                 last_error TEXT,
+                 username TEXT,
+                 password_cipher TEXT,
+                 usage_5h_baseline_percent REAL,
+                 usage_5h_anchor_success_cost REAL,
+                 usage_week_baseline_percent REAL,
+                 usage_week_anchor_success_cost REAL,
+                 usage_month_baseline_percent REAL,
+                 usage_month_anchor_success_cost REAL,
+                 sort_order INTEGER NOT NULL DEFAULT 0
+                 {extra_cooldown_columns}
+             );
+             CREATE TABLE forward_logs (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 timestamp TEXT NOT NULL,
+                 model TEXT NOT NULL,
+                 account_id TEXT NOT NULL,
+                 account_name TEXT NOT NULL,
+                 status TEXT NOT NULL,
+                 http_status INTEGER,
+                 prompt_tokens INTEGER NOT NULL DEFAULT 0,
+                 completion_tokens INTEGER NOT NULL DEFAULT 0,
+                 cached_tokens INTEGER NOT NULL DEFAULT 0,
+                 cost REAL NOT NULL DEFAULT 0,
+                 error_message TEXT
+             );
+             {extra_indexes}"
+        ))
+        .expect("v6 schema should be created");
+        conn
+    }
+
+    #[test]
+    fn v7_migration_repairs_pr11_pr12_and_combined_v6_databases() {
+        let future = (Utc::now() + Duration::days(2)).to_rfc3339();
+        for (label, extra_columns, extra_indexes, source_column, error) in [
+            (
+                "pr11-v6",
+                "",
+                "CREATE INDEX idx_forward_logs_model ON forward_logs(model);\nCREATE INDEX idx_forward_logs_status ON forward_logs(status);",
+                "",
+                "5 hour usage limit reached",
+            ),
+            (
+                "pr12-v6",
+                ", cooldown_5h_until TEXT, cooldown_week_until TEXT, cooldown_month_until TEXT",
+                "",
+                "cooldown_week_until",
+                "weekly usage limit reached",
+            ),
+            (
+                "combined-v6",
+                ", cooldown_5h_until TEXT, cooldown_week_until TEXT, cooldown_month_until TEXT",
+                "CREATE INDEX idx_forward_logs_model ON forward_logs(model);\nCREATE INDEX idx_forward_logs_status ON forward_logs(status);",
+                "cooldown_month_until",
+                "monthly usage limit reached",
+            ),
+            (
+                "generic-dev-v6",
+                ", cooldown_generic_until TEXT, cooldown_5h_until TEXT, cooldown_week_until TEXT, cooldown_month_until TEXT",
+                "CREATE INDEX idx_forward_logs_model ON forward_logs(model);\nCREATE INDEX idx_forward_logs_status ON forward_logs(status);",
+                "cooldown_generic_until",
+                "unknown rate limit",
+            ),
+        ] {
+            let dir = temp_data_dir(label);
+            let conn = create_v6_database(&dir, extra_columns, extra_indexes);
+            conn.execute(
+                "INSERT INTO accounts
+                 (id, name, key_cipher, recharge_date, created_at, updated_at, cooldown_until, last_error)
+                 VALUES ('old', 'old', 'cipher', '2026-07-01', ?1, ?1, ?2, ?3)",
+                params![Utc::now().to_rfc3339(), future, error],
+            )
+            .expect("v6 account should be inserted");
+            if !source_column.is_empty() {
+                conn.execute(
+                    &format!("UPDATE accounts SET {source_column} = ?1 WHERE id = 'old'"),
+                    [&future],
+                )
+                .expect("existing cooldown source should be set");
+            }
+            drop(conn);
+
+            let db = Database::open(dir.clone()).expect("v6 database should migrate");
+            let version: i32 = db
+                .conn
+                .query_row("SELECT MAX(version) FROM schema_version", [], |row| {
+                    row.get(0)
+                })
+                .expect("schema version should load");
+            assert_eq!(version, 7, "{label}");
+            let account = db
+                .get_account("old")
+                .expect("account query should work")
+                .expect("account should exist");
+            assert!(account.cooldown_until.is_some(), "{label}");
+            assert!(account.is_cooling_at(Utc::now()), "{label}");
+            let indexes: i64 = db
+                .conn
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master
+                     WHERE type = 'index' AND name IN (
+                         'idx_forward_logs_model',
+                         'idx_forward_logs_status',
+                         'idx_forward_logs_time_instant'
+                     )",
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("indexes should be queryable");
+            assert_eq!(indexes, 3, "{label}");
+
+            drop(db);
+            fs::remove_dir_all(dir).expect("test data dir should be removed");
+        }
+    }
+
     #[test]
     fn v4_migration_preserves_uncalibrated_usage() {
         let dir = temp_data_dir("v4-migration");
@@ -1027,6 +1252,7 @@ mod tests {
              );
              CREATE TABLE forward_logs (
                  timestamp TEXT NOT NULL,
+                 model TEXT NOT NULL DEFAULT 'test',
                  account_id TEXT NOT NULL,
                  status TEXT NOT NULL,
                  cost REAL NOT NULL DEFAULT 0
@@ -1054,7 +1280,7 @@ mod tests {
             })
             .expect("schema version should be readable");
         let usage = db.account_usage("old").expect("usage should load");
-        assert_eq!(version, 6);
+        assert_eq!(version, 7);
         assert_eq!(
             db.get_account("old")
                 .expect("account should load")
@@ -1096,6 +1322,20 @@ mod tests {
                  usage_week_anchor_success_cost REAL,
                  usage_month_baseline_percent REAL,
                  usage_month_anchor_success_cost REAL
+             );
+             CREATE TABLE forward_logs (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 timestamp TEXT NOT NULL,
+                 model TEXT NOT NULL,
+                 account_id TEXT NOT NULL,
+                 account_name TEXT NOT NULL,
+                 status TEXT NOT NULL,
+                 http_status INTEGER,
+                 prompt_tokens INTEGER NOT NULL DEFAULT 0,
+                 completion_tokens INTEGER NOT NULL DEFAULT 0,
+                 cached_tokens INTEGER NOT NULL DEFAULT 0,
+                 cost REAL NOT NULL DEFAULT 0,
+                 error_message TEXT
              );",
         )
         .expect("v4 schema should be created");
@@ -1423,7 +1663,9 @@ mod tests {
         assert!(account.cooldown_week_until.is_some());
         assert!(account.cooldown_5h_until.is_none());
         assert!(
-            account.cooldown_until.is_some_and(|until| (until - week_reset).num_seconds().abs() < 2)
+            account
+                .cooldown_until
+                .is_some_and(|until| (until - week_reset).num_seconds().abs() < 2)
         );
 
         db.set_account_usage_baseline("limited", UsageWindowKind::Month, 50.0)
@@ -1440,12 +1682,17 @@ mod tests {
         assert_cost(after.window_5h, before.window_5h);
         assert_cost(after.window_week, before.window_week);
         assert_cost(after.window_month, before.window_month);
+        let account = db
+            .get_account("limited")
+            .expect("account should load")
+            .expect("account should exist");
+        assert!(account.cooldown_generic_until.is_some());
+        assert!(account.cooldown_week_until.is_some());
         assert!(
-            db.get_account("limited")
-                .expect("account should load")
-                .expect("account should exist")
+            account
                 .cooldown_until
-                .is_some()
+                .zip(account.cooldown_week_until)
+                .is_some_and(|(summary, week)| (summary - week).num_seconds().abs() < 2)
         );
 
         drop(db);
@@ -1484,8 +1731,92 @@ mod tests {
         assert!(account.cooldown_5h_until.is_some_and(|until| until <= now));
         assert!(account.cooldown_week_until.is_some_and(|until| until > now));
         assert!(
-            account.cooldown_until.is_some_and(|until| (until - future_week).num_seconds().abs() < 2)
+            account
+                .cooldown_until
+                .is_some_and(|until| (until - future_week).num_seconds().abs() < 2)
         );
+
+        drop(db);
+        fs::remove_dir_all(dir).expect("test data dir should be removed");
+    }
+
+    #[test]
+    fn soonest_reset_is_minimum_of_each_accounts_latest_active_cooldown() {
+        let dir = temp_data_dir("soonest-account-reset");
+        let db = Database::open(dir.clone()).expect("db should open");
+        for id in ["first", "second"] {
+            db.create_account(&account(id))
+                .expect("account should be created");
+        }
+
+        let now = Utc::now();
+        let first_early = now + Duration::hours(1);
+        let first_latest = now + Duration::hours(4);
+        let second_latest = now + Duration::hours(2);
+        db.set_account_rate_limit(
+            "first",
+            first_early,
+            "5-hour usage limit reached",
+            Some(UsageWindowKind::FiveHours),
+        )
+        .expect("first short cooldown should save");
+        db.set_account_rate_limit(
+            "first",
+            first_latest,
+            "weekly usage limit reached",
+            Some(UsageWindowKind::Week),
+        )
+        .expect("first long cooldown should save");
+        db.set_account_rate_limit("second", second_latest, "unknown rate limit", None)
+            .expect("second cooldown should save");
+
+        let reset = db
+            .soonest_cooldown_reset()
+            .expect("reset query should work")
+            .expect("a reset should exist");
+        assert!((reset - second_latest).num_seconds().abs() < 2);
+
+        drop(db);
+        fs::remove_dir_all(dir).expect("test data dir should be removed");
+    }
+
+    #[test]
+    fn forward_log_time_filter_compares_rfc3339_offsets_by_instant() {
+        let dir = temp_data_dir("forward-log-offset-filter");
+        let db = Database::open(dir.clone()).expect("db should open");
+        db.conn
+            .execute(
+                "INSERT INTO forward_logs
+                 (timestamp, model, account_id, account_name, status, cost)
+                 VALUES (?1, 'inside', 'a', 'a', 'success', 1)",
+                ["2026-07-17T04:15:00Z"],
+            )
+            .expect("inside log should save");
+        db.conn
+            .execute(
+                "INSERT INTO forward_logs
+                 (timestamp, model, account_id, account_name, status, cost)
+                 VALUES (?1, 'outside', 'a', 'a', 'success', 2)",
+                ["2026-07-17T03:30:00Z"],
+            )
+            .expect("outside log should save");
+
+        let page = db
+            .query_forward_logs(
+                20,
+                0,
+                None,
+                None,
+                None,
+                Some("2026-07-17T12:00:00+08:00"),
+                Some("2026-07-17T12:30:00+08:00"),
+                Some("cost"),
+                Some("asc"),
+            )
+            .expect("offset filter should query");
+        assert_eq!(page.summary.total_requests, 1);
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(page.items[0].model, "inside");
 
         drop(db);
         fs::remove_dir_all(dir).expect("test data dir should be removed");

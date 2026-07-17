@@ -258,6 +258,7 @@ fn build_state(base_url: String, keys: &[&str]) -> (Arc<CoreStateInner>, PathBuf
             purchase_date: String::new(),
             expires_on: String::new(),
             cooldown_until: None,
+            cooldown_generic_until: None,
             cooldown_5h_until: None,
             cooldown_week_until: None,
             cooldown_month_until: None,

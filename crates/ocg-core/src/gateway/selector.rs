@@ -25,7 +25,7 @@ impl AccountSelector {
             if exclude_ids.iter().any(|excluded| account.id == *excluded) {
                 continue;
             }
-            if is_account_cooling(&account, now) {
+            if account.is_cooling_at(now) {
                 continue;
             }
             return Ok(Some(account));
@@ -33,13 +33,6 @@ impl AccountSelector {
 
         Ok(None)
     }
-}
-
-fn is_account_cooling(account: &Account, now: chrono::DateTime<Utc>) -> bool {
-    account.cooldown_5h_until.is_some_and(|until| until > now)
-        || account.cooldown_week_until.is_some_and(|until| until > now)
-        || account.cooldown_month_until.is_some_and(|until| until > now)
-        || account.cooldown_until.is_some_and(|until| until > now)
 }
 
 #[cfg(test)]
@@ -76,6 +69,7 @@ mod tests {
             purchase_date: String::new(),
             expires_on: String::new(),
             cooldown_until: cooldown,
+            cooldown_generic_until: cooldown,
             cooldown_5h_until: None,
             cooldown_week_until: None,
             cooldown_month_until: None,
@@ -136,10 +130,7 @@ mod tests {
         db.create_account(&expired_5h).unwrap();
         db.create_account(&account("next", true, None)).unwrap();
 
-        let selected = AccountSelector::new()
-            .select(&db, None)
-            .unwrap()
-            .unwrap();
+        let selected = AccountSelector::new().select(&db, None).unwrap().unwrap();
         assert_eq!(selected.id, "next");
 
         drop(db);

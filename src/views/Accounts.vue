@@ -53,11 +53,11 @@
           <div class="account-heading">
             <div class="account-name-row">
               <span>{{ account.name }}</span>
-              <n-tooltip v-if="accountIsCooling(account)" :disabled="!account.last_error">
+              <n-tooltip v-if="accountIsCooling(account)">
                 <template #trigger>
                   <n-tag type="error" size="small">{{ t("熔断 · 剩 {time}", { time: formatRemaining(account) }) }}</n-tag>
                 </template>
-                {{ account.last_error }}
+                {{ cooldownDetails(account) }}
               </n-tooltip>
             </div>
             <div class="account-lifecycle">
@@ -630,6 +630,8 @@ function formatRemaining(account: Account): string {
   if (!account.cooldown_until) return "";
   const ms = new Date(account.cooldown_until).getTime() - now.value;
   if (ms <= 0) return t("{seconds}秒", { seconds: 0 });
+  const seconds = Math.ceil(ms / 1000);
+  if (seconds < 60) return t("{seconds}秒", { seconds });
   const min = Math.floor(ms / 60000);
   if (min < 60) return t("{minutes}分钟", { minutes: min });
   const hr = Math.floor(min / 60);
@@ -638,11 +640,26 @@ function formatRemaining(account: Account): string {
   return t("{days}天{hours}小时", { days: day, hours: hr % 24 });
 }
 
+function cooldownDetails(account: Account): string {
+  const active = usageLimits.value
+    .filter((limit) => isWindowCooling(account, limit.key, now.value))
+    .map((limit) => limit.label);
+  if (
+    account.cooldown_generic_until
+    && Date.parse(account.cooldown_generic_until) > now.value
+  ) {
+    active.unshift(t("冷却中"));
+  }
+  return active.length > 0 ? active.join(" · ") : t("冷却中");
+}
+
 function formatWindowRemaining(account: Account, key: UsageKey): string {
   const until = resetTimeForWindow(account, key);
   if (!until) return "";
   const ms = new Date(until).getTime() - now.value;
   if (ms <= 0) return "";
+  const seconds = Math.ceil(ms / 1000);
+  if (seconds < 60) return t("{seconds}秒", { seconds });
   const min = Math.floor(ms / 60000);
   if (min < 60) return t("{minutes}分钟", { minutes: min });
   const hr = Math.floor(min / 60);

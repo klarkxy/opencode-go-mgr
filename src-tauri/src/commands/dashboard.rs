@@ -11,7 +11,7 @@ pub fn get_dashboard_summary(state: State<'_, AppState>) -> Result<DashboardSumm
     let now = Utc::now();
     let available_accounts = accounts
         .iter()
-        .filter(|a| a.enabled && a.cooldown_until.map(|t| t <= now).unwrap_or(true))
+        .filter(|a| a.enabled && !a.is_cooling_at(now))
         .count();
 
     let gateway_running = state.core.gateway.lock().is_some();

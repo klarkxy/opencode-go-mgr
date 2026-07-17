@@ -10,6 +10,7 @@ export interface Account {
   purchase_date: string;
   expires_on: string;
   cooldown_until: string | null;
+  cooldown_generic_until: string | null;
   cooldown_5h_until: string | null;
   cooldown_week_until: string | null;
   cooldown_month_until: string | null;

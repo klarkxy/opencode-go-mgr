@@ -39,6 +39,7 @@ pub fn create_account(state: State<'_, AppState>, input: AccountInput) -> Result
         purchase_date: input.purchase_date.unwrap_or_default(),
         expires_on: String::new(),
         cooldown_until: None,
+        cooldown_generic_until: None,
         cooldown_5h_until: None,
         cooldown_week_until: None,
         cooldown_month_until: None,

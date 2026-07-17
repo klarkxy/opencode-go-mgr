@@ -144,4 +144,7 @@ test("logs view shows top stats, extra filters, sorting, and a useful empty stat
   assert.doesNotMatch(source, /getForwardLogs\(200\)|filteredForwardLogs/);
   assert.match(source, /const request = \+\+forwardRequest/);
   assert.match(source, /request !== forwardRequest/);
+  assert.match(source, /Promise\.all\(\[loadForwardLogs\(\), loadForwardLogModels\(\)\]\)/);
+  const clearFilters = source.slice(source.indexOf("function clearFilters"), source.indexOf("function toggleSortOrder"));
+  assert.doesNotMatch(clearFilters, /sortBy\.value|sortOrder\.value/);
 });

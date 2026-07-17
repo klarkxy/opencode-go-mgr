@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
+  isCooling,
   isUsageLimitReached,
   mergeUsageEdit,
   normalizeUsagePercent,
@@ -10,24 +11,20 @@ import {
 } from "./accounts-usage.ts";
 import type { UsageKey } from "./accounts-usage.ts";
 
-test("fills only the active 5-hour, weekly, or monthly limit", () => {
-  const cases: Array<[UsageKey, string]> = [
-    ["window_5h", "5-hour usage limit reached. Resets in 13min."],
-    ["window_week", "Weekly usage limit reached. Resets in 4 days."],
-    ["window_month", "Monthly usage limit reached. Resets in 13 days."],
+test("fills every active 5-hour, weekly, or monthly limit", () => {
+  const cases: Array<[UsageKey, "cooldown_5h_until" | "cooldown_week_until" | "cooldown_month_until"]> = [
+    ["window_5h", "cooldown_5h_until"],
+    ["window_week", "cooldown_week_until"],
+    ["window_month", "cooldown_month_until"],
   ];
 
-  for (const [key, last_error] of cases) {
-    const field =
-      key === "window_5h"
-        ? "cooldown_5h_until"
-        : key === "window_week"
-          ? "cooldown_week_until"
-          : "cooldown_month_until";
+  for (const [key, field] of cases) {
     assert.equal(
-      isUsageLimitReached({ [field]: "2099-01-01T00:00:00Z", last_error } as Parameters<
-        typeof isUsageLimitReached
-      >[0], key),
+      isUsageLimitReached({
+        cooldown_5h_until: field === "cooldown_5h_until" ? "2099-01-01T00:00:00Z" : null,
+        cooldown_week_until: field === "cooldown_week_until" ? "2099-01-01T00:00:00Z" : null,
+        cooldown_month_until: field === "cooldown_month_until" ? "2099-01-01T00:00:00Z" : null,
+      }, key),
       true,
     );
   }
@@ -37,7 +34,6 @@ test("fills only the active 5-hour, weekly, or monthly limit", () => {
         cooldown_5h_until: null,
         cooldown_week_until: "2099-01-01T00:00:00Z",
         cooldown_month_until: null,
-        last_error: "Weekly usage limit reached. Resets in 4 days.",
       },
       "window_month",
     ),
@@ -49,12 +45,28 @@ test("fills only the active 5-hour, weekly, or monthly limit", () => {
         cooldown_5h_until: null,
         cooldown_week_until: "2000-01-01T00:00:00Z",
         cooldown_month_until: null,
-        last_error: "Weekly usage limit reached. Resets in 4 days.",
       },
       "window_week",
     ),
     false,
   );
+});
+
+test("keeps generic and overlapping window cooldowns visible", () => {
+  assert.equal(isCooling({
+    cooldown_until: "2099-01-01T00:00:00Z",
+    cooldown_5h_until: null,
+    cooldown_week_until: null,
+    cooldown_month_until: null,
+  }), true);
+
+  const overlapping = {
+    cooldown_5h_until: "2099-01-01T00:00:00Z",
+    cooldown_week_until: "2099-01-02T00:00:00Z",
+    cooldown_month_until: null,
+  };
+  assert.equal(isUsageLimitReached(overlapping, "window_5h"), true);
+  assert.equal(isUsageLimitReached(overlapping, "window_week"), true);
 });
 
 test("shows local estimated saturation as a warning, not a real breaker", () => {
@@ -64,7 +76,6 @@ test("shows local estimated saturation as a warning, not a real breaker", () => 
         cooldown_5h_until: null,
         cooldown_week_until: null,
         cooldown_month_until: null,
-        last_error: null,
       },
       "window_week",
       100,
@@ -77,7 +88,6 @@ test("shows local estimated saturation as a warning, not a real breaker", () => 
         cooldown_5h_until: null,
         cooldown_week_until: "2099-01-01T00:00:00Z",
         cooldown_month_until: null,
-        last_error: "Weekly usage limit reached. Resets in 4 days.",
       },
       "window_week",
       100,

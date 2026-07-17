@@ -1864,6 +1864,7 @@ mod tests {
             model: "test-model".to_string(),
             stream: true,
             body: Bytes::new(),
+            service_tier: None,
             custom_tools: Vec::new(),
             namespace_tools: Vec::new(),
             response_parallel_tool_calls: true,

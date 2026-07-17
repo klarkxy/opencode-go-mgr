@@ -16,7 +16,7 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, patch, post, put},
 };
-use chrono::{Duration, Utc};
+use chrono::{DateTime, Duration, SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::{Component, Path as FsPath, PathBuf};
 
@@ -355,6 +355,7 @@ struct DashboardAccount {
     purchase_date: String,
     expires_on: String,
     cooldown_until: Option<String>,
+    cooldown_generic_until: Option<String>,
     cooldown_5h_until: Option<String>,
     cooldown_week_until: Option<String>,
     cooldown_month_until: Option<String>,
@@ -374,6 +375,7 @@ fn dashboard_account(account: Account) -> DashboardAccount {
         purchase_date: account.purchase_date,
         expires_on: account.expires_on,
         cooldown_until: account.cooldown_until.map(|t| t.to_rfc3339()),
+        cooldown_generic_until: account.cooldown_generic_until.map(|t| t.to_rfc3339()),
         cooldown_5h_until: account.cooldown_5h_until.map(|t| t.to_rfc3339()),
         cooldown_week_until: account.cooldown_week_until.map(|t| t.to_rfc3339()),
         cooldown_month_until: account.cooldown_month_until.map(|t| t.to_rfc3339()),
@@ -451,6 +453,7 @@ async fn create_account(
         purchase_date,
         expires_on: String::new(),
         cooldown_until: None,
+        cooldown_generic_until: None,
         cooldown_5h_until: None,
         cooldown_week_until: None,
         cooldown_month_until: None,
@@ -999,7 +1002,7 @@ struct LimitQuery {
     days: Option<i64>,
 }
 
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 struct ForwardLogQuery {
     limit: Option<i64>,
     offset: Option<i64>,
@@ -1010,6 +1013,57 @@ struct ForwardLogQuery {
     end_time: Option<String>,
     sort_by: Option<String>,
     sort_order: Option<String>,
+}
+
+fn validate_forward_log_query(
+    query: &ForwardLogQuery,
+) -> Result<(Option<String>, Option<String>), ApiError> {
+    if query.sort_by.as_deref().is_some_and(|value| {
+        !matches!(
+            value,
+            "timestamp"
+                | "prompt_tokens"
+                | "completion_tokens"
+                | "cached_tokens"
+                | "cost"
+                | "model"
+                | "status"
+        )
+    }) {
+        return Err(ApiError::bad_request("invalid sort_by"));
+    }
+    if query
+        .sort_order
+        .as_deref()
+        .is_some_and(|value| !matches!(value, "asc" | "desc"))
+    {
+        return Err(ApiError::bad_request("invalid sort_order"));
+    }
+
+    let parse_time = |value: Option<&str>, name: &str| -> Result<_, ApiError> {
+        value
+            .map(|value| {
+                DateTime::parse_from_rfc3339(value)
+                    .map(|time| {
+                        time.with_timezone(&Utc)
+                            .to_rfc3339_opts(SecondsFormat::Millis, true)
+                    })
+                    .map_err(|_| ApiError::bad_request(format!("invalid {name}")))
+            })
+            .transpose()
+    };
+    let start_time = parse_time(query.start_time.as_deref(), "start_time")?;
+    let end_time = parse_time(query.end_time.as_deref(), "end_time")?;
+    if start_time
+        .as_ref()
+        .zip(end_time.as_ref())
+        .is_some_and(|(start, end)| start > end)
+    {
+        return Err(ApiError::bad_request(
+            "start_time must not be after end_time",
+        ));
+    }
+    Ok((start_time, end_time))
 }
 
 async fn gateway_logs(
@@ -1028,6 +1082,7 @@ async fn forward_logs(
     State(state): State<CoreState>,
     Query(q): Query<ForwardLogQuery>,
 ) -> Result<Json<ForwardLogPage>, ApiError> {
+    let (start_time, end_time) = validate_forward_log_query(&q)?;
     state
         .db
         .lock()
@@ -1037,8 +1092,8 @@ async fn forward_logs(
             q.status.as_deref(),
             q.account_id.as_deref(),
             q.model.as_deref(),
-            q.start_time.as_deref(),
-            q.end_time.as_deref(),
+            start_time.as_deref(),
+            end_time.as_deref(),
             q.sort_by.as_deref(),
             q.sort_order.as_deref(),
         )
@@ -1046,9 +1101,7 @@ async fn forward_logs(
         .map_err(ApiError::internal)
 }
 
-async fn forward_log_models(
-    State(state): State<CoreState>,
-) -> Result<Json<Vec<String>>, ApiError> {
+async fn forward_log_models(State(state): State<CoreState>) -> Result<Json<Vec<String>>, ApiError> {
     state
         .db
         .lock()
@@ -1066,12 +1119,7 @@ async fn dashboard_summary(
     let now = Utc::now();
     let available_accounts = accounts
         .iter()
-        .filter(|a| {
-            a.enabled
-                && !a.cooldown_5h_until.is_some_and(|until| until > now)
-                && !a.cooldown_week_until.is_some_and(|until| until > now)
-                && !a.cooldown_month_until.is_some_and(|until| until > now)
-        })
+        .filter(|a| a.enabled && !a.is_cooling_at(now))
         .count();
     let (today_cost, week_cost, month_cost) = db.total_usage().map_err(ApiError::internal)?;
     Ok(Json(DashboardSummary {
@@ -1140,9 +1188,10 @@ fn is_loopback(url: &reqwest::Url) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        AccountOrderInput, AccountUsageUpdate, asset_path, create_account, dashboard_account,
-        dashboard_summary, format_error_chain, is_update_available, parse_stable_version,
-        reorder_accounts, update_account, update_account_usage, update_settings,
+        AccountOrderInput, AccountUsageUpdate, ForwardLogQuery, asset_path, create_account,
+        dashboard_account, dashboard_summary, format_error_chain, is_update_available,
+        parse_stable_version, reorder_accounts, update_account, update_account_usage,
+        update_settings, validate_forward_log_query,
     };
     use crate::crypto::{KeyCipher, StaticKeyCipher};
     use crate::db::Database;
@@ -1183,6 +1232,7 @@ mod tests {
             purchase_date: "2026-06-15".into(),
             expires_on: "2026-07-15".into(),
             cooldown_until: None,
+            cooldown_generic_until: None,
             cooldown_5h_until: None,
             cooldown_week_until: None,
             cooldown_month_until: None,
@@ -1212,6 +1262,42 @@ mod tests {
     }
 
     #[test]
+    fn forward_log_query_normalizes_offsets_and_rejects_invalid_ordering() {
+        let query = ForwardLogQuery {
+            start_time: Some("2026-07-17T12:00:00+08:00".into()),
+            end_time: Some("2026-07-17T05:00:00Z".into()),
+            sort_by: Some("cost".into()),
+            sort_order: Some("asc".into()),
+            ..ForwardLogQuery::default()
+        };
+        let (start, end) = validate_forward_log_query(&query).expect("valid query");
+        assert_eq!(start.as_deref(), Some("2026-07-17T04:00:00.000Z"));
+        assert_eq!(end.as_deref(), Some("2026-07-17T05:00:00.000Z"));
+
+        for invalid in [
+            ForwardLogQuery {
+                sort_by: Some("costt".into()),
+                ..ForwardLogQuery::default()
+            },
+            ForwardLogQuery {
+                sort_order: Some("sideways".into()),
+                ..ForwardLogQuery::default()
+            },
+            ForwardLogQuery {
+                start_time: Some("not-a-time".into()),
+                ..ForwardLogQuery::default()
+            },
+            ForwardLogQuery {
+                start_time: Some("2026-07-17T06:00:00Z".into()),
+                end_time: Some("2026-07-17T05:00:00Z".into()),
+                ..ForwardLogQuery::default()
+            },
+        ] {
+            assert!(validate_forward_log_query(&invalid).is_err());
+        }
+    }
+
+    #[test]
     fn dashboard_account_does_not_export_secrets() {
         let dir = temp_data_dir("secret-list");
         let cipher: Arc<dyn KeyCipher + Send + Sync> = Arc::new(StaticKeyCipher::new("test"));
@@ -1228,6 +1314,7 @@ mod tests {
             purchase_date: "2026-01-31".into(),
             expires_on: "2026-02-28".into(),
             cooldown_until: None,
+            cooldown_generic_until: None,
             cooldown_5h_until: None,
             cooldown_week_until: None,
             cooldown_month_until: None,
@@ -1445,6 +1532,7 @@ mod tests {
             purchase_date: "2026-01-31".into(),
             expires_on: "2026-02-28".into(),
             cooldown_until: None,
+            cooldown_generic_until: None,
             cooldown_5h_until: None,
             cooldown_week_until: None,
             cooldown_month_until: None,

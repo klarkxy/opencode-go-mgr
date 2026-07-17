@@ -44,6 +44,7 @@ fn core_state_persists_account_through_static_cipher() {
         purchase_date: String::new(),
         expires_on: String::new(),
         cooldown_until: None,
+        cooldown_generic_until: None,
         cooldown_5h_until: None,
         cooldown_week_until: None,
         cooldown_month_until: None,
@@ -83,6 +84,7 @@ fn core_state_with_wrong_cipher_cannot_decrypt_existing_account() {
             purchase_date: String::new(),
             expires_on: String::new(),
             cooldown_until: None,
+            cooldown_generic_until: None,
             cooldown_5h_until: None,
             cooldown_week_until: None,
             cooldown_month_until: None,
@@ -305,7 +307,17 @@ fn query_forward_logs_filters_before_limit_and_summarizes_all_matches() {
     }
 
     let first = db
-        .query_forward_logs(1, 0, Some("success"), Some("selected"), None, None, None, None, None)
+        .query_forward_logs(
+            1,
+            0,
+            Some("success"),
+            Some("selected"),
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
         .unwrap();
     assert_eq!(first.items.len(), 1);
     assert_eq!(first.items[0].prompt_tokens, 30);
@@ -316,13 +328,25 @@ fn query_forward_logs_filters_before_limit_and_summarizes_all_matches() {
     assert!((first.summary.cost - 3.0).abs() < f64::EPSILON);
 
     let second = db
-        .query_forward_logs(1, 1, Some("success"), Some("selected"), None, None, None, None, None)
+        .query_forward_logs(
+            1,
+            1,
+            Some("success"),
+            Some("selected"),
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
         .unwrap();
     assert_eq!(second.items.len(), 1);
     assert_eq!(second.items[0].prompt_tokens, 10);
     assert_eq!(second.summary.total_requests, 2);
 
-    let bounded = db.query_forward_logs(999, -1, None, None, None, None, None, None, None).unwrap();
+    let bounded = db
+        .query_forward_logs(999, -1, None, None, None, None, None, None, None)
+        .unwrap();
     assert_eq!(bounded.items.len(), 200);
     assert_eq!(bounded.summary.total_requests, 203);
 }

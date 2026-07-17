@@ -1,5 +1,5 @@
 use crate::db::Database;
-use crate::gateway::cost::cost_from_counts;
+use crate::gateway::cost::cost_from_counts_with_tier;
 use crate::gateway::limit::{parse_reset, parse_usage_limit_window};
 use crate::gateway::protocol::{
     ApiFormat, RequestPlan, UsageCounts, extract_usage, format_error, merge_stream_usage,
@@ -420,6 +420,7 @@ async fn forward_request_impl(
             let st_f = st.clone();
             let converter_f = converter.clone();
             let mdl = model.clone();
+            let service_tier_f = plan.service_tier.clone();
             // `unfold` is a clean "run once, then end" stream. The DB write is the
             // unfold's state transition, the body emits a single empty chunk, and
             // the stream then terminates — no need for once() + flatten gymnastics.
@@ -431,79 +432,89 @@ async fn forward_request_impl(
                     mdl,
                     initial_id,
                 },
-                |state| async move {
-                    let (db_h, st_f, converter_f, mdl, initial_id) = match state {
-                        FinalizerState::Init {
-                            db_h,
-                            st_f,
-                            converter_f,
-                            mdl,
-                            initial_id,
-                        } => (db_h, st_f, converter_f, mdl, initial_id),
-                        FinalizerState::Done => return None,
-                    };
-                    let (output, finish_error) = if st_f.lock().error {
-                        (bytes::Bytes::new(), None)
-                    } else {
-                        let mut converter = converter_f.lock();
-                        match converter.finish() {
-                            Ok(chunks) => (join_chunks(chunks), None),
-                            Err(error) => {
-                                let message =
-                                    format!("stream conversion failed: {}", error.message);
-                                {
-                                    let mut state = st_f.lock();
-                                    state.error = true;
-                                    state.error_message = Some(message.clone());
-                                }
-                                let chunks = converter.error_event(&message);
-                                (join_chunks(chunks), Some(message))
-                            }
-                        }
-                    };
-                    let stream_error = st_f.lock().error_message.clone();
-                    let (status_str, prompt, completion, cached, cost) = {
-                        let g = st_f.lock();
-                        if g.error {
-                            // ponytail: the mapped Err arm already wrote the
-                            // 'error' row. Don't overwrite it back to success.
-                            ("error".to_string(), 0, 0, 0, 0.0)
-                        } else if g.has_usage {
-                            let (p, c, cached) = token_counts(g.usage);
-                            (
-                                "success".to_string(),
-                                p,
-                                c,
-                                cached,
-                                cost_from_counts(&mdl, p, c, cached),
-                            )
+                move |state| {
+                    let service_tier = service_tier_f.clone();
+                    async move {
+                        let (db_h, st_f, converter_f, mdl, initial_id) = match state {
+                            FinalizerState::Init {
+                                db_h,
+                                st_f,
+                                converter_f,
+                                mdl,
+                                initial_id,
+                            } => (db_h, st_f, converter_f, mdl, initial_id),
+                            FinalizerState::Done => return None,
+                        };
+                        let (output, finish_error) = if st_f.lock().error {
+                            (bytes::Bytes::new(), None)
                         } else {
-                            ("success_no_usage".to_string(), 0, 0, 0, 0.0)
+                            let mut converter = converter_f.lock();
+                            match converter.finish() {
+                                Ok(chunks) => (join_chunks(chunks), None),
+                                Err(error) => {
+                                    let message =
+                                        format!("stream conversion failed: {}", error.message);
+                                    {
+                                        let mut state = st_f.lock();
+                                        state.error = true;
+                                        state.error_message = Some(message.clone());
+                                    }
+                                    let chunks = converter.error_event(&message);
+                                    (join_chunks(chunks), Some(message))
+                                }
+                            }
+                        };
+                        let stream_error = st_f.lock().error_message.clone();
+                        let (status_str, prompt, completion, cached, cost) = {
+                            let g = st_f.lock();
+                            if g.error {
+                                // ponytail: the mapped Err arm already wrote the
+                                // 'error' row. Don't overwrite it back to success.
+                                ("error".to_string(), 0, 0, 0, 0.0)
+                            } else if g.has_usage {
+                                let (p, c, cached, cache_creation) = token_counts(g.usage);
+                                (
+                                    "success".to_string(),
+                                    p,
+                                    c,
+                                    cached,
+                                    cost_from_counts_with_tier(
+                                        &mdl,
+                                        p,
+                                        c,
+                                        cached,
+                                        cache_creation,
+                                        service_tier.as_deref(),
+                                    ),
+                                )
+                            } else {
+                                ("success_no_usage".to_string(), 0, 0, 0, 0.0)
+                            }
+                        };
+                        let db = db_h.db.lock();
+                        if let Err(e) = db.update_forward_log(
+                            initial_id,
+                            &status_str,
+                            None,
+                            ForwardMetrics {
+                                prompt_tokens: prompt,
+                                completion_tokens: completion,
+                                cached_tokens: cached,
+                                cost,
+                            },
+                            finish_error.as_deref().or(stream_error.as_deref()),
+                        ) {
+                            let _ = db.log_gateway(
+                                "warn",
+                                "forwarder",
+                                &format!("failed to finalize streaming row {}: {}", initial_id, e),
+                            );
                         }
-                    };
-                    let db = db_h.db.lock();
-                    if let Err(e) = db.update_forward_log(
-                        initial_id,
-                        &status_str,
-                        None,
-                        ForwardMetrics {
-                            prompt_tokens: prompt,
-                            completion_tokens: completion,
-                            cached_tokens: cached,
-                            cost,
-                        },
-                        finish_error.as_deref().or(stream_error.as_deref()),
-                    ) {
-                        let _ = db.log_gateway(
-                            "warn",
-                            "forwarder",
-                            &format!("failed to finalize streaming row {}: {}", initial_id, e),
-                        );
+                        Some((
+                            Ok::<bytes::Bytes, std::io::Error>(output),
+                            FinalizerState::Done,
+                        ))
                     }
-                    Some((
-                        Ok::<bytes::Bytes, std::io::Error>(output),
-                        FinalizerState::Done,
-                    ))
                 },
             )
         };
@@ -562,9 +573,17 @@ async fn forward_request_impl(
             }
         };
 
-        let (prompt_tokens, completion_tokens, cached_tokens) =
-            token_counts(extract_usage(plan.upstream, &upstream_json));
-        let cost = cost_from_counts(&model, prompt_tokens, completion_tokens, cached_tokens);
+        let usage = extract_usage(plan.upstream, &upstream_json);
+        let (prompt_tokens, completion_tokens, cached_tokens, cache_creation_tokens) =
+            token_counts(usage);
+        let cost = cost_from_counts_with_tier(
+            &model,
+            prompt_tokens,
+            completion_tokens,
+            cached_tokens,
+            cache_creation_tokens,
+            plan.service_tier.as_deref(),
+        );
         let response_json = match transform_response(plan, &upstream_json) {
             Ok(value) => value,
             Err(error) => {
@@ -984,12 +1003,13 @@ fn has_usage(format: ApiFormat, payload: &Value) -> bool {
     .is_some_and(Value::is_object)
 }
 
-fn token_counts(usage: UsageCounts) -> (i64, i64, i64) {
+fn token_counts(usage: UsageCounts) -> (i64, i64, i64, i64) {
     let to_i64 = |value: u64| value.min(i64::MAX as u64) as i64;
     (
         to_i64(usage.input_tokens),
         to_i64(usage.output_tokens),
         to_i64(usage.cached_tokens),
+        to_i64(usage.cache_creation_tokens),
     )
 }
 
@@ -1008,10 +1028,11 @@ mod stream_usage_tests {
         let chunk = Bytes::from(usage_event());
         process_chunk_for_usage(&mut st, ApiFormat::ChatCompletions, &chunk);
         assert!(st.has_usage, "usage should be set");
-        let (p, c, cached) = token_counts(st.usage);
+        let (p, c, cached, cache_creation) = token_counts(st.usage);
         assert_eq!(p, 10);
         assert_eq!(c, 20);
         assert_eq!(cached, 5);
+        assert_eq!(cache_creation, 0);
         assert!(st.buf.is_empty(), "buffer should drain on full events");
     }
 
@@ -1040,8 +1061,8 @@ mod stream_usage_tests {
         );
 
         assert!(st.has_usage, "usage should be set after boundary");
-        let (p, c, cached) = token_counts(st.usage);
-        assert_eq!((p, c, cached), (10, 20, 5));
+        let (p, c, cached, cache_creation) = token_counts(st.usage);
+        assert_eq!((p, c, cached, cache_creation), (10, 20, 5, 0));
         assert!(st.buf.is_empty(), "buffer should be empty after all chunks");
     }
 
@@ -1063,15 +1084,15 @@ mod stream_usage_tests {
         process_chunk_for_usage(&mut st, ApiFormat::ChatCompletions, &Bytes::from(first));
         process_chunk_for_usage(&mut st, ApiFormat::ChatCompletions, &Bytes::from(second));
         assert!(st.has_usage, "usage set");
-        let (p, c, cached) = token_counts(st.usage);
-        assert_eq!((p, c, cached), (100, 200, 50));
+        let (p, c, cached, cache_creation) = token_counts(st.usage);
+        assert_eq!((p, c, cached, cache_creation), (100, 200, 50, 0));
     }
 
     #[test]
     fn messages_stream_merges_start_and_delta_usage() {
         let mut st = StreamState::default();
         let start = Bytes::from_static(
-            b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":6,\"cache_read_input_tokens\":4}}}\n\n",
+            b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":6,\"cache_read_input_tokens\":4,\"cache_creation_input_tokens\":2}}}\n\n",
         );
         let delta = Bytes::from_static(
             b"event: message_delta\ndata: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":7}}\n\n",
@@ -1079,7 +1100,7 @@ mod stream_usage_tests {
         process_chunk_for_usage(&mut st, ApiFormat::Messages, &start);
         process_chunk_for_usage(&mut st, ApiFormat::Messages, &delta);
         assert!(st.has_usage);
-        assert_eq!(token_counts(st.usage), (10, 7, 4));
+        assert_eq!(token_counts(st.usage), (12, 7, 4, 2));
     }
 
     #[test]
@@ -1110,14 +1131,14 @@ mod stream_usage_tests {
         process_chunk_for_usage(&mut st, ApiFormat::Responses, &chunk);
         assert!(st.terminal);
         assert!(!st.error);
-        assert_eq!(token_counts(st.usage), (7, 2, 0));
+        assert_eq!(token_counts(st.usage), (7, 2, 0, 0));
 
         let later = Bytes::from_static(
             b"event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"error\":{\"message\":\"later\"}}}\n\n",
         );
         process_chunk_for_usage(&mut st, ApiFormat::Responses, &later);
         assert!(!st.error);
-        assert_eq!(token_counts(st.usage), (7, 2, 0));
+        assert_eq!(token_counts(st.usage), (7, 2, 0, 0));
     }
 
     #[test]
@@ -1128,7 +1149,7 @@ mod stream_usage_tests {
             b"data: {\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":11}}\r\n\r\n".to_vec();
         process_chunk_for_usage(&mut st, ApiFormat::ChatCompletions, &Bytes::from(payload));
         assert!(st.has_usage, "CRLF usage should be parsed");
-        let (p, c, _) = token_counts(st.usage);
+        let (p, c, _, _) = token_counts(st.usage);
         assert_eq!((p, c), (7, 11));
         assert!(st.buf.is_empty());
     }

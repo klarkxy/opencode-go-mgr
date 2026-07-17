@@ -115,7 +115,7 @@
                   quaternary
                   :loading="forwardLoading"
                   :aria-label="t('刷新请求日志')"
-                  @click="loadForwardLogs"
+                  @click="refreshForwardLogs"
                 >
                   <template #icon><n-icon :component="ReloadOutlined" /></template>
                 </n-button>
@@ -166,7 +166,16 @@ import { locale } from "../i18n/index.ts";
 import { formatCost, formatNumber } from "../utils/format.ts";
 
 type LogTab = "gateway" | "forward";
+type SortBy = "timestamp" | "prompt_tokens" | "completion_tokens" | "cached_tokens" | "cost";
 type SortOrder = "asc" | "desc";
+
+const sortValues = new Set<SortBy>([
+  "timestamp",
+  "prompt_tokens",
+  "completion_tokens",
+  "cached_tokens",
+  "cost",
+]);
 
 const query = new URLSearchParams(window.location.search);
 const message = useMessage();
@@ -180,15 +189,19 @@ const forwardLoading = ref(false);
 const statusFilter = ref<string | null>(query.get("status"));
 const accountFilter = ref<string | null>(query.get("account"));
 const modelFilter = ref<string | null>(query.get("model"));
-const sortBy = ref<string>(query.get("sort") || "timestamp");
-const sortOrder = ref<SortOrder>((query.get("order") as SortOrder) || "desc");
+const querySort = query.get("sort");
+const queryOrder = query.get("order");
+const sortBy = ref<SortBy>(
+  querySort !== null && sortValues.has(querySort as SortBy) ? querySort as SortBy : "timestamp",
+);
+const sortOrder = ref<SortOrder>(queryOrder === "asc" || queryOrder === "desc" ? queryOrder : "desc");
 const timeRange = ref<[number, number] | null>((() => {
   const start = query.get("start");
   const end = query.get("end");
   if (!start || !end) return null;
   const startMs = Date.parse(start);
   const endMs = Date.parse(end);
-  if (Number.isNaN(startMs) || Number.isNaN(endMs)) return null;
+  if (Number.isNaN(startMs) || Number.isNaN(endMs) || startMs > endMs) return null;
   return [startMs, endMs];
 })());
 const forwardPage = ref(1);
@@ -284,8 +297,6 @@ function clearFilters() {
   accountFilter.value = null;
   modelFilter.value = null;
   timeRange.value = null;
-  sortBy.value = "timestamp";
-  sortOrder.value = "desc";
 }
 
 function toggleSortOrder() {
@@ -370,6 +381,10 @@ async function loadForwardLogModels() {
   }
 }
 
+async function refreshForwardLogs() {
+  await Promise.all([loadForwardLogs(), loadForwardLogModels()]);
+}
+
 function changeForwardPage(page: number) {
   forwardPage.value = page;
   void loadForwardLogs();
@@ -390,6 +405,7 @@ watch(
 );
 
 onMounted(() => {
+  syncQueryState();
   void loadGatewayLogs();
   void loadForwardLogs();
   void loadAccounts();

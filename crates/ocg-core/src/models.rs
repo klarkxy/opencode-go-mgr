@@ -16,9 +16,11 @@ pub struct Account {
     pub purchase_date: String,
     #[serde(default)]
     pub expires_on: String,
-    /// Derived: nearest future reset among all per-window cooldowns.
+    /// Derived: when the account becomes usable after every active cooldown expires.
     /// Kept for backwards compatibility; `None` means currently available.
     pub cooldown_until: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub cooldown_generic_until: Option<DateTime<Utc>>,
     #[serde(default)]
     pub cooldown_5h_until: Option<DateTime<Utc>>,
     #[serde(default)]
@@ -28,6 +30,25 @@ pub struct Account {
     pub last_error: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+impl Account {
+    pub fn cooldown_ends_at(&self, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
+        [
+            self.cooldown_generic_until,
+            self.cooldown_5h_until,
+            self.cooldown_week_until,
+            self.cooldown_month_until,
+        ]
+        .into_iter()
+        .flatten()
+        .filter(|until| *until > now)
+        .max()
+    }
+
+    pub fn is_cooling_at(&self, now: DateTime<Utc>) -> bool {
+        self.cooldown_ends_at(now).is_some()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
