@@ -16,7 +16,15 @@ pub struct Account {
     pub purchase_date: String,
     #[serde(default)]
     pub expires_on: String,
-    pub cooldown_until: Option<DateTime<Utc>>, // None = 可用
+    /// Derived: nearest future reset among all per-window cooldowns.
+    /// Kept for backwards compatibility; `None` means currently available.
+    pub cooldown_until: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub cooldown_5h_until: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub cooldown_week_until: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub cooldown_month_until: Option<DateTime<Utc>>,
     pub last_error: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,

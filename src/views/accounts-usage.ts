@@ -9,26 +9,52 @@ export type UsageEditState = {
   error: string | null;
 };
 
+const cooldownFields: Record<UsageKey, keyof Pick<Account, "cooldown_5h_until" | "cooldown_week_until" | "cooldown_month_until">> = {
+  window_5h: "cooldown_5h_until",
+  window_week: "cooldown_week_until",
+  window_month: "cooldown_month_until",
+};
+
 const limitMarkers: Record<UsageKey, string> = {
   window_5h: "5-hour usage limit reached",
   window_week: "weekly usage limit reached",
   window_month: "monthly usage limit reached",
 };
 
-export function isCooling(
-  account: Pick<Account, "cooldown_until">,
+export function isWindowCooling(
+  account: Pick<Account, "cooldown_5h_until" | "cooldown_week_until" | "cooldown_month_until">,
+  key: UsageKey,
   now = Date.now(),
 ): boolean {
-  return account.cooldown_until !== null && Date.parse(account.cooldown_until) > now;
+  const until = account[cooldownFields[key]];
+  return until !== null && Date.parse(until) > now;
+}
+
+export function resetTimeForWindow(
+  account: Pick<Account, "cooldown_5h_until" | "cooldown_week_until" | "cooldown_month_until">,
+  key: UsageKey,
+): string | null {
+  return account[cooldownFields[key]];
+}
+
+export function isCooling(
+  account: Pick<Account, "cooldown_5h_until" | "cooldown_week_until" | "cooldown_month_until">,
+  now = Date.now(),
+): boolean {
+  return (
+    isWindowCooling(account, "window_5h", now) ||
+    isWindowCooling(account, "window_week", now) ||
+    isWindowCooling(account, "window_month", now)
+  );
 }
 
 export function isUsageLimitReached(
-  account: Pick<Account, "cooldown_until" | "last_error">,
+  account: Pick<Account, "cooldown_5h_until" | "cooldown_week_until" | "cooldown_month_until" | "last_error">,
   key: UsageKey,
   now = Date.now(),
 ): boolean {
   return (
-    isCooling(account, now) &&
+    isWindowCooling(account, key, now) &&
     account.last_error?.toLowerCase().includes(limitMarkers[key]) === true
   );
 }
@@ -53,7 +79,7 @@ export function mergeUsageEdit(
 }
 
 export function usageProgressStatus(
-  account: Pick<Account, "cooldown_until" | "last_error">,
+  account: Pick<Account, "cooldown_5h_until" | "cooldown_week_until" | "cooldown_month_until" | "last_error">,
   key: UsageKey,
   percent: number,
 ): "success" | "warning" | "error" {

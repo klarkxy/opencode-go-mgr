@@ -129,6 +129,7 @@ export const koKRMessages = {
   "{hours}小时{minutes}分钟": "{hours}시간 {minutes}분",
   "{minutes}分钟": "{minutes}분",
   "{seconds}秒": "{seconds}초",
+  "重置于 {time}": "{time} 후 재설정",
   "用量加载失败": "사용량을 불러오지 못했습니다",
   "重试": "다시 시도",
   "用量保存失败: {error}": "사용량 저장 실패: {error}",

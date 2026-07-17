@@ -129,6 +129,7 @@ export const ptBRMessages = {
   "{hours}小时{minutes}分钟": "{hours}h {minutes}min",
   "{minutes}分钟": "{minutes}min",
   "{seconds}秒": "{seconds}s",
+  "重置于 {time}": "Reinicia em {time}",
   "用量加载失败": "Falha ao carregar o uso",
   "重试": "Tentar novamente",
   "用量保存失败: {error}": "Falha ao salvar o uso: {error}",

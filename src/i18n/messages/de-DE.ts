@@ -129,6 +129,7 @@ export const deDEMessages = {
   "{hours}小时{minutes}分钟": "{hours} Std. {minutes} Min.",
   "{minutes}分钟": "{minutes} Min.",
   "{seconds}秒": "{seconds} Sek.",
+  "重置于 {time}": "Wird in {time} zurückgesetzt",
   "用量加载失败": "Die Nutzung konnte nicht geladen werden",
   "重试": "Erneut versuchen",
   "用量保存失败: {error}": "Nutzung konnte nicht gespeichert werden: {error}",

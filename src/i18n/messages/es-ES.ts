@@ -129,6 +129,7 @@ export const esESMessages = {
   "{hours}小时{minutes}分钟": "{hours} h {minutes} min",
   "{minutes}分钟": "{minutes} min",
   "{seconds}秒": "{seconds} s",
+  "重置于 {time}": "Se reinicia en {time}",
   "用量加载失败": "No se pudo cargar el uso",
   "重试": "Reintentar",
   "用量保存失败: {error}": "No se pudo guardar el uso: {error}",

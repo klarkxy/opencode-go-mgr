@@ -129,6 +129,7 @@ export const jaJPMessages = {
   "{hours}小时{minutes}分钟": "{hours}時間{minutes}分",
   "{minutes}分钟": "{minutes}分",
   "{seconds}秒": "{seconds}秒",
+  "重置于 {time}": "{time}後にリセット",
   "用量加载失败": "使用量の読み込みに失敗しました",
   "重试": "再試行",
   "用量保存失败: {error}": "使用量の保存に失敗しました：{error}",

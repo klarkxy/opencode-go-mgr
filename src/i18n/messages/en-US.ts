@@ -127,6 +127,7 @@ export const enUSMessages = {
   "{hours}小时{minutes}分钟": "{hours}h {minutes}m",
   "{minutes}分钟": "{minutes}m",
   "{seconds}秒": "{seconds}s",
+  "重置于 {time}": "Resets in {time}",
   "用量加载失败": "Usage failed to load",
   "重试": "Retry",
   "用量保存失败: {error}": "Failed to save usage: {error}",

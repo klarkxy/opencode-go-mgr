@@ -355,6 +355,9 @@ struct DashboardAccount {
     purchase_date: String,
     expires_on: String,
     cooldown_until: Option<String>,
+    cooldown_5h_until: Option<String>,
+    cooldown_week_until: Option<String>,
+    cooldown_month_until: Option<String>,
     last_error: Option<String>,
     created_at: String,
     updated_at: String,
@@ -371,6 +374,9 @@ fn dashboard_account(account: Account) -> DashboardAccount {
         purchase_date: account.purchase_date,
         expires_on: account.expires_on,
         cooldown_until: account.cooldown_until.map(|t| t.to_rfc3339()),
+        cooldown_5h_until: account.cooldown_5h_until.map(|t| t.to_rfc3339()),
+        cooldown_week_until: account.cooldown_week_until.map(|t| t.to_rfc3339()),
+        cooldown_month_until: account.cooldown_month_until.map(|t| t.to_rfc3339()),
         last_error: account.last_error,
         created_at: account.created_at.to_rfc3339(),
         updated_at: account.updated_at.to_rfc3339(),
@@ -445,6 +451,9 @@ async fn create_account(
         purchase_date,
         expires_on: String::new(),
         cooldown_until: None,
+        cooldown_5h_until: None,
+        cooldown_week_until: None,
+        cooldown_month_until: None,
         last_error: None,
         created_at: now,
         updated_at: now,
@@ -1054,13 +1063,14 @@ async fn dashboard_summary(
     let db = state.db.lock();
     let accounts = db.list_accounts().map_err(ApiError::internal)?;
     let total_accounts = accounts.len();
+    let now = Utc::now();
     let available_accounts = accounts
         .iter()
         .filter(|a| {
             a.enabled
-                && a.cooldown_until
-                    .map(|until| until <= Utc::now())
-                    .unwrap_or(true)
+                && !a.cooldown_5h_until.is_some_and(|until| until > now)
+                && !a.cooldown_week_until.is_some_and(|until| until > now)
+                && !a.cooldown_month_until.is_some_and(|until| until > now)
         })
         .count();
     let (today_cost, week_cost, month_cost) = db.total_usage().map_err(ApiError::internal)?;
@@ -1173,6 +1183,9 @@ mod tests {
             purchase_date: "2026-06-15".into(),
             expires_on: "2026-07-15".into(),
             cooldown_until: None,
+            cooldown_5h_until: None,
+            cooldown_week_until: None,
+            cooldown_month_until: None,
             last_error: None,
             created_at: now,
             updated_at: now,
@@ -1215,6 +1228,9 @@ mod tests {
             purchase_date: "2026-01-31".into(),
             expires_on: "2026-02-28".into(),
             cooldown_until: None,
+            cooldown_5h_until: None,
+            cooldown_week_until: None,
+            cooldown_month_until: None,
             last_error: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
@@ -1429,6 +1445,9 @@ mod tests {
             purchase_date: "2026-01-31".into(),
             expires_on: "2026-02-28".into(),
             cooldown_until: None,
+            cooldown_5h_until: None,
+            cooldown_week_until: None,
+            cooldown_month_until: None,
             last_error: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),

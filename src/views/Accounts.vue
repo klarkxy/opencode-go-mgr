@@ -156,6 +156,9 @@
             <strong v-if="usageEdits[account.id]">
               {{ formatCost(usageCost(account.id, limit.key)) }} / {{ formatCost(limit.limit) }}
             </strong>
+            <span v-if="isWindowCooling(account, limit.key)" class="usage-reset-countdown">
+              {{ t("重置于 {time}", { time: formatWindowRemaining(account, limit.key) }) }}
+            </span>
           </div>
           <n-progress
             v-if="accountUsageLimitReached(account, limit.key)"
@@ -403,8 +406,10 @@ import type { Account, AccountInput, AccountUpdate, UsageWindow } from "../api/t
 import {
   isCooling,
   isUsageLimitReached,
+  isWindowCooling,
   mergeUsageEdit,
   normalizeUsagePercent,
+  resetTimeForWindow,
   usagePercentFromCost,
 } from "./accounts-usage";
 import type { UsageEditState, UsageKey } from "./accounts-usage";
@@ -625,6 +630,19 @@ function formatRemaining(account: Account): string {
   if (!account.cooldown_until) return "";
   const ms = new Date(account.cooldown_until).getTime() - now.value;
   if (ms <= 0) return t("{seconds}秒", { seconds: 0 });
+  const min = Math.floor(ms / 60000);
+  if (min < 60) return t("{minutes}分钟", { minutes: min });
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return t("{hours}小时{minutes}分钟", { hours: hr, minutes: min % 60 });
+  const day = Math.floor(hr / 24);
+  return t("{days}天{hours}小时", { days: day, hours: hr % 24 });
+}
+
+function formatWindowRemaining(account: Account, key: UsageKey): string {
+  const until = resetTimeForWindow(account, key);
+  if (!until) return "";
+  const ms = new Date(until).getTime() - now.value;
+  if (ms <= 0) return "";
   const min = Math.floor(ms / 60000);
   if (min < 60) return t("{minutes}分钟", { minutes: min });
   const hr = Math.floor(min / 60);
@@ -1131,6 +1149,12 @@ onUnmounted(() => {
 .usage-meta strong {
   color: var(--n-text-color);
   font-weight: 600;
+}
+
+.usage-reset-countdown {
+  color: var(--n-error-color);
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 .modal-grid {

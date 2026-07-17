@@ -191,6 +191,14 @@ impl Database {
             tx.execute_batch(
                 "CREATE INDEX IF NOT EXISTS idx_forward_logs_model ON forward_logs(model);
                 CREATE INDEX IF NOT EXISTS idx_forward_logs_status ON forward_logs(status);
+                ALTER TABLE accounts ADD COLUMN cooldown_5h_until TEXT;
+                ALTER TABLE accounts ADD COLUMN cooldown_week_until TEXT;
+                ALTER TABLE accounts ADD COLUMN cooldown_month_until TEXT;
+                UPDATE accounts
+                SET cooldown_5h_until = CASE WHEN lower(COALESCE(last_error, '')) LIKE '%5-hour usage limit%' THEN cooldown_until ELSE NULL END,
+                    cooldown_week_until = CASE WHEN lower(COALESCE(last_error, '')) LIKE '%weekly usage limit%' THEN cooldown_until ELSE NULL END,
+                    cooldown_month_until = CASE WHEN lower(COALESCE(last_error, '')) LIKE '%monthly usage limit%' THEN cooldown_until ELSE NULL END
+                WHERE cooldown_until IS NOT NULL;
                 INSERT OR REPLACE INTO schema_version (version) VALUES (6)",
             )?;
         }
@@ -207,8 +215,8 @@ impl Database {
             normalize_purchase_date(&account.purchase_date)?
         };
         self.conn.execute(
-            "INSERT INTO accounts (id, name, username, password_cipher, key_cipher, enabled, referral_code, recharge_date, sort_order, cooldown_until, last_error, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, (SELECT COALESCE(MAX(sort_order), -1) + 1 FROM accounts), ?9, ?10, ?11, ?12)",
+            "INSERT INTO accounts (id, name, username, password_cipher, key_cipher, enabled, referral_code, recharge_date, sort_order, cooldown_until, cooldown_5h_until, cooldown_week_until, cooldown_month_until, last_error, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, (SELECT COALESCE(MAX(sort_order), -1) + 1 FROM accounts), ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
             params![
                 account.id,
                 account.name,
@@ -219,6 +227,9 @@ impl Database {
                 account.referral_code,
                 purchase_date,
                 account.cooldown_until.map(|t| t.to_rfc3339()),
+                account.cooldown_5h_until.map(|t| t.to_rfc3339()),
+                account.cooldown_week_until.map(|t| t.to_rfc3339()),
+                account.cooldown_month_until.map(|t| t.to_rfc3339()),
                 account.last_error,
                 account.created_at.to_rfc3339(),
                 account.updated_at.to_rfc3339(),
@@ -287,7 +298,7 @@ impl Database {
 
     pub fn get_account(&self, id: &str) -> Result<Option<Account>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, username, password_cipher, key_cipher, enabled, referral_code, recharge_date, cooldown_until, last_error, created_at, updated_at FROM accounts WHERE id = ?1"
+            "SELECT id, name, username, password_cipher, key_cipher, enabled, referral_code, recharge_date, cooldown_until, cooldown_5h_until, cooldown_week_until, cooldown_month_until, last_error, created_at, updated_at FROM accounts WHERE id = ?1"
         )?;
         let account = stmt.query_row([id], account_from_row).optional()?;
         Ok(account)
@@ -295,7 +306,7 @@ impl Database {
 
     pub fn list_accounts(&self) -> Result<Vec<Account>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, username, password_cipher, key_cipher, enabled, referral_code, recharge_date, cooldown_until, last_error, created_at, updated_at FROM accounts ORDER BY sort_order ASC, created_at ASC, id ASC"
+            "SELECT id, name, username, password_cipher, key_cipher, enabled, referral_code, recharge_date, cooldown_until, cooldown_5h_until, cooldown_week_until, cooldown_month_until, last_error, created_at, updated_at FROM accounts ORDER BY sort_order ASC, created_at ASC, id ASC"
         )?;
         let rows = stmt.query_map([], account_from_row)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.into())
@@ -547,7 +558,7 @@ impl Database {
         err: Option<&str>,
     ) -> Result<()> {
         self.conn.execute(
-            "UPDATE accounts SET cooldown_until = ?2, last_error = ?3, updated_at = ?4 WHERE id = ?1",
+            "UPDATE accounts SET cooldown_until = ?2, cooldown_5h_until = ?2, cooldown_week_until = ?2, cooldown_month_until = ?2, last_error = ?3, updated_at = ?4 WHERE id = ?1",
             params![
                 id,
                 until.map(|t| t.to_rfc3339()),
@@ -570,29 +581,71 @@ impl Database {
         err: &str,
         window: Option<UsageWindowKind>,
     ) -> Result<()> {
-        let now = Utc::now().to_rfc3339();
+        let now = Utc::now();
+        let now_rfc = now.to_rfc3339();
         let tx = self.conn.unchecked_transaction()?;
-        let changed = tx.execute(
-            "UPDATE accounts SET cooldown_until = ?2, last_error = ?3, updated_at = ?4 WHERE id = ?1",
-            params![id, until.to_rfc3339(), err, now],
+
+        // Update the per-window column, or the legacy fallback for unknown limits.
+        let column = match window {
+            Some(UsageWindowKind::FiveHours) => "cooldown_5h_until",
+            Some(UsageWindowKind::Week) => "cooldown_week_until",
+            Some(UsageWindowKind::Month) => "cooldown_month_until",
+            None => "cooldown_until",
+        };
+        tx.execute(
+            &format!("UPDATE accounts SET {column} = ?2, last_error = ?3, updated_at = ?4 WHERE id = ?1"),
+            params![id, until.to_rfc3339(), err, now_rfc],
         )?;
-        if changed > 0 {
-            if let Some(window) = window {
-                tx.execute(usage_baseline_update_sql(window), params![id, 0.0, now])?;
-            }
+
+        // Recompute the summary cooldown_until as the nearest future window reset.
+        if window.is_some() {
+            let new_cooldown = Self::compute_cooldown_until(&tx, id, &now_rfc)?;
+            tx.execute(
+                "UPDATE accounts SET cooldown_until = ?2 WHERE id = ?1",
+                params![id, new_cooldown],
+            )?;
+        }
+
+        if let Some(window) = window {
+            tx.execute(usage_baseline_update_sql(window), params![id, 0.0, now_rfc])?;
         }
         tx.commit()?;
         Ok(())
     }
 
-    /// Among all enabled accounts, return the earliest `cooldown_until` in the future.
+    fn compute_cooldown_until(
+        tx: &rusqlite::Transaction,
+        id: &str,
+        now_rfc: &str,
+    ) -> Result<Option<String>> {
+        let min: Option<String> = tx.query_row(
+            "SELECT MIN(until) FROM (
+                SELECT cooldown_5h_until AS until FROM accounts WHERE id = ?1
+                UNION ALL
+                SELECT cooldown_week_until FROM accounts WHERE id = ?1
+                UNION ALL
+                SELECT cooldown_month_until FROM accounts WHERE id = ?1
+            ) WHERE until IS NOT NULL AND until > ?2",
+            params![id, now_rfc],
+            |row| row.get(0),
+        )?;
+        Ok(min)
+    }
+
+    /// Among all enabled accounts, return the earliest per-window cooldown reset in the future.
     /// `None` means no account is in cooldown.
     pub fn soonest_cooldown_reset(&self) -> Result<Option<DateTime<Utc>>> {
         let now = Utc::now().to_rfc3339();
         let res: Option<String> = self
             .conn
             .query_row(
-                "SELECT MIN(cooldown_until) FROM accounts WHERE enabled = 1 AND cooldown_until IS NOT NULL AND cooldown_until > ?1",
+                "SELECT MIN(until) FROM (
+                    SELECT cooldown_5h_until AS until FROM accounts WHERE enabled = 1
+                    UNION ALL
+                    SELECT cooldown_week_until FROM accounts WHERE enabled = 1
+                    UNION ALL
+                    SELECT cooldown_month_until FROM accounts WHERE enabled = 1
+                ) WHERE until IS NOT NULL AND until > ?1",
                 params![now],
                 |row| row.get(0),
             )
@@ -861,9 +914,12 @@ fn account_from_row(row: &Row<'_>) -> rusqlite::Result<Account> {
         purchase_date,
         expires_on,
         cooldown_until: row.get::<_, Option<String>>(8)?.map(parse_datetime),
-        last_error: row.get(9)?,
-        created_at: parse_datetime(row.get::<_, String>(10)?),
-        updated_at: parse_datetime(row.get::<_, String>(11)?),
+        cooldown_5h_until: row.get::<_, Option<String>>(9)?.map(parse_datetime),
+        cooldown_week_until: row.get::<_, Option<String>>(10)?.map(parse_datetime),
+        cooldown_month_until: row.get::<_, Option<String>>(11)?.map(parse_datetime),
+        last_error: row.get(12)?,
+        created_at: parse_datetime(row.get::<_, String>(13)?),
+        updated_at: parse_datetime(row.get::<_, String>(14)?),
     })
 }
 
@@ -915,6 +971,9 @@ mod tests {
             purchase_date: String::new(),
             expires_on: String::new(),
             cooldown_until: None,
+            cooldown_5h_until: None,
+            cooldown_week_until: None,
+            cooldown_month_until: None,
             last_error: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
@@ -995,7 +1054,7 @@ mod tests {
             })
             .expect("schema version should be readable");
         let usage = db.account_usage("old").expect("usage should load");
-        assert_eq!(version, 5);
+        assert_eq!(version, 6);
         assert_eq!(
             db.get_account("old")
                 .expect("account should load")
@@ -1346,9 +1405,10 @@ mod tests {
         db.set_account_usage_baseline("limited", UsageWindowKind::Week, 70.0)
             .expect("week baseline should save");
 
+        let week_reset = Utc::now() + Duration::hours(1);
         db.set_account_rate_limit(
             "limited",
-            Utc::now() + Duration::hours(1),
+            week_reset,
             "weekly quota",
             Some(UsageWindowKind::Week),
         )
@@ -1356,6 +1416,15 @@ mod tests {
         let usage = db.account_usage("limited").expect("usage should load");
         assert_cost(usage.window_5h, 4.8);
         assert_cost(usage.window_week, 0.0);
+        let account = db
+            .get_account("limited")
+            .expect("account should load")
+            .expect("account should exist");
+        assert!(account.cooldown_week_until.is_some());
+        assert!(account.cooldown_5h_until.is_none());
+        assert!(
+            account.cooldown_until.is_some_and(|until| (until - week_reset).num_seconds().abs() < 2)
+        );
 
         db.set_account_usage_baseline("limited", UsageWindowKind::Month, 50.0)
             .expect("month baseline should save");
@@ -1377,6 +1446,45 @@ mod tests {
                 .expect("account should exist")
                 .cooldown_until
                 .is_some()
+        );
+
+        drop(db);
+        fs::remove_dir_all(dir).expect("test data dir should be removed");
+    }
+
+    #[test]
+    fn account_stays_cooling_until_all_windows_expire() {
+        let dir = temp_data_dir("multi-window-cooldown");
+        let db = Database::open(dir.clone()).expect("db should open");
+        db.create_account(&account("multi"))
+            .expect("account should be created");
+
+        let now = Utc::now();
+        let past_5h = now - Duration::minutes(1);
+        let future_week = now + Duration::days(2);
+        db.set_account_rate_limit(
+            "multi",
+            past_5h,
+            "5-hour usage limit reached. Resets in 13min.",
+            Some(UsageWindowKind::FiveHours),
+        )
+        .expect("5h rate limit should save");
+        db.set_account_rate_limit(
+            "multi",
+            future_week,
+            "weekly usage limit reached. Resets in 4 days.",
+            Some(UsageWindowKind::Week),
+        )
+        .expect("weekly rate limit should save");
+
+        let account = db
+            .get_account("multi")
+            .expect("account should load")
+            .expect("account should exist");
+        assert!(account.cooldown_5h_until.is_some_and(|until| until <= now));
+        assert!(account.cooldown_week_until.is_some_and(|until| until > now));
+        assert!(
+            account.cooldown_until.is_some_and(|until| (until - future_week).num_seconds().abs() < 2)
         );
 
         drop(db);
