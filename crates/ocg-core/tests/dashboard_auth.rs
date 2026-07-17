@@ -9,7 +9,7 @@ use serde_json::json;
 use std::fs;
 use std::net::SocketAddr;
 use std::sync::{
-    Arc,
+    Arc, Mutex as StdMutex,
     atomic::{AtomicBool, Ordering},
 };
 
@@ -98,6 +98,25 @@ async fn public_dashboard_uses_first_registration_and_session_cookie() {
     assert_eq!(
         client
             .get(format!("{base}/settings/check-update"))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        client
+            .get(format!("{base}/settings/update-status"))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        client
+            .post(format!("{base}/settings/install-update"))
+            .json(&json!({ "expected_version": "999.0.0" }))
             .send()
             .await
             .unwrap()
@@ -222,6 +241,169 @@ async fn loopback_dashboard_skips_login() {
     );
 
     gateway::stop_gateway(handle);
+}
+
+#[tokio::test]
+async fn loopback_desktop_update_api_is_safe_atomic_and_pollable() {
+    let current_version = env!("CARGO_PKG_VERSION");
+    let current_major = current_version
+        .split('.')
+        .next()
+        .unwrap()
+        .parse::<u64>()
+        .unwrap();
+    let newer_version = format!("{}.0.0", current_major + 1);
+    let client = reqwest::Client::new();
+
+    let unsupported_state = state("desktop-update-unsupported");
+    let unsupported_handle =
+        gateway::start_gateway_on(unsupported_state, SocketAddr::from(([127, 0, 0, 1], 0)))
+            .await
+            .unwrap();
+    let unsupported_url = format!(
+        "http://127.0.0.1:{}/dashboard/api/settings/install-update",
+        unsupported_handle.port
+    );
+    assert_eq!(
+        client.post(&unsupported_url).send().await.unwrap().status(),
+        StatusCode::UNSUPPORTED_MEDIA_TYPE
+    );
+    assert_eq!(
+        client
+            .post(&unsupported_url)
+            .form(&[("expected_version", newer_version.as_str())])
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::UNSUPPORTED_MEDIA_TYPE
+    );
+    assert_eq!(
+        client
+            .post(&unsupported_url)
+            .json(&json!({ "expected_version": newer_version }))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
+    gateway::stop_gateway(unsupported_handle);
+
+    let supported_state = state("desktop-update-supported");
+    let started_versions = Arc::new(StdMutex::new(Vec::new()));
+    let captured_versions = started_versions.clone();
+    supported_state.set_desktop_update_starter(Arc::new(move |expected_version| {
+        captured_versions.lock().unwrap().push(expected_version);
+        Ok(())
+    }));
+    let supported_handle = gateway::start_gateway_on(
+        supported_state.clone(),
+        SocketAddr::from(([127, 0, 0, 1], 0)),
+    )
+    .await
+    .unwrap();
+    let base = format!(
+        "http://127.0.0.1:{}/dashboard/api/settings",
+        supported_handle.port
+    );
+    let initial = client
+        .get(format!("{base}/update-status"))
+        .send()
+        .await
+        .unwrap()
+        .json::<serde_json::Value>()
+        .await
+        .unwrap();
+    assert_eq!(initial["phase"], "idle");
+    assert_eq!(initial["current_version"], current_version);
+    assert_eq!(initial["install_supported"], true);
+
+    for rejected in [
+        current_version.to_string(),
+        "0.0.1".to_string(),
+        format!("{newer_version}-beta.1"),
+    ] {
+        assert_eq!(
+            client
+                .post(format!("{base}/install-update"))
+                .json(&json!({ "expected_version": rejected }))
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::BAD_REQUEST,
+            "{rejected}"
+        );
+    }
+    assert!(started_versions.lock().unwrap().is_empty());
+
+    let accepted = client
+        .post(format!("{base}/install-update"))
+        .json(&json!({ "expected_version": format!("v{newer_version}") }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(accepted.status(), StatusCode::ACCEPTED);
+    let accepted = accepted.json::<serde_json::Value>().await.unwrap();
+    assert_eq!(accepted["phase"], "checking");
+    assert_eq!(
+        started_versions.lock().unwrap().as_slice(),
+        [newer_version.as_str()]
+    );
+    assert_eq!(
+        client
+            .post(format!("{base}/install-update"))
+            .json(&json!({ "expected_version": newer_version }))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::CONFLICT
+    );
+    assert_eq!(started_versions.lock().unwrap().len(), 1);
+
+    assert!(supported_state.set_desktop_update_progress(64, Some(128)));
+    let downloading = client
+        .get(format!("{base}/update-status"))
+        .send()
+        .await
+        .unwrap()
+        .json::<serde_json::Value>()
+        .await
+        .unwrap();
+    assert_eq!(downloading["phase"], "downloading");
+    assert_eq!(downloading["downloaded"], 64);
+    assert_eq!(downloading["total"], 128);
+
+    assert!(supported_state.set_desktop_update_installing());
+    supported_state.set_desktop_update_failed("signature verification failed");
+    let failed = client
+        .get(format!("{base}/update-status"))
+        .send()
+        .await
+        .unwrap()
+        .json::<serde_json::Value>()
+        .await
+        .unwrap();
+    assert_eq!(failed["phase"], "failed");
+    assert_eq!(failed["error"], "signature verification failed");
+
+    let retried = client
+        .post(format!("{base}/install-update"))
+        .json(&json!({ "expected_version": newer_version }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(retried.status(), StatusCode::ACCEPTED);
+    let retried = retried.json::<serde_json::Value>().await.unwrap();
+    assert_eq!(retried["phase"], "checking");
+    assert_eq!(retried["downloaded"], 0);
+    assert!(retried["total"].is_null());
+    assert!(retried["error"].is_null());
+    assert_eq!(started_versions.lock().unwrap().len(), 2);
+
+    gateway::stop_gateway(supported_handle);
 }
 
 #[tokio::test]

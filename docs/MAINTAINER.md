@@ -177,10 +177,11 @@ Pair them with `pnpm run build:web` for a final smoke test.
   use a single administrator stored as an Argon2 password hash in SQLite
   and an HttpOnly session cookie.
 - Settings uses the protected `GET /dashboard/api/settings/check-update`
-  endpoint to query the latest GitHub Release. The response contains the
-  current and latest versions plus the release page URL; the gateway never
-  downloads or installs release artifacts. This outbound request runs only
-  when the user clicks the check button; it is not telemetry.
+  endpoint for GitHub Release metadata. In an updater-enabled installed
+  desktop runtime, the user can continue through a signed download and
+  install; development builds, CLI, and Docker retain the metadata/release-link
+  path. The outbound request runs only when the user clicks the button; it is
+  not telemetry.
 - The Applications view is generated from 13 guides: Claude Code, Claude
   Desktop, Codex, Gemini CLI, OpenCode, OpenClaw, Hermes, Cherry Studio,
   VS Code Copilot Chat, Cline, Roo Code, Continue, and Chatbox. Its ordinary
@@ -212,11 +213,26 @@ There is no cross‑node sync and no Admin API. Do not add one.
 
 ## Upgrades And Database Migrations
 
-SQLite migrations run in place when the GUI or CLI starts. Stop the process
-and back up the complete data directory before upgrading, including the
-database and `.encryption-key` when present. Downgrades are not guaranteed;
+SQLite migrations run in place when the GUI or CLI starts. Back up the complete
+data directory before upgrading, including the database and `.encryption-key`
+when present; stop the process first for a direct/manual upgrade. The signed
+desktop updater manages its own stop and restart. Downgrades are not guaranteed;
 to roll back, restore the data backup made by the matching older version
 instead of opening a migrated database with an older binary.
+
+Version 1.4.1 has neither the updater runtime nor its embedded verification
+key. For the one-time Windows transition, instruct users to quit the tray app,
+run the first updater-enabled setup, and choose the second upgrade-method
+option, **Install without uninstalling** (不要卸载，直接安装). Tauri merely
+selects the first option by default; that option is not required. Users must
+not uninstall 1.4.1 first. The optional equivalent for advanced users is:
+
+```powershell
+Start-Process -FilePath .\ocg-manager_<version>_windows-x64-setup.exe -ArgumentList '/UPDATE','/P','/R' -Wait
+```
+
+macOS/Linux use their normal direct replacement once. Later desktop releases
+can use the signed Settings update path. CLI and Docker upgrades remain manual.
 
 ## Release Artifacts
 
@@ -232,13 +248,19 @@ Stable delivery names are:
 
 ```text
 ocg-manager_<version>_windows-x64-setup.exe
+ocg-manager_<version>_windows-x64-setup.exe.sig
 ocg-manager-cli_<version>_windows-x64.zip
 ocg-manager_<version>_macos-universal.dmg
+ocg-manager_<version>_macos-universal.app.tar.gz
+ocg-manager_<version>_macos-universal.app.tar.gz.sig
 ocg-manager-cli_<version>_macos-universal.tar.gz
 ocg-manager_<version>_linux-x64.AppImage
+ocg-manager_<version>_linux-x64.AppImage.sig
 ocg-manager_<version>_linux-x64.deb
+ocg-manager_<version>_linux-x64.deb.sig
 ocg-manager-cli_<version>_linux-x64.tar.gz
 compose.example.yaml
+latest.json
 SHA256SUMS
 ```
 
@@ -248,8 +270,9 @@ assets. Windows has no portable GUI artifact.
 
 The `linux/amd64` container is published separately as
 `ghcr.io/klarkxy/opencode-go-mgr`; the GitHub Release contains the seven
-platform payloads, the pull-only Compose example, and `SHA256SUMS` (nine
-attachments total). The runtime image includes `LICENSE` at
+ordinary platform payloads, the extra macOS updater archive, four updater
+signatures, the pull-only Compose example, `latest.json`, and `SHA256SUMS`
+(15 attachments total). The runtime image includes `LICENSE` at
 `/usr/share/licenses/ocg-manager/LICENSE`.
 
 `scripts/release.mjs` does the heavy lifting:
@@ -257,17 +280,32 @@ attachments total). The runtime image includes `LICENSE` at
 1. Validates that `package.json`, `src-tauri/tauri.conf.json`, the
    workspace `Cargo.toml`, and `src-tauri/Cargo.toml` all agree on the
    version. It also checks the Git tag, if any, against that version.
-2. Rejects unsupported host/architecture pairs
+2. Resolves the updater signing mode before creating the staging tree. With
+   `OCG_REQUIRE_UPDATER_ARTIFACTS=1`, either a missing private key or missing
+   `TAURI_UPDATER_PUBLIC_KEY` fails before `release/` can be replaced.
+3. When a signing key is configured, merges
+   `src-tauri/tauri.updater.conf.json` plus an ephemeral public-key config and
+   enables Tauri updater artifacts. `TAURI_SIGNING_PRIVATE_KEY` accepts either
+   the private-key content or its secure path outside the repository; there is
+   no separate path variable. With no signing key, the script preserves the
+   ordinary local build and prints that the result is for smoke testing, not an
+   updater-enabled published release.
+4. Rejects unsupported host/architecture pairs
    (`process.platform`/`process.arch`).
-3. Invokes `@tauri-apps/cli` with the exact bundle path for the platform
+5. Invokes `@tauri-apps/cli` with the exact bundle path for the platform
    (`nsis` on Windows, `appimage,deb` on Linux, `dmg` with
    `--target universal-apple-darwin` on macOS).
-4. Builds the CLI binary, packages it with `dist/` and `LICENSE` into
+6. Cryptographically verifies every payload/signature pair against the actual
+   `TAURI_UPDATER_PUBLIC_KEY` before staging it, then collects the NSIS and
+   AppImage signatures plus the macOS `.app.tar.gz`/signature. It explicitly
+   signs the deb with `tauri signer sign` because deb is not a native Tauri
+   updater artifact. A nonempty but mismatched key therefore fails closed.
+7. Builds the CLI binary, packages it with `dist/` and `LICENSE` into
    the per‑platform archive, and on macOS uses `lipo` + `codesign -` to
    create the universal CLI.
-5. Writes `SHA256SUMS` over every payload in the staged `release/`
+8. Writes `SHA256SUMS` over every payload and signature in the staged `release/`
    directory.
-6. Atomically replaces `release/`. On any error, the previous `release/`
+9. Atomically replaces `release/`. On any error, the previous `release/`
    is preserved and the staged tree is removed.
 
 `scripts/release.mjs` does **not** erase Cargo's incremental build
@@ -283,7 +321,11 @@ tags, with a 3‑runner matrix: Windows x64, macOS Universal, and Linux x64
    libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev
    patchelf libfuse2 xvfb xauth xdg-utils dbus-x11` on Linux.
 2. Runs `pnpm install --frozen-lockfile`, `pnpm run build:web`,
-   `pnpm run test`, `pnpm run design:lint`, and `pnpm run build`.
+   `pnpm run test`, `pnpm run design:lint`, and `pnpm run build`. The build
+   receives `TAURI_SIGNING_PRIVATE_KEY`,
+   `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` from GitHub Actions secrets and
+   `TAURI_UPDATER_PUBLIC_KEY` from a repository Actions variable, with
+   `OCG_REQUIRE_UPDATER_ARTIFACTS=1`.
 3. Uploads the per‑runner `release/` directory as a
    `release-<platform>` Actions artifact.
 
@@ -295,12 +337,15 @@ Each runner also runs a smoke flow on the freshly built bundle:
   and waits for `id="app"` to appear in the dashboard HTML.
 - **macOS / Linux CLI** — the same `key` and `serve` flow plus a `lipo
   -archs` check that the macOS CLI is a universal binary.
-- **Windows GUI** — silent NSIS install into a temp dir, launch with
-  `--startup`, wait for the dashboard on `127.0.0.1:9042`, flip
-  `auto_start` on, verify the
-  `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\OCG Manager` value,
-  flip it off, verify cleanup, then silently uninstall and confirm the
-  user data dir survives.
+- **Windows GUI** — downloads the current published installer, silently
+  installs and launches it, writes a data sentinel, and enables `auto_start`.
+  It then runs the candidate NSIS package through `/UPDATE /P /R /ARGS
+  --startup` without uninstalling, verifies the old PID exits, the candidate
+  version returns through `/settings/update-status`, and both the sentinel and
+  `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\OCG Manager` survive.
+  It then runs the existing off/on cleanup checks, silently uninstalls, and
+  confirms user data remains. A manual dispatch whose candidate is already
+  the latest release may use the candidate-only install path.
 - **macOS GUI** — mount the DMG, `codesign --verify --deep --strict`,
   check the binary is universal with `lipo -archs`, launch with
   `--startup`, wait for the dashboard.
@@ -310,12 +355,30 @@ Each runner also runs a smoke flow on the freshly built bundle:
   WEBKIT_DISABLE_COMPOSITING_MODE=1` and wait for the dashboard.
 
 When a `v*` tag is pushed, a downstream `draft-release` job downloads the
-three per-runner Actions artifacts, assembles the seven platform payloads and
-`compose.example.yaml` in `release/`, regenerates `SHA256SUMS` over all eight,
-and creates or updates a
+three per-runner Actions artifacts, assembles their payloads/signatures and
+`compose.example.yaml` in `release/`, generates `latest.json` with immutable
+tag URLs and bundle-aware platform keys, regenerates `SHA256SUMS` over the
+manifest, signatures, and every other attachment, and creates or updates a
 **draft** GitHub Release. It never publishes the release. After reviewing the
 draft and the native smoke results, publish the release in GitHub or run
 `gh release edit vX.Y.Z --draft=false`.
+
+Generate the production updater key once on a trusted workstation, writing it
+to a secure path outside the checkout (do not run this with a repository path):
+
+```powershell
+node node_modules/@tauri-apps/cli/tauri.js signer generate -w <secure-path-outside-repository>/ocg-updater.key
+```
+
+Store the private-key content and password as the two GitHub Actions secrets
+named above. Keep at least two independently stored encrypted backups of both
+the private key and its password. If they are lost, already-installed clients
+that trust the matching public key cannot receive another in-app update and
+will need a new direct-install bootstrap. The public key is safe to share; this
+project injects its content through the `TAURI_UPDATER_PUBLIC_KEY` repository
+Actions variable instead of committing it. Store the generated key contents,
+not local filesystem paths, in GitHub. Updater signatures prove that a payload
+was issued by this project, but are separate from operating-system code signing.
 
 Publishing the GitHub Release triggers `.github/workflows/container.yml`.
 That workflow checks out the release tag, builds and smoke-tests the hardened
@@ -354,9 +417,9 @@ currently add a separate Cosign image signature.
 Current Windows installers are unsigned and macOS uses ad‑hoc signing
 (`-`), not Developer ID notarization. Keep releases in draft until
 native smoke checks and platform warnings are reviewed. Windows/Linux
-ARM64, 32‑bit x86, RPM, Snap, app stores, and automatic update download or
-installation remain unsupported. Settings can check the latest published
-GitHub Release manually.
+ARM64, 32‑bit x86, RPM, Snap, and app stores remain unsupported. Signed
+in-app update is limited to updater-enabled installed desktop builds; 1.4.1,
+development builds, CLI, and Docker retain the direct/manual path.
 
 ### CI Coverage Boundaries
 

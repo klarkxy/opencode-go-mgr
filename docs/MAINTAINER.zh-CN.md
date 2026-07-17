@@ -172,9 +172,10 @@ ocg-manager-cli --data-dir /tmp/ocg-cli-test serve --port 19042
 - **回环监听时** 直接访问跳过登录。带标准反向代理转发头但没 Cookie
   的请求仍需登录。**非回环监听** 走单管理员模型：密码以 Argon2 哈希
   存 SQLite，登录下发 HttpOnly 会话 Cookie。
-- 设置页通过受保护的 `GET /dashboard/api/settings/check-update` 查询 GitHub
-  最新 Release。响应包含当前版本、最新版本和发布页 URL；Gateway 不会下载
-  或安装发布产物。该出站请求只在用户点击检查按钮时发起，不属于遥测。
+- 设置页通过受保护的 `GET /dashboard/api/settings/check-update` 获取 GitHub
+  Release 元数据。支持升级的已安装桌面运行时可继续下载、校验签名并安装；开发
+  构建、CLI、Docker 只保留元数据/发布页路径。出站请求只在用户点击按钮时发
+  起，不属于遥测。
 - Docker 可用 `OCG_ADMIN_USERNAME` 与 `OCG_ADMIN_PASSWORD` 引导首个管
   理员；不提供时由首位注册者创建。
 - **应用** 视图维护 13 个教程：Claude Code、Claude Desktop、Codex、Gemini
@@ -198,10 +199,23 @@ ocg-manager-cli --data-dir /tmp/ocg-cli-test serve --port 19042
 
 ## 升级与数据库迁移
 
-GUI 或 CLI 启动时会原地执行 SQLite 迁移。升级前先停止进程，再备份完整
-数据目录，包括数据库与存在时的 `.encryption-key`。项目不保证降级兼容；
+GUI 或 CLI 启动时会原地执行 SQLite 迁移。升级前备份完整数据目录，包括数据库
+与存在时的 `.encryption-key`；直接/手动升级时先停止进程，签名桌面升级器会自行
+停止并重启。项目不保证降级兼容；
 如需回滚，恢复对应旧版本升级前的数据备份，不要让旧二进制直接打开已迁移
 的数据库。
+
+v1.4.1 既没有升级运行时，也没有内置签名校验公钥。Windows 的一次性过渡需要明
+确指导用户：退出托盘程序，运行首个支持升级的 setup，在“升级方式”页选择第二
+项**不要卸载，直接安装（Install without uninstalling）**。第一项只是 Tauri 默
+认选中项，并非升级所必需；不要先卸载 v1.4.1。高级用户可选择执行等价命令：
+
+```powershell
+Start-Process -FilePath .\ocg-manager_<version>_windows-x64-setup.exe -ArgumentList '/UPDATE','/P','/R' -Wait
+```
+
+macOS/Linux 按各自常规方式直接替换一次。此后的桌面版可走设置页签名升级。CLI
+与 Docker 仍手动升级。
 
 ## 发布产物
 
@@ -217,13 +231,19 @@ GUI 或 CLI 启动时会原地执行 SQLite 迁移。升级前先停止进程，
 
 ```text
 ocg-manager_<version>_windows-x64-setup.exe
+ocg-manager_<version>_windows-x64-setup.exe.sig
 ocg-manager-cli_<version>_windows-x64.zip
 ocg-manager_<version>_macos-universal.dmg
+ocg-manager_<version>_macos-universal.app.tar.gz
+ocg-manager_<version>_macos-universal.app.tar.gz.sig
 ocg-manager-cli_<version>_macos-universal.tar.gz
 ocg-manager_<version>_linux-x64.AppImage
+ocg-manager_<version>_linux-x64.AppImage.sig
 ocg-manager_<version>_linux-x64.deb
+ocg-manager_<version>_linux-x64.deb.sig
 ocg-manager-cli_<version>_linux-x64.tar.gz
 compose.example.yaml
+latest.json
 SHA256SUMS
 ```
 
@@ -232,22 +252,34 @@ SHA256SUMS
 包。
 
 `linux/amd64` 容器单独发布为 `ghcr.io/klarkxy/opencode-go-mgr`。GitHub Release
-包含七份平台 payload、只拉取镜像的 Compose 示例与 `SHA256SUMS`（合计九个附件）。运行
-镜像内的许可证位于 `/usr/share/licenses/ocg-manager/LICENSE`。
+包含七份常规平台 payload、额外的 macOS 升级压缩包、四份升级签名、只拉取镜像
+的 Compose 示例、`latest.json` 与 `SHA256SUMS`（合计 15 个附件）。运行镜像内
+的许可证位于 `/usr/share/licenses/ocg-manager/LICENSE`。
 
 `scripts/release.mjs` 负责所有繁重工作：
 
 1. 校验 `package.json`、`src-tauri/tauri.conf.json`、workspace
    `Cargo.toml`、`src-tauri/Cargo.toml` 的版本一致；如有 Git tag，与之
    比对。
-2. 拒绝不支持的 host/arch 组合（`process.platform`/`process.arch`）。
-3. 用绝对 bundle 路径调用 `@tauri-apps/cli`：Windows 走 `nsis`，
+2. 在创建暂存目录前解析升级签名模式；设置
+   `OCG_REQUIRE_UPDATER_ARTIFACTS=1` 时，缺私钥或
+   `TAURI_UPDATER_PUBLIC_KEY` 都会在替换 `release/` 前失败。
+3. 配置签名密钥时，合并 `src-tauri/tauri.updater.conf.json` 和临时公钥配
+   置，启用 Tauri 升级产物。`TAURI_SIGNING_PRIVATE_KEY` 可直接填写私钥内容或仓
+   库外的安全路径，不另设 path 变量。没有签名密钥时保持普通本地构建，并明确提
+   示该结果只适合冒烟，不是可发布的升级版本。
+4. 拒绝不支持的 host/arch 组合（`process.platform`/`process.arch`）。
+5. 用绝对 bundle 路径调用 `@tauri-apps/cli`：Windows 走 `nsis`，
    Linux 走 `appimage,deb`，macOS 走 `--target universal-apple-darwin
    --bundles dmg`。
-4. 构建 CLI 二进制，与 `dist/`、`LICENSE` 一起打成对应平台的压缩包；
+6. 每份 payload/签名在暂存前都使用实际 `TAURI_UPDATER_PUBLIC_KEY` 做密码学
+   验证，再收集 NSIS、AppImage 签名与 macOS `.app.tar.gz`/签名；deb 不是
+   Tauri 原生升级产物，因此显式执行 `tauri signer sign`。公私钥即使都非空但
+   不匹配，也会 fail closed。
+7. 构建 CLI 二进制，与 `dist/`、`LICENSE` 一起打成对应平台的压缩包；
    macOS 上用 `lipo` + `codesign -` 拼出 universal CLI。
-5. 对暂存 `release/` 目录内的每份 payload 写 `SHA256SUMS`。
-6. 原子替换 `release/`。任意步骤失败，旧 `release/` 保留，暂存目录清
+8. 对暂存 `release/` 目录内的每份 payload 与签名写 `SHA256SUMS`。
+9. 原子替换 `release/`。任意步骤失败，旧 `release/` 保留，暂存目录清
    理。
 
 `scripts/release.mjs` **不会** 清空 Cargo 增量编译缓存——多次发布共用同
@@ -264,7 +296,10 @@ SHA256SUMS
    libxdo-dev libssl-dev patchelf libfuse2 xvfb xauth xdg-utils
    dbus-x11`。
 2. 跑 `pnpm install --frozen-lockfile`、`pnpm run build:web`、
-   `pnpm run test`、`pnpm run design:lint`、`pnpm run build`。
+   `pnpm run test`、`pnpm run design:lint`、`pnpm run build`。构建从 GitHub
+   Actions secrets 注入 `TAURI_SIGNING_PRIVATE_KEY`、
+   `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`，从 repository Actions variable 注入
+   `TAURI_UPDATER_PUBLIC_KEY`，并设置 `OCG_REQUIRE_UPDATER_ARTIFACTS=1`。
 3. 把每个 runner 的 `release/` 目录上传为 `release-<platform>` Actions
    artifact。
 
@@ -276,10 +311,12 @@ SHA256SUMS
   `id="app"`。
 - **macOS / Linux CLI**——同样的 `key` 与 `serve` 流程；macOS 上额外用
   `lipo -archs` 校验 universal 二进制。
-- **Windows GUI**——静默 NSIS 安装到临时目录，`--startup` 启动，等
-  `127.0.0.1:9042` 出现 dashboard；把 `auto_start` 打开，校验
-  `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\OCG Manager` 的
-  值；关掉，确认清理；静默卸载，确认用户数据目录保留。
+- **Windows GUI**——下载当前已发布安装包，静默安装并启动，写入数据哨兵并启
+  用 `auto_start`；不卸载旧版，直接用 `/UPDATE /P /R /ARGS --startup` 运行候
+  选 NSIS，确认旧 PID 退出、`/settings/update-status` 返回候选版本、哨兵与
+  `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\OCG Manager` 都保
+  留。随后继续原有的自启关闭/恢复检查，静默卸载并确认用户数据仍在。手动触发且
+  候选版本已经是 latest 时，可走仅安装候选版的路径。
 - **macOS GUI**——挂载 DMG，`codesign --verify --deep --strict`，
   `lipo -archs` 校验 universal，`--startup` 启动后等 dashboard。
 - **Linux GUI**——`dpkg-deb --info` / `dpkg-deb --contents` 校验 deb，
@@ -288,11 +325,26 @@ SHA256SUMS
   WEBKIT_DISABLE_COMPOSITING_MODE=1` 启动后等 dashboard。
 
 `v*` tag 触发时，下游 `draft-release` job 下载三个 runner 的 Actions
-artifact，把七份平台 payload 与 `compose.example.yaml` 组装进 `release/`，
-重写覆盖全部八份文件的 `SHA256SUMS`，再创建或更新 **draft** GitHub
+artifact，把平台 payload、签名与 `compose.example.yaml` 组装进 `release/`，生
+成使用不可变 tag URL 和 bundle 感知平台键的 `latest.json`，再重写覆盖 manifest、
+签名和其余附件的 `SHA256SUMS`，最后创建或更新 **draft** GitHub
 Release——**不会**自动发布。
 人工复核 draft 和原生冒烟结果后，再去 GitHub 把 release 转为 published，
 或执行 `gh release edit vX.Y.Z --draft=false`。
+
+生产升级密钥只在可信工作站生成一次，并写到仓库外的安全路径（不要把仓库内路
+径传给此命令）：
+
+```powershell
+node node_modules/@tauri-apps/cli/tauri.js signer generate -w <仓库外安全路径>/ocg-updater.key
+```
+
+私钥内容与密码分别保存到上述两个 GitHub Actions secrets；私钥和密码都至少保
+留两份独立存放的加密备份。它们一旦丢失，已经信任对应公钥的客户端就无法再走
+应用内升级，只能重新直接安装引导版本。公钥可安全分享；本项目通过 repository
+Actions variable `TAURI_UPDATER_PUBLIC_KEY` 注入其内容，而不提交到仓库。升级签
+名证明 payload 由本项目发布，但不等同于操作系统代码签名。GitHub 中保存的是
+生成后的密钥内容，不是本地文件路径。
 
 GitHub Release 发布后会触发 `.github/workflows/container.yml`。该工作流检出
 Release tag，构建并冒烟验证加固后的 `linux/amd64` 容器，把 `X.Y.Z`、`X.Y`、
@@ -326,8 +378,9 @@ provenance statement；项目当前没有另加独立 Cosign 镜像签名。
 
 当前 Windows 安装包未签名，macOS 用 ad‑hoc 签名（`-`），没有 Developer
 ID 公证。原生冒烟与平台警告复核完成前，release 保持 draft。Windows /
-Linux ARM64、32 位 x86、RPM、Snap、应用商店包以及自动下载/安装更新仍不
-支持。设置页可手动检查 GitHub 最新的已发布 Release。
+Linux ARM64、32 位 x86、RPM、Snap、应用商店包仍不支持。签名的应用内升级只
+用于支持升级的已安装桌面版；v1.4.1、开发构建、CLI、Docker 仍走直接/手动路
+径。
 
 ### CI 覆盖边界
 

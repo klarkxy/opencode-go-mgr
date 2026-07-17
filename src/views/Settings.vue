@@ -225,7 +225,7 @@
         <n-button
           type="primary"
           :loading="checkingUpdate"
-          :disabled="checkingUpdate"
+          :disabled="checkingUpdate || updateBusy"
           @click="checkForUpdate"
         >{{ checkingUpdate ? t("正在检查更新…") : t("检查更新") }}</n-button>
         <div class="update-result" aria-live="polite" aria-atomic="true">
@@ -245,17 +245,73 @@
                   <dd><code>v{{ updateResult.latest_version }}</code></dd>
                 </div>
               </dl>
-              <n-button
-                tag="a"
-                type="primary"
-                size="small"
-                :href="updateResult.release_url"
-                target="_blank"
-                rel="noopener noreferrer"
-              >{{ t("查看发布页") }}</n-button>
+              <div class="update-actions">
+                <n-popconfirm
+                  v-if="supportsInstallUpdate"
+                  :positive-text="t('开始升级')"
+                  :negative-text="t('取消')"
+                  @positive-click="installAvailableUpdate"
+                >
+                  <template #trigger>
+                    <n-button
+                      type="primary"
+                      size="small"
+                      :loading="updateBusy"
+                      :disabled="updateBusy"
+                    >{{ t("下载并安装") }}</n-button>
+                  </template>
+                  {{ t("将下载并安装 v{version}。安装时 OCG Manager 会短暂退出并自动重新启动，继续吗？", {
+                    version: updateResult.latest_version,
+                  }) }}
+                </n-popconfirm>
+                <n-button
+                  tag="a"
+                  :type="supportsInstallUpdate ? 'default' : 'primary'"
+                  :secondary="supportsInstallUpdate"
+                  size="small"
+                  :href="updateResult.release_url"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >{{ t("查看发布页") }}</n-button>
+              </div>
             </div>
           </n-alert>
-          <n-alert v-else-if="updateError" type="error" :title="t('检查更新失败')">
+          <n-alert
+            v-if="activeUpdateStatus"
+            :type="updateStatusAlertType"
+            :title="updateStatusTitle"
+          >
+            <div class="update-status-body">
+              <n-progress
+                v-if="activeUpdateStatus.phase === 'downloading'"
+                type="line"
+                :height="8"
+                :percentage="updateDownloadPercentage ?? 0"
+                :processing="updateDownloadPercentage === null"
+                :show-indicator="updateDownloadPercentage !== null"
+              />
+              <p v-if="activeUpdateStatus.phase === 'installing' || waitingForRestart">
+                {{ t("OCG Manager 会短暂离线并自动重新启动。") }}
+              </p>
+              <p v-if="activeUpdateStatus.phase === 'failed'">
+                {{ activeUpdateStatus.error || t("升级未完成，请重试。") }}
+              </p>
+              <n-popconfirm
+                v-if="activeUpdateStatus.phase === 'failed' && supportsInstallUpdate"
+                :positive-text="t('开始升级')"
+                :negative-text="t('取消')"
+                @positive-click="installAvailableUpdate"
+              >
+                <template #trigger>
+                  <n-button size="small" type="primary">{{ t("重试升级") }}</n-button>
+                </template>
+                {{ t("将下载并安装 v{version}。安装时 OCG Manager 会短暂退出并自动重新启动，继续吗？", {
+                  version: updateResult?.latest_version || updateTargetVersion,
+                }) }}
+              </n-popconfirm>
+            </div>
+          </n-alert>
+          <n-alert v-if="updateError && !updateResult" type="error" :title="t('检查更新失败')">
             {{ updateError }}
           </n-alert>
         </div>
@@ -275,6 +331,7 @@ import {
   NInput,
   NInputNumber,
   NPopconfirm,
+  NProgress,
   NSwitch,
   NTooltip,
   useMessage,
@@ -285,8 +342,8 @@ import {
   EditOutlined,
   ReloadOutlined,
 } from "@vicons/antd";
-import { tauriApi } from "../api/tauri";
-import type { AppConfig, UpdateCheckResult } from "../api/tauri";
+import { DashboardRequestError, tauriApi } from "../api/tauri";
+import type { AppConfig, UpdateCheckResult, UpdateStatus } from "../api/tauri";
 import { THEME_OPTIONS } from "../theme";
 import type { ResolvedTheme, ThemeName } from "../theme";
 import { t } from "../i18n/index.ts";
@@ -297,6 +354,14 @@ import {
   normalizeClientRootUrl,
   resolveConnectionUrls,
 } from "./dashboard-connection";
+import {
+  clearUpdateTarget,
+  decideInstallRequestFailure,
+  decideUpdateStatus,
+  isUpdatePhaseBusy,
+  readUpdateTarget,
+  writeUpdateTarget,
+} from "./settings-update-state";
 
 const { themeName, resolvedTheme } = defineProps<{
   themeName: ThemeName;
@@ -314,7 +379,21 @@ const gatewayKeyDraft = ref("");
 const checkingUpdate = ref(false);
 const updateResult = ref<UpdateCheckResult | null>(null);
 const updateError = ref("");
+const updateStatus = ref<UpdateStatus | null>(null);
+const updateTargetVersion = ref("");
+const waitingForRestart = ref(false);
+const recoveringUpdate = ref(true);
+const startingUpdate = ref(false);
+const finishingUpdate = ref(false);
 let persistedAutoStart = false;
+let updatePollTimer: number | undefined;
+let updateReloadTimer: number | undefined;
+let updatePollDeadline = 0;
+let updatePollGeneration = 0;
+let updateDisposed = true;
+
+const UPDATE_POLL_INTERVAL_MS = 1_000;
+const UPDATE_INSTALL_TIMEOUT_MS = 15 * 60_000;
 
 // ponytail: keep this pre-load fallback in sync with AppConfig::default().
 const config = ref<AppConfig>({
@@ -386,6 +465,50 @@ const clientRootPreview = computed<{
       feedback: error instanceof Error ? error.message : t("地址格式无效"),
     };
   }
+});
+
+const supportsInstallUpdate = computed(() => Boolean(
+  updateResult.value?.update_available && updateResult.value.install_supported,
+));
+const activeUpdateStatus = computed(() => (
+  updateStatus.value && updateStatus.value.phase !== "idle" ? updateStatus.value : null
+));
+const updateBusy = computed(() => {
+  const phase = activeUpdateStatus.value?.phase;
+  return recoveringUpdate.value
+    || startingUpdate.value
+    || finishingUpdate.value
+    || waitingForRestart.value
+    || (phase !== undefined && isUpdatePhaseBusy(phase));
+});
+const updateStatusAlertType = computed(() => {
+  if (activeUpdateStatus.value?.phase === "failed") return "error";
+  if (activeUpdateStatus.value?.phase === "installing" || waitingForRestart.value) return "warning";
+  return "info";
+});
+const updateStatusTitle = computed(() => {
+  if (waitingForRestart.value) return t("正在等待新版本启动…");
+  switch (activeUpdateStatus.value?.phase) {
+    case "checking":
+      return t("正在准备升级…");
+    case "downloading":
+      return updateTargetVersion.value
+        ? t("正在下载 v{version}…", { version: updateTargetVersion.value })
+        : t("正在下载升级…");
+    case "installing":
+      return updateTargetVersion.value
+        ? t("正在安装 v{version}…", { version: updateTargetVersion.value })
+        : t("正在安装升级…");
+    case "failed":
+      return t("升级失败");
+    default:
+      return "";
+  }
+});
+const updateDownloadPercentage = computed(() => {
+  const status = activeUpdateStatus.value;
+  if (status?.phase !== "downloading" || status.total === null || status.total <= 0) return null;
+  return Math.min(100, Math.max(0, Math.round((status.downloaded / status.total) * 100)));
 });
 
 async function loadSettings() {
@@ -481,20 +604,251 @@ async function regenerateKey() {
 
 async function checkForUpdate() {
   if (checkingUpdate.value) return;
+  if (!updateBusy.value) {
+    updateStatus.value = null;
+    waitingForRestart.value = false;
+  }
   checkingUpdate.value = true;
   updateResult.value = null;
   updateError.value = "";
   try {
-    updateResult.value = await tauriApi.checkForUpdate();
+    const result = await tauriApi.checkForUpdate();
+    if (!updateDisposed) updateResult.value = result;
   } catch (error) {
-    updateError.value = error instanceof Error ? error.message : String(error);
+    if (!updateDisposed) {
+      updateError.value = error instanceof Error ? error.message : String(error);
+    }
   } finally {
-    checkingUpdate.value = false;
+    if (!updateDisposed) checkingUpdate.value = false;
   }
 }
 
-onMounted(loadSettings);
-onUnmounted(cleanup);
+function updateStatusFallback(
+  phase: UpdateStatus["phase"],
+  error: string | null = null,
+): UpdateStatus {
+  return {
+    phase,
+    downloaded: updateStatus.value?.downloaded ?? 0,
+    total: updateStatus.value?.total ?? null,
+    error,
+    current_version: updateStatus.value?.current_version
+      ?? updateResult.value?.current_version
+      ?? "",
+    install_supported: updateStatus.value?.install_supported
+      ?? updateResult.value?.install_supported
+      ?? false,
+  };
+}
+
+function sessionUpdateStorage(): Storage | null {
+  try {
+    return window.sessionStorage;
+  } catch {
+    return null;
+  }
+}
+
+function clearPersistedUpdateTarget() {
+  clearUpdateTarget(sessionUpdateStorage());
+  updateTargetVersion.value = "";
+}
+
+function rememberUpdateTarget(version: string): string {
+  const target = writeUpdateTarget(sessionUpdateStorage(), version);
+  updateTargetVersion.value = target;
+  return target;
+}
+
+function cancelUpdatePolling() {
+  updatePollGeneration += 1;
+  if (updatePollTimer !== undefined) {
+    window.clearTimeout(updatePollTimer);
+    updatePollTimer = undefined;
+  }
+}
+
+function failUpdate(error: string) {
+  cancelUpdatePolling();
+  clearPersistedUpdateTarget();
+  recoveringUpdate.value = false;
+  startingUpdate.value = false;
+  finishingUpdate.value = false;
+  waitingForRestart.value = false;
+  updateStatus.value = updateStatusFallback("failed", error);
+}
+
+function isActiveUpdateGeneration(generation: number): boolean {
+  return !updateDisposed && generation === updatePollGeneration;
+}
+
+function scheduleUpdatePoll(generation: number, delay = UPDATE_POLL_INTERVAL_MS) {
+  if (!isActiveUpdateGeneration(generation)) return;
+  if (updatePollTimer !== undefined) window.clearTimeout(updatePollTimer);
+  updatePollTimer = window.setTimeout(() => {
+    updatePollTimer = undefined;
+    void pollUpdateStatus(generation);
+  }, delay);
+}
+
+function startUpdatePolling(delay = UPDATE_POLL_INTERVAL_MS): number {
+  cancelUpdatePolling();
+  updatePollDeadline = Date.now() + UPDATE_INSTALL_TIMEOUT_MS;
+  const generation = updatePollGeneration;
+  scheduleUpdatePoll(generation, delay);
+  return generation;
+}
+
+function finishInstalledUpdate(status: UpdateStatus) {
+  cancelUpdatePolling();
+  clearPersistedUpdateTarget();
+  const installedVersion = status.current_version;
+  recoveringUpdate.value = false;
+  startingUpdate.value = false;
+  finishingUpdate.value = true;
+  waitingForRestart.value = false;
+  updateStatus.value = null;
+  message.success(t("已升级到 v{version}", { version: installedVersion }));
+  updateReloadTimer = window.setTimeout(() => {
+    updateReloadTimer = undefined;
+    if (!updateDisposed) window.location.reload();
+  }, 800);
+}
+
+function acceptObservedUpdateStatus(status: UpdateStatus): boolean {
+  updateStatus.value = status;
+  waitingForRestart.value = false;
+  switch (decideUpdateStatus(status, updateTargetVersion.value)) {
+    case "complete":
+      finishInstalledUpdate(status);
+      return true;
+    case "failed":
+      failUpdate(status.error || t("升级未完成，请重试。"));
+      return true;
+    case "busy":
+      return false;
+    case "idle":
+      if (updateTargetVersion.value) {
+        failUpdate(t("升级未完成，请重试。"));
+      } else {
+        cancelUpdatePolling();
+        updateStatus.value = null;
+      }
+      return true;
+  }
+}
+
+async function pollUpdateStatus(generation: number) {
+  if (!isActiveUpdateGeneration(generation)) return;
+  if (Date.now() >= updatePollDeadline) {
+    failUpdate(t("等待新版本启动超时。请确认安装窗口是否被安全软件拦截，然后重试。"));
+    return;
+  }
+  try {
+    const status = await tauriApi.getUpdateStatus();
+    if (!isActiveUpdateGeneration(generation)) return;
+    if (acceptObservedUpdateStatus(status)) return;
+  } catch {
+    if (!isActiveUpdateGeneration(generation)) return;
+    // The installer intentionally stops the local process. Keep polling until
+    // the new version comes back or the bounded deadline expires.
+    waitingForRestart.value = true;
+    updateStatus.value = updateStatusFallback("installing");
+  }
+  scheduleUpdatePoll(generation);
+}
+
+async function restoreUpdateState() {
+  recoveringUpdate.value = true;
+  cancelUpdatePolling();
+  const generation = updatePollGeneration;
+  updateTargetVersion.value = readUpdateTarget(sessionUpdateStorage());
+  try {
+    const status = await tauriApi.getUpdateStatus();
+    if (!isActiveUpdateGeneration(generation)) return;
+    recoveringUpdate.value = false;
+    if (acceptObservedUpdateStatus(status)) return;
+    startUpdatePolling();
+  } catch {
+    if (!isActiveUpdateGeneration(generation)) return;
+    recoveringUpdate.value = false;
+    if (!updateTargetVersion.value) return;
+    waitingForRestart.value = true;
+    updateStatus.value = updateStatusFallback("installing");
+    startUpdatePolling(0);
+  }
+}
+
+async function installAvailableUpdate() {
+  const result = updateResult.value;
+  if (!result?.update_available || !result.install_supported || updateBusy.value) return;
+  startingUpdate.value = true;
+  updateError.value = "";
+  waitingForRestart.value = false;
+  let pollingStarted = false;
+
+  try {
+    const currentStatus = await tauriApi.getUpdateStatus();
+    if (updateDisposed) return;
+    if (isUpdatePhaseBusy(currentStatus.phase)) {
+      rememberUpdateTarget(result.latest_version);
+      startingUpdate.value = false;
+      updateStatus.value = currentStatus;
+      startUpdatePolling(0);
+      return;
+    }
+
+    const target = rememberUpdateTarget(result.latest_version);
+    if (!target) {
+      failUpdate(t("升级未完成，请重试。"));
+      return;
+    }
+    updateStatus.value = updateStatusFallback("checking");
+    const generation = startUpdatePolling();
+    pollingStarted = true;
+
+    const status = await tauriApi.installUpdate(result.latest_version);
+    if (!isActiveUpdateGeneration(generation)) return;
+    startingUpdate.value = false;
+    acceptObservedUpdateStatus(status);
+  } catch (error) {
+    if (updateDisposed) return;
+    startingUpdate.value = false;
+    const failureDecision = decideInstallRequestFailure(
+      error instanceof DashboardRequestError ? error.status : null,
+      Boolean(updateTargetVersion.value),
+    );
+    if (failureDecision === "observe") {
+      updateStatus.value = updateStatusFallback("checking");
+      if (!pollingStarted) startUpdatePolling(0);
+      return;
+    }
+    if (failureDecision === "fail") {
+      failUpdate(error instanceof Error ? error.message : String(error));
+      return;
+    }
+    // A network error can mean the accepted installer has already stopped the
+    // old process before fetch received its response.
+    waitingForRestart.value = true;
+    updateStatus.value = updateStatusFallback("installing");
+    if (!pollingStarted) startUpdatePolling(0);
+  }
+}
+
+onMounted(() => {
+  updateDisposed = false;
+  void loadSettings();
+  void restoreUpdateState();
+});
+onUnmounted(() => {
+  updateDisposed = true;
+  cancelUpdatePolling();
+  if (updateReloadTimer !== undefined) {
+    window.clearTimeout(updateReloadTimer);
+    updateReloadTimer = undefined;
+  }
+  cleanup();
+});
 </script>
 
 <style scoped>
@@ -661,6 +1015,18 @@ onUnmounted(cleanup);
   display: grid;
   justify-items: start;
   gap: 12px;
+}
+.update-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.update-status-body {
+  display: grid;
+  gap: 10px;
+}
+.update-status-body p {
+  margin: 0;
 }
 .update-versions {
   display: grid;
