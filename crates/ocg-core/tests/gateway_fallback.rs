@@ -895,7 +895,9 @@ async fn stream_idle_timeout_emits_protocol_error_and_updates_log() {
         "text/event-stream",
         vec![
             (StdDuration::ZERO, MESSAGES_STREAM_HEAD),
-            (StdDuration::from_millis(1_200), MESSAGES_STREAM_TAIL),
+            // Keep the tail well beyond the configured idle timeout so a loaded
+            // Windows runner cannot race delivery against the timeout itself.
+            (StdDuration::from_secs(10), MESSAGES_STREAM_TAIL),
         ],
     )
     .await;
@@ -906,7 +908,7 @@ async fn stream_idle_timeout_emits_protocol_error_and_updates_log() {
     let (port, gateway_handle) = start_gateway(state.clone()).await;
 
     let (status, body) = tokio::time::timeout(
-        StdDuration::from_secs(4),
+        StdDuration::from_secs(8),
         protocol_stream_call(port, "/v1/messages", "minimax-m2.7"),
     )
     .await
