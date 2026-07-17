@@ -345,6 +345,9 @@ Each runner also runs a smoke flow on the freshly built bundle:
   --startup` without uninstalling, verifies the old PID exits, the candidate
   version returns through `/settings/update-status`, and both the sentinel and
   `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\OCG Manager` survive.
+  Installer processes have an explicit timeout and are waited independently
+  from the `/R`-launched GUI process so a successful restart cannot hang CI;
+  the NSIS uninstaller still waits for its temporary child process tree.
   It then runs the existing off/on cleanup checks, silently uninstalls, and
   confirms user data remains. A manual dispatch whose candidate is already
   the latest release may use the candidate-only install path.

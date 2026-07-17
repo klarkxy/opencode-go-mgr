@@ -197,6 +197,33 @@ jobs:
             }
           }
 
+          function Invoke-Installer {
+            param(
+              [string]$Path,
+              [string[]]$Arguments,
+              [string]$Label,
+              [int]$TimeoutSeconds = 180
+            )
+            Write-Host "Starting $Label"
+            # Start-Process -Wait follows the whole process tree on Windows.
+            # An updater launched with /R intentionally leaves the restarted GUI
+            # running, so wait only for the installer process itself.
+            $installerProcess = Start-Process $Path -ArgumentList $Arguments -PassThru -WindowStyle Hidden
+            if (!$installerProcess.WaitForExit(1000 * $TimeoutSeconds)) {
+              try {
+                $installerProcess.Kill($true)
+                $null = $installerProcess.WaitForExit(30_000)
+              } catch {
+                Stop-Process -Id $installerProcess.Id -Force -ErrorAction SilentlyContinue
+              }
+              throw "$Label did not exit within $TimeoutSeconds seconds"
+            }
+            if ($installerProcess.ExitCode -ne 0) {
+              throw "$Label failed: $($installerProcess.ExitCode)"
+            }
+            Write-Host "Completed $Label"
+          }
+
           $candidateVersion = (Get-Content package.json -Raw | ConvertFrom-Json).version
           $candidateInstaller = (Get-Item release/*windows-x64-setup.exe).FullName
           $installDir = Join-Path $env:RUNNER_TEMP ocg-manager-install
@@ -245,8 +272,7 @@ jobs:
           $guiPath = ''
           try {
             if ($bootstrapOverwrite) {
-              $install = Start-Process $previousInstaller -ArgumentList @('/S', "/D=$installDir") -Wait -PassThru -WindowStyle Hidden
-              if ($install.ExitCode -ne 0) { throw "Published installer failed: $($install.ExitCode)" }
+              Invoke-Installer -Path $previousInstaller -Arguments @('/S', "/D=$installDir") -Label "published $latestTag install"
               $gui = Get-ChildItem $installDir -Recurse -Filter ocg-manager.exe | Select-Object -First 1
               if (!$gui) { throw 'Published GUI executable is missing' }
               $guiPath = $gui.FullName
@@ -263,8 +289,7 @@ jobs:
               if ($startupValue -ne $expectedStartupValue) { throw "Published install wrote unexpected startup value: $startupValue" }
 
               $previousPid = $process.Id
-              $update = Start-Process $candidateInstaller -ArgumentList @('/UPDATE', '/P', '/R', '/ARGS', '--startup') -Wait -PassThru -WindowStyle Hidden
-              if ($update.ExitCode -ne 0) { throw "Candidate overwrite update failed: $($update.ExitCode)" }
+              Invoke-Installer -Path $candidateInstaller -Arguments @('/UPDATE', '/P', '/R', '/ARGS', '--startup') -Label 'candidate overwrite update'
               foreach ($attempt in 1..30) {
                 if (!(Get-Process -Id $previousPid -ErrorAction SilentlyContinue)) { break }
                 Start-Sleep 1
@@ -283,8 +308,7 @@ jobs:
               $startupValue = (Get-ItemProperty -LiteralPath $runKey -Name 'OCG Manager').'OCG Manager'
               if ($startupValue -ne $expectedStartupValue) { throw "Overwrite update changed startup value: $startupValue" }
             } else {
-              $install = Start-Process $candidateInstaller -ArgumentList @('/S', "/D=$installDir") -Wait -PassThru -WindowStyle Hidden
-              if ($install.ExitCode -ne 0) { throw "Candidate installer failed: $($install.ExitCode)" }
+              Invoke-Installer -Path $candidateInstaller -Arguments @('/S', "/D=$installDir") -Label 'candidate install'
               $gui = Get-ChildItem $installDir -Recurse -Filter ocg-manager.exe | Select-Object -First 1
               if (!$gui) { throw 'Installed GUI executable is missing' }
               $guiPath = $gui.FullName
@@ -315,8 +339,12 @@ jobs:
 
           $uninstaller = Get-ChildItem $installDir -Recurse -Filter uninstall.exe | Select-Object -First 1
           if (!$uninstaller) { throw 'Uninstaller is missing' }
+          Write-Host 'Starting candidate uninstall'
+          # NSIS copies the uninstaller to a temporary child process. Unlike the
+          # /R updater path, waiting for this full process tree is intentional.
           $uninstall = Start-Process $uninstaller.FullName -ArgumentList '/S' -Wait -PassThru -WindowStyle Hidden
-          if ($uninstall.ExitCode -ne 0) { throw "Uninstaller failed: $($uninstall.ExitCode)" }
+          if ($uninstall.ExitCode -ne 0) { throw "Candidate uninstall failed: $($uninstall.ExitCode)" }
+          Write-Host 'Completed candidate uninstall'
           if ((Get-ItemProperty -LiteralPath $runKey).PSObject.Properties.Name -contains 'OCG Manager') { throw 'Uninstall left the startup entry behind' }
           if (!(Test-Path $sentinel)) { throw 'Silent uninstall deleted user data' }
 

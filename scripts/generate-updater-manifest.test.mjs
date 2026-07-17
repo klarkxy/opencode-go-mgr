@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -138,6 +138,19 @@ test("updater build plan preserves unsigned local builds", () => {
 test("macOS signed builds include the app bundle required by Tauri updater artifacts", () => {
   assert.equal(resolveMacosBundleTargets(false), "dmg");
   assert.equal(resolveMacosBundleTargets(true), "app,dmg");
+});
+
+test("Windows release smoke waits only for bounded installer processes", () => {
+  const workflow = readFileSync(
+    new URL("../.github/workflows/release.yml", import.meta.url),
+    "utf8",
+  );
+  assert.match(workflow, /function Invoke-Installer/);
+  assert.match(workflow, /\.WaitForExit\(1000 \* \$TimeoutSeconds\)/);
+  assert.match(workflow, /\.Kill\(\$true\)/);
+  assert.doesNotMatch(workflow, /Start-Process \$candidateInstaller[^\r\n]*-Wait/);
+  assert.doesNotMatch(workflow, /Start-Process \$previousInstaller[^\r\n]*-Wait/);
+  assert.match(workflow, /Start-Process \$uninstaller\.FullName[^\r\n]*-Wait/);
 });
 
 test("updater build plan accepts TAURI_SIGNING_PRIVATE_KEY content or path with a public key", () => {

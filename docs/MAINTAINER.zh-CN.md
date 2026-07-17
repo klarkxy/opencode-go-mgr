@@ -316,7 +316,9 @@ SHA256SUMS
   用 `auto_start`；不卸载旧版，直接用 `/UPDATE /P /R /ARGS --startup` 运行候
   选 NSIS，确认旧 PID 退出、`/settings/update-status` 返回候选版本、哨兵与
   `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\OCG Manager` 都保
-  留。随后继续原有的自启关闭/恢复检查，静默卸载并确认用户数据仍在。手动触发且
+  留。安装器进程有显式超时，并与 `/R` 拉起的常驻 GUI 分开等待，避免成功重启反而
+  卡住 CI；NSIS 卸载器仍等待其临时子进程树。随后继续原有的自启关闭/恢复检查，静默卸
+  载并确认用户数据仍在。手动触发且
   候选版本已经是 latest 时，可走仅安装候选版的路径。
 - **macOS GUI**——挂载 DMG，`codesign --verify --deep --strict`，
   `lipo -archs` 校验 universal，`--startup` 启动后等 dashboard。
