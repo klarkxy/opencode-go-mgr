@@ -31,6 +31,11 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
+      - name: Validate Windows release smoke syntax
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/validate-windows-release-smoke.ps1
+
       - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
         with:
           version: 10.29.2
@@ -212,7 +217,7 @@ jobs:
             if (!$installerProcess.WaitForExit(1000 * $TimeoutSeconds)) {
               try {
                 $installerProcess.Kill($true)
-                $null = $installerProcess.WaitForExit(30_000)
+                $null = $installerProcess.WaitForExit(30000)
               } catch {
                 Stop-Process -Id $installerProcess.Id -Force -ErrorAction SilentlyContinue
               }

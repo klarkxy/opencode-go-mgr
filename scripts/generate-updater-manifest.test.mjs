@@ -146,7 +146,9 @@ test("Windows release smoke waits only for bounded installer processes", () => {
     "utf8",
   );
   assert.match(workflow, /function Invoke-Installer/);
+  assert.match(workflow, /run: \.\/scripts\/validate-windows-release-smoke\.ps1/);
   assert.match(workflow, /\.WaitForExit\(1000 \* \$TimeoutSeconds\)/);
+  assert.match(workflow, /\.WaitForExit\(30000\)/);
   assert.match(workflow, /\.Kill\(\$true\)/);
   assert.doesNotMatch(workflow, /Start-Process \$candidateInstaller[^\r\n]*-Wait/);
   assert.doesNotMatch(workflow, /Start-Process \$previousInstaller[^\r\n]*-Wait/);
