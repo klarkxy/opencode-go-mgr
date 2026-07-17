@@ -179,6 +179,7 @@ mapped by the gateway. See the
 - [Maintainer guide](docs/MAINTAINER.md) · [维护者指南](docs/MAINTAINER.zh-CN.md)
 - [OpenCode‑Go anti‑abuse statement](OPENCODE_GO_ANTI_ABUSE.md) ·
   [OpenCode‑Go 防滥用声明](OPENCODE_GO_ANTI_ABUSE.zh-CN.md)
+- [Contributors / 贡献者](CONTRIBUTORS.md)
 
 ## Development
 
