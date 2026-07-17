@@ -110,7 +110,7 @@ impl Database {
                     key_cipher TEXT NOT NULL,
                     enabled INTEGER NOT NULL DEFAULT 1,
                     referral_code TEXT,
-                    recharge_date TEXT,
+                    recharge_date TEXT NOT NULL,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
@@ -274,6 +274,44 @@ impl Database {
             }
             tx.execute(
                 "INSERT OR REPLACE INTO schema_version (version) VALUES (7)",
+                [],
+            )?;
+        }
+
+        if version < 8 {
+            // Older binaries can still write NULL or otherwise invalid purchase dates after the
+            // v5 backfill has already run. Repair those rows so current account reads stay valid.
+            let accounts = {
+                let mut stmt = tx.prepare(
+                    "SELECT id, recharge_date, created_at
+                     FROM accounts",
+                )?;
+                let rows = stmt.query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                })?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()?
+            };
+
+            for (id, recharge_date, created_at) in accounts {
+                let needs_repair = match recharge_date.as_deref() {
+                    Some(value) => normalize_purchase_date(value).is_err(),
+                    None => true,
+                };
+                if needs_repair {
+                    let purchase_date = migration_fallback_purchase_date(&created_at)?;
+                    tx.execute(
+                        "UPDATE accounts SET recharge_date = ?1 WHERE id = ?2",
+                        params![purchase_date, id],
+                    )?;
+                }
+            }
+
+            tx.execute(
+                "INSERT OR REPLACE INTO schema_version (version) VALUES (8)",
                 [],
             )?;
         }
@@ -995,7 +1033,17 @@ fn forward_log_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ForwardLog>
 }
 
 fn account_from_row(row: &Row<'_>) -> rusqlite::Result<Account> {
-    let purchase_date = row.get::<_, String>(7)?;
+    let created_at = row.get::<_, String>(14)?;
+    let purchase_date = match row.get::<_, Option<String>>(7)? {
+        Some(value) if normalize_purchase_date(&value).is_ok() => value,
+        _ => migration_fallback_purchase_date(&created_at).map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(
+                14,
+                Type::Text,
+                Box::new(std::io::Error::other(error.to_string())),
+            )
+        })?,
+    };
     let expires_on = purchase_expires_on(&purchase_date).map_err(|error| {
         rusqlite::Error::FromSqlConversionFailure(7, Type::Text, Box::new(error))
     })?;
@@ -1015,14 +1063,16 @@ fn account_from_row(row: &Row<'_>) -> rusqlite::Result<Account> {
         cooldown_week_until: row.get::<_, Option<String>>(11)?.map(parse_datetime),
         cooldown_month_until: row.get::<_, Option<String>>(12)?.map(parse_datetime),
         last_error: row.get(13)?,
-        created_at: parse_datetime(row.get::<_, String>(14)?),
+        created_at: parse_datetime(created_at),
         updated_at: parse_datetime(row.get::<_, String>(15)?),
     })
 }
 
 fn migration_fallback_purchase_date(created_at: &str) -> Result<String> {
     let created_at = DateTime::parse_from_rfc3339(created_at).map_err(|error| {
-        anyhow::anyhow!("invalid account created_at {created_at:?} during v5 migration: {error}")
+        anyhow::anyhow!(
+            "invalid account created_at {created_at:?} while repairing purchase date: {error}"
+        )
     })?;
     Ok(created_at
         .with_timezone(&Utc)
@@ -1211,7 +1261,7 @@ mod tests {
                     row.get(0)
                 })
                 .expect("schema version should load");
-            assert_eq!(version, 7, "{label}");
+            assert_eq!(version, 8, "{label}");
             let account = db
                 .get_account("old")
                 .expect("account query should work")
@@ -1289,7 +1339,7 @@ mod tests {
             })
             .expect("schema version should be readable");
         let usage = db.account_usage("old").expect("usage should load");
-        assert_eq!(version, 7);
+        assert_eq!(version, 8);
         assert_eq!(
             db.get_account("old")
                 .expect("account should load")
@@ -1405,9 +1455,156 @@ mod tests {
     }
 
     #[test]
+    fn v8_migration_repairs_purchase_dates_written_by_older_binaries() {
+        let dir = temp_data_dir("v8-purchase-date-repair");
+        let conn = create_v6_database(
+            &dir,
+            ", cooldown_generic_until TEXT, cooldown_5h_until TEXT, cooldown_week_until TEXT, cooldown_month_until TEXT",
+            "",
+        );
+        conn.execute("INSERT INTO schema_version (version) VALUES (7)", [])
+            .expect("v7 schema version should be recorded");
+
+        let created_at = "2026-01-02T01:30:00+02:00";
+        for (id, recharge_date) in [
+            ("valid", Some("2025-12-31")),
+            ("null", None),
+            ("invalid", Some("2026-2-3")),
+        ] {
+            conn.execute(
+                "INSERT INTO accounts
+                 (id, name, key_cipher, recharge_date, created_at, updated_at)
+                 VALUES (?1, ?1, 'cipher', ?2, ?3, ?3)",
+                params![id, recharge_date, created_at],
+            )
+            .expect("legacy account should be inserted");
+        }
+        drop(conn);
+
+        let db = Database::open(dir.clone()).expect("v7 database should migrate");
+        let version: i32 = db
+            .conn
+            .query_row("SELECT MAX(version) FROM schema_version", [], |row| {
+                row.get(0)
+            })
+            .expect("schema version should load");
+        assert_eq!(version, 8);
+        assert_eq!(
+            db.get_account("valid")
+                .expect("valid account query should work")
+                .expect("valid account should exist")
+                .purchase_date,
+            "2025-12-31"
+        );
+        for id in ["null", "invalid"] {
+            assert_eq!(
+                db.get_account(id)
+                    .expect("repaired account query should work")
+                    .expect("repaired account should exist")
+                    .purchase_date,
+                "2026-01-01",
+                "{id}"
+            );
+        }
+
+        drop(db);
+        fs::remove_dir_all(dir).expect("test data dir should be removed");
+    }
+
+    #[test]
+    fn account_reads_fallback_after_v8_data_is_corrupted() {
+        let dir = temp_data_dir("post-v8-purchase-date-corruption");
+        let conn = create_v6_database(
+            &dir,
+            ", cooldown_generic_until TEXT, cooldown_5h_until TEXT, cooldown_week_until TEXT, cooldown_month_until TEXT",
+            "",
+        );
+        conn.execute("INSERT INTO schema_version (version) VALUES (7)", [])
+            .expect("v7 schema version should be recorded");
+        drop(conn);
+
+        let db = Database::open(dir.clone()).expect("database should open");
+        let version: i32 = db
+            .conn
+            .query_row("SELECT MAX(version) FROM schema_version", [], |row| {
+                row.get(0)
+            })
+            .expect("schema version should load");
+        assert_eq!(version, 8);
+
+        let created_at = DateTime::parse_from_rfc3339("2026-01-02T01:30:00+02:00")
+            .expect("fixed timestamp should parse")
+            .with_timezone(&Utc);
+        for id in ["null", "invalid"] {
+            let mut legacy = account(id);
+            legacy.purchase_date = "2025-12-31".to_string();
+            legacy.created_at = created_at;
+            legacy.updated_at = created_at;
+            db.create_account(&legacy)
+                .expect("account should be created before corruption");
+        }
+        db.conn
+            .execute(
+                "UPDATE accounts SET recharge_date = NULL WHERE id = 'null'",
+                [],
+            )
+            .expect("purchase date should be corrupted to NULL");
+        db.conn
+            .execute(
+                "UPDATE accounts SET recharge_date = 'not-a-date' WHERE id = 'invalid'",
+                [],
+            )
+            .expect("purchase date should be corrupted to invalid text");
+
+        let accounts = db
+            .list_accounts()
+            .expect("one corrupt row must not break the account list");
+        assert_eq!(accounts.len(), 2);
+        assert!(
+            accounts
+                .iter()
+                .all(|account| account.purchase_date == "2026-01-01")
+        );
+        for id in ["null", "invalid"] {
+            let account = db
+                .get_account(id)
+                .expect("corrupt account query should work")
+                .expect("corrupt account should exist");
+            assert_eq!(account.purchase_date, "2026-01-01", "{id}");
+            assert_eq!(account.expires_on, "2026-02-01", "{id}");
+        }
+        let remains_null: bool = db
+            .conn
+            .query_row(
+                "SELECT recharge_date IS NULL FROM accounts WHERE id = 'null'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("raw purchase date should remain queryable");
+        assert!(
+            remains_null,
+            "read fallback must not hide a migration rerun"
+        );
+
+        drop(db);
+        fs::remove_dir_all(dir).expect("test data dir should be removed");
+    }
+
+    #[test]
     fn account_creation_defaults_dates_and_appends_to_saved_order() {
         let dir = temp_data_dir("create-order");
         let db = Database::open(dir.clone()).expect("db should open");
+        let purchase_date_is_not_null: bool = db
+            .conn
+            .query_row(
+                "SELECT [notnull]
+                 FROM pragma_table_info('accounts')
+                 WHERE name = 'recharge_date'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("fresh account schema should expose purchase date constraints");
+        assert!(purchase_date_is_not_null);
         let mut first = account("first");
         first.created_at = Utc::now() + Duration::days(1);
         db.create_account(&first)

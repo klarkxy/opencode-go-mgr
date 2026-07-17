@@ -14,7 +14,7 @@
 - Tauri commands 仍注册在 `src-tauri/src/commands/`，但不是当前 Vue dashboard 的主调用路径。
 - 每个节点都由自己的 dashboard 管理；项目不提供远端同步或 Admin API。
 - 非回环监听使用单管理员登录；Docker 可通过 `OCG_ADMIN_USERNAME` 和 `OCG_ADMIN_PASSWORD` 首次初始化（两个必须同时设置，只设一个会启动报错），未提供时由首个注册者创建管理员。
-- 设置页可通过受保护的 `/dashboard/api/settings/check-update` 手动检查 GitHub 最新 Release，显示当前/最新版本与发布页链接；不会自动下载或安装。
+- 设置页可通过受保护的 `/dashboard/api/settings/check-update` 手动检查 GitHub 最新 Release。内置升级公钥的已安装桌面版可继续下载、校验签名并原位安装；开发构建、CLI、Docker 与尚未进入升级通道的旧版保留发布页/手动覆盖路径。
 - 公开 GitHub Release 发布后，`.github/workflows/container.yml` 会构建并冒烟验证 `linux/amd64` 镜像，发布到 `ghcr.io/klarkxy/opencode-go-mgr`；Compose 默认使用该镜像，本地源码构建需设置 `OCG_IMAGE=ocg-manager:local` 后执行 `docker compose up -d --build`。
 - 容器固定以 UID/GID `10001` 运行并内置 `LICENSE`；Compose 透传可选的 `OCG_MANAGER_ENCRYPTION_KEY` 以支持显式密钥恢复，正常部署仍优先保留卷内 `.encryption-key`。
 - 下游访问根地址优先使用非空 `OCG_CLIENT_ROOT_URL`，其次是 SQLite 手工值，最后由前端按生产 origin / 开发 Gateway 端口自动推导；环境变量覆盖只读且不得写回 SQLite。
@@ -29,6 +29,7 @@
 - `crates/ocg-core/src/models.rs`：共享 serde 类型和 `AppConfig`。
 - `crates/ocg-cli/src/main.rs`：CLI `serve`、`key`、`status`。
 - `src-tauri/src/lib.rs`：Tauri 启动、Gateway 启动、托盘、命令注册。
+- `src-tauri/src/updater.rs`：签名桌面升级器桥接；由受保护的 dashboard HTTP API 触发，不向 WebView 暴露 updater command 权限。
 - `src-tauri/src/tray.rs`：托盘菜单和 dashboard 打开逻辑。
 - `src/views/`：Dashboard / Accounts / Applications / Logs / Settings。
 
@@ -70,4 +71,4 @@ pnpm run build
 - 流式 usage 依赖上游 usage chunk；没有 chunk 时会记为 `success_no_usage`。
 - Tauri 隔离浏览器 command 存在，但当前 HTTP dashboard 没有按钮调用它。
 - `src-tauri/src/commands/*` 与 `crates/ocg-core/src/dashboard.rs` 有部分重复逻辑；当前不要大拆，除非同时迁移缺失行为并补验证。
-- 当前不发布 Windows/Linux ARM64、32 位 x86、RPM、Snap 或应用商店包，也没有自动下载/安装更新、Windows 正式签名或 Apple notarization。
+- 当前不发布 Windows/Linux ARM64、32 位 x86、RPM、Snap 或应用商店包，也没有 Windows Authenticode 正式签名或 Apple notarization。v1.4.1 需要最后一次直接覆盖安装首个 updater-enabled Release；不要先卸载，之后的已安装桌面版可在设置页完成签名升级。

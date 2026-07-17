@@ -2,6 +2,7 @@ pub mod autostart;
 pub mod commands;
 pub mod state;
 pub mod tray;
+pub mod updater;
 
 pub type Result<T> = anyhow::Result<T>;
 
@@ -103,6 +104,7 @@ pub fn run() {
             if let Ok(resource_dir) = app.path().resource_dir() {
                 setup_core_state.set_dashboard_dir(Some(resource_dir.join("dist")));
             }
+            updater::configure(app.handle(), setup_core_state.clone())?;
             tray::setup_tray(app)?;
             if !autostart::is_startup_launch() {
                 tray::open_dashboard(app.handle());

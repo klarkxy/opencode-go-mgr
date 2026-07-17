@@ -31,6 +31,11 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
+      - name: Validate Windows release smoke syntax
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/validate-windows-release-smoke.ps1
+
       - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
         with:
           version: 10.29.2
@@ -60,7 +65,13 @@ jobs:
         if: runner.os == 'Linux'
         run: docker compose -f compose.example.yaml config --quiet
 
-      - run: pnpm run build
+      - name: Build signed updater and platform artifacts
+        env:
+          OCG_REQUIRE_UPDATER_ARTIFACTS: "1"
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          TAURI_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
+        run: pnpm run build
 
       - name: Smoke packaged CLI (Windows)
         if: runner.os == 'Windows'
@@ -154,40 +165,175 @@ jobs:
           remaining=$("$cli" --data-dir="$data" key list)
           ! grep -q ci-smoke <<<"$remaining"
 
-      - name: Smoke installed GUI (Windows)
+      - name: Smoke installed GUI and overwrite bootstrap (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          $installDir = Join-Path $env:RUNNER_TEMP ocg-manager-install
-          $profile = Join-Path $env:RUNNER_TEMP ocg-manager-home
-          New-Item -ItemType Directory -Force $profile | Out-Null
-          $env:USERPROFILE = $profile
-          $env:HOME = $profile
+          $ErrorActionPreference = 'Stop'
 
-          $installer = Get-Item release/*windows-x64-setup.exe
-          $install = Start-Process $installer -ArgumentList @('/S', "/D=$installDir") -Wait -PassThru -WindowStyle Hidden
-          if ($install.ExitCode -ne 0) { throw "Installer failed: $($install.ExitCode)" }
-          $gui = Get-ChildItem $installDir -Recurse -Filter ocg-manager.exe | Select-Object -First 1
-          if (!$gui) { throw 'Installed GUI executable is missing' }
-
-          $process = Start-Process $gui.FullName -ArgumentList '--startup' -PassThru -WindowStyle Hidden
-          try {
-            $ready = $false
-            foreach ($attempt in 1..45) {
+          function Wait-Dashboard {
+            param(
+              [string]$ExpectedVersion = '',
+              [int]$Attempts = 60
+            )
+            foreach ($attempt in 1..$Attempts) {
               try {
-                if ((Invoke-WebRequest http://127.0.0.1:9042/dashboard/ -UseBasicParsing).Content -match 'id="app"') { $ready = $true; break }
+                $html = (Invoke-WebRequest http://127.0.0.1:9042/dashboard/ -UseBasicParsing).Content
+                if ($html -notmatch 'id="app"') { throw 'Dashboard HTML is incomplete' }
+                if (!$ExpectedVersion) { return $null }
+                $status = Invoke-RestMethod http://127.0.0.1:9042/dashboard/api/settings/update-status
+                if ($status.current_version -eq $ExpectedVersion) { return $status }
               } catch {}
               Start-Sleep 1
             }
-            if (!$ready) { throw 'Installed Windows GUI did not start its dashboard' }
+            throw "Installed GUI did not expose dashboard version $ExpectedVersion"
+          }
 
-            $settingsUrl = 'http://127.0.0.1:9042/dashboard/api/settings'
+          function Stop-InstalledGui {
+            param([string]$ExecutablePath)
+            if (!$ExecutablePath) { return }
+            Get-Process -Name ocg-manager -ErrorAction SilentlyContinue | Where-Object {
+              try { $_.Path -eq $ExecutablePath } catch { $false }
+            } | ForEach-Object {
+              Stop-Process -Id $_.Id -Force
+              $_.WaitForExit()
+            }
+          }
+
+          function Invoke-Installer {
+            param(
+              [string]$Path,
+              [string[]]$Arguments,
+              [string]$Label,
+              [int]$TimeoutSeconds = 180
+            )
+            Write-Host "Starting $Label"
+            # Start-Process -Wait follows the whole process tree on Windows.
+            # An updater launched with /R intentionally leaves the restarted GUI
+            # running, so wait only for the installer process itself.
+            $installerProcess = Start-Process $Path -ArgumentList $Arguments -PassThru -WindowStyle Hidden
+            if (!$installerProcess.WaitForExit(1000 * $TimeoutSeconds)) {
+              try {
+                $installerProcess.Kill($true)
+                $null = $installerProcess.WaitForExit(30000)
+              } catch {
+                Stop-Process -Id $installerProcess.Id -Force -ErrorAction SilentlyContinue
+              }
+              throw "$Label did not exit within $TimeoutSeconds seconds"
+            }
+            if ($installerProcess.ExitCode -ne 0) {
+              throw "$Label failed: $($installerProcess.ExitCode)"
+            }
+            Write-Host "Completed $Label"
+          }
+
+          $candidateVersion = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $candidateInstaller = (Get-Item release/*windows-x64-setup.exe).FullName
+          $installDir = Join-Path $env:RUNNER_TEMP ocg-manager-install
+          # NSIS restarts through RunAsUser, which restores the real user's
+          # environment instead of a synthetic USERPROFILE inherited by the
+          # installer. Keep the full lifecycle on this disposable runner's
+          # actual profile so the pre-update and restarted apps share state.
+          $profile = $env:USERPROFILE
+          $data = Join-Path $profile .ocg-mgr
+          if (Test-Path $data) { throw "Hosted runner profile is not clean: $data" }
+          $sentinel = Join-Path $data preserve-me
+          $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+          $settingsUrl = 'http://127.0.0.1:9042/dashboard/api/settings'
+
+          $latestTag = ''
+          try {
+            $latestTag = (& gh release view --repo $env:GITHUB_REPOSITORY --json tagName --jq .tagName).Trim()
+            if ($LASTEXITCODE -ne 0) { throw 'gh release view failed' }
+          } catch {
+            if ($env:GITHUB_REF_TYPE -eq 'tag') {
+              throw 'A tag release smoke requires a current published GitHub Release for the overwrite bootstrap.'
+            }
+            Write-Host 'No published release is available; using the candidate-only install smoke.'
+            $latestTag = ''
+          }
+
+          $latestVersion = $latestTag -replace '^v', ''
+          $bootstrapOverwrite = [bool]$latestTag
+          if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch' -and $latestVersion -eq $candidateVersion) {
+            Write-Host "Candidate v$candidateVersion is already latest; skipping the same-version bootstrap overwrite."
+            $bootstrapOverwrite = $false
+          }
+
+          $previousInstaller = $null
+          if ($bootstrapOverwrite) {
+            $previousDir = Join-Path $env:RUNNER_TEMP previous-release
+            New-Item -ItemType Directory -Force $previousDir | Out-Null
+            & gh release download $latestTag --repo $env:GITHUB_REPOSITORY --pattern 'ocg-manager_*_windows-x64-setup.exe' --dir $previousDir
+            if ($LASTEXITCODE -ne 0) { throw "Cannot download the published $latestTag Windows installer" }
+            $previousInstallers = @(Get-ChildItem $previousDir -Filter '*windows-x64-setup.exe')
+            if ($previousInstallers.Count -ne 1) {
+              throw "Expected one published Windows installer for $latestTag, found $($previousInstallers.Count)"
+            }
+            $previousInstaller = $previousInstallers[0].FullName
+          }
+
+          $process = $null
+          $guiPath = ''
+          try {
+            if ($bootstrapOverwrite) {
+              Invoke-Installer -Path $previousInstaller -Arguments @('/S', "/D=$installDir") -Label "published $latestTag install"
+              $gui = Get-ChildItem $installDir -Recurse -Filter ocg-manager.exe | Select-Object -First 1
+              if (!$gui) { throw 'Published GUI executable is missing' }
+              $guiPath = $gui.FullName
+              $process = Start-Process $guiPath -ArgumentList '--startup' -PassThru -WindowStyle Hidden
+              Wait-Dashboard
+
+              New-Item -ItemType Directory -Force $data | Out-Null
+              Set-Content $sentinel "preserved-from-$latestTag"
+              $settings = Invoke-RestMethod $settingsUrl
+              $settings.auto_start = $true
+              Invoke-RestMethod $settingsUrl -Method Post -ContentType 'application/json' -Body ($settings | ConvertTo-Json) | Out-Null
+              $expectedStartupValue = "`"$guiPath`" --startup"
+              $startupValue = (Get-ItemProperty -LiteralPath $runKey -Name 'OCG Manager').'OCG Manager'
+              if ($startupValue -ne $expectedStartupValue) { throw "Published install wrote unexpected startup value: $startupValue" }
+
+              $previousPid = $process.Id
+              Invoke-Installer -Path $candidateInstaller -Arguments @('/UPDATE', '/P', '/R', '/ARGS', '--startup') -Label 'candidate overwrite update'
+              foreach ($attempt in 1..30) {
+                if (!(Get-Process -Id $previousPid -ErrorAction SilentlyContinue)) { break }
+                Start-Sleep 1
+              }
+              if (Get-Process -Id $previousPid -ErrorAction SilentlyContinue) {
+                throw "Published GUI process $previousPid survived the overwrite update"
+              }
+
+              $updateStatus = Wait-Dashboard -ExpectedVersion $candidateVersion -Attempts 90
+              if ($updateStatus.current_version -ne $candidateVersion) {
+                throw "Unexpected updated GUI version: $($updateStatus.current_version)"
+              }
+              $updatedSettings = Invoke-RestMethod $settingsUrl
+              if (!$updatedSettings.auto_start) {
+                throw 'Overwrite update did not preserve the auto-start setting'
+              }
+              if ((Get-Content $sentinel -Raw).Trim() -ne "preserved-from-$latestTag") {
+                throw 'Overwrite update did not preserve the data sentinel'
+              }
+              $startupValue = (Get-ItemProperty -LiteralPath $runKey -Name 'OCG Manager').'OCG Manager'
+              if ($startupValue -ne $expectedStartupValue) { throw "Overwrite update changed startup value: $startupValue" }
+            } else {
+              Invoke-Installer -Path $candidateInstaller -Arguments @('/S', "/D=$installDir") -Label 'candidate install'
+              $gui = Get-ChildItem $installDir -Recurse -Filter ocg-manager.exe | Select-Object -First 1
+              if (!$gui) { throw 'Installed GUI executable is missing' }
+              $guiPath = $gui.FullName
+              $process = Start-Process $guiPath -ArgumentList '--startup' -PassThru -WindowStyle Hidden
+              Wait-Dashboard -ExpectedVersion $candidateVersion | Out-Null
+              New-Item -ItemType Directory -Force $data | Out-Null
+              Set-Content $sentinel 'preserved'
+            }
+
             $settings = Invoke-RestMethod $settingsUrl
             $settings.auto_start = $true
             Invoke-RestMethod $settingsUrl -Method Post -ContentType 'application/json' -Body ($settings | ConvertTo-Json) | Out-Null
-            $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
             $startupValue = (Get-ItemProperty -LiteralPath $runKey -Name 'OCG Manager').'OCG Manager'
-            $expectedStartupValue = "`"$($gui.FullName)`" --startup"
+            $expectedStartupValue = "`"$guiPath`" --startup"
             if ($startupValue -ne $expectedStartupValue) { throw "Unexpected startup value: $startupValue" }
 
             $settings.auto_start = $false
@@ -198,18 +344,20 @@ jobs:
             $startupValue = (Get-ItemProperty -LiteralPath $runKey -Name 'OCG Manager').'OCG Manager'
             if ($startupValue -ne $expectedStartupValue) { throw "Unexpected restored startup value: $startupValue" }
           } finally {
-            if (!$process.HasExited) { Stop-Process -Id $process.Id -Force; $process.WaitForExit() }
+            if ($process -and !$process.HasExited) { Stop-Process -Id $process.Id -Force; $process.WaitForExit() }
+            Stop-InstalledGui $guiPath
           }
 
-          $data = Join-Path $profile .ocg-mgr
-          New-Item -ItemType Directory -Force $data | Out-Null
-          Set-Content (Join-Path $data preserve-me) preserved
           $uninstaller = Get-ChildItem $installDir -Recurse -Filter uninstall.exe | Select-Object -First 1
           if (!$uninstaller) { throw 'Uninstaller is missing' }
+          Write-Host 'Starting candidate uninstall'
+          # NSIS copies the uninstaller to a temporary child process. Unlike the
+          # /R updater path, waiting for this full process tree is intentional.
           $uninstall = Start-Process $uninstaller.FullName -ArgumentList '/S' -Wait -PassThru -WindowStyle Hidden
-          if ($uninstall.ExitCode -ne 0) { throw "Uninstaller failed: $($uninstall.ExitCode)" }
+          if ($uninstall.ExitCode -ne 0) { throw "Candidate uninstall failed: $($uninstall.ExitCode)" }
+          Write-Host 'Completed candidate uninstall'
           if ((Get-ItemProperty -LiteralPath $runKey).PSObject.Properties.Name -contains 'OCG Manager') { throw 'Uninstall left the startup entry behind' }
-          if (!(Test-Path (Join-Path $data preserve-me))) { throw 'Silent uninstall deleted user data' }
+          if (!(Test-Path $sentinel)) { throw 'Silent uninstall deleted user data' }
 
       - name: Smoke mounted GUI (macOS)
         if: runner.os == 'macOS'
@@ -302,6 +450,10 @@ jobs:
           mkdir release
           find artifacts -type f ! -name SHA256SUMS -exec cp {} release/ \;
           cp compose.example.yaml release/
+          node scripts/generate-updater-manifest.mjs \
+            --release-dir release \
+            --tag "$GITHUB_REF_NAME" \
+            --repository "$GITHUB_REPOSITORY"
           (cd release && sha256sum * > SHA256SUMS)
 
       - name: Create or update draft release
@@ -310,11 +462,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
+          notes="Updater payloads include Tauri minisign signatures. The Windows installer remains unsigned by Authenticode; the macOS app uses ad-hoc signing and is not notarized."
           if [ "$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft 2>/dev/null)" = true ]; then
             gh release upload "$GITHUB_REF_NAME" release/* --clobber
+            gh release edit "$GITHUB_REF_NAME" --notes "$notes"
           elif gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             echo "Refusing to modify an already-published release." >&2
             exit 1
           else
-            gh release create "$GITHUB_REF_NAME" release/* --draft --verify-tag --title "OCG Manager $GITHUB_REF_NAME" --notes "Unsigned preview build; review platform warnings before publishing."
+            gh release create "$GITHUB_REF_NAME" release/* --draft --verify-tag --title "OCG Manager $GITHUB_REF_NAME" --notes "$notes"
           fi

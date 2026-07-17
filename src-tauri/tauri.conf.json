@@ -35,7 +35,7 @@
   },
   "identifier": "com.klarkxy.ocgmanager",
   "productName": "OCG Manager",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "app": {
     "security": {
       "csp": "default-src 'self'; connect-src 'self' http://localhost:9042; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'",

@@ -14,12 +14,22 @@ import { basename, dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
+import {
+  resolveFileSignerEnvironment,
+  resolveMacosBundleTargets,
+  resolveUpdaterBuildPlan,
+  verifyUpdaterSignature,
+} from "./generate-updater-manifest.mjs";
+
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const targetDir = resolve(root, process.env.CARGO_TARGET_DIR ?? "target");
 const releaseDir = join(root, "release");
 const workDir = join(root, `.release-tmp-${process.pid}`);
 const stagedReleaseDir = join(workDir, "release");
 const cliPackageDir = join(workDir, "cli");
+const updaterConfigPath = join(root, "src-tauri", "tauri.updater.conf.json");
+
+let workDirPrepared = false;
 
 process.chdir(root);
 
@@ -117,6 +127,21 @@ function stageArtifact(source, name, artifacts) {
   artifacts.push(name);
 }
 
+function stageUpdaterArtifact(source, name, artifacts, publicKey) {
+  verifyUpdaterSignature({
+    payloadPath: source,
+    signaturePath: `${source}.sig`,
+    publicKey,
+  });
+  stageArtifact(source, name, artifacts);
+  stageArtifact(`${source}.sig`, `${name}.sig`, artifacts);
+}
+
+function updaterBuildArgs(plan, secretConfigPath) {
+  if (!plan.enabled) return [];
+  return ["--config", updaterConfigPath, "--config", secretConfigPath];
+}
+
 function prepareCliPackage(binary) {
   const cliName = process.platform === "win32" ? "ocg-manager-cli.exe" : "ocg-manager-cli";
   cpSync(requireFile(binary, "CLI binary"), join(cliPackageDir, cliName));
@@ -182,19 +207,53 @@ function replaceRelease() {
 async function main() {
   const version = validateVersion();
   const platform = hostPlatform();
+  const updaterPlan = resolveUpdaterBuildPlan();
   const tauriCli = fileURLToPath(import.meta.resolve("@tauri-apps/cli/tauri.js"));
   const artifacts = [];
+  const tauriBuildEnvironment = { ...process.env };
+  delete tauriBuildEnvironment.TAURI_SIGNING_PRIVATE_KEY_PATH;
+
+  if (!updaterPlan.enabled) {
+    console.warn(
+      "Updater signing key not configured; building ordinary local artifacts only. "
+      + "This output is suitable for local smoke testing, not an updater-enabled published release.",
+    );
+  }
 
   rmSync(workDir, { recursive: true, force: true });
+  workDirPrepared = true;
   mkdirSync(stagedReleaseDir, { recursive: true });
   mkdirSync(cliPackageDir, { recursive: true });
+
+  let secretConfigPath;
+  if (updaterPlan.enabled) {
+    secretConfigPath = join(workDir, "tauri.updater.secrets.conf.json");
+    writeFileSync(
+      secretConfigPath,
+      `${JSON.stringify({ plugins: { updater: { pubkey: updaterPlan.publicKey } } }, null, 2)}\n`,
+      { mode: 0o600 },
+    );
+    console.log(`Updater artifacts enabled with ${updaterPlan.privateKeySource}.`);
+  }
+  const buildConfigArgs = updaterBuildArgs(updaterPlan, secretConfigPath);
 
   if (platform === "windows-x64") {
     const bundleDir = join(targetDir, "release", "bundle", "nsis");
     rmSync(bundleDir, { recursive: true, force: true });
-    run(process.execPath, [tauriCli, "build", "--ci", "--bundles", "nsis"]);
+    run(process.execPath, [
+      tauriCli,
+      "build",
+      "--ci",
+      "--bundles",
+      "nsis",
+      ...buildConfigArgs,
+    ], { env: tauriBuildEnvironment });
     const installerName = `ocg-manager_${version}_windows-x64-setup.exe`;
-    stageArtifact(onlyArtifact(bundleDir, "-setup.exe", "NSIS installer"), installerName, artifacts);
+    const installer = onlyArtifact(bundleDir, "-setup.exe", "NSIS installer");
+    if (updaterPlan.enabled) {
+      stageUpdaterArtifact(installer, installerName, artifacts, updaterPlan.publicKey);
+    }
+    else stageArtifact(installer, installerName, artifacts);
 
     const cliBinary = join(targetDir, "release", "ocg-manager-cli.exe");
     rmSync(cliBinary, { force: true });
@@ -207,17 +266,32 @@ async function main() {
     const bundleRoot = join(targetDir, "release", "bundle");
     rmSync(join(bundleRoot, "appimage"), { recursive: true, force: true });
     rmSync(join(bundleRoot, "deb"), { recursive: true, force: true });
-    run(process.execPath, [tauriCli, "build", "--ci", "--bundles", "appimage,deb"]);
-    stageArtifact(
-      onlyArtifact(join(bundleRoot, "appimage"), ".AppImage", "AppImage"),
-      `ocg-manager_${version}_linux-x64.AppImage`,
-      artifacts,
-    );
-    stageArtifact(
-      onlyArtifact(join(bundleRoot, "deb"), ".deb", "deb package"),
-      `ocg-manager_${version}_linux-x64.deb`,
-      artifacts,
-    );
+    run(process.execPath, [
+      tauriCli,
+      "build",
+      "--ci",
+      "--bundles",
+      "appimage,deb",
+      ...buildConfigArgs,
+    ], { env: tauriBuildEnvironment });
+    const appImage = onlyArtifact(join(bundleRoot, "appimage"), ".AppImage", "AppImage");
+    const appImageName = `ocg-manager_${version}_linux-x64.AppImage`;
+    if (updaterPlan.enabled) {
+      stageUpdaterArtifact(appImage, appImageName, artifacts, updaterPlan.publicKey);
+    }
+    else stageArtifact(appImage, appImageName, artifacts);
+
+    const deb = onlyArtifact(join(bundleRoot, "deb"), ".deb", "deb package");
+    const debName = `ocg-manager_${version}_linux-x64.deb`;
+    if (updaterPlan.enabled) {
+      rmSync(`${deb}.sig`, { force: true });
+      run(process.execPath, [tauriCli, "signer", "sign", deb], {
+        env: resolveFileSignerEnvironment(),
+      });
+      stageUpdaterArtifact(deb, debName, artifacts, updaterPlan.publicKey);
+    } else {
+      stageArtifact(deb, debName, artifacts);
+    }
 
     const cliBinary = join(targetDir, "release", "ocg-manager-cli");
     rmSync(cliBinary, { force: true });
@@ -229,7 +303,9 @@ async function main() {
   } else {
     const universalTarget = join(targetDir, "universal-apple-darwin", "release");
     const dmgDir = join(universalTarget, "bundle", "dmg");
+    const macosDir = join(universalTarget, "bundle", "macos");
     rmSync(dmgDir, { recursive: true, force: true });
+    if (updaterPlan.enabled) rmSync(macosDir, { recursive: true, force: true });
     run(process.execPath, [
       tauriCli,
       "build",
@@ -237,13 +313,22 @@ async function main() {
       "--target",
       "universal-apple-darwin",
       "--bundles",
-      "dmg",
-    ]);
+      resolveMacosBundleTargets(updaterPlan.enabled),
+      ...buildConfigArgs,
+    ], { env: tauriBuildEnvironment });
     stageArtifact(
       onlyArtifact(dmgDir, ".dmg", "universal DMG"),
       `ocg-manager_${version}_macos-universal.dmg`,
       artifacts,
     );
+    if (updaterPlan.enabled) {
+      stageUpdaterArtifact(
+        onlyArtifact(macosDir, ".app.tar.gz", "universal updater archive"),
+        `ocg-manager_${version}_macos-universal.app.tar.gz`,
+        artifacts,
+        updaterPlan.publicKey,
+      );
+    }
 
     const x64Cli = join(targetDir, "x86_64-apple-darwin", "release", "ocg-manager-cli");
     const arm64Cli = join(targetDir, "aarch64-apple-darwin", "release", "ocg-manager-cli");
@@ -271,5 +356,5 @@ try {
   console.error(`Release failed; existing release/ was preserved.\n${error.stack ?? error}`);
   process.exitCode = 1;
 } finally {
-  rmSync(workDir, { recursive: true, force: true });
+  if (workDirPrepared) rmSync(workDir, { recursive: true, force: true });
 }

@@ -53,7 +53,36 @@ export interface UpdateCheckResult {
   current_version: string;
   latest_version: string;
   update_available: boolean;
+  install_supported: boolean;
   release_url: string;
+}
+
+export type UpdatePhase = "idle" | "checking" | "downloading" | "installing" | "failed";
+
+export interface UpdateStatus {
+  phase: UpdatePhase;
+  downloaded: number;
+  total: number | null;
+  error: string | null;
+  current_version: string;
+  install_supported: boolean;
+}
+
+export function isVersionAtLeast(current: string, target: string): boolean {
+  const parse = (version: string): [number, number, number] | null => {
+    const match = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(version.trim());
+    if (!match) return null;
+    return [Number(match[1]), Number(match[2]), Number(match[3])];
+  };
+  const currentParts = parse(current);
+  const targetParts = parse(target);
+  if (!currentParts || !targetParts) return false;
+  for (let index = 0; index < currentParts.length; index += 1) {
+    if (currentParts[index] !== targetParts[index]) {
+      return currentParts[index] > targetParts[index];
+    }
+  }
+  return true;
 }
 
 export interface ClaudeDesktopModels {
@@ -268,6 +297,11 @@ export const tauriApi = {
     return result.key;
   },
   checkForUpdate: () => request<UpdateCheckResult>("/settings/check-update"),
+  getUpdateStatus: () => request<UpdateStatus>("/settings/update-status"),
+  installUpdate: (expectedVersion: string) => request<UpdateStatus>("/settings/install-update", {
+    method: "POST",
+    body: jsonBody({ expected_version: expectedVersion }),
+  }),
   getGatewayLogs: (limit?: number) => request<GatewayLog[]>(`/logs/gateway?limit=${limit ?? 100}`),
   getForwardLogs: (query: ForwardLogQuery = {}) => {
     const params = new URLSearchParams({

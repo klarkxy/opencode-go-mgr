@@ -93,7 +93,28 @@ before installing: use `Get-FileHash <file> -Algorithm SHA256` on
 PowerShell, `shasum -a 256 <file>` on macOS, or `sha256sum <file>` on
 Linux.
 
-Before an upgrade or restore, stop every process using the data: choose
+Version 1.4.1 predates the signed in-app updater. Windows users enter the
+updater channel once as follows:
+
+1. Choose **Quit** from the OCG Manager tray icon.
+2. Run the first updater-enabled Windows setup.
+3. On the upgrade-method page, select the second option,
+   **Install without uninstalling** (不要卸载，直接安装), then continue. The
+   first option is merely Tauri's default selection; it is not required.
+
+Do not uninstall 1.4.1 first. This direct overwrite preserves the existing
+data directory. As an optional advanced equivalent, run:
+
+```powershell
+Start-Process -FilePath .\ocg-manager_<version>_windows-x64-setup.exe -ArgumentList '/UPDATE','/P','/R' -Wait
+```
+
+macOS and Linux users perform the direct replacement described below once.
+After the first updater-enabled release is installed, future signed desktop
+releases can be downloaded and installed from **Settings** with one action.
+CLI and Docker upgrades remain manual.
+
+Before a direct/manual upgrade or restore, stop every process using the data: choose
 **Quit** from the desktop tray, stop the CLI with Ctrl+C or its service
 manager, or run `docker compose stop`. Then copy the **entire** GUI data
 directory, CLI data directory, or Docker `ocg-data` volume. A stopped
@@ -136,11 +157,13 @@ If the original deployment used `OCG_MANAGER_ENCRYPTION_KEY`, put the same
 secret back into `.env` before the restore. Keep the backup until the dashboard,
 accounts, and a real Gateway request have all been verified.
 
-Upgrade and uninstall by surface:
+Upgrade and uninstall by surface (the direct GUI steps are also the fallback
+when in-app update is unavailable):
 
-- **Windows GUI:** run the new installer over the current install. Remove
-  it from Windows **Installed apps**; the uninstaller asks whether to
-  delete `%USERPROFILE%\.ocg-mgr`.
+- **Windows GUI:** quit the tray app, run the new installer, and choose
+  **Install without uninstalling** on its upgrade-method page. Remove it from
+  Windows **Installed apps**; the uninstaller asks whether to delete
+  `%USERPROFILE%\.ocg-mgr`.
 - **macOS GUI:** replace the app in **Applications** with the new DMG copy.
   Delete the app to uninstall; remove `~/.ocg-mgr` separately only when
   you also intend to delete the data.
@@ -289,10 +312,12 @@ The **Settings** view exposes the persistent gateway configuration:
   Linux dashboards hide it.
 - **Connect / non‑stream / stream‑idle timeouts** — apply to upstream
   HTTP requests.
-- **Check for updates** — checks the latest GitHub Release and shows the
-  current version, latest version, and a **View release** link. It does not
-  download or install the release. The host running the Gateway must be able
-  to reach `api.github.com`; a failed check does not affect Gateway forwarding.
+- **Check for updates / Update now** — updater-enabled installed desktop
+  builds check the latest GitHub Release and can download, verify, and install
+  its signed platform package. Version 1.4.1 needs the one-time direct
+  overwrite install described above. Development builds, the CLI, and Docker
+  keep the release-link/manual-upgrade path. The host must be able to reach
+  GitHub; a failed check or install does not affect Gateway forwarding.
 
 Configuration settings are written to SQLite and reloaded on the next start.
 The update check is an on‑demand action and is not persisted.
@@ -541,7 +566,7 @@ it. Alternatively, run the Compose commands from a checkout containing
 `compose.yaml` and `.env.example` (preferably the matching release tag):
 
 ```bash
-git clone --branch v1.4.1 --depth 1 https://github.com/klarkxy/opencode-go-mgr.git
+git clone --branch v1.4.2 --depth 1 https://github.com/klarkxy/opencode-go-mgr.git
 cd opencode-go-mgr
 cp .env.example .env
 # PowerShell: Copy-Item .env.example .env
@@ -555,7 +580,7 @@ The repository's source-capable `compose.yaml` defaults to
 `ghcr.io/klarkxy/opencode-go-mgr:latest`; the Release
 `compose.example.yaml` defaults to its matching full version. For repeatable
 production deployments, set `OCG_IMAGE` in `.env` to a full release tag such
-as `ghcr.io/klarkxy/opencode-go-mgr:1.4.1`. The full version and
+as `ghcr.io/klarkxy/opencode-go-mgr:1.4.2`. The full version and
 `sha-<commit>` tags identify one release and are intended not to move;
 `1.4` and `latest` move forward. Only a digest such as
 `ghcr.io/klarkxy/opencode-go-mgr@sha256:...` is technically immutable. To build the current checkout
@@ -635,9 +660,9 @@ Each stable image includes an SPDX SBOM, BuildKit SLSA provenance, and a
 GitHub signed provenance attestation. Inspect and verify a release with:
 
 ```bash
-docker buildx imagetools inspect ghcr.io/klarkxy/opencode-go-mgr:1.4.1
+docker buildx imagetools inspect ghcr.io/klarkxy/opencode-go-mgr:1.4.2
 gh attestation verify \
-  oci://ghcr.io/klarkxy/opencode-go-mgr:1.4.1 \
+  oci://ghcr.io/klarkxy/opencode-go-mgr:1.4.2 \
   --repo klarkxy/opencode-go-mgr
 ```
 
@@ -729,9 +754,10 @@ intentionally want to delete all stored accounts, credentials, and keys.
   uses `restart: unless-stopped`, so its service can restart with the Docker
   daemon.
 - Windows / Linux ARM64 and 32‑bit x86 builds are not published. RPM,
-  Snap, app‑store packages, automatic update download/installation,
-  Windows signing, and Apple notarization are not implemented. Settings
-  can check the latest GitHub Release manually.
+  Snap, app‑store packages, Windows Authenticode signing, and Apple
+  notarization are not implemented. Updater-enabled installed desktop builds
+  can install signed releases from Settings; 1.4.1, development builds, the
+  CLI, and Docker use the direct/manual upgrade path.
 
 ## Troubleshooting
 

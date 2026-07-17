@@ -6,7 +6,7 @@ use crate::gateway::{
     protocol::supported_model_ids,
 };
 use crate::models::*;
-use crate::state::CoreState;
+use crate::state::{CoreState, DesktopUpdateStartError, DesktopUpdateStatus};
 use axum::{
     Json, Router,
     body::{Body, to_bytes},
@@ -44,6 +44,8 @@ pub fn api_router(state: CoreState) -> Router<CoreState> {
             get(get_claude_desktop_models).put(update_claude_desktop_models),
         )
         .route("/settings/check-update", get(check_update))
+        .route("/settings/update-status", get(get_update_status))
+        .route("/settings/install-update", post(install_update))
         .route(
             "/settings/regenerate-gateway-key",
             post(regenerate_gateway_key),
@@ -800,6 +802,13 @@ struct UpdateCheckResponse {
     latest_version: String,
     update_available: bool,
     release_url: &'static str,
+    install_supported: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct InstallUpdateRequest {
+    expected_version: String,
 }
 
 async fn check_update(
@@ -838,7 +847,40 @@ async fn check_update(
         latest_version: latest_version.to_string(),
         update_available: is_update_available(current_parts, latest_parts),
         release_url: GITHUB_LATEST_RELEASE_URL,
+        install_supported: state.desktop_update_supported(),
     }))
+}
+
+async fn get_update_status(State(state): State<CoreState>) -> Json<DesktopUpdateStatus> {
+    Json(state.desktop_update_status())
+}
+
+async fn install_update(
+    State(state): State<CoreState>,
+    Json(input): Json<InstallUpdateRequest>,
+) -> Result<(StatusCode, Json<DesktopUpdateStatus>), ApiError> {
+    let status = state.desktop_update_status();
+    let (current_parts, _) = parse_stable_version(&status.current_version)
+        .ok_or_else(|| ApiError::internal("application version is not stable X.Y.Z"))?;
+    let (expected_parts, expected_version) = parse_stable_version(&input.expected_version)
+        .ok_or_else(|| ApiError::bad_request("expected_version must be a stable X.Y.Z version"))?;
+    if !is_update_available(current_parts, expected_parts) {
+        return Err(ApiError::bad_request(
+            "expected_version must be newer than the current version",
+        ));
+    }
+
+    match state.start_desktop_update(expected_version.to_string()) {
+        Ok(()) => Ok((StatusCode::ACCEPTED, Json(state.desktop_update_status()))),
+        Err(DesktopUpdateStartError::Unsupported) => Err(ApiError::bad_request(
+            "desktop update installation is unavailable in this runtime",
+        )),
+        Err(DesktopUpdateStartError::Busy) => Err(ApiError::status(
+            StatusCode::CONFLICT,
+            "a desktop update is already in progress",
+        )),
+        Err(DesktopUpdateStartError::Starter(error)) => Err(ApiError::internal(error)),
+    }
 }
 
 fn update_check_error(error: reqwest::Error) -> ApiError {
@@ -1188,10 +1230,10 @@ fn is_loopback(url: &reqwest::Url) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        AccountOrderInput, AccountUsageUpdate, ForwardLogQuery, asset_path, create_account,
-        dashboard_account, dashboard_summary, format_error_chain, is_update_available,
-        parse_stable_version, reorder_accounts, update_account, update_account_usage,
-        update_settings, validate_forward_log_query,
+        AccountOrderInput, AccountUsageUpdate, ForwardLogQuery, UpdateCheckResponse, asset_path,
+        create_account, dashboard_account, dashboard_summary, format_error_chain,
+        is_update_available, parse_stable_version, reorder_accounts, update_account,
+        update_account_usage, update_settings, validate_forward_log_query,
     };
     use crate::crypto::{KeyCipher, StaticKeyCipher};
     use crate::db::Database;
@@ -1655,6 +1697,19 @@ mod tests {
             format_error_chain(error.as_ref()),
             "outer error: root cause"
         );
+    }
+
+    #[test]
+    fn update_check_response_reports_install_capability() {
+        let response = UpdateCheckResponse {
+            current_version: "1.0.0".to_string(),
+            latest_version: "2.0.0".to_string(),
+            update_available: true,
+            release_url: "https://example.com/release",
+            install_supported: true,
+        };
+        let json = serde_json::to_value(response).expect("response should serialize");
+        assert_eq!(json["install_supported"], true);
     }
 
     #[test]
