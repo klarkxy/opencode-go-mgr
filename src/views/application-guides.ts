@@ -394,7 +394,10 @@ export const APPLICATION_GUIDES = [
                 npm: "@ai-sdk/openai-compatible",
                 name: "OCG Manager",
                 options: { baseURL: context.apiBaseUrl, apiKey: "{env:OCG_API_KEY}" },
-                models: Object.fromEntries(models(context).map((modelId) => [modelId, { name: modelId }])),
+                models: Object.fromEntries(models(context).map((modelId) => [
+                  modelId,
+                  { name: modelId, reasoning: true },
+                ])),
               },
             },
             model: `ocg/${context.modelId}`,

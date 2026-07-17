@@ -6,7 +6,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use chrono::{Duration, Utc};
 use ocg_core::crypto::{KeyCipher, StaticKeyCipher};
-use ocg_core::db::Database;
+use ocg_core::db::{Database, ForwardLogQueryOptions};
 use ocg_core::gateway;
 use ocg_core::models::{Account, AccountUpdate};
 use ocg_core::state::{CoreStateInner, GatewayHandle};
@@ -408,7 +408,17 @@ async fn model_discovery_does_not_create_inference_logs() {
     let logs = state
         .db
         .lock()
-        .query_forward_logs(10, 0, None, None, None, None, None, None, None)
+        .query_forward_logs(ForwardLogQueryOptions {
+            limit: 10,
+            offset: 0,
+            status: None,
+            account_id: None,
+            model: None,
+            start_time: None,
+            end_time: None,
+            sort_by: None,
+            sort_order: None,
+        })
         .unwrap();
     assert!(logs.items.is_empty());
     assert_eq!(logs.summary.total_requests, 0);
@@ -439,7 +449,17 @@ async fn model_discovery_keeps_rate_limit_cooldown_without_logging() {
     let logs = state
         .db
         .lock()
-        .query_forward_logs(10, 0, None, None, None, None, None, None, None)
+        .query_forward_logs(ForwardLogQueryOptions {
+            limit: 10,
+            offset: 0,
+            status: None,
+            account_id: None,
+            model: None,
+            start_time: None,
+            end_time: None,
+            sort_by: None,
+            sort_order: None,
+        })
         .unwrap();
     assert_eq!(logs.summary.total_requests, 0);
 
@@ -590,7 +610,17 @@ async fn application_models_intersects_upstream_models_in_upstream_order() {
         state
             .db
             .lock()
-            .query_forward_logs(10, 0, None, None, None, None, None, None, None)
+            .query_forward_logs(ForwardLogQueryOptions {
+                limit: 10,
+                offset: 0,
+                status: None,
+                account_id: None,
+                model: None,
+                start_time: None,
+                end_time: None,
+                sort_by: None,
+                sort_order: None,
+            })
             .unwrap()
             .summary
             .total_requests,

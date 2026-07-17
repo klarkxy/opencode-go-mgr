@@ -58,10 +58,10 @@ Key 保存在本地 SQLite，并通过 OpenAI、Anthropic 与 Gemini 兼容 Gate
 `compose.yaml`，并按需在同目录创建 `.env`。
 
 ```bash
-git clone --branch v1.4.0 --depth 1 https://github.com/klarkxy/opencode-go-mgr.git
+git clone --branch v1.4.1 --depth 1 https://github.com/klarkxy/opencode-go-mgr.git
 cd opencode-go-mgr
 cp .env.example .env
-# 编辑 .env：选择首次管理员创建方式，并把 OCG_IMAGE 固定到 1.4.0。
+# 编辑 .env：选择首次管理员创建方式，并把 OCG_IMAGE 固定到 1.4.1。
 docker compose pull
 docker compose up -d --no-build
 docker compose ps

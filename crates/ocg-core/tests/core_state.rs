@@ -8,7 +8,7 @@
 
 use chrono::{Duration, Utc};
 use ocg_core::crypto::{KeyCipher, MachineBoundCipher, StaticKeyCipher};
-use ocg_core::db::Database;
+use ocg_core::db::{Database, ForwardLogQueryOptions};
 use ocg_core::models::{Account, ForwardLog, normalize_client_root_url};
 use ocg_core::state::CoreStateInner;
 use std::fs;
@@ -307,17 +307,17 @@ fn query_forward_logs_filters_before_limit_and_summarizes_all_matches() {
     }
 
     let first = db
-        .query_forward_logs(
-            1,
-            0,
-            Some("success"),
-            Some("selected"),
-            None,
-            None,
-            None,
-            None,
-            None,
-        )
+        .query_forward_logs(ForwardLogQueryOptions {
+            limit: 1,
+            offset: 0,
+            status: Some("success"),
+            account_id: Some("selected"),
+            model: None,
+            start_time: None,
+            end_time: None,
+            sort_by: None,
+            sort_order: None,
+        })
         .unwrap();
     assert_eq!(first.items.len(), 1);
     assert_eq!(first.items[0].prompt_tokens, 30);
@@ -328,24 +328,34 @@ fn query_forward_logs_filters_before_limit_and_summarizes_all_matches() {
     assert!((first.summary.cost - 3.0).abs() < f64::EPSILON);
 
     let second = db
-        .query_forward_logs(
-            1,
-            1,
-            Some("success"),
-            Some("selected"),
-            None,
-            None,
-            None,
-            None,
-            None,
-        )
+        .query_forward_logs(ForwardLogQueryOptions {
+            limit: 1,
+            offset: 1,
+            status: Some("success"),
+            account_id: Some("selected"),
+            model: None,
+            start_time: None,
+            end_time: None,
+            sort_by: None,
+            sort_order: None,
+        })
         .unwrap();
     assert_eq!(second.items.len(), 1);
     assert_eq!(second.items[0].prompt_tokens, 10);
     assert_eq!(second.summary.total_requests, 2);
 
     let bounded = db
-        .query_forward_logs(999, -1, None, None, None, None, None, None, None)
+        .query_forward_logs(ForwardLogQueryOptions {
+            limit: 999,
+            offset: -1,
+            status: None,
+            account_id: None,
+            model: None,
+            start_time: None,
+            end_time: None,
+            sort_by: None,
+            sort_order: None,
+        })
         .unwrap();
     assert_eq!(bounded.items.len(), 200);
     assert_eq!(bounded.summary.total_requests, 203);
