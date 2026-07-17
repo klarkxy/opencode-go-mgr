@@ -77,6 +77,30 @@ fn price_table_cell() -> &'static HashMap<String, ModelPrice> {
                 cache_read: 0.0145,
             },
         );
+        table.insert(
+            "minimax-m3".to_string(),
+            ModelPrice {
+                input: 3.15,
+                output: 12.60,
+                cache_read: 0.63,
+            },
+        );
+        table.insert(
+            "minimax-m2.7".to_string(),
+            ModelPrice {
+                input: 2.10,
+                output: 8.40,
+                cache_read: 0.42,
+            },
+        );
+        table.insert(
+            "minimax-m2.5".to_string(),
+            ModelPrice {
+                input: 2.10,
+                output: 8.40,
+                cache_read: 0.21,
+            },
+        );
         table
     })
 }
@@ -138,5 +162,32 @@ mod tests {
         let cost = cost_from_counts("glm-5.2", 100, 10, 80);
         let expected = (20.0 * 1.40 + 10.0 * 4.40 + 80.0 * 0.26) / 1_000_000.0;
         assert!((cost - expected).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn minimax_m3_uses_configured_price_table() {
+        let cost = cost_from_counts("minimax-m3", 1000, 200, 400);
+        let expected = (600.0 * 3.15 + 200.0 * 12.60 + 400.0 * 0.63) / 1_000_000.0;
+        assert!((cost - expected).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn minimax_m3_cache_read_is_not_free() {
+        // Regression: before the price table included minimax-m3, cache hits
+        // fell back to cache_read=0.0 and the request was heavily undercharged.
+        let cost = cost_from_counts("minimax-m3", 1000, 0, 1000);
+        let expected = 1000.0 * 0.63 / 1_000_000.0;
+        assert!((cost - expected).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn minimax_m2_uses_configured_price_table() {
+        let cost_m2_7 = cost_from_counts("minimax-m2.7", 1000, 200, 400);
+        let expected_m2_7 = (600.0 * 2.10 + 200.0 * 8.40 + 400.0 * 0.42) / 1_000_000.0;
+        assert!((cost_m2_7 - expected_m2_7).abs() < f64::EPSILON);
+
+        let cost_m2_5 = cost_from_counts("minimax-m2.5", 1000, 200, 400);
+        let expected_m2_5 = (600.0 * 2.10 + 200.0 * 8.40 + 400.0 * 0.21) / 1_000_000.0;
+        assert!((cost_m2_5 - expected_m2_5).abs() < f64::EPSILON);
     }
 }
