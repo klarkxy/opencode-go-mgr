@@ -442,7 +442,10 @@ manifest, signatures, and every other attachment, and creates or updates a
 **draft** GitHub Release. `verify-release` then requires the exact 15-asset
 set, re-derives `latest.json`, recomputes every checksum, verifies all four
 updater signatures, and compares every downloaded artifact with the digest
-reported by GitHub Release storage.
+reported by GitHub Release storage. The draft job passes its numeric Release
+ID downstream; verification and publication re-check that exact ID, tag, and
+draft state instead of using the tag lookup endpoint, which does not expose
+draft Releases.
 
 ### publish-release — publish only the verified tag build
 

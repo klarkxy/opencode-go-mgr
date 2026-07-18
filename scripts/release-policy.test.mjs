@@ -92,6 +92,30 @@ test("manual release runs cannot inherit the production tag path", () => {
   assert.doesNotMatch(publishJob, /environment:|always\(\)/);
 });
 
+test("the exact draft Release identity flows through verification and publication", () => {
+  const workflow = readFileSync(
+    new URL("../.github/workflows/release.yml", import.meta.url),
+    "utf8",
+  );
+  const draftJob = workflow.match(/\n  draft-release:[\s\S]*?\n  verify-release:/)?.[0] ?? "";
+  const verifyJob = workflow.match(/\n  verify-release:[\s\S]*?\n  publish-release:/)?.[0] ?? "";
+  const publishJob = workflow.match(/\n  publish-release:[\s\S]*$/)?.[0] ?? "";
+
+  assert.match(draftJob, /release_id: \$\{\{ steps\.release\.outputs\.release_id \}\}/);
+  assert.match(draftJob, /- name: Create or update draft release\s+id: release/);
+  assert.match(draftJob, /gh release view "\$GITHUB_REF_NAME" --json databaseId,isDraft,tagName/);
+  assert.match(verifyJob, /release_id: \$\{\{ steps\.asset_metadata\.outputs\.release_id \}\}/);
+  assert.match(verifyJob, /RELEASE_ID: \$\{\{ needs\.draft-release\.outputs\.release_id \}\}/);
+  assert.match(verifyJob, /if gh api "repos\/\$GITHUB_REPOSITORY\/releases\/\$RELEASE_ID"/);
+  assert.match(verifyJob, /\.id == \$release_id and \.tag_name == \$tag and \.draft == true/);
+  assert.match(verifyJob, /\.assets \| length == 15/);
+  assert.doesNotMatch(verifyJob, /releases\/tags\//);
+  assert.match(publishJob, /RELEASE_ID: \$\{\{ needs\.verify-release\.outputs\.release_id \}\}/);
+  assert.match(publishJob, /gh api "repos\/\$GITHUB_REPOSITORY\/releases\/\$RELEASE_ID" > release-metadata\.json/);
+  assert.match(publishJob, /--method PATCH "repos\/\$GITHUB_REPOSITORY\/releases\/\$RELEASE_ID"/);
+  assert.doesNotMatch(publishJob, /releases\/tags\//);
+});
+
 test("container publication checks out an exact tag and validates source versions", () => {
   const workflow = readFileSync(
     new URL("../.github/workflows/container.yml", import.meta.url),

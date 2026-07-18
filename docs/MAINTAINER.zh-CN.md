@@ -370,7 +370,9 @@ artifact，把平台 payload、签名与 `compose.example.yaml` 组装进 `relea
 manifest、签名和其余附件的 `SHA256SUMS`，最后创建或更新 **draft** GitHub
 Release。`verify-release` 随后要求资产集合恰好为 15 个，重新推导
 `latest.json`、重算全部 checksum、验证四份升级签名，并把每个下载文件与
-GitHub Release 存储层报告的 digest 对比。
+GitHub Release 存储层报告的 digest 对比。draft job 会把数字 Release ID 传给下
+游；验证和公开 job 都重新校验该 ID、tag 与 draft 状态，不使用无法显示 draft
+Release 的 tag 查询端点。
 
 ### publish-release —— 只公开已验证的 tag 构建
 

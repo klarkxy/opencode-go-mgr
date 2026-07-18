@@ -374,6 +374,8 @@ jobs:
       - quality
       - build
     runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.release.outputs.release_id }}
     permissions:
       contents: write
 
@@ -410,6 +412,7 @@ jobs:
           overwrite: true
 
       - name: Create or update draft release
+        id: release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -426,6 +429,19 @@ jobs:
           else
             gh release create "$GITHUB_REF_NAME" release/* --draft --verify-tag --title "OCG Manager $GITHUB_REF_NAME" --notes "$notes"
           fi
+          release_metadata=$(gh release view "$GITHUB_REF_NAME" --json databaseId,isDraft,tagName)
+          if ! jq -e --arg tag "$GITHUB_REF_NAME" \
+            '.isDraft == true and .tagName == $tag and (.databaseId | type == "number")' \
+            <<<"$release_metadata" >/dev/null; then
+            echo "Refusing to continue without the exact draft Release identity." >&2
+            exit 1
+          fi
+          release_id=$(jq -r .databaseId <<<"$release_metadata")
+          if [[ ! "$release_id" =~ ^[0-9]+$ ]]; then
+            echo "Invalid draft Release id: $release_id" >&2
+            exit 1
+          fi
+          echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
 
   verify-release:
     name: Verify draft release
@@ -436,6 +452,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       asset_digest: ${{ steps.asset_metadata.outputs.digest }}
+      release_id: ${{ steps.asset_metadata.outputs.release_id }}
     permissions:
       contents: read
 
@@ -458,15 +475,25 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ needs.draft-release.outputs.release_id }}
         run: |
           set -euo pipefail
+          if [[ ! "$RELEASE_ID" =~ ^[0-9]+$ ]]; then
+            echo "Invalid draft Release id: $RELEASE_ID" >&2
+            exit 1
+          fi
           ready=false
           for attempt in 1 2 3 4 5; do
-            gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" \
-              --jq '[.assets[] | {name, digest}]' > asset-metadata.json
-            if jq -e 'length == 15 and all(.[]; .digest | type == "string")' asset-metadata.json >/dev/null; then
-              ready=true
-              break
+            if gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" > release-metadata.json; then
+              if jq -e --argjson release_id "$RELEASE_ID" --arg tag "$GITHUB_REF_NAME" \
+                '.id == $release_id and .tag_name == $tag and .draft == true
+                  and (.assets | length == 15)
+                  and all(.assets[]; (.name | type == "string") and (.digest | type == "string"))' \
+                release-metadata.json >/dev/null; then
+                jq '[.assets[] | {name, digest}]' release-metadata.json > asset-metadata.json
+                ready=true
+                break
+              fi
             fi
             sleep 3
           done
@@ -476,6 +503,7 @@ jobs:
           fi
           digest=$(jq -S -c 'sort_by(.name)' asset-metadata.json | sha256sum | cut -d' ' -f1)
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          echo "release_id=$RELEASE_ID" >> "$GITHUB_OUTPUT"
 
       - name: Verify checksums, updater manifest, signatures, and server digests
         env:
@@ -510,21 +538,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          RELEASE_ID: ${{ needs.verify-release.outputs.release_id }}
           VERIFIED_ASSET_DIGEST: ${{ needs.verify-release.outputs.asset_digest }}
         run: |
           set -euo pipefail
-          state=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" --jq .draft)
-          if [ "$state" != true ]; then
-            echo "Refusing to publish a release that is not the verified draft." >&2
-            exit 1
-          fi
-          current_asset_digest=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" \
-            --jq '[.assets[] | {name, digest}]' \
-            | jq -S -c 'sort_by(.name)' \
-            | sha256sum \
-            | cut -d' ' -f1)
-          if [ "$current_asset_digest" != "$VERIFIED_ASSET_DIGEST" ]; then
-            echo "Refusing to publish: draft assets changed after verification." >&2
+          if [[ ! "$RELEASE_ID" =~ ^[0-9]+$ ]]; then
+            echo "Invalid verified Release id: $RELEASE_ID" >&2
             exit 1
           fi
           latest_error="$RUNNER_TEMP/latest-release-error"
@@ -539,8 +558,23 @@ jobs:
           make_latest=$(node scripts/release-policy.mjs should-advance \
             --candidate "$GITHUB_REF_NAME" \
             --current "$current_latest")
-          release_id=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" --jq .id)
-          gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" \
+          gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" > release-metadata.json
+          if ! jq -e --argjson release_id "$RELEASE_ID" --arg tag "$GITHUB_REF_NAME" \
+            '.id == $release_id and .tag_name == $tag and .draft == true
+              and (.assets | length == 15)
+              and all(.assets[]; (.name | type == "string") and (.digest | type == "string"))' \
+            release-metadata.json >/dev/null; then
+            echo "Refusing to publish a Release that is not the exact verified draft." >&2
+            exit 1
+          fi
+          current_asset_digest=$(jq -S -c '[.assets[] | {name, digest}] | sort_by(.name)' release-metadata.json \
+            | sha256sum \
+            | cut -d' ' -f1)
+          if [ "$current_asset_digest" != "$VERIFIED_ASSET_DIGEST" ]; then
+            echo "Refusing to publish: draft assets changed after verification." >&2
+            exit 1
+          fi
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" \
             -F draft=false \
             -f make_latest="$make_latest" \
             --silent
