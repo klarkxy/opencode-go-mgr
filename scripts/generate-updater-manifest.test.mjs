@@ -206,6 +206,7 @@ test("release workflow keeps reusable quality checks out of the native build mat
   );
   const buildJob = workflow.match(/\n  build:[\s\S]*?\n  draft-release:/)?.[0] ?? "";
   const preflightJob = workflow.match(/\n  preflight:[\s\S]*?\n  build:/)?.[0] ?? "";
+  const publishJob = workflow.match(/\n  publish-release:[\s\S]*$/)?.[0] ?? "";
   const containerWorkflow = readFileSync(
     new URL("../.github/workflows/container.yml", import.meta.url),
     "utf8",
@@ -221,17 +222,27 @@ test("release workflow keeps reusable quality checks out of the native build mat
   );
   assert.match(workflow, /pnpm run release:check/);
   assert.doesNotMatch(preflightJob, /TAURI_SIGNING_PRIVATE_KEY|OCG_REQUIRE_UPDATER_ARTIFACTS/);
-  assert.match(buildJob, /release-signing' \|\| 'release-candidate/);
+  assert.doesNotMatch(buildJob, /environment:/);
   assert.match(buildJob, /if: needs\.plan\.outputs\.production == 'true'/);
-  assert.match(buildJob, /secrets\.OCG_TAURI_SIGNING_PRIVATE_KEY/);
-  assert.doesNotMatch(buildJob, /secrets\.TAURI_SIGNING_PRIVATE_KEY/);
+  assert.match(buildJob, /secrets\.TAURI_SIGNING_PRIVATE_KEY/);
+  assert.match(
+    buildJob,
+    /needs\.plan\.outputs\.production == 'true' && secrets\.TAURI_SIGNING_PRIVATE_KEY \|\| ''/,
+  );
+  assert.match(
+    buildJob,
+    /needs\.plan\.outputs\.production == 'true' && secrets\.TAURI_SIGNING_PRIVATE_KEY_PASSWORD \|\| ''/,
+  );
+  assert.doesNotMatch(buildJob, /secrets\.OCG_TAURI_SIGNING_PRIVATE_KEY/);
   assert.match(workflow, /matrix: \$\{\{ fromJSON\(needs\.plan\.outputs\.matrix\) \}\}/);
   assert.doesNotMatch(buildJob, /pnpm run (?:test|build:web|design:lint)/);
   assert.doesNotMatch(buildJob, /cargo clippy/);
   assert.match(workflow, /name: assembled-release/);
   assert.match(workflow, /verify-release:/);
-  assert.match(workflow, /vars\.OCG_RELEASE_APPROVAL_ENABLED == 'true'/);
-  assert.match(workflow, /environment:\s+name: release/);
+  assert.match(publishJob, /if: needs\.plan\.outputs\.production == 'true'/);
+  assert.match(publishJob, /needs:\s+- plan\s+- verify-release/);
+  assert.doesNotMatch(publishJob, /environment:|OCG_RELEASE_APPROVAL_ENABLED|always\(\)/);
+  assert.doesNotMatch(workflow, /OCG_RELEASE_APPROVAL_ENABLED|name: release-signing|name: release-candidate/);
   assert.match(workflow, /Refusing to publish: draft assets changed after verification/);
   assert.match(workflow, /group: release-moving-channels\s+queue: max/);
   assert.match(workflow, /release-policy\.mjs should-advance/);

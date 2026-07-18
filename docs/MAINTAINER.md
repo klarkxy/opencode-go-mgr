@@ -360,10 +360,10 @@ repeated release builds reuse the same `target/` tree.
 
 `pnpm run release:check` validates versions, Compose, and any configured
 signing key without building a native bundle. The keyless preflight exercises
-the unsigned contract. After tag jobs receive `release-signing` approval,
-each runner signs a temporary payload and verifies it against the
-continuity-checked `TAURI_UPDATER_PUBLIC_KEY` before starting the expensive
-native build.
+the unsigned contract. For a production tag push, each runner signs a
+temporary payload with the repository signing secret and verifies it against
+the continuity-checked `TAURI_UPDATER_PUBLIC_KEY` before starting the
+expensive native build.
 
 ## CI Workflow
 
@@ -383,23 +383,24 @@ restore but do not write the Rust cache.
 `.github/workflows/release.yml` runs on `workflow_dispatch` and on `v*` tags.
 
 - A manual candidate can select Windows x64, macOS Universal, Linux x64, or
-  all three platforms. Manual candidates enter the keyless
-  `release-candidate` Environment and intentionally produce unsigned smoke
-  artifacts, even when a manual dispatch selects a tag as its ref.
+  all three platforms and intentionally produces unsigned smoke artifacts,
+  even when a manual dispatch selects a tag as its ref.
 - Only a `push` event for a `v*` tag forces the complete three-platform
-  matrix and enters the protected `release-signing` Environment.
+  matrix and supplies the repository signing secrets. For this
+  single-maintainer repository, pushing that tag is the explicit publication
+  authorization.
 - The quality job runs in parallel with a keyless Windows preflight that
   parses the extracted installer smoke, runs the release-helper tests, and
   validates all version manifests.
 
 After preflight, each selected native runner restores its platform Rust cache
-and installs dependencies. Tag jobs can read the signing secrets only after
-the `release-signing` approval, then prove the signing pair and committed
-public-key fingerprint before running the signed build. Manual jobs never
-reference that Environment's secrets and run the ordinary unsigned build.
-Both paths execute CLI/GUI smokes and upload `release-<platform>` with
-seven-day retention. The expensive generic test/type/lint suite is not
-repeated on all three native runners.
+and installs dependencies. The workflow injects signing secrets only when its
+plan proves the event is an actual `v*` tag push, then proves the signing pair
+and committed public-key fingerprint before running the signed build. Manual
+jobs receive empty signing values and run the ordinary unsigned build. Both
+paths execute CLI/GUI smokes and upload `release-<platform>` with seven-day
+retention. The expensive generic test/type/lint suite is not repeated on all
+three native runners.
 
 ### Per-runner smoke flows
 
@@ -443,16 +444,15 @@ set, re-derives `latest.json`, recomputes every checksum, verifies all four
 updater signatures, and compares every downloaded artifact with the digest
 reported by GitHub Release storage.
 
-### publish-release — fail-closed by default
+### publish-release — publish only the verified tag build
 
-`publish-release` is skipped unless the repository variable
-`OCG_RELEASE_APPROVAL_ENABLED` is exactly `true`; when it is enabled, the job
-targets the `release` GitHub Environment and must pass that environment's
-required-reviewer approval. Configure the Environment protection first and
-only then enable the variable. With either piece absent, the verified Release
-remains a draft. After approval, the publish job compares the current
-asset/digest-set fingerprint with the verified fingerprint and refuses any
-draft that changed while it was waiting.
+The `v*` tag push is the single maintainer's explicit release authorization.
+`publish-release` therefore runs automatically after `verify-release`
+succeeds. It compares the current asset/digest-set fingerprint with the
+verified fingerprint and refuses any draft that changed after verification.
+Manual candidates cannot reach the draft, verification, or publication jobs.
+A missing signing key, failed smoke, or failed verification leaves the Release
+unpublished.
 
 The publication job is serialized in the repository-wide
 `release-moving-channels` queue. Immediately before publishing it compares
@@ -470,17 +470,14 @@ path):
 node node_modules/@tauri-apps/cli/tauri.js signer generate -w <secure-path-outside-repository>/ocg-updater.key
 ```
 
-Create a protected GitHub Environment named `release-signing`. Restrict its
-deployment policy to protected `v*` tags, require an independent reviewer,
-prevent self-review, and disable administrator bypass where the repository
-plan supports those controls.
-
-- Store the private-key content and password only as that Environment's
-  `OCG_TAURI_SIGNING_PRIVATE_KEY` and
-  `OCG_TAURI_SIGNING_PRIVATE_KEY_PASSWORD` secrets. Do not keep
-  repository-level copies; delete legacy repository secrets named
-  `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` after
-  the migration.
+- Store the private-key content and password as repository Actions secrets
+  named `TAURI_SIGNING_PRIVATE_KEY` and
+  `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. The release workflow references them
+  only when the event-derived plan identifies an actual `v*` tag push; manual
+  candidates receive empty values and remain unsigned.
+- Repository secrets are not isolated by an Environment. If another
+  write-capable maintainer is added, reassess a protected signing Environment
+  or tag ruleset before the next release.
 - Keep at least two independently stored encrypted backups of both the
   private key and its password. If they are lost, already-installed clients
   that trust the matching public key cannot receive another in-app update and
@@ -548,11 +545,12 @@ The GitHub attestation signs the provenance statement; this project does not
 currently add a separate Cosign image signature.
 
 Current Windows installers are unsigned and macOS uses ad-hoc signing (`-`),
-not Developer ID notarization. Keep releases in draft until native smoke
-checks and platform warnings are reviewed. Windows/Linux ARM64, 32-bit x86,
-RPM, Snap, and app stores remain unsupported. Signed in-app update is limited
-to updater-enabled installed desktop builds; 1.4.1, development builds, CLI,
-and Docker retain the direct/manual path.
+not Developer ID notarization. Review native candidate smoke results and these
+platform warnings before pushing the release tag, because a successful tag
+workflow publishes automatically. Windows/Linux ARM64, 32-bit x86, RPM, Snap,
+and app stores remain unsupported. Signed in-app update is limited to
+updater-enabled installed desktop builds; 1.4.1, development builds, CLI, and
+Docker retain the direct/manual path.
 
 ### CI Coverage Boundaries
 
@@ -590,17 +588,12 @@ paths.
    create an annotated tag with `git tag -a vX.Y.Z -m "OCG Manager vX.Y.Z"`,
    then push the tag. Never tag a branch commit that will later be
    squash-merged.
-5. Approve only the `v*` tag deployment waiting on the `release-signing`
-   Environment. Then wait for `quality`, `preflight`, every native matrix
-   job, `draft-release`, and `verify-release` to pass. Review the exact 15
-   attachments, smoke logs, platform warnings, and notes generated from the
-   previous-tag diff.
-6. Approve the waiting `release` Environment deployment. Confirm that
-   `publish-release` converted the same verified draft, then verify the
-   public release. If approval automation is intentionally disabled, leave
-   the draft unpublished until the documented recovery procedure is
-   explicitly chosen.
-7. Wait for `container.yml`, verify the GHCR package is public, inspect its
+5. Wait for `quality`, `preflight`, every native matrix job, `draft-release`,
+   `verify-release`, and `publish-release` to pass. Confirm that publication
+   converted the same verified draft, then review the exact 15 attachments,
+   smoke logs, platform warnings, and notes generated from the previous-tag
+   diff.
+6. Wait for `container.yml`, verify the GHCR package is public, inspect its
    version and digest, and anonymously pull the full-version tag.
 
 Treat published assets and tags as immutable. If a published payload is
@@ -613,8 +606,8 @@ Run these checks **before** publishing a `v*` tag. The CI smoke flow covers
 most of them; the manual parts need a real desktop.
 
 - [ ] Both Ubuntu and Windows jobs in the reusable quality gate are green;
-      the tag-only signed `release:check` passed after `release-signing`
-      approval; every selected `pnpm run build` and platform smoke is green.
+      the tag-only signed `release:check` passed; every selected
+      `pnpm run build` and platform smoke is green.
 - [ ] `git diff --check` is clean, the previous-tag diff contains only the
       intended release scope, and all four code version manifests,
       `compose.example.yaml`, plus the three local Cargo lock entries agree.
@@ -658,8 +651,9 @@ most of them; the manual parts need a real desktop.
 - [ ] Build the container locally and confirm UID/GID `10001`, bundled
       `LICENSE`, read-only/capability hardening, dashboard authentication,
       and backup/restore ownership on an isolated volume.
-- [ ] Review the verified draft GitHub Release notes and the unsigned/ad-hoc
-      warnings before approving the `release` Environment deployment.
+- [ ] Review the intended GitHub Release notes and the unsigned/ad-hoc
+      warnings before pushing the tag; after publication, confirm the same
+      notes and exact verified asset set are public.
 - [ ] After publishing, confirm `container.yml` passed and anonymously pull
       `ghcr.io/klarkxy/opencode-go-mgr:<version>` by the expected digest;
       then verify the signer workflow, SBOM, and SLSA provenance.
