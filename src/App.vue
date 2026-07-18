@@ -69,6 +69,7 @@
     </main>
 
     <n-message-provider v-else>
+      <n-dialog-provider>
       <n-layout has-sider class="app-shell">
         <n-layout-sider
           bordered
@@ -163,6 +164,7 @@
           </main>
         </n-layout>
       </n-layout>
+      </n-dialog-provider>
     </n-message-provider>
   </n-config-provider>
 </template>
@@ -173,6 +175,7 @@ import type { Component } from "vue";
 import {
   NButton,
   NConfigProvider,
+  NDialogProvider,
   NDropdown,
   NForm,
   NFormItem,

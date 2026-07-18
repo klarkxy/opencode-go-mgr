@@ -63,7 +63,7 @@
               <div class="account-heading">
                 <div class="account-name-row">
                   <span>{{ account.name }}</span>
-                  <n-tooltip>
+                  <n-tooltip v-if="accountIsCooling(account)">
                     <template #trigger>
                       <n-tag :type="accountStatusTagType(account)" size="small">
                         {{ accountStatusLabel(account) }}
@@ -71,6 +71,9 @@
                     </template>
                     {{ cooldownDetails(account) }}
                   </n-tooltip>
+                  <n-tag v-else :type="accountStatusTagType(account)" size="small">
+                    {{ accountStatusLabel(account) }}
+                  </n-tag>
                 </div>
                 <div class="account-lifecycle">
                   <span>{{ t("购买于 {date}", { date: account.purchase_date }) }}</span>
@@ -114,7 +117,6 @@
 
               <n-dropdown
                 :options="accountMenuOptions(account)"
-                :render-option="renderAccountMenuOption"
                 trigger="click"
                 placement="bottom-end"
                 @select="(key: string | number) => handleMenuSelect(key, account.id)"
@@ -286,8 +288,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, onMounted, onUnmounted, ref } from "vue";
-import type { VNode } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import {
   NButton,
   NCard,
@@ -297,13 +298,13 @@ import {
   NIcon,
   NInputNumber,
   NPopover,
-  NPopconfirm,
   NProgress,
   NSlider,
   NSpace,
   NSwitch,
   NTag,
   NTooltip,
+  useDialog,
   useMessage,
 } from "naive-ui";
 import {
@@ -371,6 +372,7 @@ const usageLimits = computed<Array<{ key: UsageKey; label: string; limit: number
   ];
 });
 
+const dialog = useDialog();
 const message = useMessage();
 const accounts = ref<Account[]>([]);
 const usageMap = ref<Record<string, UsageWindow>>({});
@@ -558,37 +560,21 @@ function accountMenuOptions(account: Account): AccountMenuOption[] {
   return options;
 }
 
-function renderAccountMenuOption({ node, option }: { node: VNode; option: unknown }) {
-  const opt = option as AccountMenuOption;
-  if (opt.key === "delete") {
-    return h(
-      NPopconfirm,
-      {
-        positiveText: t("删除"),
-        negativeText: t("取消"),
-        onPositiveClick: () => deleteAccount(opt.accountId),
-      },
-      {
-        trigger: () => h("div", {
-          class: "n-dropdown-option account-menu-delete",
-          onClick: (e: MouseEvent) => e.stopPropagation(),
-        }, [
-          h("div", { class: "n-dropdown-option-body" }, [
-            h("div", { class: "n-dropdown-option-body__label" }, t("删除账号")),
-          ]),
-        ]),
-        default: () => t("确定删除账号 {name} 吗？", { name: opt.accountName }),
-      },
-    );
-  }
-  return node;
-}
-
 function handleMenuSelect(key: string | number, accountId: string) {
   if (key === "edit") {
     openEditModal(accountId);
   } else if (key === "reset") {
     resetCooldown(accountId);
+  } else if (key === "delete") {
+    const account = accounts.value.find((item) => item.id === accountId);
+    if (!account) return;
+    dialog.warning({
+      title: t("删除账号"),
+      content: t("确定删除账号 {name} 吗？", { name: account.name }),
+      positiveText: t("删除"),
+      negativeText: t("取消"),
+      onPositiveClick: () => deleteAccount(accountId),
+    });
   }
 }
 
@@ -737,6 +723,7 @@ function applyLoadedAccounts(loaded: Account[]): void {
 
 function replaceAccount(account: Account): void {
   accounts.value = accounts.value.map((item) => (item.id === account.id ? account : item));
+  if (editingAccount.value?.id === account.id) editingAccount.value = account;
 }
 
 function addAccount(account: Account): void {
@@ -1117,10 +1104,6 @@ onUnmounted(() => {
 .usage-save-error {
   color: var(--ocg-error);
   font-size: var(--ocg-font-xs);
-}
-
-.account-menu-delete :deep(.n-dropdown-option-body__label) {
-  color: var(--ocg-error) !important;
 }
 
 @media (max-width: 900px) {

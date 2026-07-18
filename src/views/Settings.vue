@@ -546,9 +546,10 @@ async function saveSettings() {
     return;
   }
   saving.value = true;
+  const payload = { ...config.value };
   try {
-    await tauriApi.updateSettings(config.value);
-    savedConfig.value = { ...config.value };
+    await tauriApi.updateSettings(payload);
+    savedConfig.value = payload;
     message.success(t("设置已保存"));
   } catch (e) {
     message.error(t("保存失败: {error}", { error: String(e) }));
@@ -639,6 +640,7 @@ async function regenerateKey() {
   regenerating.value = true;
   try {
     config.value.gateway_key = await tauriApi.regenerateGatewayKey();
+    if (savedConfig.value) savedConfig.value.gateway_key = config.value.gateway_key;
     cancelGatewayKeyEdit();
     message.success(t("Key 已重新生成"));
   } catch (e) {

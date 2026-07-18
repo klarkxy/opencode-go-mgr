@@ -510,12 +510,12 @@ test("applications view uses deep-linked subpages and a responsive second naviga
   assert.match(restoreDefaults, /selectedModels\.value = \[\.\.\.models\]/);
   assert.match(restoreDefaults, /selectedModel\.value = models\[0\] \?\? null/);
   assert.match(restoreDefaults, /claudeDesktopDefaults\.value/);
-  assert.doesNotMatch(applications, /snippetDrafts|clearApplicationDrafts/);
+  assert.match(applications, /snippetDrafts|clearApplicationDrafts/);
   assert.doesNotMatch(restoreDefaults, /loadModels|tauriApi\./);
   assert.match(applications, /tauriApi\.updateClaudeDesktopModels/);
   assert.match(applications, /v-model:value="selectedModels"/);
-  assert.match(applications, /<pre class="snippet-body">/);
-  assert.match(applications, /const value = snippet\.copy/);
+  assert.match(applications, /type="textarea"/);
+  assert.match(applications, /restoreMaskedConnectionKey\(draft, guideContext\.value\.displayKey, guideContext\.value\.actualKey\)/);
   assert.doesNotMatch(applications, /Authorization: `Bearer/);
   assert.doesNotMatch(applications, /\s+tag(?:\s|>)/);
   assert.doesNotMatch(applications, /fetch\(`\$\{connectionUrls\.value\.apiBaseUrl\}/);
@@ -584,6 +584,15 @@ test("accounts keep one enabled control instead of a duplicate status badge", as
   assert.doesNotMatch(template, /account\.enabled \? t\("已启用"\) : t\("已禁用"\)/);
 });
 
+test("accounts confirm deletes through a dialog and keep modal state fresh", async () => {
+  const accounts = await readFile(new URL("./Accounts.vue", import.meta.url), "utf8");
+
+  assert.match(accounts, /useDialog/);
+  assert.doesNotMatch(accounts, /renderAccountMenuOption|NPopconfirm/);
+  assert.match(accounts, /v-if="accountIsCooling\(account\)"/);
+  assert.match(accounts, /editingAccount\.value = account/);
+});
+
 test("settings expose supported Windows auto-start safely", async () => {
   const settings = await readFile(new URL("./Settings.vue", import.meta.url), "utf8");
   const api = await readFile(new URL("../api/tauri.ts", import.meta.url), "utf8");
@@ -596,5 +605,7 @@ test("settings expose supported Windows auto-start safely", async () => {
   assert.match(settings, /:loading="regenerating"\s+:disabled="saving"/);
   assert.match(settings, /async function handleAutoStartToggle\(newValue: boolean\)/);
   assert.match(settings, /savedConfig\.value/);
+  assert.match(settings, /savedConfig\.value\.gateway_key = config\.value\.gateway_key/);
+  assert.match(settings, /const payload = \{ \.\.\.config\.value \}/);
   assert.match(api, /auto_start_supported: boolean/);
 });

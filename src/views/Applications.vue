@@ -298,8 +298,14 @@
                       {{ copiedTarget === `${activeGuide.id}:${index}` ? t("已复制") : t("复制配置") }}
                     </n-button>
                   </header>
-                  <pre class="snippet-body">{{ snippet.display }}</pre>
-                  <p class="snippet-caption">{{ t("复制内容将包含真实 Key") }}</p>
+                  <n-input
+                    type="textarea"
+                    class="snippet-editor"
+                    :value="snippetDraft(index, snippet)"
+                    :autosize="{ minRows: 5, maxRows: 24 }"
+                    :input-props="{ 'aria-label': snippet.label, spellcheck: 'false' }"
+                    @update:value="updateSnippetDraft(index, $event)"
+                  />
                 </article>
               </div>
             </section>
@@ -323,6 +329,7 @@ import {
   NAlert,
   NButton,
   NIcon,
+  NInput,
   NMenu,
   NPopconfirm,
   NSelect,
@@ -338,6 +345,7 @@ import {
   isGeminiCliBaseUrlAllowed,
   maskConnectionKey,
   resolveConnectionUrls,
+  restoreMaskedConnectionKey,
 } from "./dashboard-connection";
 import {
   APPLICATION_GUIDES,
@@ -372,6 +380,7 @@ const selectedModels = computed<string[]>({
     const applicationId = currentApplication.value;
     if (sameStringArray(selectedModelsByApplication.value[applicationId], value)) return;
     selectedModelsByApplication.value[applicationId] = [...value];
+    clearApplicationDrafts(applicationId);
     const primary = selectedModelByApplication.value[applicationId];
     if (!primary || !value.includes(primary)) {
       selectedModelByApplication.value[applicationId] = value[0] ?? null;
@@ -384,9 +393,11 @@ const selectedModel = computed<string | null>({
     const applicationId = currentApplication.value;
     if ((selectedModelByApplication.value[applicationId] ?? null) === value) return;
     selectedModelByApplication.value[applicationId] = value;
+    clearApplicationDrafts(applicationId);
   },
 });
 const modelValues = ref<Record<string, string>>({});
+const snippetDrafts = ref<Record<string, string>>({});
 
 const serviceConfig = ref({
   gateway_port: 9042,
@@ -559,18 +570,23 @@ async function loadModels() {
           defaultSelectedModels,
           Boolean(guide.multipleModels),
         );
+        let changed = false;
         if (
           guide.multipleModels
           && !sameStringArray(selectedModelsByApplication.value[guide.id], selection.selectedModels)
         ) {
           selectedModelsByApplication.value[guide.id] = selection.selectedModels;
+          changed = true;
         }
         if ((selectedModelByApplication.value[guide.id] ?? null) !== selection.selectedModel) {
           selectedModelByApplication.value[guide.id] = selection.selectedModel;
+          changed = true;
         }
+        if (changed) clearApplicationDrafts(guide.id);
         continue;
       }
       if (guide.id === "claude-desktop") continue;
+      let changed = false;
       for (const field of guide.modelFields) {
         if (!availableIds.includes(modelValues.value[field])) {
           const nextModel = guide.id === "claude-code"
@@ -578,12 +594,15 @@ async function loadModels() {
             : fallbackModel;
           if (modelValues.value[field] !== nextModel) {
             modelValues.value[field] = nextModel;
+            changed = true;
           }
         }
       }
+      if (changed) clearApplicationDrafts(guide.id);
     }
     if (claudeDesktopModels) {
       claudeDesktopDefaults.value = { ...claudeDesktopModels };
+      let changed = false;
       for (const field of CLAUDE_DESKTOP_FIELDS) {
         const current = modelValues.value[field];
         const nextModel = current && availableIds.includes(current)
@@ -591,8 +610,10 @@ async function loadModels() {
           : claudeDesktopModels[field];
         if (current !== nextModel) {
           modelValues.value[field] = nextModel;
+          changed = true;
         }
       }
+      if (changed) clearApplicationDrafts("claude-desktop");
       claudeDesktopModelsLoaded.value = true;
     }
     modelsError.value = errors.join("；");
@@ -640,10 +661,26 @@ function snippetKey(index: number): string {
   return `${activeGuide.value.id}:${index}`;
 }
 
+function snippetDraft(index: number, snippet: { display: string }): string {
+  return snippetDrafts.value[snippetKey(index)] ?? snippet.display;
+}
+
+function updateSnippetDraft(index: number, value: string) {
+  snippetDrafts.value[snippetKey(index)] = value;
+}
+
+function clearApplicationDrafts(applicationId: string) {
+  const prefix = `${applicationId}:`;
+  for (const key of Object.keys(snippetDrafts.value)) {
+    if (key.startsWith(prefix)) delete snippetDrafts.value[key];
+  }
+}
+
 function updateModelField(field: string, value: string | number | null) {
   const nextModel = typeof value === "string" ? value : "";
   if (modelValues.value[field] === nextModel) return;
   modelValues.value[field] = nextModel;
+  clearApplicationDrafts(activeGuide.value.id);
 }
 
 function sameStringArray(left: readonly string[] | undefined, right: readonly string[]): boolean {
@@ -669,6 +706,8 @@ function restoreApplicationDefaults() {
     if (guide.multipleModels) selectedModels.value = [...models];
     selectedModel.value = models[0] ?? null;
   }
+
+  clearApplicationDrafts(guide.id);
 }
 
 async function copySnippet(index: number, snippet: { label: string; display: string; copy: string }) {
@@ -690,7 +729,10 @@ async function copySnippet(index: number, snippet: { label: string; display: str
       return;
     }
   }
-  const value = snippet.copy;
+  const draft = snippetDraft(index, snippet);
+  const value = draft === snippet.display
+    ? snippet.copy
+    : restoreMaskedConnectionKey(draft, guideContext.value.displayKey, guideContext.value.actualKey);
   await copyValue(snippetKey(index), value, snippet.label);
 }
 
@@ -1082,23 +1124,14 @@ onUnmounted(() => {
   text-transform: uppercase;
 }
 
-.snippet-body {
-  margin: 0;
+.snippet-editor {
   padding: 12px;
-  overflow-x: auto;
-  color: var(--ocg-ink);
+}
+
+.snippet-editor :deep(.n-input__textarea-el) {
   font: var(--ocg-font-md)/1.6 "Cascadia Mono", Consolas, monospace;
   tab-size: 2;
   white-space: pre;
-  background: transparent;
-}
-
-.snippet-caption {
-  margin: 0;
-  padding: 6px 12px 10px;
-  color: var(--ocg-subtle);
-  font-size: var(--ocg-font-xs);
-  line-height: 1.5;
 }
 
 @media (max-width: 1023px) {
