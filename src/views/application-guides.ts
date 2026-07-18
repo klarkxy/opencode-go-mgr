@@ -178,7 +178,7 @@ export const APPLICATION_GUIDES = [
   {
     id: "claude-code",
     name: "Claude Code",
-    category: "官方推荐",
+    category: "Claude 兼容",
     protocol: "Anthropic Messages",
     endpointKind: "messages",
     officialUrl: "https://code.claude.com/docs/en/llm-gateway-connect",

@@ -28,6 +28,7 @@ export const esESMessages = {
   "仪表盘": "Panel",
   "账号": "Cuentas",
   "应用": "Aplicaciones",
+  "价格表": "Precios",
   "日志": "Registros",
   "设置": "Ajustes",
   "主题：{theme}": "Tema: {theme}",

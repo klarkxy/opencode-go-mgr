@@ -33,8 +33,13 @@ test("official price multiplier defaults to one and preserves included multiplie
 
 test("pricing catalog refreshes only on explicit action and keeps exact-rate affordances", () => {
   const catalog = readFileSync(new URL("../components/PricingCatalog.vue", import.meta.url), "utf8");
+  const pricing = readFileSync(new URL("./Pricing.vue", import.meta.url), "utf8");
   const settings = readFileSync(new URL("./Settings.vue", import.meta.url), "utf8");
-  assert.match(settings, /<PricingCatalog \/>/);
+  const app = readFileSync(new URL("../App.vue", import.meta.url), "utf8");
+  assert.match(pricing, /<PricingCatalog \/>/);
+  assert.doesNotMatch(settings, /PricingCatalog/);
+  assert.match(app, /<Pricing v-if="activeKey === 'pricing'" \/>/);
+  assert.match(app, /key: "pricing"/);
   assert.match(catalog, /onMounted\(\(\) => void loadPricing\(\)\)/);
   assert.doesNotMatch(catalog, /onMounted\(\(\) => void refreshPricing\(\)\)/);
   assert.match(catalog, /@click="refreshPricing"/);

@@ -192,6 +192,14 @@ test("application catalog has thirteen verified clients and never displays a com
     assert.ok(APPLICATION_GUIDES.some((guide) => guide.id === appId), appId);
   }
 
+  for (const appId of ["claude-code", "claude-desktop"]) {
+    assert.equal(
+      APPLICATION_GUIDES.find((guide) => guide.id === appId)?.category,
+      "Claude 兼容",
+      appId,
+    );
+  }
+
   const actualKey = "ocg-this-is-the-complete-secret-key";
   const urls = resolveConnectionUrls("https://edge.example.com/ocg", "https://ignored", 9042, false);
   const modelValues = {
@@ -564,11 +572,12 @@ test("applications view uses deep-linked subpages and a responsive second naviga
   assert.doesNotMatch(applications, /<code>\{\{ serviceConfig\.gateway_key \}\}<\/code>/);
   assert.match(app, /<main class="app-content">/);
   assert.doesNotMatch(app, /<n-layout-content/);
-  assert.match(app, /dashboard.*accounts.*apps.*logs.*settings/s);
+  assert.match(app, /dashboard.*accounts.*apps.*pricing.*logs.*settings/s);
 });
 
 test("settings expose the downstream display root and bounded request timeouts", async () => {
   const settings = await readFile(new URL("./Settings.vue", import.meta.url), "utf8");
+  const pricing = await readFile(new URL("./Pricing.vue", import.meta.url), "utf8");
   const api = await readFile(new URL("../api/tauri.ts", import.meta.url), "utf8");
   const dashboard = await readFile(new URL("./Dashboard.vue", import.meta.url), "utf8");
 
@@ -601,7 +610,8 @@ test("settings expose the downstream display root and bounded request timeouts",
   assert.match(api, /non_stream_timeout_secs: number/);
   assert.match(api, /stream_idle_timeout_secs: number/);
   assert.doesNotMatch(dashboard, /ref<AppConfig>/);
-  assert.match(settings, /<PricingCatalog \/>/);
+  assert.doesNotMatch(settings, /PricingCatalog/);
+  assert.match(pricing, /<PricingCatalog \/>/);
   assert.match(api, /getPricing: \(\) => request<PricingSnapshot>\("\/pricing"\)/);
   assert.match(api, /refreshPricing: \(\) => request<PricingRefreshResult>\("\/pricing\/refresh", \{ method: "POST" \}\)/);
 });

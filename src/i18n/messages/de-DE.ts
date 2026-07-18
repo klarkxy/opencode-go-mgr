@@ -28,6 +28,7 @@ export const deDEMessages = {
   "仪表盘": "Dashboard",
   "账号": "Konten",
   "应用": "Anwendungen",
+  "价格表": "Preistabelle",
   "日志": "Protokolle",
   "设置": "Einstellungen",
   "主题：{theme}": "Design: {theme}",

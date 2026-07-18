@@ -154,6 +154,7 @@
             <KeepAlive>
               <Applications v-if="activeKey === 'apps'" />
             </KeepAlive>
+            <Pricing v-if="activeKey === 'pricing'" />
             <Logs v-if="activeKey === 'logs'" />
             <Settings
               v-if="activeKey === 'settings'"
@@ -197,6 +198,7 @@ import {
   BgColorsOutlined,
   CheckOutlined,
   DashboardOutlined,
+  DollarCircleOutlined,
   FileTextOutlined,
   KeyOutlined,
   LogoutOutlined,
@@ -218,12 +220,13 @@ import {
 } from "./theme";
 import type { ThemeName } from "./theme";
 
-type ViewKey = "dashboard" | "accounts" | "apps" | "logs" | "settings";
+type ViewKey = "dashboard" | "accounts" | "apps" | "pricing" | "logs" | "settings";
 
 const viewConfig: Record<ViewKey, MessageKey> = {
   dashboard: "仪表盘",
   accounts: "账号",
   apps: "应用",
+  pricing: "价格表",
   logs: "日志",
   settings: "设置",
 };
@@ -232,6 +235,7 @@ const views = new Set<ViewKey>(Object.keys(viewConfig) as ViewKey[]);
 const Dashboard = defineAsyncComponent(() => import("./views/Dashboard.vue"));
 const Accounts = defineAsyncComponent(() => import("./views/Accounts.vue"));
 const Applications = defineAsyncComponent(() => import("./views/Applications.vue"));
+const Pricing = defineAsyncComponent(() => import("./views/Pricing.vue"));
 const Logs = defineAsyncComponent(() => import("./views/Logs.vue"));
 const Settings = defineAsyncComponent(() => import("./views/Settings.vue"));
 
@@ -268,6 +272,7 @@ const menuOptions = computed(() => [
   { label: t("仪表盘"), key: "dashboard", icon: renderIcon(DashboardOutlined) },
   { label: t("账号"), key: "accounts", icon: renderIcon(KeyOutlined) },
   { label: t("应用"), key: "apps", icon: renderIcon(AppstoreOutlined) },
+  { label: t("价格表"), key: "pricing", icon: renderIcon(DollarCircleOutlined) },
   { label: t("日志"), key: "logs", icon: renderIcon(FileTextOutlined) },
   { label: t("设置"), key: "settings", icon: renderIcon(SettingOutlined) },
 ]);

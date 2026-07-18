@@ -28,6 +28,7 @@ export const ptBRMessages = {
   "仪表盘": "Painel",
   "账号": "Contas",
   "应用": "Aplicativos",
+  "价格表": "Preços",
   "日志": "Logs",
   "设置": "Configurações",
   "主题：{theme}": "Tema: {theme}",

@@ -7,6 +7,7 @@ import {
   mergeUsageEdit,
   normalizeUsagePercent,
   usagePercentFromCost,
+  usageProgressPercentage,
   usageProgressStatus,
 } from "./accounts-usage.ts";
 import type { UsageKey } from "./accounts-usage.ts";
@@ -70,13 +71,20 @@ test("keeps generic and overlapping window cooldowns visible", () => {
 });
 
 test("shows local estimated saturation as a warning, not a real breaker", () => {
+  const available = {
+    cooldown_5h_until: null,
+    cooldown_week_until: null,
+    cooldown_month_until: null,
+  };
+  const realWeeklyBreaker = {
+    cooldown_5h_until: null,
+    cooldown_week_until: "2099-01-01T00:00:00Z",
+    cooldown_month_until: null,
+  };
+
   assert.equal(
     usageProgressStatus(
-      {
-        cooldown_5h_until: null,
-        cooldown_week_until: null,
-        cooldown_month_until: null,
-      },
+      available,
       "window_week",
       100,
     ),
@@ -84,16 +92,45 @@ test("shows local estimated saturation as a warning, not a real breaker", () => 
   );
   assert.equal(
     usageProgressStatus(
-      {
-        cooldown_5h_until: null,
-        cooldown_week_until: "2099-01-01T00:00:00Z",
-        cooldown_month_until: null,
-      },
+      realWeeklyBreaker,
       "window_week",
-      100,
+      0,
     ),
     "error",
   );
+  assert.equal(usageProgressPercentage(available, "window_week", 100), 100);
+  assert.equal(usageProgressPercentage(realWeeklyBreaker, "window_week", 0), 100);
+});
+
+test("reserves a reset-countdown row below every quota progress bar", async () => {
+  const source = await readFile(new URL("./Accounts.vue", import.meta.url), "utf8");
+  const progress = source.indexOf(":percentage=\"usageProgressPercentage(");
+  const countdown = source.indexOf("<span class=\"usage-reset-countdown\">");
+
+  assert.ok(progress >= 0);
+  assert.ok(countdown > progress);
+  assert.match(source, /\.usage-reset-countdown \{\s+min-height: 1\.4em;/);
+});
+
+test("keeps account cards compact with metadata tags and top-level usage calibration", async () => {
+  const source = await readFile(new URL("./Accounts.vue", import.meta.url), "utf8");
+  const header = source.slice(
+    source.indexOf("<template #header>"),
+    source.indexOf('<div v-if="quotaLimitsError"'),
+  );
+  const usage = source.slice(
+    source.indexOf('<div v-else class="usage-strip">'),
+    source.indexOf("</n-card>"),
+  );
+
+  assert.ok(header.indexOf("accountStatusLabel(account)") < header.indexOf('t("购买于 {date}"'));
+  assert.match(header, /<n-tag size="small" :bordered="false">\s+\{\{ t\("购买于 \{date\}"/);
+  assert.match(header, /<n-tag size="small" :bordered="false">\s+\{\{ t\("到期于 \{date\}"/);
+  assert.match(header, /:aria-label="t\('校准用量'\)"/);
+  assert.doesNotMatch(usage, /usage-strip-title|\{\{ t\("用量"\) \}\}/);
+  assert.match(usage, /class="usage-strip-body" role="group" :aria-label="t\('用量'\)"/);
+  assert.doesNotMatch(source, /class="account-lifecycle"|\.account-lifecycle\s*\{/);
+  assert.match(source, /key: "edit", label: t\("编辑账号"\)/);
 });
 
 test("normalizes manually entered percentages to the supported range and precision", () => {

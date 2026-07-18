@@ -328,8 +328,6 @@
         </div>
       </section>
     </div>
-
-    <PricingCatalog />
   </div>
 </template>
 
@@ -364,7 +362,6 @@ import { THEME_OPTIONS } from "../theme";
 import type { ResolvedTheme, ThemeName } from "../theme";
 import { t } from "../i18n/index.ts";
 import type { MessageKey } from "../i18n/index.ts";
-import PricingCatalog from "../components/PricingCatalog.vue";
 import { useClipboard } from "../utils/format.ts";
 import {
   maskConnectionKey,

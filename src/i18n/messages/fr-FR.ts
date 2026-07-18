@@ -28,6 +28,7 @@ export const frFRMessages = {
   "仪表盘": "Tableau de bord",
   "账号": "Comptes",
   "应用": "Applications",
+  "价格表": "Tarifs",
   "日志": "Journaux",
   "设置": "Paramètres",
   "主题：{theme}": "Thème : {theme}",

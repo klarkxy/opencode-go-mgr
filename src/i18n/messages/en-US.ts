@@ -26,6 +26,7 @@ export const enUSMessages = {
   "仪表盘": "Dashboard",
   "账号": "Accounts",
   "应用": "Applications",
+  "价格表": "Pricing",
   "日志": "Logs",
   "设置": "Settings",
   "主题：{theme}": "Theme: {theme}",

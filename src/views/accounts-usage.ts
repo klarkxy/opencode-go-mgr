@@ -74,7 +74,17 @@ export function usageProgressStatus(
   account: Pick<Account, "cooldown_5h_until" | "cooldown_week_until" | "cooldown_month_until">,
   key: UsageKey,
   percent: number,
+  now = Date.now(),
 ): "success" | "warning" | "error" {
-  if (isUsageLimitReached(account, key)) return "error";
+  if (isUsageLimitReached(account, key, now)) return "error";
   return percent >= 80 ? "warning" : "success";
+}
+
+export function usageProgressPercentage(
+  account: Pick<Account, "cooldown_5h_until" | "cooldown_week_until" | "cooldown_month_until">,
+  key: UsageKey,
+  percent: number,
+  now = Date.now(),
+): number {
+  return isUsageLimitReached(account, key, now) ? 100 : normalizeUsagePercent(percent);
 }
