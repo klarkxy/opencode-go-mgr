@@ -1,5 +1,10 @@
 <template>
   <div class="applications">
+    <header class="page-header">
+      <h1>{{ t("应用接入") }}</h1>
+      <p>{{ t("选择客户端，复制接入配置即可使用") }}</p>
+    </header>
+
     <div class="application-layout">
       <aside class="application-sider">
         <nav class="application-nav" :aria-label="t('选择下游应用')">
@@ -24,147 +29,174 @@
           </div>
 
           <section class="connection-panel" aria-labelledby="connection-panel-title">
-            <div class="connection-head">
-              <div>
-                <h2 id="connection-panel-title">{{ t("当前节点接入轨") }}</h2>
-              </div>
-              <n-tag v-if="settingsLoaded" type="success" :bordered="false">{{ t("已同步设置") }}</n-tag>
-              <n-tag v-else-if="settingsLoading" :bordered="false">{{ t("正在读取设置") }}</n-tag>
-              <n-tag v-else type="error" :bordered="false">{{ t("读取失败") }}</n-tag>
-            </div>
+            <h2 id="connection-panel-title" class="connection-panel-title">
+              {{ t("接入信息") }}
+            </h2>
 
-            <div class="connection-track">
-              <article class="connection-stage">
-                <span>{{ t("ROOT") }}</span>
-                <div class="connection-value">
-                  <code>{{ connectionUrls.rootUrl }}</code>
+            <div class="connection-zones">
+              <div class="connection-zone">
+                <h3 class="zone-caption">{{ t("节点信息") }}</h3>
+                <div class="connection-track">
+                  <article class="connection-stage">
+                    <span>{{ t("服务地址") }}</span>
+                    <div class="connection-value">
+                      <code>{{ connectionUrls.rootUrl }}</code>
+                      <n-button
+                        circle
+                        quaternary
+                        :aria-label="t('复制 {label}', { label: t('服务地址') })"
+                        :disabled="!settingsLoaded"
+                        @click="copyValue('root', connectionUrls.rootUrl, t('服务地址'))"
+                      >
+                        <template #icon>
+                          <n-icon :component="copiedTarget === 'root' ? CheckOutlined : CopyOutlined" />
+                        </template>
+                      </n-button>
+                    </div>
+                  </article>
+                  <article class="connection-stage">
+                    <span>{{ t("API 地址") }}</span>
+                    <div class="connection-value">
+                      <code>{{ connectionUrls.apiBaseUrl }}</code>
+                      <n-button
+                        circle
+                        quaternary
+                        :aria-label="t('复制 {label}', { label: t('API 地址') })"
+                        :disabled="!settingsLoaded"
+                        @click="copyValue('api', connectionUrls.apiBaseUrl, t('API 地址'))"
+                      >
+                        <template #icon>
+                          <n-icon :component="copiedTarget === 'api' ? CheckOutlined : CopyOutlined" />
+                        </template>
+                      </n-button>
+                    </div>
+                  </article>
+                  <article v-if="serviceConfig.upstream_base_url" class="connection-stage">
+                    <span>{{ t("上游地址") }}</span>
+                    <div class="connection-value">
+                      <code>{{ serviceConfig.upstream_base_url }}</code>
+                      <n-button
+                        circle
+                        quaternary
+                        :aria-label="t('复制 {label}', { label: t('上游地址') })"
+                        :disabled="!settingsLoaded"
+                        @click="copyValue('upstream', serviceConfig.upstream_base_url, t('上游地址'))"
+                      >
+                        <template #icon>
+                          <n-icon :component="copiedTarget === 'upstream' ? CheckOutlined : CopyOutlined" />
+                        </template>
+                      </n-button>
+                    </div>
+                  </article>
+                </div>
+
+                <div class="key-row">
+                  <span>{{ t("Key") }}</span>
+                  <code>{{ maskedKey }}</code>
                   <n-button
                     circle
                     quaternary
-                    :aria-label="t('复制根地址')"
-                    :disabled="!settingsLoaded"
-                    @click="copyValue('root', connectionUrls.rootUrl, t('根地址'))"
+                    :aria-label="t('复制 Key')"
+                    :disabled="!settingsLoaded || !serviceConfig.gateway_key"
+                    @click="copyValue('key', serviceConfig.gateway_key, t('Key'))"
                   >
                     <template #icon>
-                      <n-icon :component="copiedTarget === 'root' ? CheckOutlined : CopyOutlined" />
+                      <n-icon :component="copiedTarget === 'key' ? CheckOutlined : CopyOutlined" />
                     </template>
                   </n-button>
                 </div>
-              </article>
-              <article class="connection-stage">
-                <span>{{ t("API BASE") }}</span>
-                <div class="connection-value">
-                  <code>{{ connectionUrls.apiBaseUrl }}</code>
-                  <n-button
-                    circle
-                    quaternary
-                    :aria-label="t('复制 API Base URL')"
-                    :disabled="!settingsLoaded"
-                    @click="copyValue('api', connectionUrls.apiBaseUrl, 'API Base URL')"
-                  >
-                    <template #icon>
-                      <n-icon :component="copiedTarget === 'api' ? CheckOutlined : CopyOutlined" />
-                    </template>
-                  </n-button>
-                </div>
-              </article>
-              <article class="connection-stage">
-                <span>{{ activeEndpoint.label }}</span>
-                <div class="connection-value">
-                  <code>{{ activeEndpoint.url }}</code>
-                  <n-button
-                    circle
-                    quaternary
-                    :aria-label="t('复制 {label}', { label: activeEndpoint.label })"
-                    :disabled="!settingsLoaded"
-                    @click="copyValue('endpoint', activeEndpoint.url, activeEndpoint.label)"
-                  >
-                    <template #icon>
-                      <n-icon :component="copiedTarget === 'endpoint' ? CheckOutlined : CopyOutlined" />
-                    </template>
-                  </n-button>
-                </div>
-              </article>
-            </div>
-
-            <div class="key-row">
-              <span>{{ t("GATEWAY KEY") }}</span>
-              <code>{{ maskedKey }}</code>
-              <n-button
-                circle
-                quaternary
-                :aria-label="t('复制 Gateway Key')"
-                :disabled="!settingsLoaded || !serviceConfig.gateway_key"
-                @click="copyValue('key', serviceConfig.gateway_key, 'Gateway Key')"
-              >
-                <template #icon>
-                  <n-icon :component="copiedTarget === 'key' ? CheckOutlined : CopyOutlined" />
-                </template>
-              </n-button>
-            </div>
-
-            <div class="model-row">
-              <div class="model-row-head">
-                <strong>{{ t("模型") }}</strong>
-                <n-button
-                  size="small"
-                  secondary
-                  :loading="modelsLoading"
-                  :disabled="!settingsLoaded
-                    || (activeGuide.id === 'claude-desktop'
-                      ? !claudeDesktopModelsLoaded
-                      : applicationModelIds.length === 0)"
-                  @click="restoreApplicationDefaults"
-                >
-                  {{ t("恢复默认") }}
-                </n-button>
               </div>
-              <div
-                class="model-controls"
-                :class="{ 'model-controls--single': !activeGuide.multipleModels && !activeGuide.modelFields }"
-              >
-                <template v-if="activeGuide.modelFields">
-                  <label v-for="field in activeGuide.modelFields" :key="field" class="model-field">
-                    <span>{{ field }}</span>
-                    <n-select
-                      :value="modelValues[field]"
-                      :options="modelOptions"
+
+              <div class="connection-zone connection-zone--app">
+                <h3 class="zone-caption">{{ t("当前应用配置") }}</h3>
+                <div class="connection-track endpoint-track">
+                  <article class="connection-stage">
+                    <span>{{ t("请求地址") }}</span>
+                    <div class="connection-value">
+                      <code>{{ activeEndpoint.url }}</code>
+                      <n-button
+                        circle
+                        quaternary
+                        :aria-label="t('复制 {label}', { label: t('请求地址') })"
+                        :disabled="!settingsLoaded"
+                        @click="copyValue('endpoint', activeEndpoint.url, t('请求地址'))"
+                      >
+                        <template #icon>
+                          <n-icon :component="copiedTarget === 'endpoint' ? CheckOutlined : CopyOutlined" />
+                        </template>
+                      </n-button>
+                    </div>
+                  </article>
+                </div>
+
+                <div class="model-row">
+                  <div class="model-row-head">
+                    <span class="model-label">{{ t("模型") }}</span>
+                    <n-button
+                      text
+                      size="small"
                       :loading="modelsLoading"
-                      :disabled="!settingsLoaded || (activeGuide.id === 'claude-desktop' && !claudeDesktopModelsLoaded)"
-                      :placeholder="t('选择模型 ID')"
-                      filterable
-                      @update:value="updateModelField(field, $event)"
-                    />
-                  </label>
-                </template>
-                <template v-else>
-                  <label v-if="activeGuide.multipleModels" class="model-field">
-                    <span>models</span>
-                    <n-select
-                      v-model:value="selectedModels"
-                      :options="modelOptions"
-                      :loading="modelsLoading"
-                      :disabled="!settingsLoaded"
-                      :placeholder="t('选择模型 ID')"
-                      max-tag-count="responsive"
-                      multiple
-                      filterable
-                    />
-                  </label>
-                  <label class="model-field">
-                    <span>model</span>
-                    <n-select
-                      v-model:value="selectedModel"
-                      :options="primaryModelOptions"
-                      :loading="modelsLoading"
-                      :disabled="!settingsLoaded"
-                      :placeholder="t('选择模型 ID')"
-                      filterable
-                    />
-                  </label>
-                </template>
+                      :disabled="!settingsLoaded
+                        || (activeGuide.id === 'claude-desktop'
+                          ? !claudeDesktopModelsLoaded
+                          : applicationModelIds.length === 0)"
+                      @click="restoreApplicationDefaults"
+                    >
+                      {{ t("恢复推荐模型") }}
+                    </n-button>
+                  </div>
+                  <div
+                    class="model-controls"
+                    :class="{ 'model-controls--single': !activeGuide.multipleModels && !activeGuide.modelFields }"
+                  >
+                    <template v-if="activeGuide.modelFields">
+                      <label v-for="field in activeGuide.modelFields" :key="field" class="model-field">
+                        <span>{{ field }}</span>
+                        <n-select
+                          :value="modelValues[field]"
+                          :options="modelOptions"
+                          :loading="modelsLoading"
+                          :disabled="!settingsLoaded || (activeGuide.id === 'claude-desktop' && !claudeDesktopModelsLoaded)"
+                          :placeholder="t('选择模型 ID')"
+                          filterable
+                          @update:value="updateModelField(field, $event)"
+                        />
+                      </label>
+                    </template>
+                    <template v-else>
+                      <label v-if="activeGuide.multipleModels" class="model-field">
+                        <span>models</span>
+                        <n-select
+                          v-model:value="selectedModels"
+                          :options="modelOptions"
+                          :loading="modelsLoading"
+                          :disabled="!settingsLoaded"
+                          :placeholder="t('选择模型 ID')"
+                          max-tag-count="responsive"
+                          multiple
+                          filterable
+                        />
+                      </label>
+                      <label class="model-field">
+                        <span>model</span>
+                        <n-select
+                          v-model:value="selectedModel"
+                          :options="primaryModelOptions"
+                          :loading="modelsLoading"
+                          :disabled="!settingsLoaded"
+                          :placeholder="t('选择模型 ID')"
+                          filterable
+                        />
+                      </label>
+                    </template>
+                  </div>
+                </div>
               </div>
             </div>
+
+            <p v-if="copyDisabledHint" class="copy-disabled-hint">
+              {{ copyDisabledHint }}
+            </p>
           </section>
 
           <n-alert v-if="settingsError" type="error" :title="t('节点设置加载失败')">
@@ -183,7 +215,7 @@
             type="warning"
             :title="t('当前使用非本机 HTTP 地址')"
           >
-            {{ t("Gateway Key 与请求内容会以明文传输。仅在可信局域网内使用，公网接入请配置 HTTPS。") }}
+            {{ t("Key 与请求内容会以明文传输。仅在可信局域网内使用，公网接入请配置 HTTPS。") }}
           </n-alert>
           <n-alert
             v-if="activeGuide.id === 'gemini-cli' && !geminiCliBaseUrlAllowed"
@@ -229,7 +261,7 @@
                       {{ t(action.label) }}
                     </n-button>
                   </template>
-                  {{ t("即将把当前 Gateway Key 交给 {app}。", { app: activeGuide.name }) }}
+                  {{ t("即将把当前 Key 交给 {app}。", { app: activeGuide.name }) }}
                 </n-popconfirm>
               </template>
             </div>
@@ -266,14 +298,8 @@
                       {{ copiedTarget === `${activeGuide.id}:${index}` ? t("已复制") : t("复制配置") }}
                     </n-button>
                   </header>
-                  <n-input
-                    type="textarea"
-                    class="snippet-editor"
-                    :value="snippetDraft(index, snippet)"
-                    :autosize="{ minRows: 5, maxRows: 24 }"
-                    :input-props="{ 'aria-label': snippet.label, spellcheck: 'false' }"
-                    @update:value="updateSnippetDraft(index, $event)"
-                  />
+                  <pre class="snippet-body">{{ snippet.display }}</pre>
+                  <p class="snippet-caption">{{ t("复制内容将包含真实 Key") }}</p>
                 </article>
               </div>
             </section>
@@ -297,14 +323,13 @@ import {
   NAlert,
   NButton,
   NIcon,
-  NInput,
   NMenu,
   NPopconfirm,
   NSelect,
   NTag,
   useMessage,
 } from "naive-ui";
-import type { MenuOption, SelectOption } from "naive-ui";
+import type { MenuOption, SelectGroupOption, SelectOption } from "naive-ui";
 import { CheckOutlined, CopyOutlined, ExportOutlined } from "@vicons/antd";
 import logoUrl from "../../assets/logo/ocg_logo_final_transparent.png";
 import { tauriApi, type ClaudeDesktopModels } from "../api/tauri";
@@ -313,7 +338,6 @@ import {
   isGeminiCliBaseUrlAllowed,
   maskConnectionKey,
   resolveConnectionUrls,
-  restoreMaskedConnectionKey,
 } from "./dashboard-connection";
 import {
   APPLICATION_GUIDES,
@@ -322,7 +346,7 @@ import {
   reconcileApplicationModelSelection,
 } from "./application-guides";
 import type { ApplicationGuide, ApplicationId, GuideAction, GuideContext } from "./application-guides";
-import { t } from "../i18n/index.ts";
+import { t, type MessageKey } from "../i18n/index.ts";
 
 const DEFAULT_APPLICATION: ApplicationId = "claude-code";
 const CLAUDE_DESKTOP_FIELDS = ["sonnet", "opus", "haiku"] as const;
@@ -352,7 +376,6 @@ const selectedModels = computed<string[]>({
     if (!primary || !value.includes(primary)) {
       selectedModelByApplication.value[applicationId] = value[0] ?? null;
     }
-    clearApplicationDrafts(applicationId);
   },
 });
 const selectedModel = computed<string | null>({
@@ -361,16 +384,15 @@ const selectedModel = computed<string | null>({
     const applicationId = currentApplication.value;
     if ((selectedModelByApplication.value[applicationId] ?? null) === value) return;
     selectedModelByApplication.value[applicationId] = value;
-    clearApplicationDrafts(applicationId);
   },
 });
 const modelValues = ref<Record<string, string>>({});
-const snippetDrafts = ref<Record<string, string>>({});
 
 const serviceConfig = ref({
   gateway_port: 9042,
   gateway_key: "",
   client_root_url: "",
+  upstream_base_url: "",
 });
 
 const applicationGuides: readonly ApplicationGuide[] = APPLICATION_GUIDES;
@@ -378,14 +400,39 @@ const activeGuide = computed<ApplicationGuide>(() => (
   applicationGuides.find((guide) => guide.id === currentApplication.value)
   ?? applicationGuides[0]
 ));
-const applicationMenuOptions = computed<MenuOption[]>(() => applicationGuides.map((guide) => ({
-  key: guide.id,
-  label: guide.name,
-})));
-const applicationSelectOptions = computed<SelectOption[]>(() => applicationGuides.map((guide) => ({
-  value: guide.id,
-  label: guide.name,
-})));
+function groupGuidesByCategory(guides: readonly ApplicationGuide[]) {
+  const groups = new Map<string, ApplicationGuide[]>();
+  for (const guide of guides) {
+    const list = groups.get(guide.category) ?? [];
+    list.push(guide);
+    groups.set(guide.category, list);
+  }
+  return [...groups.entries()];
+}
+const applicationMenuOptions = computed<MenuOption[]>(() => {
+  const groups = groupGuidesByCategory(applicationGuides);
+  return groups.map(([category, guides]) => ({
+    type: "group",
+    label: t(category as MessageKey),
+    key: `group:${category}`,
+    children: guides.map((guide) => ({
+      key: guide.id,
+      label: guide.name,
+    })),
+  }));
+});
+const applicationSelectOptions = computed<(SelectOption | SelectGroupOption)[]>(() => {
+  const groups = groupGuidesByCategory(applicationGuides);
+  return groups.map(([category, guides]) => ({
+    type: "group",
+    label: t(category as MessageKey),
+    key: `group:${category}`,
+    children: guides.map((guide) => ({
+      value: guide.id,
+      label: guide.name,
+    })),
+  }));
+});
 const primaryModelOptions = computed<SelectOption[]>(() => (
   activeGuide.value.multipleModels
     ? modelOptions.value.filter(({ value }) => typeof value === "string" && selectedModels.value.includes(value))
@@ -430,18 +477,22 @@ const activeEndpoint = computed(() => {
     const url = activeGuide.value.id === "claude-desktop"
       ? `${connectionUrls.value.rootUrl}/claude-desktop/v1/messages`
       : connectionUrls.value.messagesUrl;
-    return { label: t("MESSAGES ENDPOINT"), url };
+    return { url };
   }
   if (activeGuide.value.endpointKind === "responses") {
-    return { label: t("RESPONSES ENDPOINT"), url: connectionUrls.value.responsesUrl };
+    return { url: connectionUrls.value.responsesUrl };
   }
   if (activeGuide.value.endpointKind === "gemini") {
     return {
-      label: "GENERATE CONTENT",
       url: `${connectionUrls.value.rootUrl}/v1beta/models/${guideContext.value.modelId}:generateContent`,
     };
   }
-  return { label: t("CHAT ENDPOINT"), url: connectionUrls.value.chatCompletionsUrl };
+  return { url: connectionUrls.value.chatCompletionsUrl };
+});
+const copyDisabledHint = computed(() => {
+  if (!settingsLoaded.value) return t("设置加载完成后可复制");
+  if (modelsLoading.value) return t("模型加载完成后可复制");
+  return "";
 });
 
 function readApplication(): ApplicationId {
@@ -508,23 +559,18 @@ async function loadModels() {
           defaultSelectedModels,
           Boolean(guide.multipleModels),
         );
-        let changed = false;
         if (
           guide.multipleModels
           && !sameStringArray(selectedModelsByApplication.value[guide.id], selection.selectedModels)
         ) {
           selectedModelsByApplication.value[guide.id] = selection.selectedModels;
-          changed = true;
         }
         if ((selectedModelByApplication.value[guide.id] ?? null) !== selection.selectedModel) {
           selectedModelByApplication.value[guide.id] = selection.selectedModel;
-          changed = true;
         }
-        if (changed) clearApplicationDrafts(guide.id);
         continue;
       }
       if (guide.id === "claude-desktop") continue;
-      let changed = false;
       for (const field of guide.modelFields) {
         if (!availableIds.includes(modelValues.value[field])) {
           const nextModel = guide.id === "claude-code"
@@ -532,15 +578,12 @@ async function loadModels() {
             : fallbackModel;
           if (modelValues.value[field] !== nextModel) {
             modelValues.value[field] = nextModel;
-            changed = true;
           }
         }
       }
-      if (changed) clearApplicationDrafts(guide.id);
     }
     if (claudeDesktopModels) {
       claudeDesktopDefaults.value = { ...claudeDesktopModels };
-      let changed = false;
       for (const field of CLAUDE_DESKTOP_FIELDS) {
         const current = modelValues.value[field];
         const nextModel = current && availableIds.includes(current)
@@ -548,10 +591,8 @@ async function loadModels() {
           : claudeDesktopModels[field];
         if (current !== nextModel) {
           modelValues.value[field] = nextModel;
-          changed = true;
         }
       }
-      if (changed) clearApplicationDrafts("claude-desktop");
       claudeDesktopModelsLoaded.value = true;
     }
     modelsError.value = errors.join("；");
@@ -571,6 +612,7 @@ async function loadSettings(loadApplicationModels = true) {
       gateway_port: settings.gateway_port,
       gateway_key: settings.gateway_key,
       client_root_url: settings.client_root_url,
+      upstream_base_url: settings.upstream_base_url || "",
     };
     settingsLoaded.value = true;
     if (loadApplicationModels) await loadModels();
@@ -598,32 +640,16 @@ function snippetKey(index: number): string {
   return `${activeGuide.value.id}:${index}`;
 }
 
-function snippetDraft(index: number, snippet: { display: string }): string {
-  return snippetDrafts.value[snippetKey(index)] ?? snippet.display;
-}
-
-function updateSnippetDraft(index: number, value: string) {
-  snippetDrafts.value[snippetKey(index)] = value;
-}
-
 function updateModelField(field: string, value: string | number | null) {
   const nextModel = typeof value === "string" ? value : "";
   if (modelValues.value[field] === nextModel) return;
   modelValues.value[field] = nextModel;
-  clearApplicationDrafts(activeGuide.value.id);
 }
 
 function sameStringArray(left: readonly string[] | undefined, right: readonly string[]): boolean {
   if (!left) return false;
   return left.length === right.length
     && left.every((value, index) => value === right[index]);
-}
-
-function clearApplicationDrafts(applicationId: string) {
-  const prefix = `${applicationId}:`;
-  for (const key of Object.keys(snippetDrafts.value)) {
-    if (key.startsWith(prefix)) delete snippetDrafts.value[key];
-  }
 }
 
 function restoreApplicationDefaults() {
@@ -643,8 +669,6 @@ function restoreApplicationDefaults() {
     if (guide.multipleModels) selectedModels.value = [...models];
     selectedModel.value = models[0] ?? null;
   }
-
-  clearApplicationDrafts(guide.id);
 }
 
 async function copySnippet(index: number, snippet: { label: string; display: string; copy: string }) {
@@ -666,10 +690,7 @@ async function copySnippet(index: number, snippet: { label: string; display: str
       return;
     }
   }
-  const draft = snippetDraft(index, snippet);
-  const value = draft === snippet.display
-    ? snippet.copy
-    : restoreMaskedConnectionKey(draft, guideContext.value.displayKey, guideContext.value.actualKey);
+  const value = snippet.copy;
   await copyValue(snippetKey(index), value, snippet.label);
 }
 
@@ -709,6 +730,23 @@ onUnmounted(() => {
   margin: 0 auto;
 }
 
+.page-header {
+  margin-bottom: 24px;
+}
+
+.page-header h1 {
+  margin: 0;
+  color: var(--ocg-ink);
+  font: 700 var(--ocg-font-xl)/1.3 "Bahnschrift", "Segoe UI Variable Display", sans-serif;
+}
+
+.page-header p {
+  margin: 8px 0 0;
+  color: var(--ocg-muted);
+  font-size: var(--ocg-font-md);
+  line-height: 1.6;
+}
+
 .application-layout {
   display: grid;
   grid-template-columns: 220px minmax(0, 1fr);
@@ -745,17 +783,6 @@ onUnmounted(() => {
   display: none;
 }
 
-.connection-head,
-.guide-head,
-.guide-title-row,
-.connection-value,
-.key-row,
-.snippet-card > header,
-.model-row {
-  display: flex;
-  align-items: center;
-}
-
 .connection-panel {
   min-width: 0;
   padding: 16px;
@@ -765,26 +792,56 @@ onUnmounted(() => {
   box-shadow: var(--ocg-shadow-sm);
 }
 
-.connection-head {
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 12px;
+.connection-panel-title {
+  margin: 0 0 16px;
+  color: var(--ocg-ink);
+  font: 700 var(--ocg-font-lg)/1.3 "Bahnschrift", "Segoe UI Variable Display", sans-serif;
 }
 
-.connection-head h2 {
+.connection-zones {
+  display: grid;
+  gap: 16px;
+}
+
+.connection-zone {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.connection-zone--app {
+  padding-top: 16px;
+  border-top: 1px solid var(--ocg-divider);
+}
+
+.zone-caption {
   margin: 0;
-  color: var(--ocg-ink);
-  font: 700 18px/1.3 "Bahnschrift", "Segoe UI Variable Display", sans-serif;
+  color: var(--ocg-subtle);
+  font-size: var(--ocg-font-xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.connection-track,
+.guide-head,
+.guide-title-row,
+.connection-value,
+.key-row,
+.upstream-row,
+.snippet-card > header,
+.model-row {
+  display: flex;
+  align-items: center;
 }
 
 .connection-track {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 28px;
 }
 
 .connection-stage {
   position: relative;
+  flex: 1 1 0;
   min-width: 0;
   padding: 12px;
   border: 1px solid var(--ocg-border);
@@ -802,11 +859,12 @@ onUnmounted(() => {
 }
 
 .connection-stage > span,
-.key-row > span {
+.key-row > span,
+.upstream-row > span {
   display: block;
   margin-bottom: 5px;
   color: var(--ocg-subtle);
-  font: 700 16px/1.2 "Cascadia Mono", Consolas, monospace;
+  font: 700 var(--ocg-font-sm)/1.2 "Cascadia Mono", Consolas, monospace;
   letter-spacing: 0.04em;
 }
 
@@ -816,11 +874,12 @@ onUnmounted(() => {
 }
 
 .connection-value code,
-.key-row code {
+.key-row code,
+.upstream-row code {
   min-width: 0;
   overflow: hidden;
   color: var(--ocg-ink);
-  font: 16px/1.5 "Cascadia Mono", Consolas, monospace;
+  font: var(--ocg-font-md)/1.5 "Cascadia Mono", Consolas, monospace;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -829,19 +888,27 @@ onUnmounted(() => {
   flex: 1 1 auto;
 }
 
-.key-row {
+.key-row,
+.upstream-row {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 10px;
-  margin-top: 10px;
   padding: 10px 12px;
   border-radius: 10px;
   background: var(--ocg-primary-soft);
 }
 
-.key-row > span {
+.key-row > span,
+.upstream-row > span {
   margin: 0;
   color: var(--ocg-primary);
+}
+
+.copy-disabled-hint {
+  margin: 12px 0 0;
+  color: var(--ocg-subtle);
+  font-size: var(--ocg-font-xs);
+  line-height: 1.5;
 }
 
 .models-error-content {
@@ -855,13 +922,14 @@ onUnmounted(() => {
   align-items: flex-start;
   justify-content: space-between;
   gap: 20px;
-  margin-top: 12px;
   padding-top: 12px;
   border-top: 1px solid var(--ocg-divider);
 }
 
-.model-row strong {
+.model-label {
   color: var(--ocg-ink);
+  font-size: var(--ocg-font-md);
+  font-weight: 700;
 }
 
 .model-row-head {
@@ -892,7 +960,7 @@ onUnmounted(() => {
 
 .model-field > span {
   color: var(--ocg-subtle);
-  font: 14px/1.2 "Cascadia Mono", Consolas, monospace;
+  font: var(--ocg-font-sm)/1.2 "Cascadia Mono", Consolas, monospace;
 }
 
 .model-field :deep(.n-select) {
@@ -921,13 +989,13 @@ onUnmounted(() => {
 .guide-head h1 {
   margin: 0;
   color: var(--ocg-ink);
-  font: 700 24px/1.3 "Bahnschrift", "Segoe UI Variable Display", sans-serif;
+  font: 700 var(--ocg-font-2xl)/1.3 "Bahnschrift", "Segoe UI Variable Display", sans-serif;
 }
 
 .guide-head p {
   margin: 8px 0 0;
   color: var(--ocg-muted);
-  font-size: var(--ocg-font-size);
+  font-size: var(--ocg-font-md);
   line-height: 1.65;
 }
 
@@ -940,7 +1008,7 @@ onUnmounted(() => {
   border: 1px solid var(--ocg-border);
   border-radius: 8px;
   color: var(--ocg-primary);
-  font-size: var(--ocg-font-size);
+  font-size: var(--ocg-font-md);
   font-weight: 650;
   text-decoration: none;
 }
@@ -964,7 +1032,7 @@ onUnmounted(() => {
 .guide-section h2 {
   margin: 0 0 10px;
   color: var(--ocg-ink);
-  font: 700 18px/1.3 "Bahnschrift", "Segoe UI Variable Display", sans-serif;
+  font: 700 var(--ocg-font-lg)/1.3 "Bahnschrift", "Segoe UI Variable Display", sans-serif;
 }
 
 .guide-section ol,
@@ -974,7 +1042,7 @@ onUnmounted(() => {
   margin: 0;
   padding-left: 24px;
   color: var(--ocg-muted);
-  font-size: var(--ocg-font-size);
+  font-size: var(--ocg-font-md);
   line-height: 1.65;
 }
 
@@ -1002,7 +1070,7 @@ onUnmounted(() => {
   min-width: 0;
   overflow: hidden;
   color: var(--ocg-ink);
-  font-size: var(--ocg-font-size);
+  font-size: var(--ocg-font-md);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1010,18 +1078,27 @@ onUnmounted(() => {
 .snippet-card header > span {
   margin-right: auto;
   color: var(--ocg-subtle);
-  font: 16px/1 "Cascadia Mono", Consolas, monospace;
+  font: var(--ocg-font-sm)/1 "Cascadia Mono", Consolas, monospace;
   text-transform: uppercase;
 }
 
-.snippet-editor {
+.snippet-body {
+  margin: 0;
   padding: 12px;
-}
-
-.snippet-editor :deep(.n-input__textarea-el) {
-  font: 16px/1.6 "Cascadia Mono", Consolas, monospace;
+  overflow-x: auto;
+  color: var(--ocg-ink);
+  font: var(--ocg-font-md)/1.6 "Cascadia Mono", Consolas, monospace;
   tab-size: 2;
   white-space: pre;
+  background: transparent;
+}
+
+.snippet-caption {
+  margin: 0;
+  padding: 6px 12px 10px;
+  color: var(--ocg-subtle);
+  font-size: var(--ocg-font-xs);
+  line-height: 1.5;
 }
 
 @media (max-width: 1023px) {
@@ -1039,8 +1116,17 @@ onUnmounted(() => {
 }
 
 @media (max-width: 800px) {
-  .connection-track {
+  .connection-zones {
     grid-template-columns: 1fr;
+  }
+
+  .connection-zone--app {
+    padding-left: 0;
+    border-left: none;
+  }
+
+  .connection-track {
+    flex-direction: column;
     gap: 18px;
   }
 
@@ -1051,6 +1137,10 @@ onUnmounted(() => {
     bottom: -17px;
     transform: translateX(50%);
   }
+
+  .model-controls {
+    width: 100%;
+  }
 }
 
 @media (max-width: 640px) {
@@ -1058,8 +1148,20 @@ onUnmounted(() => {
     gap: 12px;
   }
 
+  .page-header {
+    margin-bottom: 16px;
+  }
+
+  .page-header h1 {
+    font-size: var(--ocg-font-lg);
+  }
+
   .connection-panel {
     padding: 12px;
+  }
+
+  .connection-zones {
+    gap: 12px;
   }
 
   .model-row,

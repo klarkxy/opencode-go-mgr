@@ -466,7 +466,7 @@ test("dashboard and settings keep partial data safe", async () => {
   const app = await readFile(new URL("../App.vue", import.meta.url), "utf8");
 
   assert.match(dashboard, /Promise\.allSettled/);
-  assert.match(settings, /:disabled="!loaded \|\| regenerating \|\| clientRootPreview\.status === 'error'"/);
+  assert.match(settings, /:disabled="!loaded \|\| regenerating \|\| clientRootPreview\.status === 'error'(?: \|\| editingGatewayKey)?"/);
   assert.match(settings, /if \(!loaded\.value\) return/);
   assert.match(settings, /\{\{ maskedSettingsKey \}\}/);
   assert.doesNotMatch(settings, /v-model:value="config\.gateway_key"/);
@@ -510,13 +510,12 @@ test("applications view uses deep-linked subpages and a responsive second naviga
   assert.match(restoreDefaults, /selectedModels\.value = \[\.\.\.models\]/);
   assert.match(restoreDefaults, /selectedModel\.value = models\[0\] \?\? null/);
   assert.match(restoreDefaults, /claudeDesktopDefaults\.value/);
-  assert.match(restoreDefaults, /clearApplicationDrafts\(guide\.id\)/);
-  assert.match(applications, /key\.startsWith\(prefix\)/);
+  assert.doesNotMatch(applications, /snippetDrafts|clearApplicationDrafts/);
   assert.doesNotMatch(restoreDefaults, /loadModels|tauriApi\./);
   assert.match(applications, /tauriApi\.updateClaudeDesktopModels/);
   assert.match(applications, /v-model:value="selectedModels"/);
-  assert.match(applications, /type="textarea"/);
-  assert.match(applications, /restoreMaskedConnectionKey\(draft, guideContext\.value\.displayKey, guideContext\.value\.actualKey\)/);
+  assert.match(applications, /<pre class="snippet-body">/);
+  assert.match(applications, /const value = snippet\.copy/);
   assert.doesNotMatch(applications, /Authorization: `Bearer/);
   assert.doesNotMatch(applications, /\s+tag(?:\s|>)/);
   assert.doesNotMatch(applications, /fetch\(`\$\{connectionUrls\.value\.apiBaseUrl\}/);
@@ -550,7 +549,7 @@ test("settings expose the downstream display root and bounded request timeouts",
   assert.match(settings, /get: \(\) => config\.value\.client_root_url,/);
   assert.match(settings, /:placeholder="config\.client_root_url_from_env \? '' : automaticClientRootUrls\.rootUrl"/);
   assert.doesNotMatch(settings, /config\.value\.client_root_url = resolveConnectionUrls/);
-  assert.match(settings, /非本机 HTTP 会明文传输 Gateway Key 与请求内容/);
+  assert.match(settings, /非本机 HTTP 会明文传输 Key 与请求内容/);
   assert.match(settings, /请求超时/);
   assert.match(settings, /config\.connect_timeout_secs"\s+:min="1"\s+:max="300"\s+:precision="0"/);
   assert.match(settings, /config\.non_stream_timeout_secs"\s+:min="1"\s+:max="3600"\s+:precision="0"/);
@@ -580,10 +579,12 @@ test("settings expose supported Windows auto-start safely", async () => {
   const api = await readFile(new URL("../api/tauri.ts", import.meta.url), "utf8");
 
   assert.match(settings, /v-if="config\.auto_start_supported"/);
-  assert.match(settings, /v-model:value="config\.auto_start"/);
+  assert.match(settings, /:value="config\.auto_start"/);
+  assert.match(settings, /@update:value="handleAutoStartToggle"/);
   assert.match(settings, /:aria-label="t\('随 Windows 登录自动启动 OCG Manager'\)"/);
   assert.match(settings, /:disabled="!loaded \|\| saving \|\| regenerating"/);
   assert.match(settings, /:loading="regenerating"\s+:disabled="saving"/);
-  assert.match(settings, /config\.value\.auto_start = persistedAutoStart/);
+  assert.match(settings, /async function handleAutoStartToggle\(newValue: boolean\)/);
+  assert.match(settings, /savedConfig\.value/);
   assert.match(api, /auto_start_supported: boolean/);
 });

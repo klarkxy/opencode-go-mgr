@@ -1,6 +1,12 @@
 :root {
   color-scheme: light;
-  --ocg-font-size: 16px;
+  /* 字号阶梯：层级由字号 + 字重共同承担，各档用途见 DESIGN.md Typography */
+  --ocg-font-xs: 12px;
+  --ocg-font-sm: 13px;
+  --ocg-font-md: 14px;
+  --ocg-font-lg: 16px;
+  --ocg-font-xl: 20px;
+  --ocg-font-2xl: 24px;
   --ocg-canvas: #f7f7f8;
   --ocg-surface: #ffffff;
   --ocg-surface-raised: #ffffff;
@@ -29,7 +35,7 @@ body,
   height: 100%;
   margin: 0;
   padding: 0;
-  font-size: var(--ocg-font-size);
+  font-size: var(--ocg-font-md);
   line-height: 1.6;
   font-family: "Segoe UI Variable Text", "Noto Sans SC", "Microsoft YaHei UI", sans-serif;
   background: var(--ocg-canvas);

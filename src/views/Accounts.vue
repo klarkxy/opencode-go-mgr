@@ -1,389 +1,281 @@
 <template>
   <div class="accounts-view">
-  <n-space vertical :size="16" class="accounts-content">
-    <n-space justify="space-between" align="center" class="accounts-toolbar">
-      <n-h3 style="margin: 0">{{ t("账号") }}</n-h3>
-      <n-button type="primary" @click="openCreateModal">
-        <template #icon>
-          <n-icon :component="PlusOutlined" />
+    <n-space vertical :size="16" class="accounts-content">
+      <n-space justify="space-between" align="center" class="accounts-toolbar">
+        <n-h3 style="margin: 0">{{ t("账号") }}</n-h3>
+        <n-button type="primary" @click="openCreateModal">
+          <template #icon>
+            <n-icon :component="PlusOutlined" />
+          </template>
+          {{ t("新增账号") }}
+        </n-button>
+      </n-space>
+
+      <span id="account-order-instructions" class="sr-only">
+        {{ t("使用上下方向键调整优先级") }}
+      </span>
+
+      <n-empty v-if="accounts.length === 0" :description="t('暂无账号')">
+        <template #extra>
+          <n-button type="primary" @click="openCreateModal">
+            <template #icon>
+              <n-icon :component="PlusOutlined" />
+            </template>
+            {{ t("新增账号") }}
+          </n-button>
         </template>
-        {{ t("新增账号") }}
-      </n-button>
-    </n-space>
+      </n-empty>
 
-    <span id="account-order-instructions" class="sr-only">
-      {{ t("使用上下方向键调整优先级") }}
-    </span>
-    <n-empty v-if="accounts.length === 0" :description="t('暂无账号')" />
-
-    <div v-if="accounts.length > 0" class="account-list">
-      <n-card
-        v-for="account in accounts"
-        :key="account.id"
-        :data-account-id="account.id"
-        size="small"
-        class="account-card"
-        :class="{
-          'account-card--cooling': accountIsCooling(account),
-          'account-card--dragging': draggingAccountId === account.id,
-        }"
-      >
-      <template #header>
-        <div class="account-title">
-          <n-tooltip trigger="hover">
-            <template #trigger>
-              <n-button
-                circle
-                quaternary
-                size="small"
-                class="account-order-handle"
-                :class="{ 'account-order-handle--dragging': draggingAccountId === account.id }"
-                :disabled="orderSaving || busy || accounts.length < 2"
-                :aria-label="t('拖动调整账号 {name} 的优先级', { name: account.name })"
-                aria-describedby="account-order-instructions"
-                @click.prevent
-                @keydown="handleOrderKeydown($event, account.id)"
-                @pointerdown="startAccountDrag($event, account.id)"
-              >
-                <template #icon><n-icon :component="DragOutlined" /></template>
-              </n-button>
-            </template>
-            {{ t("拖动调整账号 {name} 的优先级", { name: account.name }) }}
-          </n-tooltip>
-          <div class="account-heading">
-            <div class="account-name-row">
-              <span>{{ account.name }}</span>
-              <n-tooltip v-if="accountIsCooling(account)">
-                <template #trigger>
-                  <n-tag type="error" size="small">{{ t("熔断 · 剩 {time}", { time: formatRemaining(account) }) }}</n-tag>
-                </template>
-                {{ cooldownDetails(account) }}
-              </n-tooltip>
-            </div>
-            <div class="account-lifecycle">
-              <span>{{ t("购买于 {date}", { date: account.purchase_date }) }}</span>
-              <span>{{ t("到期于 {date}", { date: account.expires_on }) }}</span>
-              <n-tag :type="accountExpiryTagType(account)" size="small" :bordered="false">
-                {{ accountExpiryLabel(account) }}
-              </n-tag>
-            </div>
-          </div>
-        </div>
-      </template>
-      <template #header-extra>
-        <n-space align="center" :size="8">
-          <n-tooltip trigger="hover">
-            <template #trigger>
-              <n-button
-                circle
-                quaternary
-                size="small"
-                :aria-label="t('测试账号 {name}', { name: account.name })"
-                :loading="pinging[account.id]"
-                @click="pingAccount(account.id)"
-              >
-                <template #icon><n-icon :component="ThunderboltOutlined" /></template>
-              </n-button>
-            </template>
-            {{ t("测试连接") }}
-          </n-tooltip>
-          <n-switch
-            :value="account.enabled"
-            :aria-label="account.enabled ? t('禁用账号 {name}', { name: account.name }) : t('启用账号 {name}', { name: account.name })"
-            @update:value="toggleAccount(account.id)"
-          >
-            <template #checked>{{ t("启用") }}</template>
-            <template #unchecked>{{ t("禁用") }}</template>
-          </n-switch>
-          <n-tooltip trigger="hover">
-            <template #trigger>
-              <n-button
-                circle
-                quaternary
-                size="small"
-                :aria-label="expanded[account.id] ? t('收起账号 {name}', { name: account.name }) : t('展开账号 {name}', { name: account.name })"
-                @click="toggleExpanded(account.id)"
-              >
-                <template #icon>
-                  <n-icon :component="expanded[account.id] ? UpOutlined : DownOutlined" />
-                </template>
-              </n-button>
-            </template>
-            {{ expanded[account.id] ? t("收起") : t("展开") }}
-          </n-tooltip>
-          <n-popconfirm
-            :positive-text="t('删除')"
-            :negative-text="t('取消')"
-            @positive-click="deleteAccount(account.id)"
-          >
-            <template #trigger>
+      <div v-if="accounts.length > 0" class="account-list">
+        <n-card
+          v-for="account in accounts"
+          :key="account.id"
+          :data-account-id="account.id"
+          size="small"
+          class="account-card"
+          :class="{
+            'account-card--cooling': accountIsCooling(account),
+            'account-card--dragging': draggingAccountId === account.id,
+          }"
+        >
+          <template #header>
+            <div class="account-title">
               <n-tooltip trigger="hover">
                 <template #trigger>
                   <n-button
                     circle
                     quaternary
                     size="small"
-                    type="error"
-                    :aria-label="t('删除账号 {name}', { name: account.name })"
+                    class="account-order-handle"
+                    :class="{ 'account-order-handle--dragging': draggingAccountId === account.id }"
+                    :disabled="orderSaving || busy || accounts.length < 2"
+                    :aria-label="t('拖动调整账号 {name} 的优先级', { name: account.name })"
+                    aria-describedby="account-order-instructions"
+                    @click.prevent
+                    @keydown="handleOrderKeydown($event, account.id)"
+                    @pointerdown="startAccountDrag($event, account.id)"
                   >
-                    <template #icon><n-icon :component="DeleteOutlined" /></template>
+                    <template #icon><n-icon :component="HolderOutlined" /></template>
                   </n-button>
                 </template>
-                {{ t("删除账号") }}
+                {{ t("拖动调整账号 {name} 的优先级", { name: account.name }) }}
               </n-tooltip>
-            </template>
-            {{ t("确定删除账号 {name} 吗？", { name: account.name }) }}
-          </n-popconfirm>
-        </n-space>
-      </template>
-
-      <div v-if="usageLoadErrors[account.id]" class="usage-load-error" role="alert">
-        <span>{{ t("用量加载失败") }}</span>
-        <n-button
-          text
-          size="tiny"
-          type="primary"
-          :loading="usageLoading[account.id]"
-          @click="loadAccountUsage(account.id)"
-        >
-          {{ t("重试") }}
-        </n-button>
-      </div>
-      <div v-else class="usage-strip">
-        <div v-for="limit in usageLimits" :key="limit.key" class="usage-segment">
-          <div class="usage-meta">
-            <span>{{ limit.label }}</span>
-            <strong v-if="usageEdits[account.id]">
-              {{ formatCost(usageCost(account.id, limit.key)) }} / {{ formatCost(limit.limit) }}
-            </strong>
-            <span v-if="isWindowCooling(account, limit.key)" class="usage-reset-countdown">
-              {{ t("重置于 {time}", { time: formatWindowRemaining(account, limit.key) }) }}
-            </span>
-          </div>
-          <n-progress
-            v-if="accountUsageLimitReached(account, limit.key)"
-            type="line"
-            :height="8"
-            :percentage="100"
-            status="error"
-            :show-indicator="false"
-          />
-          <template v-else-if="usageEdits[account.id]">
-            <div class="usage-editor">
-              <n-input-number
-                :value="usageEdits[account.id][limit.key].draft"
-                :min="0"
-                :max="100"
-                :step="0.1"
-                :precision="1"
-                size="tiny"
-                :show-button="false"
-                :disabled="usageLoading[account.id] || usageEdits[account.id][limit.key].saving"
-                :status="usageEdits[account.id][limit.key].error ? 'error' : undefined"
-                :input-props="{
-                  'aria-label': t('{name} {period} 当前用量百分比', {
-                    name: account.name,
-                    period: limit.label,
-                  }),
-                }"
-                @update:value="updateUsageDraft(account.id, limit.key, $event)"
-                @blur="saveUsage(account.id, limit.key)"
-                @keydown.enter.prevent="saveUsage(account.id, limit.key)"
-              >
-                <template #suffix>%</template>
-              </n-input-number>
-              <n-slider
-                v-usage-slider-label="t('{name} {period} 当前用量百分比', {
-                  name: account.name,
-                  period: limit.label,
-                })"
-                :value="usageEdits[account.id][limit.key].draft"
-                :min="0"
-                :max="100"
-                :step="0.1"
-                :disabled="usageLoading[account.id] || usageEdits[account.id][limit.key].saving"
-                @update:value="updateUsageDraft(account.id, limit.key, $event)"
-                @dragend="saveUsage(account.id, limit.key)"
-                @focusout="saveUsage(account.id, limit.key)"
-              />
-            </div>
-            <span
-              v-if="usageEdits[account.id][limit.key].error"
-              class="usage-save-error"
-              role="alert"
-            >
-              {{ t("用量保存失败: {error}", {
-                error: usageEdits[account.id][limit.key].error || "",
-              }) }}
-            </span>
-          </template>
-          <n-progress
-            v-else
-            type="line"
-            :height="8"
-            :percentage="0"
-            processing
-            :show-indicator="false"
-          />
-        </div>
-      </div>
-
-      <div v-if="expanded[account.id]" class="account-detail">
-        <n-form :model="drafts[account.id]" label-placement="top" :show-feedback="false">
-          <div class="detail-grid">
-            <n-form-item :label="t('名称')">
-              <n-input
-                v-model:value="drafts[account.id].name"
-                :input-props="{ 'aria-label': t('{name} 名称', { name: account.name }) }"
-              />
-            </n-form-item>
-            <n-form-item :label="t('账号')">
-              <n-input
-                v-model:value="drafts[account.id].username"
-                :input-props="{ 'aria-label': t('{name} 登录账号', { name: account.name }) }"
-                :placeholder="t('OpenCode-Go 账号')"
-              />
-            </n-form-item>
-            <n-form-item :label="t('购买日期')">
-              <n-date-picker
-                v-model:value="drafts[account.id].purchaseDate"
-                type="date"
-                format="yyyy-MM-dd"
-                :actions="['now']"
-                :clearable="false"
-                :is-date-disabled="isPurchaseDateDisabled"
-                :aria-label="t('购买日期')"
-              />
-            </n-form-item>
-            <n-form-item :label="t('密码')">
-              <div class="secret-field">
-                <n-input
-                  v-model:value="drafts[account.id].password"
-                  :input-props="{ 'aria-label': t('{name} 密码', { name: account.name }) }"
-                  type="password"
-                  show-password-on="click"
-                  :placeholder="t('留空不修改')"
-                  :disabled="drafts[account.id].clearPassword"
-                />
-                <n-button
-                  text
-                  size="tiny"
-                  type="warning"
-                  @click="drafts[account.id].clearPassword = !drafts[account.id].clearPassword"
-                >
-                  {{ drafts[account.id].clearPassword ? t("取消清除密码") : t("清除已存密码") }}
-                </n-button>
+              <div class="account-heading">
+                <div class="account-name-row">
+                  <span>{{ account.name }}</span>
+                  <n-tooltip>
+                    <template #trigger>
+                      <n-tag :type="accountStatusTagType(account)" size="small">
+                        {{ accountStatusLabel(account) }}
+                      </n-tag>
+                    </template>
+                    {{ cooldownDetails(account) }}
+                  </n-tooltip>
+                </div>
+                <div class="account-lifecycle">
+                  <span>{{ t("购买于 {date}", { date: account.purchase_date }) }}</span>
+                  <span>{{ t("到期于 {date}", { date: account.expires_on }) }}</span>
+                  <n-tag :type="accountExpiryTagType(account)" size="small" :bordered="false">
+                    {{ accountExpiryLabel(account) }}
+                  </n-tag>
+                </div>
               </div>
-            </n-form-item>
-            <n-form-item :label="t('API Key')">
-              <n-input
-                v-model:value="drafts[account.id].key"
-                :input-props="{ 'aria-label': t('{name} API Key', { name: account.name }) }"
-                type="password"
-                show-password-on="click"
-                :placeholder="t('留空不修改')"
-              />
-            </n-form-item>
-          </div>
-        </n-form>
-        <n-space justify="end" align="center">
-          <n-button
-            v-if="accountIsCooling(account)"
-            size="small"
-            type="warning"
-            @click="resetCooldown(account.id)"
-          >
-            {{ t("重置冷却") }}
-          </n-button>
-          <n-button size="small" type="primary" :loading="busy" @click="saveAccount(account)">
-            {{ t("保存") }}
-          </n-button>
-        </n-space>
-      </div>
-      </n-card>
-    </div>
-    <span class="sr-only" aria-live="polite" aria-atomic="true">{{ orderAnnouncement }}</span>
-  </n-space>
+            </div>
+          </template>
 
-  <n-modal
-    v-model:show="showCreateModal"
-    preset="card"
-    :title="t('新增账号')"
-    class="account-modal"
-    style="width: 560px; max-width: calc(100vw - 32px)"
-    :mask-closable="false"
-  >
-    <n-form :model="newAccount" label-placement="top" :show-feedback="false">
-      <div class="modal-grid">
-        <n-form-item :label="t('名称')">
-          <n-input
-            v-model:value="newAccount.name"
-            :input-props="{ 'aria-label': t('名称') }"
-            :placeholder="t('主号')"
-          />
-        </n-form-item>
-        <n-form-item :label="t('账号')">
-          <n-input
-            v-model:value="newAccount.username"
-            :input-props="{ 'aria-label': t('登录账号') }"
-            :placeholder="t('OpenCode-Go 账号')"
-          />
-        </n-form-item>
-        <n-form-item :label="t('购买日期')">
-          <n-date-picker
-            v-model:value="newAccount.purchaseDate"
-            type="date"
-            format="yyyy-MM-dd"
-            :actions="['now']"
-            :clearable="false"
-            :is-date-disabled="isPurchaseDateDisabled"
-            :aria-label="t('购买日期')"
-          />
-        </n-form-item>
-        <n-form-item :label="t('密码')">
-          <n-input
-            v-model:value="newAccount.password"
-            :input-props="{ 'aria-label': t('密码') }"
-            type="password"
-            show-password-on="click"
-            :placeholder="t('OpenCode-Go 密码')"
-          />
-        </n-form-item>
-        <n-form-item label="API Key">
-          <n-input
-            v-model:value="newAccount.key"
-            :input-props="{ 'aria-label': 'API Key' }"
-            type="password"
-            show-password-on="click"
-            placeholder="sk-..."
-          />
-        </n-form-item>
+          <template #header-extra>
+            <n-space align="center" :size="8">
+              <n-tooltip trigger="hover">
+                <template #trigger>
+                  <n-button
+                    circle
+                    quaternary
+                    size="small"
+                    :aria-label="t('测试账号 {name}', { name: account.name })"
+                    :loading="pinging[account.id]"
+                    @click="pingAccount(account.id)"
+                  >
+                    <template #icon><n-icon :component="ThunderboltOutlined" /></template>
+                  </n-button>
+                </template>
+                {{ t("测试连接") }}
+              </n-tooltip>
+
+              <n-tooltip trigger="hover">
+                <template #trigger>
+                  <n-switch
+                    :value="account.enabled"
+                    :aria-label="account.enabled ? t('禁用账号 {name}', { name: account.name }) : t('启用账号 {name}', { name: account.name })"
+                    @update:value="toggleAccount(account.id)"
+                  />
+                </template>
+                {{ account.enabled ? t("禁用账号 {name}", { name: account.name }) : t("启用账号 {name}", { name: account.name }) }}
+              </n-tooltip>
+
+              <n-dropdown
+                :options="accountMenuOptions(account)"
+                :render-option="renderAccountMenuOption"
+                trigger="click"
+                placement="bottom-end"
+                @select="(key: string | number) => handleMenuSelect(key, account.id)"
+              >
+                <n-tooltip trigger="hover">
+                  <template #trigger>
+                    <n-button
+                      circle
+                      quaternary
+                      size="small"
+                      :aria-label="t('更多操作')"
+                    >
+                      <template #icon><n-icon :component="MoreOutlined" /></template>
+                    </n-button>
+                  </template>
+                  {{ t("更多操作") }}
+                </n-tooltip>
+              </n-dropdown>
+            </n-space>
+          </template>
+
+          <div v-if="usageLoadErrors[account.id]" class="usage-load-error" role="alert">
+            <span>{{ t("用量加载失败") }}</span>
+            <n-button
+              text
+              size="tiny"
+              type="primary"
+              :loading="usageLoading[account.id]"
+              @click="loadAccountUsage(account.id)"
+            >
+              {{ t("重试") }}
+            </n-button>
+          </div>
+
+          <div v-else class="usage-strip">
+            <div class="usage-strip-header">
+              <span class="usage-strip-title">{{ t("用量") }}</span>
+              <n-popover trigger="click" width="trigger" :show-arrow="false">
+                <template #trigger>
+                  <n-tooltip trigger="hover">
+                    <template #trigger>
+                      <n-button
+                        circle
+                        quaternary
+                        size="small"
+                        :aria-label="t('校准用量')"
+                      >
+                        <template #icon><n-icon :component="EditOutlined" /></template>
+                      </n-button>
+                    </template>
+                    {{ t("校准用量") }}
+                  </n-tooltip>
+                </template>
+                <div class="usage-editor-popover">
+                  <p class="usage-editor-caption">
+                    {{ t("手动上报用量百分比，仅用于校准额度显示") }}
+                  </p>
+                  <div v-for="limit in usageLimits" :key="limit.key" class="usage-editor-row">
+                    <div class="usage-editor-label">
+                      <span>{{ limit.label }}</span>
+                      <span v-if="usageEdits[account.id]" class="usage-editor-value">
+                        {{ usageEdits[account.id][limit.key].draft }}%
+                      </span>
+                    </div>
+                    <div v-if="usageEdits[account.id]" class="usage-editor">
+                      <n-input-number
+                        :value="usageEdits[account.id][limit.key].draft"
+                        :min="0"
+                        :max="100"
+                        :step="0.1"
+                        :precision="1"
+                        size="tiny"
+                        :show-button="false"
+                        :disabled="usageLoading[account.id] || usageEdits[account.id][limit.key].saving"
+                        :status="usageEdits[account.id][limit.key].error ? 'error' : undefined"
+                        :input-props="{
+                          'aria-label': t('{name} {period} 当前用量百分比', {
+                            name: account.name,
+                            period: limit.label,
+                          }),
+                        }"
+                        @update:value="updateUsageDraft(account.id, limit.key, $event)"
+                        @blur="saveUsage(account.id, limit.key)"
+                        @keydown.enter.prevent="saveUsage(account.id, limit.key)"
+                      >
+                        <template #suffix>%</template>
+                      </n-input-number>
+                      <n-slider
+                        v-usage-slider-label="t('{name} {period} 当前用量百分比', {
+                          name: account.name,
+                          period: limit.label,
+                        })"
+                        :value="usageEdits[account.id][limit.key].draft"
+                        :min="0"
+                        :max="100"
+                        :step="0.1"
+                        :disabled="usageLoading[account.id] || usageEdits[account.id][limit.key].saving"
+                        @update:value="updateUsageDraft(account.id, limit.key, $event)"
+                        @dragend="saveUsage(account.id, limit.key)"
+                        @focusout="saveUsage(account.id, limit.key)"
+                      />
+                    </div>
+                    <span
+                      v-if="usageEdits[account.id]?.[limit.key].error"
+                      class="usage-save-error"
+                      role="alert"
+                    >
+                      {{ t("用量保存失败: {error}", { error: usageEdits[account.id][limit.key].error || "" }) }}
+                    </span>
+                  </div>
+                </div>
+              </n-popover>
+            </div>
+            <div class="usage-strip-body">
+              <div v-for="limit in usageLimits" :key="limit.key" class="usage-segment">
+                <div class="usage-meta">
+                  <span>{{ limit.label }}</span>
+                  <strong>{{ formatCost(usageCost(account.id, limit.key)) }} / {{ formatCost(limit.limit) }}</strong>
+                </div>
+                <n-progress
+                  type="line"
+                  :height="8"
+                  :percentage="usagePercent(account.id, limit.key)"
+                  :status="usageProgressStatus(account, limit.key, usagePercent(account.id, limit.key))"
+                  :show-indicator="false"
+                />
+                <span v-if="isWindowCooling(account, limit.key)" class="usage-reset-countdown">
+                  {{ t("重置于 {time}", { time: formatWindowRemaining(account, limit.key) }) }}
+                </span>
+              </div>
+            </div>
+          </div>
+        </n-card>
       </div>
-    </n-form>
-    <template #footer>
-      <n-space justify="end">
-        <n-button @click="showCreateModal = false">{{ t("取消") }}</n-button>
-        <n-button type="primary" :loading="busy" @click="createAccount">{{ t("保存") }}</n-button>
-      </n-space>
-    </template>
-  </n-modal>
+
+      <span class="sr-only" aria-live="polite" aria-atomic="true">{{ orderAnnouncement }}</span>
+    </n-space>
+
+    <AccountFormModal
+      v-model:show="showModal"
+      :account="editingAccount"
+      :is-cooling="editingAccount ? accountIsCooling(editingAccount) : false"
+      :busy="busy"
+      @save="onFormSave"
+      @reset-cooldown="resetCooldown(editingAccount!.id)"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, h, onMounted, onUnmounted, ref } from "vue";
+import type { VNode } from "vue";
 import {
   NButton,
   NCard,
-  NDatePicker,
+  NDropdown,
   NEmpty,
-  NForm,
-  NFormItem,
   NH3,
   NIcon,
-  NInput,
   NInputNumber,
-  NModal,
+  NPopover,
   NPopconfirm,
   NProgress,
   NSlider,
@@ -394,12 +286,11 @@ import {
   useMessage,
 } from "naive-ui";
 import {
-  DeleteOutlined,
-  DownOutlined,
-  DragOutlined,
+  EditOutlined,
+  HolderOutlined,
+  MoreOutlined,
   PlusOutlined,
   ThunderboltOutlined,
-  UpOutlined,
 } from "@vicons/antd";
 import { DashboardRequestError, tauriApi } from "../api/tauri";
 import type { Account, AccountInput, AccountUpdate, UsageWindow } from "../api/tauri";
@@ -411,20 +302,20 @@ import {
   normalizeUsagePercent,
   resetTimeForWindow,
   usagePercentFromCost,
+  usageProgressStatus,
 } from "./accounts-usage";
 import type { UsageEditState, UsageKey } from "./accounts-usage";
-import { daysUntilDate, expiryTagType, localDateString, moveItem } from "./account-lifecycle";
+import { daysUntilDate, expiryTagType, moveItem } from "./account-lifecycle";
 import { t } from "../i18n/index.ts";
 import { formatCost } from "../utils/format.ts";
 import { mapWithConcurrency } from "../utils/async.ts";
+import AccountFormModal from "../components/AccountFormModal.vue";
 
-type AccountDraft = {
-  name: string;
-  username: string;
-  password: string;
-  key: string;
-  purchaseDate: number | null;
-  clearPassword: boolean;
+type AccountMenuOption = {
+  key: string | number;
+  label?: string;
+  accountId: string;
+  accountName: string;
 };
 
 type AccountUsageEdits = Record<UsageKey, UsageEditState>;
@@ -458,41 +349,15 @@ const usageMap = ref<Record<string, UsageWindow>>({});
 const usageEdits = ref<Record<string, AccountUsageEdits>>({});
 const usageLoading = ref<Record<string, boolean>>({});
 const usageLoadErrors = ref<Record<string, string | null>>({});
-const drafts = ref<Record<string, AccountDraft>>({});
-const expanded = ref<Record<string, boolean>>({});
 const pinging = ref<Record<string, boolean>>({});
-const showCreateModal = ref(false);
+const showModal = ref(false);
+const editingAccount = ref<Account | null>(null);
 const busy = ref(false);
 const orderSaving = ref(false);
 const draggingAccountId = ref<string | null>(null);
 const orderAnnouncement = ref("");
 const now = ref(Date.now());
 let accountDrag: AccountDragState | null = null;
-
-function timestampFromLocalDate(value: string): number | null {
-  const parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-  if (!parts) return null;
-  const year = Number(parts[1]);
-  const month = Number(parts[2]);
-  const day = Number(parts[3]);
-  const date = new Date(year, month - 1, day);
-  return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day
-    ? date.getTime()
-    : null;
-}
-
-function blankAccountDraft(): AccountDraft {
-  return {
-    name: "",
-    username: "",
-    password: "",
-    key: "",
-    purchaseDate: timestampFromLocalDate(localDateString()) ?? Date.now(),
-    clearPassword: false,
-  };
-}
-
-const newAccount = ref<AccountDraft>(blankAccountDraft());
 
 function blankUsage(accountId: string): UsageWindow {
   return {
@@ -501,57 +366,6 @@ function blankUsage(accountId: string): UsageWindow {
     window_week: 0,
     window_month: 0,
   };
-}
-
-function draftFromAccount(account: Account): AccountDraft {
-  return {
-    name: account.name,
-    username: account.username,
-    password: "",
-    key: "",
-    purchaseDate: timestampFromLocalDate(account.purchase_date)
-      ?? timestampFromLocalDate(localDateString())
-      ?? Date.now(),
-    clearPassword: false,
-  };
-}
-
-function applyLoadedAccounts(loaded: Account[]): void {
-  const nextDrafts: Record<string, AccountDraft> = {};
-  for (const account of loaded) {
-    nextDrafts[account.id] = drafts.value[account.id] || draftFromAccount(account);
-  }
-  accounts.value = loaded;
-  drafts.value = nextDrafts;
-}
-
-// 单账号操作后就地更新，避免触发全量重载（旧实现每次都 loadAccounts → O(N) 用量重拉）
-function replaceAccount(account: Account): void {
-  accounts.value = accounts.value.map((item) => (item.id === account.id ? account : item));
-  drafts.value[account.id] = draftFromAccount(account);
-}
-
-function addAccount(account: Account): void {
-  accounts.value = [...accounts.value, account];
-  drafts.value[account.id] = draftFromAccount(account);
-}
-
-function removeAccountState(id: string): void {
-  accounts.value = accounts.value.filter((item) => item.id !== id);
-  delete drafts.value[id];
-  delete usageMap.value[id];
-  delete usageEdits.value[id];
-  delete usageLoading.value[id];
-  delete usageLoadErrors.value[id];
-  delete expanded.value[id];
-  delete pinging.value[id];
-}
-
-// 用一次 getAccounts 刷新列表状态（如 ping 后的冷却变更），仅重载受影响账号的用量
-async function refreshAccountState(id: string): Promise<void> {
-  const loaded = await tauriApi.getAccounts();
-  applyLoadedAccounts(loaded);
-  await loadAccountUsage(id);
 }
 
 function getUsage(accountId: string): UsageWindow {
@@ -564,6 +378,10 @@ function usageCost(accountId: string, key: UsageKey): number {
 
 function usageLimit(key: UsageKey): number {
   return usageLimits.value.find((limit) => limit.key === key)?.limit ?? 0;
+}
+
+function usagePercent(accountId: string, key: UsageKey): number {
+  return usagePercentFromCost(usageCost(accountId, key), usageLimit(key));
 }
 
 function usageEditsFromWindow(usage: UsageWindow): AccountUsageEdits {
@@ -620,10 +438,6 @@ async function saveUsage(accountId: string, key: UsageKey) {
 
 function accountIsCooling(account: Account): boolean {
   return isCooling(account, now.value);
-}
-
-function accountUsageLimitReached(account: Account, key: UsageKey): boolean {
-  return isUsageLimitReached(account, key, now.value);
 }
 
 function formatRemaining(account: Account): string {
@@ -683,21 +497,81 @@ function accountExpiryLabel(account: Account): string {
   return t("已到期 {days} 天", { days: Number.isFinite(days) ? Math.abs(days) : 0 });
 }
 
-function isPurchaseDateDisabled(timestamp: number): boolean {
-  return localDateString(timestamp) > localDateString(now.value);
+function accountStatusLabel(account: Account): string {
+  if (!account.enabled) return t("已禁用");
+  if (accountIsCooling(account)) return t("冷却中·剩 {time}", { time: formatRemaining(account) });
+  return t("可用");
 }
 
-function purchaseDateIsFuture(draft: AccountDraft): boolean {
-  return draft.purchaseDate !== null && isPurchaseDateDisabled(draft.purchaseDate);
+function accountStatusTagType(account: Account): "success" | "warning" | "default" {
+  if (!account.enabled) return "default";
+  if (accountIsCooling(account)) return "warning";
+  return "success";
+}
+
+function accountMenuOptions(account: Account): AccountMenuOption[] {
+  const options: AccountMenuOption[] = [
+    { key: "edit", label: t("编辑账号"), accountId: account.id, accountName: account.name },
+  ];
+  if (accountIsCooling(account)) {
+    options.push({
+      key: "reset",
+      label: t("重置冷却"),
+      accountId: account.id,
+      accountName: account.name,
+    });
+  }
+  options.push({
+    key: "delete",
+    label: t("删除账号"),
+    accountId: account.id,
+    accountName: account.name,
+  });
+  return options;
+}
+
+function renderAccountMenuOption({ node, option }: { node: VNode; option: unknown }) {
+  const opt = option as AccountMenuOption;
+  if (opt.key === "delete") {
+    return h(
+      NPopconfirm,
+      {
+        positiveText: t("删除"),
+        negativeText: t("取消"),
+        onPositiveClick: () => deleteAccount(opt.accountId),
+      },
+      {
+        trigger: () => h("div", {
+          class: "n-dropdown-option account-menu-delete",
+          onClick: (e: MouseEvent) => e.stopPropagation(),
+        }, [
+          h("div", { class: "n-dropdown-option-body" }, [
+            h("div", { class: "n-dropdown-option-body__label" }, t("删除账号")),
+          ]),
+        ]),
+        default: () => t("确定删除账号 {name} 吗？", { name: opt.accountName }),
+      },
+    );
+  }
+  return node;
+}
+
+function handleMenuSelect(key: string | number, accountId: string) {
+  if (key === "edit") {
+    openEditModal(accountId);
+  } else if (key === "reset") {
+    resetCooldown(accountId);
+  }
 }
 
 function openCreateModal(): void {
-  newAccount.value = blankAccountDraft();
-  showCreateModal.value = true;
+  editingAccount.value = null;
+  showModal.value = true;
 }
 
-function toggleExpanded(id: string) {
-  expanded.value[id] = !expanded.value[id];
+function openEditModal(id: string): void {
+  editingAccount.value = accounts.value.find((account) => account.id === id) ?? null;
+  showModal.value = true;
 }
 
 function sameAccountOrder(left: readonly Account[], right: readonly Account[]): boolean {
@@ -829,40 +703,37 @@ async function handleOrderKeydown(event: KeyboardEvent, accountId: string): Prom
   await persistAccountOrder(previous, accountId);
 }
 
-function trimmedDraft(draft: AccountDraft): AccountInput {
-  return {
-    name: draft.name.trim(),
-    username: draft.username.trim(),
-    password: draft.password.trim(),
-    key: draft.key.trim(),
-    purchase_date: draft.purchaseDate === null ? undefined : localDateString(draft.purchaseDate),
-  };
+function applyLoadedAccounts(loaded: Account[]): void {
+  accounts.value = loaded;
 }
 
-function trimmedUpdate(draft: AccountDraft): AccountUpdate {
-  const update: AccountUpdate = {
-    name: draft.name.trim(),
-    username: draft.username.trim(),
-    purchase_date: draft.purchaseDate === null ? undefined : localDateString(draft.purchaseDate),
-  };
-  const password = draft.password.trim();
-  const key = draft.key.trim();
-  if (draft.clearPassword) update.password = "";
-  else if (password) update.password = password;
-  if (key) update.key = key;
-  return update;
+function replaceAccount(account: Account): void {
+  accounts.value = accounts.value.map((item) => (item.id === account.id ? account : item));
+}
+
+function addAccount(account: Account): void {
+  accounts.value = [...accounts.value, account];
+}
+
+function removeAccountState(id: string): void {
+  accounts.value = accounts.value.filter((item) => item.id !== id);
+  delete usageMap.value[id];
+  delete usageEdits.value[id];
+  delete usageLoading.value[id];
+  delete usageLoadErrors.value[id];
+  delete pinging.value[id];
+}
+
+async function refreshAccountState(id: string): Promise<void> {
+  const loaded = await tauriApi.getAccounts();
+  applyLoadedAccounts(loaded);
+  await loadAccountUsage(id);
 }
 
 async function loadAccounts() {
   try {
     const loaded = await tauriApi.getAccounts();
-    const nextDrafts: Record<string, AccountDraft> = {};
-    for (const account of loaded) {
-      nextDrafts[account.id] = drafts.value[account.id] || draftFromAccount(account);
-    }
     accounts.value = loaded;
-    drafts.value = nextDrafts;
-    // 限流并发拉取用量，避免账号多时 N 次请求同时打到后端
     await mapWithConcurrency(loaded, 4, (account) => loadAccountUsage(account.id));
   } catch (e) {
     message.error(t("加载账号失败: {error}", { error: String(e) }));
@@ -883,52 +754,46 @@ async function loadAccountUsage(accountId: string) {
   }
 }
 
-async function createAccount() {
-  const input = trimmedDraft(newAccount.value);
-  if (!input.name || !input.key) {
-    message.warning(t("请填写名称和 API Key"));
-    return;
-  }
-  if (purchaseDateIsFuture(newAccount.value)) {
-    message.warning(t("购买日期不能晚于今天"));
-    return;
-  }
-  busy.value = true;
-  try {
-    const created = await tauriApi.createAccount(input);
-    newAccount.value = blankAccountDraft();
-    showCreateModal.value = false;
-    message.success(t("账号已添加"));
-    addAccount(created);
-    await loadAccountUsage(created.id);
-  } catch (e) {
-    message.error(t("保存失败: {error}", { error: String(e) }));
-  } finally {
-    busy.value = false;
-  }
-}
-
-async function saveAccount(account: Account) {
-  const draft = drafts.value[account.id];
-  const update = trimmedUpdate(draft);
-  if (!update.name) {
-    message.warning(t("名称不能为空"));
-    return;
-  }
-  if (purchaseDateIsFuture(draft)) {
-    message.warning(t("购买日期不能晚于今天"));
-    return;
-  }
-  busy.value = true;
-  try {
-    const saved = await tauriApi.updateAccount(account.id, update);
-    drafts.value[account.id] = draftFromAccount(saved);
-    replaceAccount(saved);
-    message.success(t("账号已更新"));
-  } catch (e) {
-    message.error(t("保存失败: {error}", { error: String(e) }));
-  } finally {
-    busy.value = false;
+async function onFormSave(payload: { name: string; username: string; password?: string; key?: string; purchase_date?: string }) {
+  if (editingAccount.value) {
+    const update: AccountUpdate = {
+      name: payload.name,
+      username: payload.username,
+      purchase_date: payload.purchase_date,
+    };
+    if (payload.password !== undefined) update.password = payload.password;
+    if (payload.key !== undefined) update.key = payload.key;
+    busy.value = true;
+    try {
+      const saved = await tauriApi.updateAccount(editingAccount.value.id, update);
+      replaceAccount(saved);
+      message.success(t("账号已更新"));
+      showModal.value = false;
+    } catch (e) {
+      message.error(t("保存失败: {error}", { error: String(e) }));
+    } finally {
+      busy.value = false;
+    }
+  } else {
+    const input: AccountInput = {
+      name: payload.name,
+      username: payload.username,
+      key: payload.key || "",
+      password: payload.password,
+      purchase_date: payload.purchase_date,
+    };
+    busy.value = true;
+    try {
+      const created = await tauriApi.createAccount(input);
+      message.success(t("账号已添加"));
+      addAccount(created);
+      await loadAccountUsage(created.id);
+      showModal.value = false;
+    } catch (e) {
+      message.error(t("保存失败: {error}", { error: String(e) }));
+    } finally {
+      busy.value = false;
+    }
   }
 }
 
@@ -943,7 +808,6 @@ async function pingAccount(id: string) {
       : t("Ping 失败: {error}", { error: String(e) }));
   } finally {
     pinging.value[id] = false;
-    // ping 可能改变冷却状态，仅刷新该账号而非全量重载
     try {
       await refreshAccountState(id);
     } catch (e) {
@@ -1018,37 +882,6 @@ onUnmounted(() => {
   gap: 16px;
 }
 
-.detail-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-  align-items: start;
-}
-
-.secret-field {
-  display: grid;
-  gap: 6px;
-  width: 100%;
-  justify-items: start;
-}
-
-.secret-field :deep(.n-input) {
-  width: 100%;
-}
-
-.detail-grid :deep(.n-date-picker),
-.modal-grid :deep(.n-date-picker) {
-  width: 100%;
-}
-
-.account-card :deep(.n-card-header) {
-  align-items: center;
-}
-
-.account-card :deep(.n-card-header__main) {
-  min-width: 0;
-}
-
 .account-card {
   border-radius: 14px;
   box-shadow: var(--ocg-shadow-sm);
@@ -1100,6 +933,9 @@ onUnmounted(() => {
 
 .account-name-row > span:first-child {
   overflow: hidden;
+  color: var(--ocg-ink);
+  font-size: var(--ocg-font-md);
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1109,8 +945,8 @@ onUnmounted(() => {
   flex-wrap: wrap;
   align-items: center;
   gap: 4px 10px;
-  color: var(--n-text-color-3);
-  font-size: 12px;
+  color: var(--ocg-muted);
+  font-size: var(--ocg-font-xs);
   font-weight: 400;
 }
 
@@ -1118,7 +954,37 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 
+.usage-load-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 42px;
+  color: var(--ocg-error);
+  font-size: var(--ocg-font-sm);
+}
+
 .usage-strip {
+  display: grid;
+  gap: 10px;
+}
+
+.usage-strip-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.usage-strip-title {
+  color: var(--ocg-muted);
+  font-size: var(--ocg-font-xs);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.usage-strip-body {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
@@ -1128,6 +994,57 @@ onUnmounted(() => {
   display: grid;
   gap: 6px;
   min-width: 0;
+}
+
+.usage-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: var(--ocg-font-sm);
+  color: var(--ocg-muted);
+}
+
+.usage-meta strong {
+  color: var(--ocg-ink);
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-weight: 600;
+}
+
+.usage-reset-countdown {
+  color: var(--ocg-warning);
+  font-size: var(--ocg-font-xs);
+  white-space: nowrap;
+}
+
+.usage-editor-popover {
+  display: grid;
+  gap: 10px;
+  min-width: 220px;
+}
+
+.usage-editor-caption {
+  margin: 0;
+  color: var(--ocg-muted);
+  font-size: var(--ocg-font-xs);
+  line-height: 1.5;
+}
+
+.usage-editor-row {
+  display: grid;
+  gap: 4px;
+}
+
+.usage-editor-label {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: var(--ocg-font-sm);
+  color: var(--ocg-muted);
+}
+
+.usage-editor-value {
+  color: var(--ocg-ink);
+  font-family: "Cascadia Mono", Consolas, monospace;
 }
 
 .usage-editor {
@@ -1141,53 +1058,17 @@ onUnmounted(() => {
   width: 78px;
 }
 
-.usage-load-error {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  min-height: 42px;
-  color: var(--n-error-color);
-}
-
 .usage-save-error {
-  color: var(--n-error-color);
-  font-size: 12px;
+  color: var(--ocg-error);
+  font-size: var(--ocg-font-xs);
 }
 
-.usage-meta {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  font-size: var(--ocg-font-size);
-  color: var(--n-text-color-2);
-}
-
-.usage-meta strong {
-  color: var(--n-text-color);
-  font-weight: 600;
-}
-
-.usage-reset-countdown {
-  color: var(--n-error-color);
-  font-size: 12px;
-  white-space: nowrap;
-}
-
-.modal-grid {
-  display: grid;
-  gap: 12px;
-}
-
-.account-detail {
-  margin-top: 14px;
-  padding-top: 14px;
-  border-top: 1px solid var(--n-border-color);
+.account-menu-delete :deep(.n-dropdown-option-body__label) {
+  color: var(--ocg-error) !important;
 }
 
 @media (max-width: 900px) {
-  .detail-grid,
-  .usage-strip {
+  .usage-strip-body {
     grid-template-columns: 1fr;
   }
 

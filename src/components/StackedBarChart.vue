@@ -62,9 +62,9 @@
           :key="`col-${bi}`"
           class="bar-col"
           :transform="`translate(${bar.x}, 0)`"
-          @mouseenter="onEnter(bi, $event)"
-          @mousemove="onMove(bi, $event)"
-          @mouseleave="onLeave"
+          @pointerenter="onEnter(bi, $event)"
+          @pointermove="onMove(bi, $event)"
+          @pointerleave="onLeave"
         >
           <rect
             v-for="(seg, si) in bar.segments"
@@ -308,17 +308,17 @@ const tooltip = ref<{ show: boolean; x: number; y: number; title: string; total:
   rows: [],
 });
 
-function onEnter(bi: number, e: MouseEvent) {
+function onEnter(bi: number, e: PointerEvent) {
   updateTooltip(bi, e);
 }
-function onMove(bi: number, e: MouseEvent) {
+function onMove(bi: number, e: PointerEvent) {
   updateTooltip(bi, e);
 }
 function onLeave() {
   tooltip.value.show = false;
 }
 
-function updateTooltip(bi: number, e: MouseEvent) {
+function updateTooltip(bi: number, e: PointerEvent) {
   const d = dates.value[bi];
   if (!d) return;
   const models = sortedModels.value;
@@ -353,16 +353,15 @@ function updateTooltip(bi: number, e: MouseEvent) {
   display: block;
   width: 100%;
   height: auto;
-  font-family: v-sans, system-ui, -apple-system, sans-serif;
 }
 .grid-line {
-  stroke: rgba(127, 127, 127, 0.18);
+  stroke: var(--ocg-divider);
   stroke-width: 1;
   shape-rendering: crispEdges;
 }
 .axis-text {
-  fill: var(--n-text-color-3, rgba(127, 127, 127, 0.9));
-  font-size: var(--ocg-font-size);
+  fill: var(--ocg-subtle);
+  font-size: var(--ocg-font-xs);
 }
 .bar-seg {
   transition: opacity 0.15s ease;
@@ -376,19 +375,20 @@ function updateTooltip(bi: number, e: MouseEvent) {
   z-index: 5;
   min-width: 168px;
   padding: 8px 10px;
+  border: 1px solid var(--ocg-border);
   border-radius: 8px;
-  background: var(--n-color-popover, #fff);
+  background: var(--ocg-surface-raised);
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
-  font-size: var(--ocg-font-size);
+  font-size: var(--ocg-font-sm);
 }
 .tooltip-title {
   font-weight: 600;
   margin-bottom: 2px;
 }
 .tooltip-total {
-  color: var(--n-text-color-3, #888);
+  color: var(--ocg-subtle);
   margin-bottom: 6px;
-  font-size: var(--ocg-font-size);
+  font-size: var(--ocg-font-xs);
 }
 .tooltip-row {
   display: flex;
@@ -411,6 +411,6 @@ function updateTooltip(bi: number, e: MouseEvent) {
 .tooltip-row .cost {
   flex: 0 0 auto;
   font-variant-numeric: tabular-nums;
-  color: var(--n-text-color-2, #555);
+  color: var(--ocg-muted);
 }
 </style>

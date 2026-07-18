@@ -32,6 +32,7 @@ export interface GuideAction {
 export interface ApplicationGuide {
   id: string;
   name: string;
+  category: MessageKey;
   protocol: string;
   endpointKind: "messages" | "responses" | "chat" | "gemini";
   officialUrl: string;
@@ -177,13 +178,14 @@ export const APPLICATION_GUIDES = [
   {
     id: "claude-code",
     name: "Claude Code",
+    category: "官方推荐",
     protocol: "Anthropic Messages",
     endpointKind: "messages",
     officialUrl: "https://code.claude.com/docs/en/llm-gateway-connect",
     summary: "通过 Anthropic 兼容入口连接 OCG Manager，地址使用不带 /v1 的根地址。",
     steps: [
       "打开用户级 ~/.claude/settings.json，将下面的环境变量和模型配置合并进去。",
-      "确认 ANTHROPIC_BASE_URL 使用下方根地址，ANTHROPIC_AUTH_TOKEN 使用 Gateway Key。",
+      "确认 ANTHROPIC_BASE_URL 使用下方根地址，ANTHROPIC_AUTH_TOKEN 使用 Key。",
       "启动 Claude Code 并发送一条测试消息，再到 OCG Manager 的请求日志确认成功记录。",
     ],
     notes: [
@@ -226,6 +228,7 @@ export const APPLICATION_GUIDES = [
   {
     id: "claude-desktop",
     name: "Claude Desktop",
+    category: "Claude 兼容",
     protocol: "Anthropic Messages",
     endpointKind: "messages",
     officialUrl: "https://github.com/farion1231/cc-switch/blob/main/docs/user-manual/en/2-providers/2.6-claude-desktop.md",
@@ -256,6 +259,7 @@ export const APPLICATION_GUIDES = [
   {
     id: "codex",
     name: "Codex",
+    category: "OpenAI 兼容",
     protocol: "OpenAI Responses",
     endpointKind: "responses",
     officialUrl: "https://developers.openai.com/codex/config-reference/",
@@ -295,6 +299,7 @@ export const APPLICATION_GUIDES = [
   {
     id: "gemini-cli",
     name: "Gemini CLI",
+    category: "Gemini",
     protocol: "Gemini generateContent",
     endpointKind: "gemini",
     officialUrl: "https://github.com/google-gemini/gemini-cli/blob/main/docs/reference/configuration.md",
@@ -371,6 +376,7 @@ export const APPLICATION_GUIDES = [
   {
     id: "opencode",
     name: "OpenCode",
+    category: "OpenAI 兼容",
     protocol: "OpenAI Chat Completions",
     endpointKind: "chat",
     officialUrl: "https://opencode.ai/docs/providers/",
@@ -424,6 +430,7 @@ export const APPLICATION_GUIDES = [
   {
     id: "openclaw",
     name: "OpenClaw",
+    category: "OpenAI 兼容",
     protocol: "OpenAI Chat Completions",
     endpointKind: "chat",
     officialUrl: "https://docs.openclaw.ai/concepts/model-providers",
@@ -475,6 +482,7 @@ export const APPLICATION_GUIDES = [
   {
     id: "hermes",
     name: "Hermes",
+    category: "OpenAI 兼容",
     protocol: "OpenAI Chat Completions",
     endpointKind: "chat",
     officialUrl: "https://hermes-agent.nousresearch.com/docs/integrations/providers",
@@ -501,6 +509,7 @@ export const APPLICATION_GUIDES = [
   {
     id: "cherry-studio",
     name: "Cherry Studio",
+    category: "OpenAI 兼容",
     protocol: "OpenAI Chat Completions",
     endpointKind: "chat",
     officialUrl: "https://docs.cherry-ai.com/docs/en-us/pre-basic/settings/providers",
@@ -529,6 +538,7 @@ export const APPLICATION_GUIDES = [
   {
     id: "vscode-copilot",
     name: "VS Code Copilot Chat",
+    category: "OpenAI 兼容",
     protocol: "OpenAI Chat Completions",
     endpointKind: "chat",
     officialUrl: "https://code.visualstudio.com/docs/agent-customization/language-models",
@@ -570,6 +580,7 @@ export const APPLICATION_GUIDES = [
   {
     id: "cline",
     name: "Cline",
+    category: "OpenAI 兼容",
     protocol: "OpenAI Chat Completions",
     endpointKind: "chat",
     officialUrl: "https://docs.cline.bot/provider-config/openai-compatible",
@@ -592,6 +603,7 @@ export const APPLICATION_GUIDES = [
   {
     id: "roo-code",
     name: "Roo Code",
+    category: "OpenAI 兼容",
     protocol: "OpenAI Chat Completions",
     endpointKind: "chat",
     officialUrl: "https://roocodeinc.github.io/Roo-Code/providers/openai-compatible/",
@@ -614,6 +626,7 @@ export const APPLICATION_GUIDES = [
   {
     id: "continue",
     name: "Continue",
+    category: "OpenAI 兼容",
     protocol: "OpenAI Chat Completions",
     endpointKind: "chat",
     officialUrl: "https://docs.continue.dev/customize/model-providers/top-level/openai",
@@ -641,6 +654,7 @@ export const APPLICATION_GUIDES = [
   {
     id: "chatbox",
     name: "Chatbox",
+    category: "OpenAI 兼容",
     protocol: "OpenAI Chat Completions",
     endpointKind: "chat",
     officialUrl: "https://docs.chatboxai.app/en/guides/providers/import-config",

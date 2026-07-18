@@ -122,7 +122,7 @@ test("usage refresh preserves dirty drafts unless a real 429 reset that window",
 
 test("accounts render before per-account usage and expose failed loads for retry", async () => {
   const source = await readFile(new URL("./Accounts.vue", import.meta.url), "utf8");
-  const load = source.slice(source.indexOf("async function loadAccounts"), source.indexOf("async function createAccount"));
+  const load = source.slice(source.indexOf("async function loadAccounts"), source.indexOf("async function onFormSave"));
 
   assert.ok(load.indexOf("accounts.value = loaded") < load.indexOf("getAccountUsage"));
   assert.match(load, /loadAccountUsage\(account\.id\)/);

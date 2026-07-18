@@ -510,7 +510,7 @@ onUnmounted(() => {
   font-family: "Bahnschrift", "Segoe UI Variable Display", sans-serif;
 }
 .auth-brand {
-  font-size: 19px;
+  font-size: var(--ocg-font-xl);
   font-weight: 700;
 }
 .auth-panel-head {
@@ -525,7 +525,7 @@ onUnmounted(() => {
 .auth-kicker {
   margin: 20px 0 6px;
   color: var(--ocg-primary);
-  font-size: var(--ocg-font-size);
+  font-size: var(--ocg-font-sm);
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -533,7 +533,7 @@ onUnmounted(() => {
 .auth-panel h1 {
   margin: 0 0 22px;
   font-family: "Bahnschrift", "Segoe UI Variable Display", sans-serif;
-  font-size: 29px;
+  font-size: var(--ocg-font-xl);
 }
 .auth-copy {
   color: var(--ocg-muted);
@@ -544,7 +544,7 @@ onUnmounted(() => {
 .auth-error {
   margin: 0 0 12px;
   color: var(--ocg-error);
-  font-size: var(--ocg-font-size);
+  font-size: var(--ocg-font-sm);
 }
 .auth-character {
   position: absolute;
@@ -583,7 +583,7 @@ onUnmounted(() => {
 }
 .brand-name {
   color: var(--ocg-ink);
-  font-size: var(--ocg-font-size);
+  font-size: var(--ocg-font-md);
   font-weight: 650;
 }
 .app-header {
@@ -596,7 +596,7 @@ onUnmounted(() => {
 }
 .desktop-title {
   color: var(--ocg-ink);
-  font-size: var(--ocg-font-size);
+  font-size: var(--ocg-font-lg);
   font-weight: 650;
 }
 .header-actions {

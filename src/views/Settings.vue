@@ -3,7 +3,7 @@
     <section class="settings-card" aria-labelledby="forwarding-title">
       <div class="settings-head">
         <div>
-          <h2 id="forwarding-title">↗ {{ t("转发") }}</h2>
+          <h2 id="forwarding-title"><n-icon class="section-icon" :component="SwapOutlined" aria-hidden="true" /> {{ t("转发") }}</h2>
         </div>
       </div>
       <n-form :model="config" label-placement="top" :show-feedback="false">
@@ -110,9 +110,10 @@
                   type="password"
                   class="mono"
                   :input-props="{ 'aria-label': t('新 Key') }"
-                  :placeholder="t('输入新 Key，然后保存设置')"
+                  :placeholder="t('输入新 Key')"
                 />
                 <n-button size="small" secondary @click="cancelGatewayKeyEdit">{{ t("取消") }}</n-button>
+                <n-button size="small" type="primary" :loading="saving" @click="saveGatewayKey">{{ t("保存 Key") }}</n-button>
               </div>
             </div>
           </n-form-item>
@@ -124,7 +125,8 @@
         >
           <h3 id="startup-title">{{ t("开机启动") }}</h3>
           <n-switch
-            v-model:value="config.auto_start"
+            :value="config.auto_start"
+            @update:value="handleAutoStartToggle"
             :aria-label="t('随 Windows 登录自动启动 OCG Manager')"
             :disabled="!loaded || saving || regenerating"
             :loading="saving"
@@ -136,44 +138,53 @@
         <div class="settings-subsection" aria-labelledby="request-timeout-title">
           <h3 id="request-timeout-title">{{ t("请求超时") }}</h3>
           <n-form-item :label="t('连接超时')">
-            <n-input-number
-              v-model:value="config.connect_timeout_secs"
-              :min="1"
-              :max="300"
-              :precision="0"
-              :input-props="{ 'aria-label': t('连接超时（秒）') }"
-            >
-              <template #suffix>{{ t("秒") }}</template>
-            </n-input-number>
+            <div class="timeout-field">
+              <n-input-number
+                v-model:value="config.connect_timeout_secs"
+                :min="1"
+                :max="300"
+                :precision="0"
+                :input-props="{ 'aria-label': t('连接超时（秒）') }"
+              >
+                <template #suffix>{{ t("秒") }}</template>
+              </n-input-number>
+              <span class="field-caption">{{ t("建立上游连接的初始超时（秒）") }}</span>
+            </div>
           </n-form-item>
           <n-form-item :label="t('非流式总超时')">
-            <n-input-number
-              v-model:value="config.non_stream_timeout_secs"
-              :min="1"
-              :max="3600"
-              :precision="0"
-              :input-props="{ 'aria-label': t('非流式总超时（秒）') }"
-            >
-              <template #suffix>{{ t("秒") }}</template>
-            </n-input-number>
+            <div class="timeout-field">
+              <n-input-number
+                v-model:value="config.non_stream_timeout_secs"
+                :min="1"
+                :max="3600"
+                :precision="0"
+                :input-props="{ 'aria-label': t('非流式总超时（秒）') }"
+              >
+                <template #suffix>{{ t("秒") }}</template>
+              </n-input-number>
+              <span class="field-caption">{{ t("非流式请求从发起到完整响应的总超时（秒）") }}</span>
+            </div>
           </n-form-item>
           <n-form-item :label="t('流式空闲超时')">
-            <n-input-number
-              v-model:value="config.stream_idle_timeout_secs"
-              :min="1"
-              :max="3600"
-              :precision="0"
-              :input-props="{ 'aria-label': t('流式空闲超时（秒）') }"
-            >
-              <template #suffix>{{ t("秒") }}</template>
-            </n-input-number>
+            <div class="timeout-field">
+              <n-input-number
+                v-model:value="config.stream_idle_timeout_secs"
+                :min="1"
+                :max="3600"
+                :precision="0"
+                :input-props="{ 'aria-label': t('流式空闲超时（秒）') }"
+              >
+                <template #suffix>{{ t("秒") }}</template>
+              </n-input-number>
+              <span class="field-caption">{{ t("流式响应两次数据块之间的最大空闲时间（秒）") }}</span>
+            </div>
           </n-form-item>
         </div>
       </n-form>
       <n-button
         type="primary"
         :loading="saving"
-        :disabled="!loaded || regenerating || clientRootPreview.status === 'error'"
+        :disabled="!loaded || regenerating || clientRootPreview.status === 'error' || editingGatewayKey"
         @click="saveSettings"
       >{{ t("保存设置") }}</n-button>
     </section>
@@ -182,7 +193,7 @@
       <section class="settings-card" aria-labelledby="appearance-title">
         <div class="settings-head">
           <div>
-            <h2 id="appearance-title">◐ {{ t("外观") }}</h2>
+            <h2 id="appearance-title"><n-icon class="section-icon" :component="BgColorsOutlined" aria-hidden="true" /> {{ t("外观") }}</h2>
             <p>{{ t("当前：{theme}", { theme: themeLabel }) }}</p>
           </div>
         </div>
@@ -219,7 +230,7 @@
       <section class="settings-card" aria-labelledby="update-title">
         <div class="settings-head">
           <div>
-            <h2 id="update-title">↻ {{ t("检查更新") }}</h2>
+            <h2 id="update-title"><n-icon class="section-icon" :component="CloudSyncOutlined" aria-hidden="true" /> {{ t("检查更新") }}</h2>
           </div>
         </div>
         <n-button
@@ -284,6 +295,9 @@ import {
   CopyOutlined,
   EditOutlined,
   ReloadOutlined,
+  SwapOutlined,
+  BgColorsOutlined,
+  CloudSyncOutlined,
 } from "@vicons/antd";
 import { tauriApi } from "../api/tauri";
 import type { AppConfig, UpdateCheckResult } from "../api/tauri";
@@ -314,7 +328,7 @@ const gatewayKeyDraft = ref("");
 const checkingUpdate = ref(false);
 const updateResult = ref<UpdateCheckResult | null>(null);
 const updateError = ref("");
-let persistedAutoStart = false;
+const savedConfig = ref<AppConfig | null>(null);
 
 // ponytail: keep this pre-load fallback in sync with AppConfig::default().
 const config = ref<AppConfig>({
@@ -373,7 +387,7 @@ const clientRootPreview = computed<{
     if (urls.insecureHttp) {
       return {
         status: "warning",
-        feedback: t("API Base URL：{url}。警告：非本机 HTTP 会明文传输 Gateway Key 与请求内容。", { url: urls.apiBaseUrl }),
+        feedback: t("API Base URL：{url}。警告：非本机 HTTP 会明文传输 Key 与请求内容。", { url: urls.apiBaseUrl }),
       };
     }
     if (!config.value.client_root_url.trim()) {
@@ -391,7 +405,7 @@ const clientRootPreview = computed<{
 async function loadSettings() {
   try {
     config.value = await tauriApi.getSettings();
-    persistedAutoStart = config.value.auto_start;
+    savedConfig.value = { ...config.value };
     loaded.value = true;
   } catch (e) {
     message.error(t("加载设置失败: {error}", { error: String(e) }));
@@ -401,28 +415,57 @@ async function loadSettings() {
 async function saveSettings() {
   if (!loaded.value) return;
   if (!normalizeClientRootInput()) return;
-  const nextGatewayKey = gatewayKeyDraft.value.trim();
-  if (editingGatewayKey.value && !nextGatewayKey) {
-    message.error(t("新 Key 不能为空"));
-    return;
-  }
   if (!timeoutsValid()) {
     message.error(t("请求超时必须为整数：连接 1–300 秒，其余 1–3600 秒"));
     return;
   }
-  const previousGatewayKey = config.value.gateway_key;
-  if (editingGatewayKey.value) config.value.gateway_key = nextGatewayKey;
   saving.value = true;
   try {
     await tauriApi.updateSettings(config.value);
-    persistedAutoStart = config.value.auto_start;
-    editingGatewayKey.value = false;
-    gatewayKeyDraft.value = "";
+    savedConfig.value = { ...config.value };
     message.success(t("设置已保存"));
   } catch (e) {
-    config.value.auto_start = persistedAutoStart;
-    config.value.gateway_key = previousGatewayKey;
     message.error(t("保存失败: {error}", { error: String(e) }));
+  } finally {
+    saving.value = false;
+  }
+}
+
+async function handleAutoStartToggle(newValue: boolean) {
+  if (!loaded.value || !savedConfig.value) return;
+  const next = { ...savedConfig.value, auto_start: newValue };
+  saving.value = true;
+  try {
+    await tauriApi.updateSettings(next);
+    savedConfig.value = next;
+    config.value.auto_start = newValue;
+    message.success(t("设置已保存"));
+  } catch (e) {
+    config.value.auto_start = savedConfig.value.auto_start;
+    message.error(t("自动启动设置失败: {error}", { error: String(e) }));
+  } finally {
+    saving.value = false;
+  }
+}
+
+async function saveGatewayKey() {
+  if (!loaded.value || !savedConfig.value) return;
+  const key = gatewayKeyDraft.value.trim();
+  if (!key) {
+    message.error(t("新 Key 不能为空"));
+    return;
+  }
+  const payload = { ...savedConfig.value, gateway_key: key };
+  saving.value = true;
+  try {
+    await tauriApi.updateSettings(payload);
+    savedConfig.value = payload;
+    config.value.gateway_key = key;
+    gatewayKeyDraft.value = "";
+    editingGatewayKey.value = false;
+    message.success(t("Key 已保存"));
+  } catch (e) {
+    message.error(t("Key 保存失败: {error}", { error: String(e) }));
   } finally {
     saving.value = false;
   }
@@ -535,12 +578,16 @@ onUnmounted(cleanup);
 .settings-head h2 {
   margin: 0;
   color: var(--ocg-ink);
-  font: 700 18px/1.3 "Bahnschrift", "Segoe UI Variable Display", sans-serif;
+  font: 700 var(--ocg-font-lg)/1.3 "Bahnschrift", "Segoe UI Variable Display", sans-serif;
 }
 .settings-head p {
   margin: 4px 0 0;
   color: var(--ocg-subtle);
-  font-size: var(--ocg-font-size);
+  font-size: var(--ocg-font-sm);
+}
+.section-icon {
+  margin-right: 6px;
+  vertical-align: -0.15em;
 }
 .key-field {
   display: grid;
@@ -567,13 +614,15 @@ onUnmounted(cleanup);
 .key-display code {
   overflow: hidden;
   color: var(--ocg-ink);
-  font: 16px/1.4 "Cascadia Mono", Consolas, monospace;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: var(--ocg-font-md);
+  line-height: 1.4;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .key-editor {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 6px;
 }
@@ -583,7 +632,7 @@ onUnmounted(cleanup);
 .client-root-field > p {
   margin: 6px 0 0;
   color: var(--ocg-subtle);
-  font-size: var(--ocg-font-size);
+  font-size: var(--ocg-font-xs);
   line-height: 1.5;
 }
 .settings-subsection {
@@ -594,7 +643,18 @@ onUnmounted(cleanup);
 .settings-subsection h3 {
   margin: 0;
   color: var(--ocg-ink);
-  font: 700 18px/1.3 "Bahnschrift", "Segoe UI Variable Display", sans-serif;
+  font: 700 var(--ocg-font-lg)/1.3 "Bahnschrift", "Segoe UI Variable Display", sans-serif;
+}
+.timeout-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+}
+.field-caption {
+  font-size: var(--ocg-font-xs);
+  color: var(--ocg-subtle);
+  line-height: 1.4;
 }
 .theme-grid {
   display: grid;
@@ -614,7 +674,7 @@ onUnmounted(cleanup);
   border-radius: 10px;
   color: var(--ocg-muted);
   background: var(--ocg-canvas);
-  font: 600 16px/1 "Segoe UI Variable Text", "Microsoft YaHei UI", sans-serif;
+  font: 600 var(--ocg-font-sm)/1 "Segoe UI Variable Text", "Microsoft YaHei UI", sans-serif;
   cursor: pointer;
   transition: border-color 0.16s ease, box-shadow 0.16s ease, color 0.16s ease;
 }
@@ -629,7 +689,7 @@ onUnmounted(cleanup);
 .theme-option--selected {
   border-color: var(--ocg-primary);
   color: var(--ocg-primary);
-  box-shadow: 0 0 0 1px var(--ocg-primary);
+  box-shadow: 0 0 0 2px var(--ocg-primary);
 }
 .theme-swatch {
   width: 20px;
@@ -649,7 +709,7 @@ onUnmounted(cleanup);
   position: absolute;
   top: 5px;
   right: 5px;
-  font-size: var(--ocg-font-size);
+  font-size: var(--ocg-font-xs);
 }
 .update-result {
   margin-top: 14px;
@@ -675,14 +735,17 @@ onUnmounted(cleanup);
 }
 .update-versions dt {
   color: var(--ocg-subtle);
-  font-size: var(--ocg-font-size);
+  font-size: var(--ocg-font-xs);
 }
 .update-versions dd {
   margin: 0;
 }
 .update-result-content code {
   color: var(--ocg-ink);
-  font: 600 16px/1.4 "Cascadia Mono", Consolas, monospace;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: var(--ocg-font-md);
+  font-weight: 600;
+  line-height: 1.4;
 }
 
 @media (max-width: 800px) {

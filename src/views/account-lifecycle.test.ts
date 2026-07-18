@@ -5,6 +5,7 @@ import {
   expiryTagType,
   localDateString,
   moveItem,
+  purchaseExpiresOn,
 } from "./account-lifecycle.ts";
 
 test("formats dates and compares calendar days without time-of-day drift", () => {
@@ -30,6 +31,14 @@ test("moves items in either direction without mutating the source", () => {
   assert.deepEqual(moveItem(source, 3, 0), ["d", "a", "b", "c"]);
   assert.deepEqual(moveItem(source, -1, 2), source);
   assert.deepEqual(source, ["a", "b", "c", "d"]);
+});
+
+test("computes next-month expiry from purchase date, clamped to month end", () => {
+  assert.equal(purchaseExpiresOn("2026-01-15"), "2026-02-15");
+  assert.equal(purchaseExpiresOn("2026-01-31"), "2026-02-28");
+  assert.equal(purchaseExpiresOn("2024-01-31"), "2024-02-29");
+  assert.equal(purchaseExpiresOn("2024-12-15"), "2025-01-15");
+  assert.equal(purchaseExpiresOn("not-a-date"), null);
 });
 
 test("uses warning for imminent expiry and error after expiry", () => {

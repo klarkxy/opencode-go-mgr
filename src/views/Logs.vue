@@ -52,38 +52,53 @@
           </div>
         </div>
         <div class="filter-bar">
-          <n-select
-            v-model:value="statusFilter"
-            :options="statusOptions"
-            :placeholder="t('状态')"
-            clearable
-          />
-          <n-select
-            v-model:value="accountFilter"
-            :options="accountOptions"
-            :placeholder="t('账号')"
-            clearable
-          />
-          <n-select
-            v-model:value="modelFilter"
-            :options="modelOptions"
-            :placeholder="t('模型')"
-            clearable
-          />
-          <n-date-picker
-            v-model:value="timeRange"
-            type="datetimerange"
-            clearable
-            :placeholder="t('选择时间范围')"
-            class="time-range-picker"
-          />
-          <n-select
-            v-model:value="sortBy"
-            :options="sortOptions"
-            :placeholder="t('排序')"
-            :consistent-menu-width="false"
-            class="sort-select"
-          />
+          <div class="filter-field">
+            <span class="filter-label">{{ t("状态") }}</span>
+            <n-select
+              v-model:value="statusFilter"
+              :options="statusOptions"
+              :placeholder="t('状态')"
+              clearable
+            />
+          </div>
+          <div class="filter-field">
+            <span class="filter-label">{{ t("账号") }}</span>
+            <n-select
+              v-model:value="accountFilter"
+              :options="accountOptions"
+              :placeholder="t('账号')"
+              clearable
+            />
+          </div>
+          <div class="filter-field">
+            <span class="filter-label">{{ t("模型") }}</span>
+            <n-select
+              v-model:value="modelFilter"
+              :options="modelOptions"
+              :placeholder="t('模型')"
+              clearable
+            />
+          </div>
+          <div class="filter-field time-range-field">
+            <span class="filter-label">{{ t("时间范围") }}</span>
+            <n-date-picker
+              v-model:value="timeRange"
+              type="datetimerange"
+              clearable
+              :placeholder="t('选择时间范围')"
+              class="time-range-picker"
+            />
+          </div>
+          <div class="filter-field">
+            <span class="filter-label">{{ t("排序") }}</span>
+            <n-select
+              v-model:value="sortBy"
+              :options="sortOptions"
+              :placeholder="t('排序')"
+              :consistent-menu-width="false"
+              class="sort-select"
+            />
+          </div>
           <n-tooltip trigger="hover">
             <template #trigger>
               <n-button
@@ -144,7 +159,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, onMounted, ref, watch } from "vue";
+import { computed, h, onMounted, onUnmounted, ref, watch } from "vue";
 import {
   NButton,
   NDataTable,
@@ -158,12 +173,12 @@ import {
   NTooltip,
   useMessage,
 } from "naive-ui";
-import { ArrowDownOutlined, ArrowUpOutlined, ClearOutlined, ReloadOutlined } from "@vicons/antd";
+import { ArrowDownOutlined, ArrowUpOutlined, CheckOutlined, ClearOutlined, CopyOutlined, ReloadOutlined } from "@vicons/antd";
 import { tauriApi } from "../api/tauri";
 import type { Account, ForwardLog, ForwardLogSummary, GatewayLog } from "../api/tauri";
 import { t } from "../i18n/index.ts";
 import { locale } from "../i18n/index.ts";
-import { formatCost, formatNumber } from "../utils/format.ts";
+import { formatCost, formatNumber, useClipboard } from "../utils/format.ts";
 
 type LogTab = "gateway" | "forward";
 type SortBy = "timestamp" | "prompt_tokens" | "completion_tokens" | "cached_tokens" | "cost";
@@ -179,6 +194,7 @@ const sortValues = new Set<SortBy>([
 
 const query = new URLSearchParams(window.location.search);
 const message = useMessage();
+const { copiedTarget, copy, cleanup } = useClipboard();
 const activeTab = ref<LogTab>(query.get("tab") === "forward" ? "forward" : "gateway");
 const gatewayLogs = ref<GatewayLog[]>([]);
 const forwardLogs = ref<ForwardLog[]>([]);
@@ -265,6 +281,15 @@ function toIsoString(ms: number): string {
   return new Date(ms).toISOString();
 }
 
+async function copyError(target: string, error: string) {
+  try {
+    await copy(target, error, t("错误"));
+    message.success(t("已复制 {label}", { label: t("错误") }));
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : t("复制失败"));
+  }
+}
+
 const gatewayColumns = computed(() => [
   { title: t("时间"), key: "created_at", width: 150, render: (row: GatewayLog) => formatDate(row.created_at) },
   { title: t("级别"), key: "level", width: 80 },
@@ -272,6 +297,24 @@ const gatewayColumns = computed(() => [
   { title: t("消息"), key: "message", minWidth: 480, ellipsis: { tooltip: true } },
 ]);
 const forwardColumns = computed(() => [
+  {
+    type: "expand" as const,
+    width: 44,
+    expandable: (row: ForwardLog) => !!row.error_message,
+    renderExpand: (row: ForwardLog) => {
+      const target = `error-${row.id}`;
+      return h("div", { class: "expand-error" }, [
+        h("pre", { class: "error-text" }, row.error_message!),
+        h(NButton, {
+          size: "small",
+          onClick: () => copyError(target, row.error_message!),
+        }, {
+          default: () => t("复制错误"),
+          icon: () => h(NIcon, { component: copiedTarget.value === target ? CheckOutlined : CopyOutlined }),
+        }),
+      ]);
+    },
+  },
   { title: t("时间"), key: "timestamp", width: 150, render: (row: ForwardLog) => formatDate(row.timestamp) },
   { title: t("模型"), key: "model", width: 160, ellipsis: { tooltip: true } },
   { title: t("账号"), key: "account_name", width: 120, ellipsis: { tooltip: true } },
@@ -411,6 +454,8 @@ onMounted(() => {
   void loadAccounts();
   void loadForwardLogModels();
 });
+
+onUnmounted(cleanup);
 </script>
 
 <style scoped>
@@ -437,11 +482,11 @@ onMounted(() => {
 }
 .stat-label {
   margin-bottom: 6px;
-  font-size: 12px;
+  font-size: var(--ocg-font-xs);
   color: var(--ocg-text-secondary);
 }
 .stat-value {
-  font-size: 18px;
+  font-size: var(--ocg-font-xl);
   font-weight: 600;
   color: var(--ocg-text);
   white-space: nowrap;
@@ -451,9 +496,20 @@ onMounted(() => {
 .filter-bar {
   display: grid;
   grid-template-columns: 140px 180px 180px 320px 120px auto 1fr;
-  align-items: center;
+  align-items: end;
   gap: 8px;
   margin-bottom: 12px;
+}
+.filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.filter-label {
+  font-size: var(--ocg-font-xs);
+  color: var(--ocg-subtle);
+  line-height: 1.2;
 }
 .time-range-picker {
   min-width: 0;
@@ -470,12 +526,31 @@ onMounted(() => {
 .log-toolbar {
   margin-bottom: 8px;
 }
+.expand-error {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 0;
+}
+.error-text {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--ocg-border);
+  border-radius: 6px;
+  background: var(--ocg-bg);
+  color: var(--ocg-ink);
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: var(--ocg-font-sm);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 
 @media (max-width: 1200px) {
   .filter-bar {
     grid-template-columns: repeat(4, 1fr) auto;
   }
-  .time-range-picker {
+  .time-range-field {
     grid-column: span 2;
   }
 }
@@ -488,7 +563,7 @@ onMounted(() => {
   .filter-bar {
     grid-template-columns: 1fr 1fr auto;
   }
-  .time-range-picker {
+  .time-range-field {
     grid-column: span 2;
   }
 }
@@ -503,7 +578,7 @@ onMounted(() => {
   .filter-bar {
     grid-template-columns: 1fr 1fr auto;
   }
-  .time-range-picker {
+  .time-range-field {
     grid-column: span 2;
   }
 }
