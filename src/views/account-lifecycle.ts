@@ -52,25 +52,6 @@ export function moveItem<T>(items: readonly T[], fromIndex: number, toIndex: num
   return next;
 }
 
-export function purchaseExpiresOn(value: string): string | null {
-  const match = DATE_PATTERN.exec(value);
-  if (!match) return null;
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-  const purchase = new Date(Date.UTC(year, month - 1, day));
-  if (
-    purchase.getUTCFullYear() !== year
-    || purchase.getUTCMonth() !== month - 1
-    || purchase.getUTCDate() !== day
-  ) return null;
-  const targetYear = month === 12 ? year + 1 : year;
-  const targetMonth = month === 12 ? 1 : month + 1;
-  const targetLastDay = new Date(Date.UTC(targetYear, targetMonth, 0)).getUTCDate();
-  const expires = new Date(Date.UTC(targetYear, targetMonth - 1, Math.min(day, targetLastDay)));
-  return `${expires.getUTCFullYear()}-${String(expires.getUTCMonth() + 1).padStart(2, "0")}-${String(expires.getUTCDate()).padStart(2, "0")}`;
-}
-
 export function expiryTagType(days: number): ExpiryTagType {
   if (!Number.isFinite(days) || days <= 0) return "error";
   return days <= 7 ? "warning" : "success";

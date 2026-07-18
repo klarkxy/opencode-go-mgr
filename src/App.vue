@@ -130,6 +130,7 @@
                       aria-haspopup="menu"
                       :aria-expanded="themeMenuShown"
                       :aria-label="t('主题：{theme}', { theme: themeLabel })"
+                      @keydown.esc.prevent.stop="closeThemeMenu"
                     >
                       <template #icon><n-icon :component="BgColorsOutlined" /></template>
                     </n-button>
@@ -139,7 +140,14 @@
               </n-tooltip>
               <n-tooltip v-if="!localMode" trigger="hover">
                 <template #trigger>
-                  <n-button circle quaternary :aria-label="t('退出登录')" @click="logout">
+                  <n-button
+                    circle
+                    quaternary
+                    :aria-label="t('退出登录')"
+                    :loading="loggingOut"
+                    :disabled="loggingOut"
+                    @click="logout"
+                  >
                     <template #icon><n-icon :component="LogoutOutlined" /></template>
                   </n-button>
                 </template>
@@ -149,6 +157,15 @@
           </n-layout-header>
 
           <main class="app-content">
+            <n-alert
+              v-if="logoutError"
+              class="app-error"
+              type="error"
+              closable
+              @close="logoutError = ''"
+            >
+              {{ logoutError }}
+            </n-alert>
             <Dashboard v-if="activeKey === 'dashboard'" />
             <Accounts v-if="activeKey === 'accounts'" />
             <KeepAlive>
@@ -174,6 +191,7 @@
 import { computed, defineAsyncComponent, h, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import type { Component } from "vue";
 import {
+  NAlert,
   NButton,
   NConfigProvider,
   NDialogProvider,
@@ -219,6 +237,7 @@ import {
   writeTheme,
 } from "./theme";
 import type { ThemeName } from "./theme";
+import { userFacingError } from "./utils/errors.ts";
 
 type ViewKey = "dashboard" | "accounts" | "apps" | "pricing" | "logs" | "settings";
 
@@ -252,6 +271,9 @@ const authPasswordConfirm = ref("");
 const authError = ref("");
 const authState = ref<"checking" | "login" | "register" | "ready">("checking");
 const localMode = ref(false);
+const loggingOut = ref(false);
+const logoutError = ref("");
+let suppressAuthRequired = false;
 
 const authFormModel = computed(() => ({
   username: authUsername.value,
@@ -271,8 +293,8 @@ function renderIcon(icon: Component) {
 const menuOptions = computed(() => [
   { label: t("仪表盘"), key: "dashboard", icon: renderIcon(DashboardOutlined) },
   { label: t("账号"), key: "accounts", icon: renderIcon(KeyOutlined) },
-  { label: t("应用"), key: "apps", icon: renderIcon(AppstoreOutlined) },
   { label: t("价格表"), key: "pricing", icon: renderIcon(DollarCircleOutlined) },
+  { label: t("应用"), key: "apps", icon: renderIcon(AppstoreOutlined) },
   { label: t("日志"), key: "logs", icon: renderIcon(FileTextOutlined) },
   { label: t("设置"), key: "settings", icon: renderIcon(SettingOutlined) },
 ]);
@@ -359,6 +381,18 @@ function focusThemeTrigger() {
   document.querySelector<HTMLElement>('[aria-controls="theme-menu"]')?.focus();
 }
 
+function closeThemeMenu() {
+  if (!themeMenuShown.value) return;
+  themeMenuShown.value = false;
+  void nextTick(focusThemeTrigger);
+}
+
+function closeOpenThemeMenuOnEscape(event: KeyboardEvent) {
+  if (!themeMenuShown.value || event.key !== "Escape") return;
+  event.preventDefault();
+  closeThemeMenu();
+}
+
 function handleThemeMenuKeydown(event: KeyboardEvent, current: ThemeName) {
   const index = THEME_OPTIONS.findIndex(({ value }) => value === current);
   let nextIndex: number | undefined;
@@ -378,8 +412,7 @@ function handleThemeMenuKeydown(event: KeyboardEvent, current: ThemeName) {
   } else if (event.key === "Escape") {
     event.preventDefault();
     event.stopPropagation();
-    themeMenuShown.value = false;
-    void nextTick(focusThemeTrigger);
+    closeThemeMenu();
     return;
   } else {
     return;
@@ -390,6 +423,8 @@ function handleThemeMenuKeydown(event: KeyboardEvent, current: ThemeName) {
 }
 
 function onAuthRequired(event: Event) {
+  if (suppressAuthRequired) return;
+  logoutError.value = "";
   authState.value = "login";
   authPassword.value = "";
   authPasswordConfirm.value = "";
@@ -402,10 +437,14 @@ async function loadAuthStatus() {
     const status = await tauriApi.getAuthStatus();
     localMode.value = status.local;
     authError.value = "";
+    logoutError.value = "";
     authState.value = status.authenticated ? "ready" : status.initialized ? "login" : "register";
+    suppressAuthRequired = false;
   } catch (e) {
     authState.value = "login";
-    authError.value = t("连接失败: {error}", { error: String(e) });
+    authError.value = t("连接失败: {error}", {
+      error: userFacingError(e, t("无法连接到本地服务，请确认程序正在运行后重试")),
+    });
   }
 }
 
@@ -433,14 +472,34 @@ async function submitAuth() {
     authPassword.value = "";
     authPasswordConfirm.value = "";
     authError.value = "";
+    logoutError.value = "";
     authState.value = "ready";
+    suppressAuthRequired = false;
   } catch (e) {
     authPassword.value = "";
     authPasswordConfirm.value = "";
-    let error = e instanceof Error ? e.message : String(e);
+    let error = userFacingError(e, t("无法连接到本地服务，请确认程序正在运行后重试"));
     if (e instanceof DashboardRequestError) {
       if (mode === "login" && e.status === 401) error = t("用户名或密码错误");
       if (mode === "register" && e.status === 409) error = t("管理员已经创建，请直接登录");
+    }
+    if (mode === "login" && e instanceof DashboardRequestError && e.status === 401) {
+      const status = await tauriApi.getAuthStatus().catch(() => null);
+      if (status) {
+        localMode.value = status.local;
+        if (status.authenticated) {
+          authError.value = "";
+          logoutError.value = "";
+          authState.value = "ready";
+          suppressAuthRequired = false;
+          return;
+        }
+        if (!status.initialized) {
+          authError.value = "";
+          authState.value = "register";
+          return;
+        }
+      }
     }
     if (mode === "register") {
       const status = await tauriApi.getAuthStatus().catch(() => null);
@@ -457,11 +516,23 @@ async function submitAuth() {
 }
 
 async function logout() {
-  await tauriApi.logoutAdmin();
-  authPassword.value = "";
-  authPasswordConfirm.value = "";
-  authError.value = "";
-  authState.value = "login";
+  if (loggingOut.value) return;
+  loggingOut.value = true;
+  logoutError.value = "";
+  suppressAuthRequired = true;
+  try {
+    await tauriApi.logoutAdmin();
+    authPassword.value = "";
+    authPasswordConfirm.value = "";
+    authError.value = "";
+    authState.value = "login";
+  } catch (e) {
+    suppressAuthRequired = false;
+    const error = userFacingError(e, t("无法连接到本地服务，请确认程序正在运行后重试"));
+    logoutError.value = t("退出登录失败: {error}", { error });
+  } finally {
+    loggingOut.value = false;
+  }
 }
 
 watch(activeKey, syncView);
@@ -474,12 +545,14 @@ watch([resolvedTheme, themeTokens], ([resolved, tokens]) => {
 onMounted(() => {
   window.addEventListener(DASHBOARD_AUTH_REQUIRED_EVENT, onAuthRequired);
   window.addEventListener("popstate", onPopState);
+  document.addEventListener("keydown", closeOpenThemeMenuOnEscape);
   void loadAuthStatus();
 });
 
 onUnmounted(() => {
   window.removeEventListener(DASHBOARD_AUTH_REQUIRED_EVENT, onAuthRequired);
   window.removeEventListener("popstate", onPopState);
+  document.removeEventListener("keydown", closeOpenThemeMenuOnEscape);
 });
 </script>
 
@@ -625,6 +698,9 @@ onUnmounted(() => {
   padding: 24px;
   overflow-y: auto;
   background: var(--ocg-canvas);
+}
+.app-error {
+  margin-bottom: 16px;
 }
 
 @media (max-width: 1023px) {

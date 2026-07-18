@@ -9,7 +9,7 @@ import { locale, t } from "../i18n/index.ts";
 
 /** Format a number as USD currency with adaptive or caller-specified decimal places. */
 export function formatCost(value: number, digits?: number): string {
-  const fractionDigits = digits ?? (value !== 0 && value < 0.01 ? 4 : 2);
+  const fractionDigits = digits ?? (value !== 0 && Math.abs(value) < 0.01 ? 4 : 2);
   return new Intl.NumberFormat(locale.value, {
     style: "currency",
     currency: "USD",

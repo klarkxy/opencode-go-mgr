@@ -89,8 +89,10 @@ pub struct UsageCounts {
 }
 
 const CHAT_MODELS: &[&str] = &[
+    "grok-4.5",
     "glm-5.2",
     "glm-5.1",
+    "kimi-k3",
     "kimi-k2.7-code",
     "kimi-k2.6",
     "deepseek-v4-pro",
@@ -2999,8 +3001,10 @@ mod tests {
         assert_eq!(
             supported_model_ids().collect::<Vec<_>>(),
             [
+                "grok-4.5",
                 "glm-5.2",
                 "glm-5.1",
+                "kimi-k3",
                 "kimi-k2.7-code",
                 "kimi-k2.6",
                 "deepseek-v4-pro",
@@ -3017,6 +3021,22 @@ mod tests {
                 "qwen3.6-plus",
             ]
         );
+    }
+
+    #[test]
+    fn grok_and_kimi_k3_route_to_their_official_chat_endpoint() {
+        for model in ["grok-4.5", "kimi-k3"] {
+            let plan = prepare_request(
+                ApiFormat::Messages,
+                bytes(json!({
+                    "model": model,
+                    "messages": [{"role": "user", "content": "hi"}],
+                    "max_tokens": 8
+                })),
+            )
+            .unwrap();
+            assert_eq!(plan.upstream, ApiFormat::ChatCompletions, "{model}");
+        }
     }
 
     #[test]

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   applyTheme,
@@ -183,6 +184,33 @@ test("colored themes keep broad lightness separation from white", () => {
     assert.ok(contrast(tokens.canvas, THEME_TOKENS.white.canvas) >= 1.2, `${name} canvas`);
     assert.ok(contrast(tokens.surface, THEME_TOKENS.white.surface) >= 1.2, `${name} surface`);
   }
+});
+
+test("stacked chart reuses defined gradients when models exceed the palette", async () => {
+  const source = await readFile(new URL("./components/StackedBarChart.vue", import.meta.url), "utf8");
+  const segments = source.slice(source.indexOf("const bars = computed"), source.indexOf("// X 轴标签"));
+
+  assert.match(segments, /idx: models\.indexOf\(model\) % CHART_PALETTE\.length/);
+});
+
+test("stacked chart exposes daily detail to keyboard and assistive technology", async () => {
+  const source = await readFile(new URL("./components/StackedBarChart.vue", import.meta.url), "utf8");
+
+  assert.match(source, /:tabindex="dates\[bi\]\?\.total > 0 \? 0 : -1"/);
+  assert.match(source, /:aria-label="barAriaLabel\(bi\)"/);
+  assert.match(source, /@focus="onFocus\(bi\)"/);
+  assert.match(source, /<desc :id="`chart-description-\$\{gid\}`">\{\{ chartDescription \}\}<\/desc>/);
+  assert.match(source, /class="bar-hitbox"/);
+  assert.match(source, /\.bar-col:focus-visible \.bar-hitbox[\s\S]*?stroke-width: 2;[\s\S]*?vector-effect: non-scaling-stroke/);
+});
+
+test("theme menu closes with Escape from the trigger or any menu descendant", async () => {
+  const source = await readFile(new URL("./App.vue", import.meta.url), "utf8");
+
+  assert.match(source, /@keydown\.esc\.prevent\.stop="closeThemeMenu"/);
+  assert.match(source, /function closeOpenThemeMenuOnEscape[\s\S]*?event\.key !== "Escape"[\s\S]*?closeThemeMenu\(\)/);
+  assert.match(source, /document\.addEventListener\("keydown", closeOpenThemeMenuOnEscape\)/);
+  assert.match(source, /document\.removeEventListener\("keydown", closeOpenThemeMenuOnEscape\)/);
 });
 
 test("theme text and primary actions meet WCAG AA contrast", () => {

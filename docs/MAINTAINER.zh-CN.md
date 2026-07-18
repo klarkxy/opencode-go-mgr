@@ -161,16 +161,19 @@ Desktop 三个角色模型的持久化行为。
   settings 更新必须保留它。
 - `selector.rs` 选下一个账号并跳过禁用、冷却、本次已失败的账号；`limit.rs`
   解析上游 429 中的重置时长；`pricing.rs` 从当前 OpenCode Go 价格快照计算
-  token 对应的额度消耗，面板窗口额度也来自同一快照。`PricingModel` 的
-  `official_price_multiplier` 表示官方 token 表价相对供应商基准已经包含的倍率，
-  仅用于说明；实际 `quota_multiplier = 月额度 / Usage`。
-  `deepseek-v4-pro` 和 `mimo-v2.5-pro` 为 `4`，Grok 等其他模型默认 `1`；该字段
-  不能抵消单独的 Go Usage 换算。
-- 价格刷新只由用户通过受保护的 `GET/POST /dashboard/api/pricing[/refresh]`
-  发起。抓取器仅允许 OpenCode Go HTTPS 主机和同主机重定向，总时限 20 秒、响应
-  体上限 2 MiB；任何校验失败都不会激活不完整数据，`pricing_snapshots` 会保留
-  最后成功 revision。MiniMax 长上下文、priority 和 high-speed 调整是本地策略，
-  运行时不会访问供应商价格页。
+  token 对应的额度消耗，面板窗口额度也来自同一快照。
+  `PricingModel.quota_multiplier` 是唯一实际参与结算的官方倍率；抓取的快照按
+  `月额度 / Usage` 推导，受保护的倍率更新端点可以为临时活动保存用户覆盖值，并
+  生成新的不可变 revision。
+- 价格读写由受保护的 `GET /dashboard/api/pricing`、
+  `PUT /dashboard/api/pricing/multipliers` 和
+  `POST /dashboard/api/pricing/refresh` 提供。刷新发现官方倍率与当前值不同时，先返回
+  不激活的差异预览；后续请求同时绑定当前 revision 与刚预览的官方 content hash，
+  再选择保留当前值或采用官方值，官方候选变化时必须重新确认。抓取器
+  仅允许 OpenCode Go HTTPS 主机和同主机重定向，总时限 20 秒、响应体上限 2 MiB；
+  任何校验失败都不会激活不完整数据，`pricing_snapshots` 会保留最后成功 revision。
+  MiniMax 长上下文、priority 和 high-speed 调整是本地策略，运行时不会访问供应商
+  价格页。
 - `forwarder.rs` 向 `handler.rs` 返回显式动作：只有能证明请求尚未发出的
   DNS/TCP/TLS 建连失败可以在同一账号重试一次；`401`/`403`/`429` 可以切换账号。
   `408`、`5xx`、建连后的失败、响应体超时和流式中断均不得重放，无法确认的结果

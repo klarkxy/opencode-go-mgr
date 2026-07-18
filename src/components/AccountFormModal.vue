@@ -15,18 +15,20 @@
       label-placement="top"
     >
       <div class="modal-grid">
-        <n-form-item path="name" :label="t('名称')">
-          <n-input
-            v-model:value="form.name"
-            :input-props="{ 'aria-label': t('名称') }"
-            :placeholder="t('主号')"
-          />
-        </n-form-item>
         <n-form-item path="username" :label="t('账号')">
           <n-input
-            v-model:value="form.username"
+            :value="form.username"
             :input-props="{ 'aria-label': t('登录账号') }"
             :placeholder="t('OpenCode-Go 账号')"
+            @update:value="handleUsernameUpdate"
+          />
+        </n-form-item>
+        <n-form-item path="name" :label="t('名称')">
+          <n-input
+            :value="form.name"
+            :input-props="{ 'aria-label': t('名称') }"
+            :placeholder="t('主号')"
+            @update:value="handleNameUpdate"
           />
         </n-form-item>
         <n-form-item path="purchaseDate" :label="t('购买日期')">
@@ -40,27 +42,6 @@
             :input-props="{ 'aria-label': t('购买日期') }"
           />
         </n-form-item>
-        <n-form-item path="password" :label="t('密码')">
-          <div class="secret-field">
-            <n-input
-              v-model:value="form.password"
-              :input-props="{ 'aria-label': t('密码') }"
-              type="password"
-              show-password-on="click"
-              :placeholder="isEdit ? t('留空不修改') : t('OpenCode-Go 密码')"
-              :disabled="form.clearPassword"
-            />
-            <n-button
-              v-if="isEdit"
-              text
-              size="tiny"
-              type="warning"
-              @click="form.clearPassword = !form.clearPassword"
-            >
-              {{ form.clearPassword ? t("取消清除密码") : t("清除已存密码") }}
-            </n-button>
-          </div>
-        </n-form-item>
         <n-form-item path="key" :label="t('API Key')">
           <n-input
             v-model:value="form.key"
@@ -68,15 +49,6 @@
             type="password"
             show-password-on="click"
             :placeholder="isEdit ? t('留空不修改') : 'sk-...'"
-          />
-        </n-form-item>
-        <n-form-item :label="t('到期日期')">
-          <n-input
-            :value="expiresOn"
-            :input-props="{ 'aria-label': t('到期日期') }"
-            readonly
-            disabled
-            placeholder="—"
           />
         </n-form-item>
       </div>
@@ -115,12 +87,11 @@ import {
 } from "naive-ui";
 import type { Account } from "../api/tauri";
 import { t } from "../i18n/index.ts";
-import { localDateString, purchaseExpiresOn } from "../views/account-lifecycle";
+import { localDateString } from "../views/account-lifecycle";
 
 type AccountFormPayload = {
   name: string;
   username: string;
-  password?: string;
   key?: string;
   purchase_date?: string;
 };
@@ -128,10 +99,8 @@ type AccountFormPayload = {
 type AccountDraft = {
   name: string;
   username: string;
-  password: string;
   key: string;
   purchaseDate: number | null;
-  clearPassword: boolean;
 };
 
 const props = withDefaults(defineProps<{
@@ -153,13 +122,10 @@ const emit = defineEmits<{
 
 const formRef = ref<FormInst | null>(null);
 const form = ref<AccountDraft>(blankAccountDraft());
+const nameWasEdited = ref(false);
 
 const isEdit = computed(() => !!props.account);
 const title = computed(() => (isEdit.value ? t("编辑账号") : t("新增账号")));
-const expiresOn = computed(() => {
-  if (form.value.purchaseDate === null) return "";
-  return purchaseExpiresOn(localDateString(form.value.purchaseDate)) ?? "";
-});
 
 const rules = computed<FormRules>(() => {
   const base: FormRules = {
@@ -170,7 +136,12 @@ const rules = computed<FormRules>(() => {
       trigger: ["input", "blur"],
     },
     purchaseDate: [
-      { required: true, message: t("请选择购买日期"), trigger: ["change", "blur"] },
+      {
+        required: true,
+        type: "number",
+        message: t("请选择购买日期"),
+        trigger: ["change", "blur"],
+      },
       {
         validator: (_rule: unknown, value: number | null) => {
           if (value === null) return true;
@@ -195,6 +166,7 @@ const rules = computed<FormRules>(() => {
 watch(() => props.show, (show) => {
   if (show) {
     form.value = props.account ? draftFromAccount(props.account) : blankAccountDraft();
+    nameWasEdited.value = isEdit.value;
     formRef.value?.restoreValidation();
   }
 });
@@ -215,10 +187,8 @@ function blankAccountDraft(): AccountDraft {
   return {
     name: "",
     username: "",
-    password: "",
     key: "",
     purchaseDate: timestampFromLocalDate(localDateString()) ?? Date.now(),
-    clearPassword: false,
   };
 }
 
@@ -226,13 +196,25 @@ function draftFromAccount(account: Account): AccountDraft {
   return {
     name: account.name,
     username: account.username,
-    password: "",
     key: "",
     purchaseDate: timestampFromLocalDate(account.purchase_date)
       ?? timestampFromLocalDate(localDateString())
       ?? Date.now(),
-    clearPassword: false,
   };
+}
+
+function handleUsernameUpdate(value: string) {
+  form.value.username = value;
+  if (!isEdit.value && !nameWasEdited.value) {
+    form.value.name = value;
+  }
+}
+
+function handleNameUpdate(value: string) {
+  form.value.name = value;
+  if (!isEdit.value) {
+    nameWasEdited.value = true;
+  }
 }
 
 function isPurchaseDateDisabled(timestamp: number): boolean {
@@ -251,16 +233,10 @@ async function handleSave() {
     purchase_date: form.value.purchaseDate === null ? undefined : localDateString(form.value.purchaseDate),
   };
   if (isEdit.value) {
-    if (form.value.clearPassword) {
-      payload.password = "";
-    } else if (form.value.password.trim()) {
-      payload.password = form.value.password.trim();
-    }
     if (form.value.key.trim()) {
       payload.key = form.value.key.trim();
     }
   } else {
-    payload.password = form.value.password.trim();
     payload.key = form.value.key.trim();
   }
   emit("save", payload);
@@ -276,17 +252,6 @@ async function handleSave() {
 }
 
 .modal-grid :deep(.n-date-picker) {
-  width: 100%;
-}
-
-.secret-field {
-  display: grid;
-  gap: 6px;
-  width: 100%;
-  justify-items: start;
-}
-
-.secret-field :deep(.n-input) {
   width: 100%;
 }
 

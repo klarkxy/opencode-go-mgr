@@ -15,10 +15,12 @@
       :height="height"
       preserveAspectRatio="xMidYMid meet"
       class="chart-svg"
-      role="img"
+      role="group"
       :aria-labelledby="`chart-title-${gid}`"
+      :aria-describedby="`chart-description-${gid}`"
     >
       <title :id="`chart-title-${gid}`">{{ t("最近 {days} 天按模型分段的每日消耗", { days }) }}</title>
+      <desc :id="`chart-description-${gid}`">{{ chartDescription }}</desc>
       <defs>
         <linearGradient
           v-for="(c, idx) in CHART_PALETTE"
@@ -62,9 +64,15 @@
           :key="`col-${bi}`"
           class="bar-col"
           :transform="`translate(${bar.x}, 0)`"
+          :tabindex="dates[bi]?.total > 0 ? 0 : -1"
+          role="img"
+          :aria-label="barAriaLabel(bi)"
           @pointerenter="onEnter(bi, $event)"
           @pointermove="onMove(bi, $event)"
           @pointerleave="onLeave"
+          @focus="onFocus(bi)"
+          @blur="onLeave"
+          @keydown.esc="onLeave"
         >
           <rect
             v-for="(seg, si) in bar.segments"
@@ -85,6 +93,7 @@
             :width="barWidth"
             :height="chartH"
             fill="transparent"
+            class="bar-hitbox"
           />
         </g>
       </g>
@@ -106,6 +115,7 @@
     <div
       v-if="tooltip.show"
       class="chart-tooltip"
+      role="tooltip"
       :style="{ left: tooltip.x + 'px', top: tooltip.y + 'px' }"
     >
       <div class="tooltip-title">{{ tooltip.title }}</div>
@@ -213,6 +223,12 @@ const sortedModels = computed(() => {
 
 const dates = computed(() => padZeroDates(props.data, props.days));
 
+const totalCost = computed(() => dates.value.reduce((sum, date) => sum + date.total, 0));
+const chartDescription = computed(() => [
+  t("模型：{count}", { count: sortedModels.value.length }),
+  `${t("{days} 天合计", { days: props.days })} ${formatCost(totalCost.value)}`,
+].join(t("；")));
+
 const chartW = computed(() => Math.max(0, width.value - padL - padR));
 const chartH = height - padT - padB;
 
@@ -272,7 +288,7 @@ const bars = computed(() => {
       const h = cost * scale;
       cursor -= h;
       segments.push({
-        idx: models.indexOf(model),
+        idx: models.indexOf(model) % CHART_PALETTE.length,
         model,
         y: cursor,
         h: Math.max(0.5, h),
@@ -318,28 +334,63 @@ function onLeave() {
   tooltip.value.show = false;
 }
 
-function updateTooltip(bi: number, e: PointerEvent) {
+function tooltipRows(bi: number) {
+  const d = dates.value[bi];
+  if (!d) return [];
+  const models = sortedModels.value;
+  return models
+    .map((model) => ({ model, cost: d.models.get(model) ?? 0 }))
+    .filter((row) => row.cost > 0)
+    .sort((a, b) => b.cost - a.cost)
+    .map((row) => ({ ...row, color: modelColor(row.model, models) }));
+}
+
+function barAriaLabel(bi: number): string {
+  const d = dates.value[bi];
+  if (!d) return "";
+  return [
+    formatChartDate(d.date),
+    t("合计 {total}", { total: formatCost(d.total) }),
+    ...tooltipRows(bi).map((row) => `${row.model} ${formatCost(row.cost)}`),
+  ].join(t("；"));
+}
+
+function showTooltip(bi: number, x: number, y: number) {
   const d = dates.value[bi];
   if (!d) return;
-  const models = sortedModels.value;
-  const rows = models
-    .map((m) => ({ model: m, cost: d.models.get(m) ?? 0 }))
-    .filter((r) => r.cost > 0)
-    .sort((a, b) => b.cost - a.cost)
-    .map((r) => ({ ...r, color: modelColor(r.model, models) }));
   const rect = rootRef.value?.getBoundingClientRect();
-  // 用视口坐标相对容器定位，避免 SVG <g transform> 下 offset 语义不一致
-  const x = rect ? e.clientX - rect.left + 14 : e.offsetX + 14;
-  const y = rect ? e.clientY - rect.top + 14 : e.offsetY + 14;
   const maxX = rect ? rect.width - 184 : x;
   tooltip.value = {
     show: true,
     title: formatChartDate(d.date),
     total: d.total,
-    rows,
+    rows: tooltipRows(bi),
     x: Math.min(x, Math.max(0, maxX)),
     y,
   };
+}
+
+function onFocus(bi: number) {
+  const bar = bars.value[bi];
+  const rect = rootRef.value?.getBoundingClientRect();
+  if (!bar || !rect) return;
+  const scale = rect.width / width.value;
+  const top = bar.segments.length > 0
+    ? Math.min(...bar.segments.map((segment) => segment.y))
+    : padT + chartH;
+  showTooltip(
+    bi,
+    (bar.x + barWidth.value / 2) * scale + 14,
+    top * scale + 14,
+  );
+}
+
+function updateTooltip(bi: number, e: PointerEvent) {
+  const rect = rootRef.value?.getBoundingClientRect();
+  // 用视口坐标相对容器定位，避免 SVG <g transform> 下 offset 语义不一致
+  const x = rect ? e.clientX - rect.left + 14 : e.offsetX + 14;
+  const y = rect ? e.clientY - rect.top + 14 : e.offsetY + 14;
+  showTooltip(bi, x, y);
 }
 
 </script>
@@ -366,8 +417,17 @@ function updateTooltip(bi: number, e: PointerEvent) {
 .bar-seg {
   transition: opacity 0.15s ease;
 }
-.bar-col:hover .bar-seg {
+.bar-col:hover .bar-seg,
+.bar-col:focus-visible .bar-seg {
   opacity: 0.82;
+}
+.bar-col:focus {
+  outline: none;
+}
+.bar-col:focus-visible .bar-hitbox {
+  stroke: var(--ocg-primary);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
 }
 .chart-tooltip {
   position: absolute;

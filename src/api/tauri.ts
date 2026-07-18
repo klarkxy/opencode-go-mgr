@@ -173,8 +173,6 @@ export interface PricingModel {
   cache_read: number | null;
   cache_write: number | null;
   usage: number;
-  /** Multiplier already included in the token rates published by OpenCode Go. */
-  official_price_multiplier?: number;
   quota_multiplier: number;
   min_input_tokens?: number | null;
   max_input_tokens?: number | null;
@@ -193,8 +191,27 @@ export interface PricingSnapshot {
 }
 
 export interface PricingRefreshResult extends PricingSnapshot {
-  refresh_status: "success" | "failed_no_change";
+  refresh_status: "success" | "unchanged" | "needs_confirmation" | "failed_no_change";
+  multiplier_changes?: PricingMultiplierChange[];
+  official_content_hash?: string;
   error?: string | null;
+}
+
+export interface PricingMultiplierChange {
+  model_id: string;
+  current_multiplier: number;
+  official_multiplier: number;
+}
+
+export interface PricingRefreshRequest {
+  policy?: "keep_current" | "use_official";
+  expected_revision?: string;
+  expected_official_content_hash?: string;
+}
+
+export interface PricingMultiplierUpdate {
+  model_id: string;
+  multiplier: number;
 }
 
 export interface DashboardSummary {
@@ -203,6 +220,7 @@ export interface DashboardSummary {
   today_cost: number;
   week_cost: number;
   month_cost: number;
+  gateway_running: boolean;
 }
 
 export interface DailyModelCost {
@@ -246,6 +264,7 @@ function apiBase(): string {
   if (window.location.pathname.startsWith("/dashboard")) {
     return "/dashboard/api";
   }
+  // 回退仅覆盖 Gateway 监听默认端口 9042 的纯静态托管场景（如直接打开构建产物）
   return "http://127.0.0.1:9042/dashboard/api";
 }
 
@@ -268,12 +287,14 @@ async function request<T>(
       throw dashboardAuthError(t("登录已失效，请重新登录"));
     }
     let message = `${response.status} ${response.statusText}`;
-    try {
-      const body = await response.json() as { error?: unknown };
-      if (typeof body.error === "string") message = body.error;
-    } catch {
-      const text = await response.text().catch(() => "");
-      if (text) message = text;
+    const responseText = await response.text().catch(() => "");
+    if (responseText) {
+      try {
+        const body = JSON.parse(responseText) as { error?: unknown };
+        if (typeof body.error === "string") message = body.error;
+      } catch {
+        message = responseText;
+      }
     }
     throw new DashboardRequestError(message, response.status);
   }
@@ -332,7 +353,15 @@ export const tauriApi = {
 
   getSettings: () => request<AppConfig>("/settings"),
   getPricing: () => request<PricingSnapshot>("/pricing"),
-  refreshPricing: () => request<PricingRefreshResult>("/pricing/refresh", { method: "POST" }),
+  refreshPricing: (refresh: PricingRefreshRequest = {}) => request<PricingRefreshResult>("/pricing/refresh", {
+    method: "POST",
+    body: jsonBody(refresh),
+  }),
+  updatePricingMultipliers: (expectedRevision: string, multipliers: PricingMultiplierUpdate[]) =>
+    request<PricingSnapshot>("/pricing/multipliers", {
+      method: "PUT",
+      body: jsonBody({ expected_revision: expectedRevision, multipliers }),
+    }),
   getApplicationModels: () => request<string[]>("/application-models"),
   getClaudeDesktopModels: () => request<ClaudeDesktopModels>("/claude-desktop/models"),
   updateClaudeDesktopModels: (models: ClaudeDesktopModels) =>

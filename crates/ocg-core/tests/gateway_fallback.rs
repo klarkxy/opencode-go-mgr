@@ -664,11 +664,16 @@ async fn application_models_intersects_upstream_models_in_upstream_order() {
         "key-1".to_string(),
         VecDeque::from([MockReply {
             status: 200,
-            body: r#"{"object":"list","data":[{"id":"unknown"},{"id":"minimax-m2.7"},{"id":"deepseek-v4-flash"},{"id":"minimax-m2.7"},{"id":"qwen3.7-plus"}]}"#,
+            body: r#"{"object":"list","data":[{"id":"unknown"},{"id":"grok-4.5"},{"id":"kimi-k3"},{"id":"glm-5.1"},{"id":"minimax-m2.7-highspeed"},{"id":"minimax-m2.7"},{"id":"deepseek-v4-flash"},{"id":"minimax-m2.7"},{"id":"qwen3.7-plus"}]}"#,
         }]),
     )]);
     let (base_url, calls, stop_mock) = start_mock_upstream(replies).await;
     let (state, dir) = build_state(base_url, &["key-1"]);
+    let mut pricing = state.pricing_snapshot().as_ref().clone();
+    pricing.models.retain(|model| model.model_id != "glm-5.1");
+    pricing.revision = format!("test-priced-models-{}", Utc::now().timestamp_micros());
+    pricing.activated_at = Utc::now().to_rfc3339();
+    state.activate_pricing_snapshot(pricing).unwrap();
     let (port, gateway_handle) = start_gateway(state.clone()).await;
 
     let response = reqwest::Client::new()
@@ -681,7 +686,14 @@ async fn application_models_intersects_upstream_models_in_upstream_order() {
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
         response.json::<serde_json::Value>().await.unwrap(),
-        serde_json::json!(["minimax-m2.7", "deepseek-v4-flash", "qwen3.7-plus"])
+        serde_json::json!([
+            "grok-4.5",
+            "kimi-k3",
+            "minimax-m2.7-highspeed",
+            "minimax-m2.7",
+            "deepseek-v4-flash",
+            "qwen3.7-plus"
+        ])
     );
     assert_eq!(calls.lock().unwrap()[0].path, "/v1/models");
     assert_eq!(

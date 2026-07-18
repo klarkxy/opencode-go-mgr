@@ -144,6 +144,16 @@
                     >
                       {{ t("恢复推荐模型") }}
                     </n-button>
+                    <n-button
+                      v-if="activeGuide.id === 'claude-desktop'"
+                      type="primary"
+                      size="small"
+                      :loading="claudeDesktopModelsSaving"
+                      :disabled="!claudeDesktopModelsDirty || modelsLoading"
+                      @click="saveClaudeDesktopModels"
+                    >
+                      {{ t("保存") }}
+                    </n-button>
                   </div>
                   <div
                     class="model-controls"
@@ -154,9 +164,10 @@
                         <span>{{ field }}</span>
                         <n-select
                           :value="modelValues[field]"
-                          :options="modelOptions"
+                          :options="activeModelOptions"
                           :loading="modelsLoading"
-                          :disabled="!settingsLoaded || (activeGuide.id === 'claude-desktop' && !claudeDesktopModelsLoaded)"
+                          :disabled="!settingsLoaded || (activeGuide.id === 'claude-desktop'
+                            && (!claudeDesktopModelsLoaded || claudeDesktopModelsSaving))"
                           :placeholder="t('选择模型 ID')"
                           filterable
                           @update:value="updateModelField(field, $event)"
@@ -165,10 +176,10 @@
                     </template>
                     <template v-else>
                       <label v-if="activeGuide.multipleModels" class="model-field">
-                        <span>models</span>
+                        <span>{{ t("模型（多选）") }}</span>
                         <n-select
                           v-model:value="selectedModels"
-                          :options="modelOptions"
+                          :options="activeModelOptions"
                           :loading="modelsLoading"
                           :disabled="!settingsLoaded"
                           :placeholder="t('选择模型 ID')"
@@ -178,7 +189,7 @@
                         />
                       </label>
                       <label class="model-field">
-                        <span>model</span>
+                        <span>{{ t("模型") }}</span>
                         <n-select
                           v-model:value="selectedModel"
                           :options="primaryModelOptions"
@@ -200,7 +211,12 @@
           </section>
 
           <n-alert v-if="settingsError" type="error" :title="t('节点设置加载失败')">
-            {{ t("{error}。教程正文仍可阅读，但为避免复制错误地址，动态配置复制已禁用。", { error: settingsError }) }}
+            <div class="models-error-content">
+              <span>{{ t("{error}。教程正文仍可阅读，但为避免复制错误地址，动态配置复制已禁用。", { error: settingsError }) }}</span>
+              <n-button size="small" secondary :loading="settingsLoading" @click="loadSettings()">
+                {{ t("重试") }}
+              </n-button>
+            </div>
           </n-alert>
           <n-alert v-if="modelsError" type="warning" :title="t('读取失败')">
             <div class="models-error-content">
@@ -261,7 +277,8 @@
                       {{ t(action.label) }}
                     </n-button>
                   </template>
-                  {{ t("即将把当前 Key 交给 {app}。", { app: activeGuide.name }) }}
+                  <div>{{ t("即将把当前 Key 交给 {app}。", { app: activeGuide.name }) }}</div>
+                  <div>{{ t("如未安装客户端，一键导入不会有反应") }}</div>
                 </n-popconfirm>
               </template>
             </div>
@@ -286,7 +303,8 @@
                     <span>{{ snippet.language }}</span>
                     <n-button
                       secondary
-                      :disabled="!canGenerateConfig"
+                      :disabled="!canGenerateConfig
+                        || (activeGuide.id === 'claude-desktop' && claudeDesktopModelsSaving)"
                       :aria-label="t('复制 {label}', { label: snippet.label })"
                       @click="copySnippet(index, snippet)"
                     >
@@ -368,8 +386,8 @@ const settingsLoaded = ref(false);
 const settingsError = ref("");
 const modelsLoading = ref(false);
 const modelsError = ref("");
-const modelsInitialized = ref(false);
 const claudeDesktopModelsLoaded = ref(false);
+const claudeDesktopModelsSaving = ref(false);
 const claudeDesktopDefaults = ref<ClaudeDesktopModels>({ sonnet: "", opus: "", haiku: "" });
 const applicationModelIds = ref<string[]>([]);
 const modelOptions = ref<SelectOption[]>([]);
@@ -399,6 +417,12 @@ const selectedModel = computed<string | null>({
 });
 const modelValues = ref<Record<string, string>>({});
 const snippetDrafts = ref<Record<string, string>>({});
+const claudeDesktopModelsDirty = computed(() => (
+  claudeDesktopModelsLoaded.value
+  && CLAUDE_DESKTOP_FIELDS.some((field) => (
+    modelValues.value[field] !== claudeDesktopDefaults.value[field]
+  ))
+));
 
 const serviceConfig = ref({
   gateway_port: 9042,
@@ -445,18 +469,34 @@ const applicationSelectOptions = computed<(SelectOption | SelectGroupOption)[]>(
     })),
   }));
 });
+const activeModelOptions = computed<SelectOption[]>(() => (
+  activeGuide.value.id === "claude-desktop"
+    ? modelOptions.value
+    : applicationModelIds.value.map((modelId) => ({ label: modelId, value: modelId }))
+));
 const primaryModelOptions = computed<SelectOption[]>(() => (
   activeGuide.value.multipleModels
-    ? modelOptions.value.filter(({ value }) => typeof value === "string" && selectedModels.value.includes(value))
-    : modelOptions.value
+    ? activeModelOptions.value.filter(({ value }) => typeof value === "string" && selectedModels.value.includes(value))
+    : activeModelOptions.value
 ));
 
-const connectionUrls = computed(() => resolveConnectionUrls(
-  serviceConfig.value.client_root_url,
-  window.location.origin,
-  serviceConfig.value.gateway_port,
-  import.meta.env.DEV,
-));
+const connectionUrls = computed(() => {
+  try {
+    return resolveConnectionUrls(
+      serviceConfig.value.client_root_url,
+      window.location.origin,
+      serviceConfig.value.gateway_port,
+      import.meta.env.DEV,
+    );
+  } catch {
+    return resolveConnectionUrls(
+      "",
+      window.location.origin,
+      serviceConfig.value.gateway_port,
+      import.meta.env.DEV,
+    );
+  }
+});
 const maskedKey = computed(() => maskConnectionKey(serviceConfig.value.gateway_key));
 const guideContext = computed<GuideContext>(() => ({
   rootUrl: connectionUrls.value.rootUrl,
@@ -502,8 +542,13 @@ const activeEndpoint = computed(() => {
   return { url: connectionUrls.value.chatCompletionsUrl };
 });
 const copyDisabledHint = computed(() => {
-  if (!settingsLoaded.value) return t("设置加载完成后可复制");
+  if (settingsLoading.value) return t("设置加载完成后可复制");
+  if (settingsError.value) return t("设置加载失败，请先重试");
+  if (!serviceConfig.value.gateway_key) return t("请先在仪表盘设置 Key");
   if (modelsLoading.value) return t("模型加载完成后可复制");
+  if (modelsError.value && activeGuide.value.id === "claude-desktop" && !claudeDesktopModelsLoaded.value) {
+    return modelsError.value;
+  }
   return "";
 });
 
@@ -559,15 +604,15 @@ async function loadModels() {
       ...Object.values(claudeDesktopModels ?? claudeDesktopDefaults.value).filter(Boolean),
     ])];
     modelOptions.value = availableIds.map((modelId) => ({ label: modelId, value: modelId }));
-    const defaultSelectedModels = modelIds.length ? modelIds : availableIds;
-    const fallbackModel = availableIds[0] ?? "";
+    const defaultSelectedModels = modelIds;
+    const fallbackModel = modelIds[0] ?? "";
     for (const guide of applicationGuides) {
       if (!isApplicationId(guide.id)) continue;
       if (!guide.modelFields?.length) {
         const selection = reconcileApplicationModelSelection(
           selectedModelsByApplication.value[guide.id],
           selectedModelByApplication.value[guide.id],
-          availableIds,
+          modelIds,
           defaultSelectedModels,
           Boolean(guide.multipleModels),
         );
@@ -589,7 +634,7 @@ async function loadModels() {
       if (guide.id === "claude-desktop") continue;
       let changed = false;
       for (const field of guide.modelFields) {
-        if (!availableIds.includes(modelValues.value[field])) {
+        if (!modelIds.includes(modelValues.value[field])) {
           const nextModel = guide.id === "claude-code"
             ? recommendClaudeCodeModel(field, modelIds) || fallbackModel
             : fallbackModel;
@@ -617,9 +662,8 @@ async function loadModels() {
       if (changed) clearApplicationDrafts("claude-desktop");
       claudeDesktopModelsLoaded.value = true;
     }
-    modelsError.value = errors.join("；");
+    modelsError.value = errors.join(t("；"));
   } finally {
-    modelsInitialized.value = true;
     modelsLoading.value = false;
   }
 }
@@ -690,6 +734,34 @@ function updateModelField(field: string, value: string | number | null) {
   clearApplicationDrafts(activeGuide.value.id);
 }
 
+function currentClaudeDesktopModels(): ClaudeDesktopModels {
+  return {
+    sonnet: modelValues.value.sonnet,
+    opus: modelValues.value.opus,
+    haiku: modelValues.value.haiku,
+  };
+}
+
+async function saveClaudeDesktopModels(): Promise<boolean> {
+  if (!claudeDesktopModelsLoaded.value) return false;
+  if (!claudeDesktopModelsDirty.value) return true;
+  if (claudeDesktopModelsSaving.value) return false;
+  claudeDesktopModelsSaving.value = true;
+  try {
+    const persisted = await tauriApi.updateClaudeDesktopModels(currentClaudeDesktopModels());
+    Object.assign(modelValues.value, persisted);
+    claudeDesktopDefaults.value = { ...persisted };
+    message.success(t("设置已保存"));
+    return true;
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    message.error(t("模型映射保存失败: {error}", { error: detail }));
+    return false;
+  } finally {
+    claudeDesktopModelsSaving.value = false;
+  }
+}
+
 function sameStringArray(left: readonly string[] | undefined, right: readonly string[]): boolean {
   if (!left) return false;
   return left.length === right.length
@@ -723,18 +795,7 @@ async function copySnippet(index: number, snippet: { label: string; display: str
       message.error(modelsError.value || t("读取失败"));
       return;
     }
-    try {
-      const persisted = await tauriApi.updateClaudeDesktopModels({
-        sonnet: modelValues.value.sonnet,
-        opus: modelValues.value.opus,
-        haiku: modelValues.value.haiku,
-      });
-      Object.assign(modelValues.value, persisted);
-      claudeDesktopDefaults.value = { ...persisted };
-    } catch (error) {
-      message.error(error instanceof Error ? error.message : String(error));
-      return;
-    }
+    if (!(await saveClaudeDesktopModels())) return;
   }
   const draft = snippetDraft(index, snippet);
   const value = draft === snippet.display
@@ -763,7 +824,7 @@ onMounted(() => {
 });
 
 onActivated(() => {
-  if (!settingsLoading.value) void loadSettings(!modelsInitialized.value);
+  if (!settingsLoading.value) void loadSettings();
 });
 
 onUnmounted(() => {

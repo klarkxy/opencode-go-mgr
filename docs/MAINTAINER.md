@@ -179,19 +179,23 @@ difference, and the Claude Desktop three-role persistence behavior.
   already-failed accounts. `limit.rs` parses the upstream 429 reset phrase.
   `pricing.rs` loads the active OpenCode Go pricing snapshot and derives
   quota cost from token usage; the dashboard windows use the limits stored in
-  that same snapshot. `PricingModel` records the multiplier already included
-  in an official token rate relative to the supplier baseline as the
-  informational `official_price_multiplier`; the applied `quota_multiplier`
-  is always `monthly limit / Usage`. `official_price_multiplier` is `4` for
-  `deepseek-v4-pro` and `mimo-v2.5-pro`, and defaults to `1` for Grok and
-  other models. It must not reduce the separate Go Usage conversion.
+  that same snapshot. `PricingModel.quota_multiplier` is the single applied
+  official multiplier. A fetched snapshot derives it as
+  `monthly limit / Usage`; the protected multiplier update endpoint may
+  persist user overrides for temporary promotions under a new immutable
+  revision.
 - Pricing refresh is user-triggered through protected
-  `GET/POST /dashboard/api/pricing[/refresh]`. The fetcher is restricted to
-  the OpenCode Go HTTPS host, same-host redirects, a 20-second deadline, and
-  a 2 MiB body. Validation failure never activates a partial snapshot;
-  `pricing_snapshots` retains the last successful revision. MiniMax context,
-  priority, and high-speed adjustments are local policy and never trigger a
-  supplier-site request.
+  `GET /dashboard/api/pricing`, `PUT /dashboard/api/pricing/multipliers`, and
+  `POST /dashboard/api/pricing/refresh`. A refresh whose official multipliers
+  differ from the active values first returns a non-activating preview; a
+  follow-up is bound to both the active revision and the previewed official
+  content hash before it chooses current or official values; a changed
+  official candidate must be confirmed again. The
+  fetcher is restricted to the OpenCode Go HTTPS host, same-host redirects, a
+  20-second deadline, and a 2 MiB body. Validation failure never activates a
+  partial snapshot; `pricing_snapshots` retains the last successful revision.
+  MiniMax context, priority, and high-speed adjustments are local policy and
+  never trigger a supplier-site request.
 - `forwarder.rs` returns an explicit action to `handler.rs`: only a pre-send
   DNS/TCP/TLS connection failure can retry once on the same account;
   `401`/`403`/`429` can select another account. `408`, `5xx`, post-connect

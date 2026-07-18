@@ -64,6 +64,28 @@ test("dashboard request errors preserve status for localized handling", async ()
   );
 });
 
+test("dashboard request errors preserve a non-JSON proxy response body", async () => {
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { location: { pathname: "/dashboard" }, dispatchEvent() {} },
+  });
+  Object.defineProperty(globalThis, "fetch", {
+    configurable: true,
+    value: async () => new Response("<h1>Bad Gateway</h1>", {
+      status: 502,
+      statusText: "Bad Gateway",
+      headers: { "Content-Type": "text/html" },
+    }),
+  });
+
+  await assert.rejects(
+    () => tauriApi.registerAdmin("admin", "password123"),
+    (error) => error instanceof DashboardRequestError
+      && error.status === 502
+      && error.message === "<h1>Bad Gateway</h1>",
+  );
+});
+
 test("settings API maps the loaded revision to conditional writes and returns new revisions", async () => {
   Object.defineProperty(globalThis, "window", {
     configurable: true,

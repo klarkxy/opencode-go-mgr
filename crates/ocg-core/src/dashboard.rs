@@ -6,7 +6,7 @@ use crate::gateway::{
     protocol::supported_model_ids,
 };
 use crate::models::*;
-use crate::pricing::{PricingSnapshot, fetch_official_snapshot};
+use crate::pricing::{PricingSnapshot, fetch_official_snapshot, stamp_pricing_activation};
 use crate::state::{CoreState, DesktopUpdateStartError, DesktopUpdateStatus};
 use axum::{
     Json, Router,
@@ -19,6 +19,7 @@ use axum::{
 };
 use chrono::{DateTime, Duration, SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Component, Path as FsPath, PathBuf};
 
 pub fn api_router(state: CoreState) -> Router<CoreState> {
@@ -49,6 +50,7 @@ pub fn api_router(state: CoreState) -> Router<CoreState> {
         .route("/settings/install-update", post(install_update))
         .route("/pricing", get(get_pricing))
         .route("/pricing/refresh", post(refresh_pricing))
+        .route("/pricing/multipliers", put(update_pricing_multipliers))
         .route(
             "/settings/regenerate-gateway-key",
             post(regenerate_gateway_key),
@@ -410,12 +412,52 @@ struct PricingRefreshResponse {
     #[serde(flatten)]
     snapshot: PricingSnapshot,
     refresh_status: &'static str,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    multiplier_changes: Vec<PricingMultiplierChange>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    official_content_hash: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq)]
+struct PricingMultiplierChange {
+    model_id: String,
+    current_multiplier: f64,
+    official_multiplier: f64,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum PricingRefreshPolicy {
+    KeepCurrent,
+    UseOfficial,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct PricingRefreshRequest {
+    policy: Option<PricingRefreshPolicy>,
+    expected_revision: Option<String>,
+    expected_official_content_hash: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PricingMultiplierInput {
+    model_id: String,
+    multiplier: f64,
+}
+
+#[derive(Debug, Deserialize)]
+struct PricingMultiplierUpdate {
+    expected_revision: String,
+    multipliers: Vec<PricingMultiplierInput>,
+}
+
+const MAX_PRICING_MULTIPLIER: f64 = 1000.0;
+
 async fn refresh_pricing(
     State(state): State<CoreState>,
+    request: Option<Json<PricingRefreshRequest>>,
 ) -> Result<Json<PricingRefreshResponse>, ApiError> {
     let _guard = state.pricing_refresh.try_lock().map_err(|_| {
         ApiError::status(
@@ -424,26 +466,66 @@ async fn refresh_pricing(
         )
     })?;
 
-    apply_pricing_refresh(&state, fetch_official_snapshot().await).map(Json)
+    let request = request.map(|Json(request)| request).unwrap_or_default();
+    if let Some(expected_revision) = request.expected_revision.as_deref()
+        && state.pricing_snapshot().revision != expected_revision
+    {
+        return Err(ApiError::status(
+            StatusCode::CONFLICT,
+            "pricing revision changed; refresh and try again",
+        ));
+    }
+
+    apply_pricing_refresh(
+        &state,
+        fetch_official_snapshot().await,
+        request.policy,
+        request.expected_official_content_hash.as_deref(),
+    )
+    .map(Json)
 }
 
 fn apply_pricing_refresh(
     state: &CoreState,
     result: crate::Result<PricingSnapshot>,
+    policy: Option<PricingRefreshPolicy>,
+    expected_official_content_hash: Option<&str>,
 ) -> Result<PricingRefreshResponse, ApiError> {
     match result {
-        Ok(snapshot) => {
+        Ok(official) => {
             let active = state.pricing_snapshot();
-            let snapshot = if active.content_hash == snapshot.content_hash
-                && active.adjustment_policy_version == snapshot.adjustment_policy_version
-            {
-                active.as_ref().clone()
-            } else {
-                state
-                    .activate_pricing_snapshot(snapshot.clone())
-                    .map_err(ApiError::internal)?;
-                snapshot
-            };
+            let multiplier_changes = pricing_multiplier_changes(&active, &official);
+            let official_content_hash = official.content_hash.clone();
+            let confirmation_matches = expected_official_content_hash
+                .is_some_and(|expected| expected == official_content_hash);
+            if !multiplier_changes.is_empty() && (policy.is_none() || !confirmation_matches) {
+                return Ok(PricingRefreshResponse {
+                    snapshot: active.as_ref().clone(),
+                    refresh_status: "needs_confirmation",
+                    multiplier_changes,
+                    official_content_hash: Some(official_content_hash),
+                    error: None,
+                });
+            }
+
+            let mut candidate = official;
+            if matches!(policy, Some(PricingRefreshPolicy::KeepCurrent)) {
+                merge_current_multipliers(&active, &mut candidate);
+            }
+            if pricing_semantically_equal(&active, &candidate) {
+                return Ok(PricingRefreshResponse {
+                    snapshot: active.as_ref().clone(),
+                    refresh_status: "unchanged",
+                    multiplier_changes,
+                    official_content_hash: None,
+                    error: None,
+                });
+            }
+
+            let snapshot = stamp_pricing_activation(candidate);
+            state
+                .activate_pricing_snapshot(snapshot.clone())
+                .map_err(ApiError::internal)?;
             let _ = state.db.lock().log_gateway(
                 "info",
                 "pricing",
@@ -452,6 +534,8 @@ fn apply_pricing_refresh(
             Ok(PricingRefreshResponse {
                 snapshot,
                 refresh_status: "success",
+                multiplier_changes,
+                official_content_hash: None,
                 error: None,
             })
         }
@@ -465,10 +549,132 @@ fn apply_pricing_refresh(
             Ok(PricingRefreshResponse {
                 snapshot: state.pricing_snapshot().as_ref().clone(),
                 refresh_status: "failed_no_change",
+                multiplier_changes: Vec::new(),
+                official_content_hash: None,
                 error: Some(message),
             })
         }
     }
+}
+
+fn pricing_multiplier_changes(
+    current: &PricingSnapshot,
+    official: &PricingSnapshot,
+) -> Vec<PricingMultiplierChange> {
+    let current = pricing_multiplier_map(current);
+    let official = pricing_multiplier_map(official);
+    current
+        .iter()
+        .filter_map(|(model_id, current_multiplier)| {
+            let official_multiplier = official.get(model_id)?;
+            (current_multiplier != official_multiplier).then(|| PricingMultiplierChange {
+                model_id: model_id.clone(),
+                current_multiplier: *current_multiplier,
+                official_multiplier: *official_multiplier,
+            })
+        })
+        .collect()
+}
+
+fn pricing_multiplier_map(snapshot: &PricingSnapshot) -> BTreeMap<String, f64> {
+    snapshot
+        .models
+        .iter()
+        .map(|model| (model.model_id.clone(), model.quota_multiplier))
+        .collect()
+}
+
+fn merge_current_multipliers(current: &PricingSnapshot, candidate: &mut PricingSnapshot) {
+    let current = pricing_multiplier_map(current);
+    for model in &mut candidate.models {
+        if let Some(multiplier) = current.get(&model.model_id) {
+            model.quota_multiplier = *multiplier;
+        }
+    }
+}
+
+fn pricing_semantically_equal(left: &PricingSnapshot, right: &PricingSnapshot) -> bool {
+    left.content_hash == right.content_hash
+        && left.document_updated_at == right.document_updated_at
+        && left.limits == right.limits
+        && left.models == right.models
+        && left.adjustment_policy_version == right.adjustment_policy_version
+}
+
+async fn update_pricing_multipliers(
+    State(state): State<CoreState>,
+    Json(update): Json<PricingMultiplierUpdate>,
+) -> Result<Json<PricingSnapshot>, ApiError> {
+    let _guard = state
+        .pricing_refresh
+        .try_lock()
+        .map_err(|_| ApiError::status(StatusCode::CONFLICT, "pricing update is already running"))?;
+    let active = state.pricing_snapshot();
+    if active.revision != update.expected_revision {
+        return Err(ApiError::status(
+            StatusCode::CONFLICT,
+            "pricing revision changed; refresh and try again",
+        ));
+    }
+    if update.multipliers.is_empty() {
+        return Err(ApiError::bad_request("at least one multiplier is required"));
+    }
+
+    let known_models = active
+        .models
+        .iter()
+        .map(|model| model.model_id.as_str())
+        .collect::<HashSet<_>>();
+    let mut requested = BTreeMap::new();
+    for input in update.multipliers {
+        let model_id = input.model_id.trim();
+        if model_id.is_empty() || !known_models.contains(model_id) {
+            return Err(ApiError::bad_request(format!(
+                "unknown pricing model `{model_id}`"
+            )));
+        }
+        if !input.multiplier.is_finite()
+            || input.multiplier <= 0.0
+            || input.multiplier > MAX_PRICING_MULTIPLIER
+        {
+            return Err(ApiError::bad_request(format!(
+                "multiplier for `{model_id}` must be greater than 0 and at most {MAX_PRICING_MULTIPLIER}"
+            )));
+        }
+        if requested
+            .insert(model_id.to_string(), input.multiplier)
+            .is_some()
+        {
+            return Err(ApiError::bad_request(format!(
+                "duplicate multiplier for `{model_id}`"
+            )));
+        }
+    }
+
+    let mut snapshot = active.as_ref().clone();
+    let mut changed = false;
+    for model in &mut snapshot.models {
+        if let Some(multiplier) = requested.get(&model.model_id)
+            && model.quota_multiplier != *multiplier
+        {
+            model.quota_multiplier = *multiplier;
+            changed = true;
+        }
+    }
+    if !changed {
+        return Ok(Json(active.as_ref().clone()));
+    }
+
+    let snapshot = stamp_pricing_activation(snapshot);
+    state
+        .activate_pricing_snapshot(snapshot.clone())
+        .map_err(ApiError::internal)?;
+    let _ = state.db.lock().log_gateway(
+        "info",
+        "pricing",
+        &format!("updated pricing multipliers in {}", snapshot.revision),
+    );
+    Ok(Json(snapshot))
 }
 
 fn encrypted_optional(
@@ -1134,12 +1340,22 @@ async fn application_models(State(state): State<CoreState>) -> Result<Json<Vec<S
             ApiError::status(StatusCode::BAD_GATEWAY, "upstream model list is invalid")
         })?;
     let supported = supported_model_ids().collect::<Vec<_>>();
+    let pricing = state.pricing_snapshot();
+    let priced = pricing
+        .models
+        .iter()
+        .map(|model| model.model_id.as_str())
+        .collect::<HashSet<_>>();
     let mut models = Vec::new();
     for id in data
         .iter()
         .filter_map(|model| model.get("id").and_then(serde_json::Value::as_str))
     {
-        if supported.contains(&id) && !models.iter().any(|model| model == id) {
+        let priced_model = priced.contains(id)
+            || id
+                .strip_suffix("-highspeed")
+                .is_some_and(|base| priced.contains(base));
+        if supported.contains(&id) && priced_model && !models.iter().any(|model| model == id) {
             models.push(id.to_string());
         }
     }
@@ -1338,11 +1554,13 @@ fn is_loopback(url: &reqwest::Url) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        AccountOrderInput, AccountUsageUpdate, ForwardLogQuery, SettingsUpdateRequest,
-        UpdateCheckResponse, apply_pricing_refresh, asset_path, create_account, dashboard_account,
-        dashboard_summary, format_error_chain, is_update_available, parse_stable_version,
-        reorder_accounts, update_account, update_account_usage, update_settings,
-        validate_forward_log_query,
+        AccountOrderInput, AccountUsageUpdate, ForwardLogQuery, MAX_PRICING_MULTIPLIER,
+        PricingMultiplierInput, PricingMultiplierUpdate, PricingRefreshPolicy,
+        SettingsUpdateRequest, UpdateCheckResponse, apply_pricing_refresh, asset_path,
+        create_account, dashboard_account, dashboard_summary, format_error_chain,
+        is_update_available, parse_stable_version, pricing_multiplier_changes,
+        pricing_semantically_equal, reorder_accounts, update_account, update_account_usage,
+        update_pricing_multipliers, update_settings, validate_forward_log_query,
     };
     use crate::crypto::{KeyCipher, StaticKeyCipher};
     use crate::db::Database;
@@ -1425,12 +1643,323 @@ mod tests {
         let response = apply_pricing_refresh(
             &state,
             Err(anyhow::anyhow!("fixture parser rejected the document")),
+            None,
+            None,
         )
         .unwrap();
 
         assert_eq!(response.refresh_status, "failed_no_change");
         assert_eq!(response.snapshot.revision, before.revision);
         assert_eq!(state.pricing_snapshot().revision, before.revision);
+        drop(state);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn pricing_refresh_requires_one_confirmation_per_changed_model() {
+        let dir = temp_data_dir("pricing-confirmation");
+        let cipher: Arc<dyn KeyCipher + Send + Sync> =
+            Arc::new(StaticKeyCipher::new("pricing-test"));
+        let state = Arc::new(
+            CoreStateInner::new(Database::open(dir.clone()).unwrap(), dir.clone(), cipher).unwrap(),
+        );
+        let before = state.pricing_snapshot();
+        let mut official = before.as_ref().clone();
+        official.content_hash = "official-price-change".into();
+        for model in &mut official.models {
+            if model.model_id == "qwen3.7-plus" {
+                model.quota_multiplier = 2.0;
+            }
+        }
+
+        let changes = pricing_multiplier_changes(&before, &official);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].model_id, "qwen3.7-plus");
+        let response = apply_pricing_refresh(&state, Ok(official), None, None).unwrap();
+        assert_eq!(response.refresh_status, "needs_confirmation");
+        assert_eq!(response.multiplier_changes.len(), 1);
+        assert_eq!(
+            response.official_content_hash.as_deref(),
+            Some("official-price-change")
+        );
+        assert_eq!(state.pricing_snapshot().revision, before.revision);
+
+        drop(state);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn pricing_refresh_reconfirms_when_the_official_candidate_changes() {
+        let dir = temp_data_dir("pricing-confirmation-candidate");
+        let cipher: Arc<dyn KeyCipher + Send + Sync> =
+            Arc::new(StaticKeyCipher::new("pricing-test"));
+        let state = Arc::new(
+            CoreStateInner::new(Database::open(dir.clone()).unwrap(), dir.clone(), cipher).unwrap(),
+        );
+        let before = state.pricing_snapshot();
+        let mut first = before.as_ref().clone();
+        first.content_hash = "official-candidate-a".into();
+        for model in &mut first.models {
+            if model.model_id == "qwen3.7-plus" {
+                model.quota_multiplier = 2.0;
+            }
+        }
+        let mut second = first.clone();
+        second.content_hash = "official-candidate-b".into();
+        second.models[0].input += 0.25;
+
+        let preview = apply_pricing_refresh(&state, Ok(first), None, None).unwrap();
+        assert_eq!(preview.refresh_status, "needs_confirmation");
+        assert_eq!(
+            preview.official_content_hash.as_deref(),
+            Some("official-candidate-a")
+        );
+
+        let changed = apply_pricing_refresh(
+            &state,
+            Ok(second.clone()),
+            Some(PricingRefreshPolicy::UseOfficial),
+            preview.official_content_hash.as_deref(),
+        )
+        .unwrap();
+        assert_eq!(changed.refresh_status, "needs_confirmation");
+        assert_eq!(
+            changed.official_content_hash.as_deref(),
+            Some("official-candidate-b")
+        );
+        assert_eq!(state.pricing_snapshot().revision, before.revision);
+
+        let confirmed = apply_pricing_refresh(
+            &state,
+            Ok(second),
+            Some(PricingRefreshPolicy::UseOfficial),
+            changed.official_content_hash.as_deref(),
+        )
+        .unwrap();
+        assert_eq!(confirmed.refresh_status, "success");
+        assert_eq!(confirmed.snapshot.content_hash, "official-candidate-b");
+
+        drop(state);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn keep_current_refresh_merges_multiplier_across_all_official_tiers() {
+        let dir = temp_data_dir("pricing-keep-current");
+        let cipher: Arc<dyn KeyCipher + Send + Sync> =
+            Arc::new(StaticKeyCipher::new("pricing-test"));
+        let state = Arc::new(
+            CoreStateInner::new(Database::open(dir.clone()).unwrap(), dir.clone(), cipher).unwrap(),
+        );
+        let before = state.pricing_snapshot();
+        let current_multiplier = before
+            .models
+            .iter()
+            .find(|model| model.model_id == "qwen3.7-plus")
+            .unwrap()
+            .quota_multiplier;
+        let mut official = before.as_ref().clone();
+        official.content_hash = "official-price-and-multiplier-change".into();
+        official.models[0].input += 0.25;
+        for model in &mut official.models {
+            if model.model_id == "qwen3.7-plus" {
+                model.quota_multiplier = 2.0;
+            }
+        }
+
+        let response = apply_pricing_refresh(
+            &state,
+            Ok(official),
+            Some(PricingRefreshPolicy::KeepCurrent),
+            Some("official-price-and-multiplier-change"),
+        )
+        .unwrap();
+        assert_eq!(response.refresh_status, "success");
+        assert_ne!(response.snapshot.revision, before.revision);
+        assert!(
+            response
+                .snapshot
+                .models
+                .iter()
+                .filter(|model| model.model_id == "qwen3.7-plus")
+                .all(|model| model.quota_multiplier == current_multiplier)
+        );
+        assert_eq!(
+            state
+                .db
+                .lock()
+                .latest_pricing_snapshot()
+                .unwrap()
+                .unwrap()
+                .revision,
+            response.snapshot.revision
+        );
+
+        drop(state);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn official_refresh_applies_changed_multiplier_and_source_metadata() {
+        let dir = temp_data_dir("pricing-use-official");
+        let cipher: Arc<dyn KeyCipher + Send + Sync> =
+            Arc::new(StaticKeyCipher::new("pricing-test"));
+        let state = Arc::new(
+            CoreStateInner::new(Database::open(dir.clone()).unwrap(), dir.clone(), cipher).unwrap(),
+        );
+        let before = state.pricing_snapshot();
+        let mut official = before.as_ref().clone();
+        official.content_hash = "new-official-document".into();
+        official.document_updated_at = "2026-07-18T00:00:00Z".into();
+        for model in &mut official.models {
+            if model.model_id == "grok-4.5" {
+                model.quota_multiplier = 3.0;
+            }
+        }
+        assert!(!pricing_semantically_equal(&before, &official));
+
+        let response = apply_pricing_refresh(
+            &state,
+            Ok(official),
+            Some(PricingRefreshPolicy::UseOfficial),
+            Some("new-official-document"),
+        )
+        .unwrap();
+        assert_eq!(response.refresh_status, "success");
+        assert_eq!(response.snapshot.content_hash, "new-official-document");
+        assert_eq!(
+            response
+                .snapshot
+                .models
+                .iter()
+                .find(|model| model.model_id == "grok-4.5")
+                .unwrap()
+                .quota_multiplier,
+            3.0
+        );
+
+        drop(state);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn refresh_is_unchanged_when_only_volatile_activation_metadata_differs() {
+        let dir = temp_data_dir("pricing-unchanged");
+        let cipher: Arc<dyn KeyCipher + Send + Sync> =
+            Arc::new(StaticKeyCipher::new("pricing-test"));
+        let state = Arc::new(
+            CoreStateInner::new(Database::open(dir.clone()).unwrap(), dir.clone(), cipher).unwrap(),
+        );
+        let before = state.pricing_snapshot();
+        let mut fetched = before.as_ref().clone();
+        fetched.revision = "volatile-fetch-revision".into();
+        fetched.activated_at = "2099-01-01T00:00:00Z".into();
+
+        let response = apply_pricing_refresh(&state, Ok(fetched), None, None).unwrap();
+        assert_eq!(response.refresh_status, "unchanged");
+        assert_eq!(response.snapshot.revision, before.revision);
+        assert_eq!(state.pricing_snapshot().revision, before.revision);
+
+        drop(state);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn multiplier_batch_updates_every_tier_with_one_revision() {
+        let dir = temp_data_dir("pricing-edit");
+        let cipher: Arc<dyn KeyCipher + Send + Sync> =
+            Arc::new(StaticKeyCipher::new("pricing-test"));
+        let state = Arc::new(
+            CoreStateInner::new(Database::open(dir.clone()).unwrap(), dir.clone(), cipher).unwrap(),
+        );
+        let before = state.pricing_snapshot();
+        let Json(updated) = update_pricing_multipliers(
+            State(state.clone()),
+            Json(PricingMultiplierUpdate {
+                expected_revision: before.revision.clone(),
+                multipliers: vec![PricingMultiplierInput {
+                    model_id: "qwen3.7-plus".into(),
+                    multiplier: 0.75,
+                }],
+            }),
+        )
+        .await
+        .unwrap();
+        assert_ne!(updated.revision, before.revision);
+        assert!(
+            updated
+                .models
+                .iter()
+                .filter(|model| model.model_id == "qwen3.7-plus")
+                .all(|model| model.quota_multiplier == 0.75)
+        );
+        assert_eq!(
+            state
+                .db
+                .lock()
+                .latest_pricing_snapshot()
+                .unwrap()
+                .unwrap()
+                .revision,
+            updated.revision
+        );
+
+        let Json(no_change) = update_pricing_multipliers(
+            State(state.clone()),
+            Json(PricingMultiplierUpdate {
+                expected_revision: updated.revision.clone(),
+                multipliers: vec![PricingMultiplierInput {
+                    model_id: "qwen3.7-plus".into(),
+                    multiplier: 0.75,
+                }],
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(no_change.revision, updated.revision);
+
+        let stale = update_pricing_multipliers(
+            State(state.clone()),
+            Json(PricingMultiplierUpdate {
+                expected_revision: before.revision.clone(),
+                multipliers: vec![PricingMultiplierInput {
+                    model_id: "grok-4.5".into(),
+                    multiplier: 2.0,
+                }],
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(stale.status, StatusCode::CONFLICT);
+
+        let too_large = update_pricing_multipliers(
+            State(state.clone()),
+            Json(PricingMultiplierUpdate {
+                expected_revision: updated.revision.clone(),
+                multipliers: vec![PricingMultiplierInput {
+                    model_id: "grok-4.5".into(),
+                    multiplier: MAX_PRICING_MULTIPLIER + 0.1,
+                }],
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(too_large.status, StatusCode::BAD_REQUEST);
+
+        let zero = update_pricing_multipliers(
+            State(state.clone()),
+            Json(PricingMultiplierUpdate {
+                expected_revision: updated.revision,
+                multipliers: vec![PricingMultiplierInput {
+                    model_id: "grok-4.5".into(),
+                    multiplier: 0.0,
+                }],
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(zero.status, StatusCode::BAD_REQUEST);
+
         drop(state);
         fs::remove_dir_all(dir).unwrap();
     }

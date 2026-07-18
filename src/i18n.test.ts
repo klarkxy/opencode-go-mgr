@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { userFacingError } from "./utils/errors.ts";
 import {
   DEFAULT_LOCALE,
   LOCALE_OPTIONS,
   LOCALE_STORAGE_KEY,
   matchLocale,
-  messages,
   readLocale,
   resolveLocale,
   setLocale,
@@ -13,6 +13,15 @@ import {
   writeLocale,
 } from "./i18n/index.ts";
 import type { MessageKey } from "./i18n/index.ts";
+import { deDEMessages } from "./i18n/messages/de-DE.ts";
+import { enUSMessages } from "./i18n/messages/en-US.ts";
+import { esESMessages } from "./i18n/messages/es-ES.ts";
+import { frFRMessages } from "./i18n/messages/fr-FR.ts";
+import { jaJPMessages } from "./i18n/messages/ja-JP.ts";
+import { koKRMessages } from "./i18n/messages/ko-KR.ts";
+import { ptBRMessages } from "./i18n/messages/pt-BR.ts";
+import { ruRUMessages } from "./i18n/messages/ru-RU.ts";
+import { zhTWMessages } from "./i18n/messages/zh-TW.ts";
 import { formatCost } from "./utils/format.ts";
 
 test("locale matching uses stored preference, browser languages, and a stable fallback", () => {
@@ -38,13 +47,24 @@ test("locale preference can be read and written without requiring browser storag
 });
 
 test("all locale catalogs have identical keys and placeholders", () => {
-  const expectedKeys = (Object.keys(messages[DEFAULT_LOCALE]) as MessageKey[]).sort();
+  const expectedKeys = (Object.keys(enUSMessages) as MessageKey[]).sort();
   const placeholders = (value: string) => [...value.matchAll(/\{\w+\}/g)].map(([token]) => token).sort();
+  const rawCatalogs = {
+    "zh-TW": zhTWMessages,
+    "en-US": enUSMessages,
+    "ja-JP": jaJPMessages,
+    "ko-KR": koKRMessages,
+    "es-ES": esESMessages,
+    "fr-FR": frFRMessages,
+    "de-DE": deDEMessages,
+    "pt-BR": ptBRMessages,
+    "ru-RU": ruRUMessages,
+  } as const;
 
-  for (const { value } of LOCALE_OPTIONS) {
-    assert.deepEqual(Object.keys(messages[value]).sort(), expectedKeys, value);
+  for (const [value, catalog] of Object.entries(rawCatalogs)) {
+    assert.deepEqual(Object.keys(catalog).sort(), expectedKeys, value);
     for (const key of expectedKeys) {
-      assert.deepEqual(placeholders(messages[value][key]), placeholders(key), `${value}: ${key}`);
+      assert.deepEqual(placeholders(catalog[key]), placeholders(key), `${value}: ${key}`);
     }
   }
 });
@@ -64,4 +84,11 @@ test("USD costs use the narrow dollar symbol and preserve requested precision", 
   }
   setLocale(DEFAULT_LOCALE);
   assert.match(formatCost(0.00015, 5), /0\.00015/);
+  assert.equal(formatCost(-5), "-$5.00");
+  assert.equal(formatCost(-0.005), "-$0.0050");
+});
+
+test("network failures use a human-facing fallback without hiding server errors", () => {
+  assert.equal(userFacingError(new TypeError("Failed to fetch"), "offline"), "offline");
+  assert.equal(userFacingError(new Error("server detail"), "offline"), "server detail");
 });
