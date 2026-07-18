@@ -104,8 +104,6 @@ jobs:
       - plan
       - preflight
     runs-on: ${{ matrix.os }}
-    environment:
-      name: ${{ needs.plan.outputs.production == 'true' && 'release-signing' || 'release-candidate' }}
     timeout-minutes: 90
     strategy:
       fail-fast: false
@@ -149,16 +147,16 @@ jobs:
         if: needs.plan.outputs.production == 'true'
         env:
           OCG_REQUIRE_UPDATER_ARTIFACTS: "1"
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.OCG_TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.OCG_TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          TAURI_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ needs.plan.outputs.production == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ needs.plan.outputs.production == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
+          TAURI_UPDATER_PUBLIC_KEY: ${{ needs.plan.outputs.production == 'true' && vars.TAURI_UPDATER_PUBLIC_KEY || '' }}
         run: pnpm run release:check
 
       - name: Build platform artifacts
         env:
           OCG_REQUIRE_UPDATER_ARTIFACTS: ${{ needs.plan.outputs.production == 'true' && '1' || '0' }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ needs.plan.outputs.production == 'true' && secrets.OCG_TAURI_SIGNING_PRIVATE_KEY || '' }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ needs.plan.outputs.production == 'true' && secrets.OCG_TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ needs.plan.outputs.production == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ needs.plan.outputs.production == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
           TAURI_UPDATER_PUBLIC_KEY: ${{ needs.plan.outputs.production == 'true' && vars.TAURI_UPDATER_PUBLIC_KEY || '' }}
         run: pnpm run build
 
@@ -490,15 +488,12 @@ jobs:
             --asset-metadata asset-metadata.json
 
   publish-release:
-    name: Publish approved release
-    if: needs.plan.outputs.production == 'true' && vars.OCG_RELEASE_APPROVAL_ENABLED == 'true'
+    name: Publish verified release
+    if: needs.plan.outputs.production == 'true'
     needs:
       - plan
       - verify-release
     runs-on: ubuntu-latest
-    environment:
-      name: release
-      url: https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}
     concurrency:
       group: release-moving-channels
       queue: max

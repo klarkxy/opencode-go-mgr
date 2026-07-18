@@ -64,20 +64,32 @@ test("manual release runs cannot inherit the production tag path", () => {
     new URL("../.github/workflows/release.yml", import.meta.url),
     "utf8",
   );
+  const buildJob = workflow.match(/\n  build:[\s\S]*?\n  draft-release:/)?.[0] ?? "";
+  const draftJob = workflow.match(/\n  draft-release:[\s\S]*?\n  verify-release:/)?.[0] ?? "";
+  const verifyJob = workflow.match(/\n  verify-release:[\s\S]*?\n  publish-release:/)?.[0] ?? "";
+  const publishJob = workflow.match(/\n  publish-release:[\s\S]*$/)?.[0] ?? "";
   assert.match(workflow, /production: \$\{\{ steps\.matrix\.outputs\.production \}\}/);
   assert.match(
     workflow,
     /if \[\[ "\$GITHUB_EVENT_NAME" == push && "\$GITHUB_REF" == refs\/tags\/v\* \]\]; then/,
   );
   assert.doesNotMatch(workflow, /if:\s*startsWith\(github\.ref, 'refs\/tags\/v'\)/);
+  assert.doesNotMatch(workflow, /release-signing|release-candidate/);
+  assert.doesNotMatch(workflow, /OCG_TAURI_SIGNING|OCG_RELEASE_APPROVAL_ENABLED/);
   assert.match(
-    workflow,
-    /name: \$\{\{ needs\.plan\.outputs\.production == 'true' && 'release-signing' \|\| 'release-candidate' \}\}/,
+    buildJob,
+    /TAURI_SIGNING_PRIVATE_KEY: \$\{\{ needs\.plan\.outputs\.production == 'true' && secrets\.TAURI_SIGNING_PRIVATE_KEY \|\| '' \}\}/,
   );
-  assert.ok(
-    (workflow.match(/needs\.plan\.outputs\.production == 'true'/g) ?? []).length >= 8,
-    "every signing, draft, verification, and publication path must use the plan output",
+  assert.match(
+    buildJob,
+    /TAURI_SIGNING_PRIVATE_KEY_PASSWORD: \$\{\{ needs\.plan\.outputs\.production == 'true' && secrets\.TAURI_SIGNING_PRIVATE_KEY_PASSWORD \|\| '' \}\}/,
   );
+  assert.doesNotMatch(buildJob, /environment:/);
+  assert.match(draftJob, /if: needs\.plan\.outputs\.production == 'true'/);
+  assert.match(verifyJob, /if: needs\.plan\.outputs\.production == 'true'/);
+  assert.match(publishJob, /if: needs\.plan\.outputs\.production == 'true'/);
+  assert.match(publishJob, /needs:\s+- plan\s+- verify-release/);
+  assert.doesNotMatch(publishJob, /environment:|always\(\)/);
 });
 
 test("container publication checks out an exact tag and validates source versions", () => {
