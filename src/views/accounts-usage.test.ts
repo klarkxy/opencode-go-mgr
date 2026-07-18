@@ -11,6 +11,7 @@ import {
   usageProgressStatus,
 } from "./accounts-usage.ts";
 import type { UsageKey } from "./accounts-usage.ts";
+import { mapWithConcurrency } from "../utils/async.ts";
 
 test("fills every active 5-hour, weekly, or monthly limit", () => {
   const cases: Array<[UsageKey, "cooldown_5h_until" | "cooldown_week_until" | "cooldown_month_until"]> = [
@@ -116,10 +117,11 @@ test("keeps account cards compact with metadata tags and top-level usage calibra
   const source = await readFile(new URL("./Accounts.vue", import.meta.url), "utf8");
   const header = source.slice(
     source.indexOf("<template #header>"),
-    source.indexOf('<div v-if="quotaLimitsError"'),
+    source.indexOf('<div v-if="!quotaLimitsError'),
   );
+  const usageStart = source.indexOf('class="usage-strip-body" role="group"');
   const usage = source.slice(
-    source.indexOf('<div v-else class="usage-strip">'),
+    usageStart,
     source.indexOf("</n-card>"),
   );
 
@@ -131,6 +133,8 @@ test("keeps account cards compact with metadata tags and top-level usage calibra
   assert.match(usage, /class="usage-strip-body" role="group" :aria-label="t\('用量'\)"/);
   assert.doesNotMatch(source, /class="account-lifecycle"|\.account-lifecycle\s*\{/);
   assert.match(source, /key: "edit", label: t\("编辑账号"\)/);
+  assert.match(source, /v-if="quotaLimitsError"[\s\S]*?@click="retryQuotaLimits"/);
+  assert.equal(source.match(/v-if="quotaLimitsError"/g)?.length, 1);
 });
 
 test("normalizes manually entered percentages to the supported range and precision", () => {
@@ -155,6 +159,32 @@ test("usage refresh preserves dirty drafts unless a real 429 reset that window",
     saving: false,
     error: null,
   });
+  assert.deepEqual(mergeUsageEdit(undefined, 35, false), {
+    draft: 35,
+    saved: 35,
+    saving: false,
+    error: null,
+  });
+});
+
+test("usage refresh initializes windows missing after an earlier quota load failure", async () => {
+  const source = await readFile(new URL("./Accounts.vue", import.meta.url), "utf8");
+  const sync = source.slice(source.indexOf("function syncUsageEdits"), source.indexOf("function updateUsageDraft"));
+
+  assert.match(
+    sync,
+    /if \(!edit\) \{\s+existing\[key\] = mergeUsageEdit\(undefined, saved, Boolean\(wasActuallyReset\)\);\s+continue;/,
+  );
+  assert.ok(sync.indexOf("if (!edit)") < sync.indexOf("Object.assign(edit"));
+});
+
+test("bounded concurrency rejects invalid limits instead of dropping work", async () => {
+  const worker = async (value: number) => value * 2;
+
+  await assert.rejects(mapWithConcurrency([1], 0, worker), RangeError);
+  await assert.rejects(mapWithConcurrency([1], -1, worker), RangeError);
+  await assert.rejects(mapWithConcurrency([1], Number.NaN, worker), RangeError);
+  await assert.rejects(mapWithConcurrency([1], 0.5, worker), RangeError);
 });
 
 test("accounts render before per-account usage and expose failed loads for retry", async () => {
@@ -163,7 +193,8 @@ test("accounts render before per-account usage and expose failed loads for retry
 
   assert.ok(load.indexOf("accounts.value = loaded") < load.indexOf("getAccountUsage"));
   assert.match(load, /loadAccountUsage\(account\.id\)/);
-  assert.match(load, /usageLoadErrors\.value\[accountId\] = String\(error\)/);
+  assert.match(load, /usageLoadErrors\.value\[accountId\] = errorDetail\(error\)/);
+  assert.match(source, /v-if="accountListLoading"[\s\S]*?v-else-if="accountListError"[\s\S]*?@click="loadAccounts"/);
 
   const ping = source.slice(source.indexOf("async function pingAccount"), source.indexOf("async function toggleAccount"));
   assert.match(ping, /try \{\s+await refreshAccountState\(id\);\s+\} catch \(e\) \{/);

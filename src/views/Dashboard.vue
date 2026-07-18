@@ -4,14 +4,24 @@
       <div class="connection-content">
         <div class="connection-head">
           <h2 id="connection-title">⚡ {{ t("接入中心") }}</h2>
-          <span class="ready-mark"><span aria-hidden="true" /> {{ t("就绪") }}</span>
+          <span
+            class="ready-mark"
+            :class="{
+              'not-ready': summaryLoaded && !summary.gateway_running,
+              pending: !summaryLoaded,
+            }"
+            role="status"
+          >
+            <span aria-hidden="true" />
+            {{ !summaryLoaded ? t("加载中…") : summary.gateway_running ? t("就绪") : t("服务未就绪") }}
+          </span>
         </div>
 
         <div class="connection-rows">
           <div class="connection-row">
             <n-icon size="18" aria-hidden="true"><ApiOutlined /></n-icon>
             <div class="connection-value">
-              <span class="sr-only">API Base URL</span>
+              <span class="sr-only">{{ t("API 地址") }}</span>
               <code>{{ serviceApiUrl }}</code>
             </div>
             <n-tooltip trigger="hover" :delay="200">
@@ -21,7 +31,7 @@
                   quaternary
                   size="small"
                   :aria-label="t('复制 API Base URL')"
-                  @click="copyConnection('api', serviceApiUrl, 'API Base URL')"
+                  @click="copyConnection('api', serviceApiUrl, t('API 地址'))"
                 >
                   <template #icon>
                     <n-icon :component="copiedTarget === 'api' ? CheckOutlined : CopyOutlined" />
@@ -35,7 +45,7 @@
           <div class="connection-row">
             <n-icon size="18" aria-hidden="true"><KeyOutlined /></n-icon>
             <div class="connection-value">
-              <span class="sr-only">Key</span>
+              <span class="sr-only">{{ t("Key") }}</span>
               <code>{{ maskedKey }}</code>
             </div>
             <div class="row-actions">
@@ -53,6 +63,7 @@
                         size="small"
                         :aria-label="t('刷新 Key')"
                         :loading="refreshingKey"
+                        :disabled="refreshingKey || loading || !serviceConfig.gateway_key"
                       >
                         <template #icon><n-icon :component="ReloadOutlined" /></template>
                       </n-button>
@@ -69,8 +80,8 @@
                     quaternary
                     size="small"
                     :aria-label="t('复制 Key')"
-                    :disabled="!serviceConfig.gateway_key"
-                    @click="copyConnection('key', serviceConfig.gateway_key, 'Key')"
+                    :disabled="refreshingKey || !serviceConfig.gateway_key"
+                    @click="copyConnection('key', serviceConfig.gateway_key, t('Key'))"
                   >
                     <template #icon>
                       <n-icon :component="copiedTarget === 'key' ? CheckOutlined : CopyOutlined" />
@@ -114,22 +125,28 @@
       <img :src="characterImage" alt="" class="hero-character" aria-hidden="true" />
     </section>
 
-    <section class="kpi-row" :aria-label="t('用量摘要')">
+    <n-alert v-if="dashboardError" type="error" :title="t('仪表盘数据加载失败')">
+      <n-button size="small" secondary :loading="loading" :disabled="refreshingKey" @click="loadDashboard">
+        {{ t("重试") }}
+      </n-button>
+    </n-alert>
+
+    <section class="kpi-row" :aria-label="t('用量摘要')" :aria-busy="!summaryLoaded">
       <article class="kpi-card">
         <span class="kpi-badge success"><n-icon aria-hidden="true"><KeyOutlined /></n-icon></span>
-        <div><strong>{{ formatNumber(summary.available_accounts) }}<small>/{{ formatNumber(summary.total_accounts) }}</small></strong><span>{{ t("可用账号") }}</span></div>
+        <div><strong>{{ summaryLoaded ? formatNumber(summary.available_accounts) : "—" }}<small v-if="summaryLoaded">/{{ formatNumber(summary.total_accounts) }}</small></strong><span>{{ t("可用账号") }}</span></div>
       </article>
       <article class="kpi-card">
         <span class="kpi-badge info"><n-icon aria-hidden="true"><CalendarOutlined /></n-icon></span>
-        <div><strong>{{ formatCost(summary.today_cost) }}</strong><span>{{ t("今日") }}</span></div>
+        <div><strong>{{ summaryLoaded ? formatCost(summary.today_cost) : "—" }}</strong><span>{{ t("今日") }}</span></div>
       </article>
       <article class="kpi-card">
         <span class="kpi-badge warning"><n-icon aria-hidden="true"><ClockCircleOutlined /></n-icon></span>
-        <div><strong>{{ formatCost(summary.week_cost) }}</strong><span>{{ t("本周") }}</span></div>
+        <div><strong>{{ summaryLoaded ? formatCost(summary.week_cost) : "—" }}</strong><span>{{ t("本周") }}</span></div>
       </article>
       <article class="kpi-card">
         <span class="kpi-badge primary"><n-icon aria-hidden="true"><WalletOutlined /></n-icon></span>
-        <div><strong>{{ formatCost(summary.month_cost) }}</strong><span>{{ t("本月") }}</span></div>
+        <div><strong>{{ summaryLoaded ? formatCost(summary.month_cost) : "—" }}</strong><span>{{ t("本月") }}</span></div>
       </article>
     </section>
 
@@ -138,20 +155,23 @@
         <div>
           <h3 class="card-title">{{ t("每日消耗") }}</h3>
         </div>
-        <div class="chart-stats" :aria-label="t('图表摘要')">
+        <div v-if="costsLoaded" class="chart-stats" role="group" :aria-label="t('图表摘要')">
           <span>{{ t("模型：{count}", { count: formatNumber(legendModels.length) }) }}</span>
           <span><b>{{ formatCost(totalChartCost) }}</b> {{ t("{days} 天合计", { days: 30 }) }}</span>
           <span><b>{{ formatCost(totalChartCost / 30) }}</b> {{ t("日均") }}</span>
         </div>
       </div>
-      <div class="legend" :aria-label="t('模型图例')">
-        <span v-for="model in legendModels" :key="model.model" class="legend-item">
+      <div v-if="costsLoaded" class="legend" role="list" :aria-label="t('模型图例')">
+        <span v-for="model in legendModels" :key="model.model" class="legend-item" role="listitem">
           <span class="legend-dot" :style="{ background: model.color }" aria-hidden="true" />
           {{ model.model }}
         </span>
       </div>
-      <n-spin :show="loading">
-        <n-empty v-if="!loading && totalChartCost === 0" :description="t('暂无消耗数据')" />
+      <n-spin :show="loading && !costsLoaded">
+        <div v-if="!costsLoaded" class="section-state">
+          {{ loading ? t("加载中…") : t("仪表盘数据加载失败") }}
+        </div>
+        <n-empty v-else-if="totalChartCost === 0" :description="t('暂无消耗数据')" />
         <StackedBarChart v-else :data="dailyCosts" :days="30" />
       </n-spin>
     </section>
@@ -159,9 +179,12 @@
     <section class="card accounts-card">
       <div class="card-head">
         <h3 class="card-title">{{ t("账号概览") }}</h3>
-        <span class="card-desc">{{ t("账号数：{count}", { count: formatNumber(accounts.length) }) }}</span>
+        <span class="card-desc">{{ accountsLoaded ? t("账号数：{count}", { count: formatNumber(accounts.length) }) : t("加载中…") }}</span>
       </div>
-      <n-empty v-if="accounts.length === 0" :description="t('暂无账号')">
+      <div v-if="!accountsLoaded" class="section-state">
+        {{ loading ? t("加载中…") : t("仪表盘数据加载失败") }}
+      </div>
+      <n-empty v-else-if="accounts.length === 0" :description="t('暂无账号')">
         <template #extra>
           <n-button size="small" @click="goToAccounts">{{ t("前往账号页添加") }}</n-button>
         </template>
@@ -201,6 +224,10 @@
               <strong>{{ row.value }}</strong>
             </div>
           </div>
+          <div v-else-if="loading" class="account-usage-empty">{{ t("加载中…") }}</div>
+          <div v-else-if="usageFailedAccountIds.has(account.id)" class="account-usage-empty">
+            {{ t("读取失败") }}
+          </div>
           <div v-else class="account-usage-empty">{{ t("暂无用量") }}</div>
         </article>
       </div>
@@ -210,7 +237,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import { NButton, NEmpty, NIcon, NPopconfirm, NSpin, NTag, NTooltip, useMessage } from "naive-ui";
+import { NAlert, NButton, NEmpty, NIcon, NPopconfirm, NSpin, NTag, NTooltip, useMessage } from "naive-ui";
 import {
   ApiOutlined,
   CalendarOutlined,
@@ -228,6 +255,7 @@ import type { Account, DailyModelCost, DashboardSummary, UsageWindow } from "../
 import { CHART_PALETTE } from "../theme";
 import { t } from "../i18n/index.ts";
 import { formatCost, formatNumber, useClipboard } from "../utils/format.ts";
+import { userFacingError } from "../utils/errors.ts";
 import { mapWithConcurrency } from "../utils/async.ts";
 import { daysUntilDate, expiryTagType } from "./account-lifecycle";
 import { maskConnectionKey, resolveConnectionUrls } from "./dashboard-connection";
@@ -241,6 +269,11 @@ const accounts = ref<Account[]>([]);
 const usageMap = ref<Record<string, UsageWindow>>({});
 const dailyCosts = ref<DailyModelCost[]>([]);
 const loading = ref(true);
+const accountsLoaded = ref(false);
+const summaryLoaded = ref(false);
+const costsLoaded = ref(false);
+const dashboardError = ref(false);
+const usageFailedAccountIds = ref(new Set<string>());
 const refreshingKey = ref(false);
 const lifecycleNow = ref(Date.now());
 
@@ -256,6 +289,7 @@ const summary = ref<DashboardSummary>({
   today_cost: 0,
   week_cost: 0,
   month_cost: 0,
+  gateway_running: false,
 });
 
 const legendModels = computed(() => {
@@ -267,12 +301,23 @@ const legendModels = computed(() => {
 });
 const totalChartCost = computed(() => dailyCosts.value.reduce((sum, row) => sum + row.cost, 0));
 const maskedKey = computed(() => maskConnectionKey(serviceConfig.value.gateway_key));
-const connectionUrls = computed(() => resolveConnectionUrls(
-  serviceConfig.value.client_root_url,
-  window.location.origin,
-  serviceConfig.value.gateway_port,
-  import.meta.env.DEV,
-));
+const connectionUrls = computed(() => {
+  try {
+    return resolveConnectionUrls(
+      serviceConfig.value.client_root_url,
+      window.location.origin,
+      serviceConfig.value.gateway_port,
+      import.meta.env.DEV,
+    );
+  } catch {
+    return resolveConnectionUrls(
+      "",
+      window.location.origin,
+      serviceConfig.value.gateway_port,
+      import.meta.env.DEV,
+    );
+  }
+});
 const serviceApiUrl = computed(() => connectionUrls.value.apiBaseUrl);
 
 function isCoolingDown(account: Account): boolean {
@@ -293,8 +338,10 @@ function accountExpiryDays(account: Account): number {
 function accountExpiryLabel(account: Account): string {
   const days = accountExpiryDays(account);
   if (!Number.isFinite(days)) return t("未设置");
+  if (days === 1) return t("剩 1 天");
   if (days > 0) return t("剩 {days} 天", { days });
   if (days === 0) return t("今天到期");
+  if (days === -1) return t("已到期 1 天");
   return t("已到期 {days} 天", { days: Math.abs(days) });
 }
 
@@ -322,13 +369,42 @@ async function copyConnection(target: ConnectionTarget, value: string, label: st
 }
 
 async function regenerateKey() {
+  if (refreshingKey.value || dashboardRequestActive || !serviceConfig.value.gateway_key) return;
+  const previousKey = serviceConfig.value.gateway_key;
   refreshingKey.value = true;
+  let mutationFailed = false;
+  let mutationError: unknown = null;
+  let result: { key: string; revision: number } | null = null;
   try {
-    const result = await tauriApi.regenerateGatewayKey();
-    serviceConfig.value.gateway_key = result.key;
-    message.success(t("Key 已刷新"));
-  } catch (e) {
-    message.error(t("刷新 Key 失败: {error}", { error: String(e) }));
+    try {
+      result = await tauriApi.regenerateGatewayKey();
+      serviceConfig.value.gateway_key = result.key;
+    } catch (error) {
+      mutationFailed = true;
+      mutationError = error;
+    }
+
+    try {
+      const latest = await tauriApi.getSettings();
+      serviceConfig.value = latest;
+      if (!mutationFailed || latest.gateway_key !== previousKey) {
+        message.success(t("Key 已刷新"));
+      } else {
+        message.error(t("刷新 Key 失败: {error}", {
+          error: userFacingError(mutationError, t("无法连接到本地服务，请确认程序正在运行后重试")),
+        }));
+      }
+    } catch {
+      if (result) {
+        message.success(t("Key 已刷新"));
+      } else {
+        serviceConfig.value.gateway_key = "";
+        dashboardError.value = true;
+        message.error(t("刷新 Key 失败: {error}", {
+          error: userFacingError(mutationError, t("无法连接到本地服务，请确认程序正在运行后重试")),
+        }));
+      }
+    }
   } finally {
     refreshingKey.value = false;
   }
@@ -342,11 +418,20 @@ function goToAccounts() {
 }
 
 let lifecycleClock: number | undefined;
+let dashboardRequestActive = false;
 
-onMounted(async () => {
-  lifecycleClock = window.setInterval(() => {
-    lifecycleNow.value = Date.now();
-  }, 60_000);
+async function loadDashboard() {
+  if (dashboardRequestActive || refreshingKey.value) return;
+  dashboardRequestActive = true;
+  loading.value = true;
+  dashboardError.value = false;
+  accountsLoaded.value = false;
+  summaryLoaded.value = false;
+  costsLoaded.value = false;
+  usageFailedAccountIds.value = new Set();
+  accounts.value = [];
+  usageMap.value = {};
+  dailyCosts.value = [];
   const [loadedAccounts, settings, loadedSummary, costs] = await Promise.allSettled([
       tauriApi.getAccounts(),
       tauriApi.getSettings(),
@@ -355,6 +440,7 @@ onMounted(async () => {
   ]);
   if (loadedAccounts.status === "fulfilled") {
     accounts.value = loadedAccounts.value;
+    accountsLoaded.value = true;
     // 限流并发拉取每账号用量，避免账号多时 N 次请求同时打到后端
     const settled = await mapWithConcurrency(
       loadedAccounts.value,
@@ -364,19 +450,46 @@ onMounted(async () => {
     usageMap.value = Object.fromEntries(
       settled.flatMap((result) => (result.status === "fulfilled" ? [result.value] : [])),
     );
+    usageFailedAccountIds.value = new Set(settled.flatMap((result, index) => (
+      result.status === "rejected" && loadedAccounts.value[index]
+        ? [loadedAccounts.value[index].id]
+        : []
+    )));
   }
   if (settings.status === "fulfilled") serviceConfig.value = settings.value;
-  if (loadedSummary.status === "fulfilled") summary.value = loadedSummary.value;
-  if (costs.status === "fulfilled") dailyCosts.value = costs.value;
-  if ([loadedAccounts, settings, loadedSummary, costs].some((result) => result.status === "rejected")) {
+  if (loadedSummary.status === "fulfilled") {
+    summary.value = loadedSummary.value;
+    summaryLoaded.value = true;
+  }
+  if (costs.status === "fulfilled") {
+    dailyCosts.value = costs.value;
+    costsLoaded.value = true;
+  }
+  dashboardError.value = [loadedAccounts, settings, loadedSummary, costs].some((result) => result.status === "rejected")
+    || usageFailedAccountIds.value.size > 0;
+  if (dashboardError.value) {
     message.error(t("部分仪表盘数据加载失败"));
   }
   loading.value = false;
+  dashboardRequestActive = false;
+}
+
+function refreshWhenVisible() {
+  if (document.visibilityState === "visible") void loadDashboard();
+}
+
+onMounted(() => {
+  lifecycleClock = window.setInterval(() => {
+    lifecycleNow.value = Date.now();
+  }, 60_000);
+  document.addEventListener("visibilitychange", refreshWhenVisible);
+  void loadDashboard();
 });
 
 onUnmounted(() => {
   cleanup();
   window.clearInterval(lifecycleClock);
+  document.removeEventListener("visibilitychange", refreshWhenVisible);
 });
 </script>
 
@@ -451,6 +564,20 @@ onUnmounted(() => {
   border-radius: 50%;
   background: var(--ocg-success);
   box-shadow: 0 0 0 4px var(--ocg-success-soft);
+}
+.ready-mark.not-ready {
+  color: var(--ocg-error);
+}
+.ready-mark.not-ready > span {
+  background: var(--ocg-error);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--ocg-error) 16%, transparent);
+}
+.ready-mark.pending {
+  color: var(--ocg-subtle);
+}
+.ready-mark.pending > span {
+  background: var(--ocg-subtle);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--ocg-subtle) 16%, transparent);
 }
 .connection-rows {
   display: grid;
@@ -677,6 +804,13 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 .account-usage-empty {
+  color: var(--ocg-subtle);
+  font-size: var(--ocg-font-sm);
+}
+.section-state {
+  min-height: 96px;
+  display: grid;
+  place-items: center;
   color: var(--ocg-subtle);
   font-size: var(--ocg-font-sm);
 }

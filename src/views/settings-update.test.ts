@@ -105,12 +105,17 @@ test("settings restores and observes updates with bounded, lifecycle-safe pollin
   assert.equal(settings.match(/rememberUpdateTarget\(result\.latest_version\)/g)?.length, 2);
   assert.match(settings, /window\.location\.reload\(\)/);
   assert.match(settings, /updateResult\.release_url/);
+  assert.match(settings, /function observeUpdateStatusFailure\(\)[\s\S]*?phase !== "installing"[\s\S]*?updateStatusFallback\("installing"\)/);
+  assert.match(settings, /catch \{[\s\S]*?observeUpdateStatusFailure\(\);[\s\S]*?scheduleUpdatePoll\(generation\)/);
+  assert.doesNotMatch(settings, /class="update-result" aria-live=/);
+  assert.match(settings, /class="sr-only" aria-live="polite" aria-atomic="true"/);
 
   const finishStart = settings.indexOf("function finishInstalledUpdate");
   const finishEnd = settings.indexOf("function acceptObservedUpdateStatus", finishStart);
   assert.ok(finishStart >= 0 && finishEnd > finishStart);
   const finishSource = settings.slice(finishStart, finishEnd);
   assert.doesNotMatch(finishSource, /checkForUpdate/);
+  assert.doesNotMatch(finishSource, /updateDisposed/);
   assert.match(finishSource, /}, 800\)/);
 });
 

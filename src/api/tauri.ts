@@ -220,6 +220,7 @@ export interface DashboardSummary {
   today_cost: number;
   week_cost: number;
   month_cost: number;
+  gateway_running: boolean;
 }
 
 export interface DailyModelCost {
@@ -263,6 +264,7 @@ function apiBase(): string {
   if (window.location.pathname.startsWith("/dashboard")) {
     return "/dashboard/api";
   }
+  // 回退仅覆盖 Gateway 监听默认端口 9042 的纯静态托管场景（如直接打开构建产物）
   return "http://127.0.0.1:9042/dashboard/api";
 }
 
@@ -285,12 +287,14 @@ async function request<T>(
       throw dashboardAuthError(t("登录已失效，请重新登录"));
     }
     let message = `${response.status} ${response.statusText}`;
-    try {
-      const body = await response.json() as { error?: unknown };
-      if (typeof body.error === "string") message = body.error;
-    } catch {
-      const text = await response.text().catch(() => "");
-      if (text) message = text;
+    const responseText = await response.text().catch(() => "");
+    if (responseText) {
+      try {
+        const body = JSON.parse(responseText) as { error?: unknown };
+        if (typeof body.error === "string") message = body.error;
+      } catch {
+        message = responseText;
+      }
     }
     throw new DashboardRequestError(message, response.status);
   }

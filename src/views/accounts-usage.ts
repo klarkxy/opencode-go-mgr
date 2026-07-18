@@ -60,10 +60,13 @@ export function usagePercentFromCost(cost: number, limit: number): number {
 }
 
 export function mergeUsageEdit(
-  edit: UsageEditState,
+  edit: UsageEditState | undefined,
   saved: number,
   force: boolean,
 ): UsageEditState {
+  if (!edit) {
+    return { draft: saved, saved, saving: false, error: null };
+  }
   if (!force && (edit.saving || edit.draft !== edit.saved)) {
     return { ...edit, saved };
   }

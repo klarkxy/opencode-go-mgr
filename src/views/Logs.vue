@@ -18,6 +18,10 @@
             {{ t("刷新运行日志") }}
           </n-tooltip>
         </div>
+        <n-alert v-if="gatewayError" type="error" :title="t('加载运行日志失败: {error}', { error: gatewayError })">
+          <n-button size="small" secondary @click="loadGatewayLogs">{{ t("重试") }}</n-button>
+        </n-alert>
+        <p class="log-limit-note">{{ t("仅显示最近 {count} 条运行日志", { count: 200 }) }}</p>
         <n-data-table
           :columns="gatewayColumns"
           :data="gatewayLogs"
@@ -85,7 +89,6 @@
               v-model:value="timeRange"
               type="datetimerange"
               clearable
-              :placeholder="t('选择时间范围')"
               class="time-range-picker"
             />
           </div>
@@ -161,6 +164,7 @@
 <script setup lang="ts">
 import { computed, h, onMounted, onUnmounted, ref, watch } from "vue";
 import {
+  NAlert,
   NButton,
   NDataTable,
   NDatePicker,
@@ -201,6 +205,7 @@ const forwardLogs = ref<ForwardLog[]>([]);
 const accounts = ref<Account[]>([]);
 const models = ref<string[]>([]);
 const gatewayLoading = ref(false);
+const gatewayError = ref("");
 const forwardLoading = ref(false);
 const statusFilter = ref<string | null>(query.get("status"));
 const accountFilter = ref<string | null>(query.get("account"));
@@ -242,6 +247,7 @@ const forwardPagination = computed(() => ({
 }));
 
 const dateFormatter = computed(() => new Intl.DateTimeFormat(locale.value, {
+  year: "numeric",
   month: "2-digit",
   day: "2-digit",
   hour: "2-digit",
@@ -385,11 +391,13 @@ function syncQueryState() {
 
 async function loadGatewayLogs() {
   gatewayLoading.value = true;
+  gatewayError.value = "";
   try {
     gatewayLogs.value = await tauriApi.getGatewayLogs(200);
     gatewayPage.value = 1;
   } catch (e) {
-    message.error(t("加载运行日志失败: {error}", { error: String(e) }));
+    gatewayError.value = e instanceof Error ? e.message : String(e);
+    message.error(t("加载运行日志失败: {error}", { error: gatewayError.value }));
   } finally {
     gatewayLoading.value = false;
   }
@@ -479,6 +487,12 @@ onUnmounted(cleanup);
 </script>
 
 <style scoped>
+.log-limit-note {
+  margin: 6px 0 10px;
+  color: var(--ocg-subtle);
+  font-size: var(--ocg-font-xs);
+}
+
 .logs-card {
   max-width: 1480px;
   margin: 0 auto;

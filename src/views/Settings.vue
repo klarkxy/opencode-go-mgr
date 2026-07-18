@@ -10,6 +10,7 @@
         <n-form-item :label="t('上游地址')">
           <n-input
             v-model:value="config.upstream_base_url"
+            :disabled="!loaded || regenerating"
             :input-props="{ 'aria-label': t('上游地址') }"
             placeholder="https://opencode.ai/zen/go"
           />
@@ -24,6 +25,7 @@
             <div class="client-root-field">
               <n-input
                 v-model:value="clientRootInputValue"
+                :disabled="!loaded || regenerating"
                 :readonly="config.client_root_url_from_env"
                 :clearable="!config.client_root_url_from_env && !!config.client_root_url"
                 :placeholder="config.client_root_url_from_env ? '' : automaticClientRootUrls.rootUrl"
@@ -47,7 +49,7 @@
           <n-form-item label="Key">
             <div class="key-stack">
               <div class="key-field">
-                <div class="key-display" :aria-label="t('已脱敏 Key')">
+                <div class="key-display" role="group" :aria-label="t('已脱敏 Key')">
                   <code>{{ maskedSettingsKey }}</code>
                 </div>
                 <n-tooltip trigger="hover">
@@ -56,7 +58,7 @@
                       circle
                       quaternary
                       :aria-label="t('复制 Key')"
-                      :disabled="!config.gateway_key"
+                      :disabled="!loaded || regenerating || !config.gateway_key"
                       @click="copyKey"
                     >
                       <template #icon>
@@ -72,7 +74,7 @@
                       circle
                       quaternary
                       :aria-label="t('设置自定义 Key')"
-                      :disabled="saving || regenerating"
+                      :disabled="!loaded || saving || regenerating"
                       @click="startGatewayKeyEdit"
                     >
                       <template #icon><n-icon :component="EditOutlined" /></template>
@@ -93,7 +95,7 @@
                           quaternary
                           :aria-label="t('刷新 Key')"
                           :loading="regenerating"
-                          :disabled="saving"
+                          :disabled="!loaded || saving || editingGatewayKey"
                         >
                           <template #icon><n-icon :component="ReloadOutlined" /></template>
                         </n-button>
@@ -109,16 +111,31 @@
                   v-model:value="gatewayKeyDraft"
                   type="password"
                   class="mono"
+                  :disabled="saving"
                   :input-props="{ 'aria-label': t('新 Key') }"
                   :placeholder="t('输入新 Key')"
                 />
                 <n-button size="small" secondary @click="cancelGatewayKeyEdit">{{ t("取消") }}</n-button>
-                <n-button size="small" type="primary" :loading="saving" @click="saveGatewayKey">{{ t("保存 Key") }}</n-button>
+                <n-popconfirm
+                  :positive-text="t('保存 Key')"
+                  :negative-text="t('取消')"
+                  @positive-click="saveGatewayKey"
+                >
+                  <template #trigger>
+                    <n-button
+                      size="small"
+                      type="primary"
+                      :loading="saving"
+                      :disabled="!gatewayKeyDraft.trim()"
+                    >{{ t("保存 Key") }}</n-button>
+                  </template>
+                  {{ t("保存自定义 Key 后旧 Key 立即失效，确定保存吗？") }}
+                </n-popconfirm>
               </div>
             </div>
           </n-form-item>
         </div>
-        <div
+        <section
           v-if="config.auto_start_supported"
           class="settings-subsection"
           aria-labelledby="startup-title"
@@ -134,13 +151,14 @@
             <template #checked>{{ t("开启") }}</template>
             <template #unchecked>{{ t("关闭") }}</template>
           </n-switch>
-        </div>
-        <div class="settings-subsection" aria-labelledby="request-timeout-title">
+        </section>
+        <section class="settings-subsection" aria-labelledby="request-timeout-title">
           <h3 id="request-timeout-title">{{ t("请求超时") }}</h3>
           <n-form-item :label="t('连接超时')">
             <div class="timeout-field">
               <n-input-number
                 v-model:value="config.connect_timeout_secs"
+                :disabled="!loaded || regenerating"
                 :min="1"
                 :max="300"
                 :precision="0"
@@ -155,6 +173,7 @@
             <div class="timeout-field">
               <n-input-number
                 v-model:value="config.non_stream_timeout_secs"
+                :disabled="!loaded || regenerating"
                 :min="1"
                 :max="3600"
                 :precision="0"
@@ -169,6 +188,7 @@
             <div class="timeout-field">
               <n-input-number
                 v-model:value="config.stream_idle_timeout_secs"
+                :disabled="!loaded || regenerating"
                 :min="1"
                 :max="3600"
                 :precision="0"
@@ -179,8 +199,14 @@
               <span class="field-caption">{{ t("流式响应两次数据块之间的最大空闲时间（秒）") }}</span>
             </div>
           </n-form-item>
-        </div>
+        </section>
       </n-form>
+      <n-alert v-if="settingsLoadError" type="error" :title="t('设置加载失败，请先重试')">
+        <div class="settings-load-error">
+          <span>{{ settingsLoadError }}</span>
+          <n-button size="small" secondary @click="loadSettings">{{ t("重试") }}</n-button>
+        </div>
+      </n-alert>
       <n-button
         type="primary"
         :loading="saving"
@@ -239,7 +265,8 @@
           :disabled="checkingUpdate || updateBusy"
           @click="checkForUpdate"
         >{{ checkingUpdate ? t("正在检查更新…") : t("检查更新") }}</n-button>
-        <div class="update-result" aria-live="polite" aria-atomic="true">
+        <div class="update-result">
+          <span v-if="updateAnnouncement" class="sr-only" aria-live="polite" aria-atomic="true">{{ updateAnnouncement }}</span>
           <n-alert
             v-if="updateResult"
             :type="updateResult.update_available ? 'warning' : 'success'"
@@ -388,6 +415,7 @@ const saving = ref(false);
 const regenerating = ref(false);
 const { copiedTarget: keyCopied, copy, cleanup } = useClipboard();
 const loaded = ref(false);
+const settingsLoadError = ref("");
 const editingGatewayKey = ref(false);
 const gatewayKeyDraft = ref("");
 const checkingUpdate = ref(false);
@@ -400,14 +428,15 @@ const recoveringUpdate = ref(true);
 const startingUpdate = ref(false);
 const finishingUpdate = ref(false);
 let updatePollTimer: number | undefined;
-let updateReloadTimer: number | undefined;
 let updatePollDeadline = 0;
 let updatePollGeneration = 0;
 let updateDisposed = true;
+let settingsLoadGeneration = 0;
 
 const UPDATE_POLL_INTERVAL_MS = 1_000;
 const UPDATE_INSTALL_TIMEOUT_MS = 15 * 60_000;
 const savedConfig = ref<AppConfig | null>(null);
+let pendingSettingsMerge: { current: AppConfig; saved: AppConfig } | null = null;
 
 // ponytail: keep this pre-load fallback in sync with AppConfig::default().
 const config = ref<AppConfig>({
@@ -520,6 +549,13 @@ const updateStatusTitle = computed(() => {
       return "";
   }
 });
+const updateAnnouncement = computed(() => {
+  if (activeUpdateStatus.value) return updateStatusTitle.value;
+  if (updateResult.value) {
+    return t(updateResult.value.update_available ? "发现新版本" : "已是最新版本");
+  }
+  return updateError.value ? t("检查更新失败") : "";
+});
 const updateDownloadPercentage = computed(() => {
   const status = activeUpdateStatus.value;
   if (status?.phase !== "downloading" || status.total === null || status.total <= 0) return null;
@@ -527,14 +563,18 @@ const updateDownloadPercentage = computed(() => {
 });
 
 async function loadSettings(): Promise<boolean> {
+  const generation = ++settingsLoadGeneration;
   loaded.value = false;
+  settingsLoadError.value = "";
   try {
-    config.value = await tauriApi.getSettings();
-    savedConfig.value = { ...config.value };
-    loaded.value = true;
+    const nextConfig = await tauriApi.getSettings();
+    if (generation !== settingsLoadGeneration) return false;
+    acceptSettingsSnapshot(nextConfig);
     return true;
   } catch (e) {
-    message.error(t("加载设置失败: {error}", { error: String(e) }));
+    if (generation !== settingsLoadGeneration) return false;
+    settingsLoadError.value = e instanceof Error ? e.message : String(e);
+    message.error(t("加载设置失败: {error}", { error: settingsLoadError.value }));
     return false;
   }
 }
@@ -542,7 +582,7 @@ async function loadSettings(): Promise<boolean> {
 async function reloadSettingsAfterConflict(error: unknown): Promise<boolean> {
   if (!(error instanceof DashboardRequestError) || error.status !== 409) return false;
   if (await loadSettings()) {
-    message.warning(t("设置已被其他操作修改，已重新加载最新设置，请确认后再保存"));
+    message.warning(t("设置已被其他操作修改，已重新加载最新设置，你的未保存修改已被覆盖"));
   } else {
     message.error(t("保存失败: {error}", { error: String(error) }));
   }
@@ -552,10 +592,7 @@ async function reloadSettingsAfterConflict(error: unknown): Promise<boolean> {
 async function saveSettings() {
   if (!loaded.value) return;
   if (!normalizeClientRootInput()) return;
-  if (!timeoutsValid()) {
-    message.error(t("请求超时必须为整数：连接 1–300 秒，其余 1–3600 秒"));
-    return;
-  }
+  if (!validateTimeouts()) return;
   saving.value = true;
   const payload = { ...config.value };
   try {
@@ -644,15 +681,59 @@ function normalizeClientRootInput(): boolean {
   }
 }
 
-function timeoutsValid(): boolean {
-  return [
-    [config.value.connect_timeout_secs, 300],
-    [config.value.non_stream_timeout_secs, 3600],
-    [config.value.stream_idle_timeout_secs, 3600],
-  ].every(([value, max]) => Number.isInteger(value) && value >= 1 && value <= max);
+function validateTimeouts(): boolean {
+  const fields = [
+    { field: t("连接超时"), value: config.value.connect_timeout_secs, min: 1, max: 300 },
+    { field: t("非流式总超时"), value: config.value.non_stream_timeout_secs, min: 1, max: 3600 },
+    { field: t("流式空闲超时"), value: config.value.stream_idle_timeout_secs, min: 1, max: 3600 },
+  ];
+  const invalid = fields.find(({ value, min, max }) => (
+    !Number.isInteger(value) || value < min || value > max
+  ));
+  if (!invalid) return true;
+  message.error(t("{field}必须为 {min}–{max} 秒的整数", invalid));
+  return false;
+}
+
+function mergeUnsavedSettingsAfterKeyRegeneration(
+  latest: AppConfig,
+  current: AppConfig,
+  saved: AppConfig,
+): AppConfig {
+  return {
+    ...latest,
+    gateway_port: current.gateway_port !== saved.gateway_port ? current.gateway_port : latest.gateway_port,
+    upstream_base_url: current.upstream_base_url !== saved.upstream_base_url
+      ? current.upstream_base_url
+      : latest.upstream_base_url,
+    client_root_url: current.client_root_url !== saved.client_root_url
+      ? current.client_root_url
+      : latest.client_root_url,
+    connect_timeout_secs: current.connect_timeout_secs !== saved.connect_timeout_secs
+      ? current.connect_timeout_secs
+      : latest.connect_timeout_secs,
+    non_stream_timeout_secs: current.non_stream_timeout_secs !== saved.non_stream_timeout_secs
+      ? current.non_stream_timeout_secs
+      : latest.non_stream_timeout_secs,
+    stream_idle_timeout_secs: current.stream_idle_timeout_secs !== saved.stream_idle_timeout_secs
+      ? current.stream_idle_timeout_secs
+      : latest.stream_idle_timeout_secs,
+  };
+}
+
+function acceptSettingsSnapshot(latest: AppConfig) {
+  const pending = pendingSettingsMerge;
+  savedConfig.value = { ...latest };
+  config.value = pending
+    ? mergeUnsavedSettingsAfterKeyRegeneration(latest, pending.current, pending.saved)
+    : latest;
+  pendingSettingsMerge = null;
+  loaded.value = true;
+  settingsLoadError.value = "";
 }
 
 async function copyKey() {
+  if (!loaded.value || regenerating.value || !config.value.gateway_key) return;
   try {
     await copy("settings-key", config.value.gateway_key, "Key");
     message.success(t("已复制 Key"));
@@ -662,19 +743,56 @@ async function copyKey() {
 }
 
 async function regenerateKey() {
+  if (
+    regenerating.value
+    || saving.value
+    || editingGatewayKey.value
+    || !loaded.value
+    || !savedConfig.value
+  ) return;
+  const saved = { ...savedConfig.value };
+  pendingSettingsMerge = { current: { ...config.value }, saved };
+  const generation = ++settingsLoadGeneration;
   regenerating.value = true;
+  let mutationFailed = false;
+  let mutationError: unknown = null;
+  let result: { key: string; revision: number } | null = null;
   try {
-    const result = await tauriApi.regenerateGatewayKey();
-    config.value.gateway_key = result.key;
-    config.value.revision = result.revision;
-    if (savedConfig.value) {
-      savedConfig.value.gateway_key = result.key;
-      savedConfig.value.revision = result.revision;
+    try {
+      result = await tauriApi.regenerateGatewayKey();
+      if (generation !== settingsLoadGeneration) return;
+      config.value.gateway_key = result.key;
+      config.value.revision = result.revision;
+    } catch (error) {
+      mutationFailed = true;
+      mutationError = error;
     }
-    cancelGatewayKeyEdit();
-    message.success(t("Key 已重新生成"));
-  } catch (e) {
-    message.error(t("生成失败: {error}", { error: String(e) }));
+
+    try {
+      const latest = await tauriApi.getSettings();
+      if (generation !== settingsLoadGeneration) return;
+      const keyChanged = latest.gateway_key !== saved.gateway_key;
+      acceptSettingsSnapshot(latest);
+      cancelGatewayKeyEdit();
+      if (!mutationFailed || keyChanged) {
+        message.success(t("Key 已重新生成"));
+      } else {
+        message.error(t("生成失败: {error}", { error: String(mutationError) }));
+      }
+      return;
+    } catch (reloadError) {
+      if (generation !== settingsLoadGeneration) return;
+      savedConfig.value = null;
+      loaded.value = false;
+      settingsLoadError.value = reloadError instanceof Error ? reloadError.message : String(reloadError);
+      cancelGatewayKeyEdit();
+      if (result) {
+        message.success(t("Key 已重新生成"));
+      } else {
+        message.error(t("生成失败: {error}", { error: String(mutationError) }));
+      }
+      message.error(t("加载设置失败: {error}", { error: settingsLoadError.value }));
+    }
   } finally {
     regenerating.value = false;
   }
@@ -787,10 +905,15 @@ function finishInstalledUpdate(status: UpdateStatus) {
   waitingForRestart.value = false;
   updateStatus.value = null;
   message.success(t("已升级到 v{version}", { version: installedVersion }));
-  updateReloadTimer = window.setTimeout(() => {
-    updateReloadTimer = undefined;
-    if (!updateDisposed) window.location.reload();
+  window.setTimeout(() => {
+    window.location.reload();
   }, 800);
+}
+
+function observeUpdateStatusFailure() {
+  if (updateStatus.value?.phase !== "installing" && !waitingForRestart.value) return;
+  waitingForRestart.value = true;
+  updateStatus.value = updateStatusFallback("installing");
 }
 
 function acceptObservedUpdateStatus(status: UpdateStatus): boolean {
@@ -828,10 +951,9 @@ async function pollUpdateStatus(generation: number) {
     if (acceptObservedUpdateStatus(status)) return;
   } catch {
     if (!isActiveUpdateGeneration(generation)) return;
-    // The installer intentionally stops the local process. Keep polling until
-    // the new version comes back or the bounded deadline expires.
-    waitingForRestart.value = true;
-    updateStatus.value = updateStatusFallback("installing");
+    // A transient status request failure must not turn checking/downloading
+    // into a false installation state. Only retain an already observed restart.
+    observeUpdateStatusFailure();
   }
   scheduleUpdatePoll(generation);
 }
@@ -921,10 +1043,6 @@ onMounted(() => {
 onUnmounted(() => {
   updateDisposed = true;
   cancelUpdatePolling();
-  if (updateReloadTimer !== undefined) {
-    window.clearTimeout(updateReloadTimer);
-    updateReloadTimer = undefined;
-  }
   cleanup();
 });
 </script>
@@ -1033,6 +1151,13 @@ onUnmounted(() => {
   margin: 0;
   color: var(--ocg-ink);
   font: 700 var(--ocg-font-lg)/1.3 "Bahnschrift", "Segoe UI Variable Display", sans-serif;
+}
+.settings-load-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
 }
 .timeout-field {
   display: flex;

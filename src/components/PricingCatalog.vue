@@ -131,9 +131,15 @@ function renderRate(value: number | null | undefined) {
   if (value === undefined) return "";
   const formatted = formatRate(value);
   if (!formatted.exact) return formatted.label;
-  return h(NTooltip, { trigger: "hover" }, {
-    trigger: () => h("span", { class: "tiny-rate", tabindex: 0 }, formatted.label),
-    default: () => t("精确值：{value} / 百万 tokens", { value: formatted.exact ?? "" }),
+  const exactLabel = t("精确值：{value} / 百万 tokens", { value: formatted.exact });
+  return h(NTooltip, { trigger: "focus" }, {
+    trigger: () => h("span", {
+      class: "tiny-rate",
+      tabindex: 0,
+      title: exactLabel,
+      "aria-label": `${formatted.label}, ${exactLabel}`,
+    }, formatted.label),
+    default: () => exactLabel,
   });
 }
 
@@ -173,7 +179,8 @@ function renderModel(row: PricingTableRow) {
       "aria-label": row.kind === "variant" ? `${row.model_id} ${row.display_name}` : undefined,
     }, row.display_name || row.model_id);
   }
-  const tierCount = t("{count} 个价格档位", { count: (row.children?.length ?? 0) + 1 });
+  const count = (row.children?.length ?? 0) + 1;
+  const tierCount = count === 1 ? t("1 个价格档位") : t("{count} 个价格档位", { count });
   return h(NButton, {
     text: true,
     class: "pricing-tree-toggle",
@@ -269,6 +276,7 @@ function renderMultiplierAction(
   icon: typeof CheckOutlined,
   action: () => void,
   primary = false,
+  disabled = false,
 ) {
   return h(NTooltip, { trigger: "hover" }, {
     trigger: () => h(NButton, {
@@ -277,7 +285,7 @@ function renderMultiplierAction(
       size: "tiny",
       type: primary ? "primary" : "default",
       loading: primary && savingModelId.value === row.model_id,
-      disabled: savingModelId.value !== null || refreshing.value,
+      disabled: disabled || savingModelId.value !== null || refreshing.value,
       "aria-label": `${label}: ${row.display_name}`,
       onClick: action,
     }, { icon: () => h(NIcon, { component: icon }) }),
@@ -315,7 +323,14 @@ function renderMultiplierEditor(row: PricingTableRow) {
     }, { prefix: () => "×" }),
     dirty
       ? h("div", { class: "multiplier-editor__actions" }, [
-        renderMultiplierAction(row, t("保存倍率"), CheckOutlined, () => void saveMultiplier(row.model_id), true),
+        renderMultiplierAction(
+          row,
+          t("保存倍率"),
+          CheckOutlined,
+          () => void saveMultiplier(row.model_id),
+          true,
+          !valid,
+        ),
         renderMultiplierAction(row, t("放弃修改"), CloseOutlined, () => discardMultiplierDraft(row.model_id)),
       ])
       : null,
@@ -457,7 +472,7 @@ async function performPricingRefresh(
     });
     if (result.refresh_status === "needs_confirmation") {
       if (!result.official_content_hash) {
-        refreshError.value = "pricing confirmation is missing its official content hash";
+        refreshError.value = t("刷新确认缺少官方内容哈希");
         return;
       }
       showRefreshConfirmation(
@@ -476,8 +491,8 @@ async function performPricingRefresh(
       snapshot.value = result;
       message.info(t("价格表没有变化"));
     } else {
-      refreshError.value = result.error ?? "";
-      message.warning(t("价格表没有变化"));
+      refreshError.value = result.error || t("价格表刷新失败，详见页面提示");
+      message.warning(t("价格表刷新失败，详见页面提示"));
     }
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);

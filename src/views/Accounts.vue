@@ -15,7 +15,30 @@
         {{ t("使用上下方向键调整优先级") }}
       </span>
 
-      <n-empty v-if="accounts.length === 0" :description="t('暂无账号')">
+      <div
+        v-if="accountListLoading"
+        class="account-list-state"
+        role="status"
+        aria-live="polite"
+        :aria-label="t('加载中…')"
+      >
+        <n-spin size="small" />
+      </div>
+
+      <n-alert v-else-if="accountListError" type="error" :title="t('加载账号失败: {error}', { error: accountListError })">
+        <n-button size="small" secondary @click="loadAccounts">{{ t("重试") }}</n-button>
+      </n-alert>
+
+      <n-alert v-if="quotaLimitsError" type="warning" :title="t('用量加载失败')">
+        <n-button
+          size="small"
+          secondary
+          :loading="quotaLimitsLoading"
+          @click="retryQuotaLimits"
+        >{{ t("重试") }}</n-button>
+      </n-alert>
+
+      <n-empty v-if="!accountListLoading && !accountListError && accounts.length === 0" :description="t('暂无账号')">
         <template #extra>
           <n-button type="primary" @click="openCreateModal">
             <template #icon>
@@ -26,7 +49,7 @@
         </template>
       </n-empty>
 
-      <div v-if="accounts.length > 0" class="account-list">
+      <div v-if="!accountListLoading && !accountListError && accounts.length > 0" class="account-list">
         <n-card
           v-for="account in accounts"
           :key="account.id"
@@ -221,20 +244,7 @@
             </n-space>
           </template>
 
-          <div v-if="quotaLimitsError" class="usage-load-error" role="alert">
-            <span>{{ t("用量加载失败") }}</span>
-            <n-button
-              text
-              size="tiny"
-              type="primary"
-              :loading="quotaLimitsLoading"
-              @click="retryQuotaLimits"
-            >
-              {{ t("重试") }}
-            </n-button>
-          </div>
-
-          <div v-else-if="quotaLimitsLoading || !quotaLimits" class="usage-strip">
+          <div v-if="!quotaLimitsError && (quotaLimitsLoading || !quotaLimits)" class="usage-strip">
             <div class="usage-strip-body">
               <div class="usage-segment">
                 <n-progress type="line" :height="8" :percentage="0" processing :show-indicator="false" />
@@ -242,7 +252,7 @@
             </div>
           </div>
 
-          <div v-else-if="usageLoadErrors[account.id]" class="usage-load-error" role="alert">
+          <div v-else-if="!quotaLimitsError && usageLoadErrors[account.id]" class="usage-load-error" role="alert">
             <span>{{ t("用量加载失败") }}</span>
             <n-button
               text
@@ -255,7 +265,7 @@
             </n-button>
           </div>
 
-          <div v-else class="usage-strip">
+          <div v-else-if="!quotaLimitsError" class="usage-strip">
             <div class="usage-strip-body" role="group" :aria-label="t('用量')">
               <div v-for="limit in usageLimits" :key="limit.key" class="usage-segment">
                 <div class="usage-meta">
@@ -307,6 +317,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import {
+  NAlert,
   NButton,
   NCard,
   NDropdown,
@@ -316,6 +327,7 @@ import {
   NInputNumber,
   NPopover,
   NProgress,
+  NSpin,
   NSlider,
   NSpace,
   NSwitch,
@@ -348,6 +360,7 @@ import type { UsageEditState, UsageKey } from "./accounts-usage";
 import { daysUntilDate, expiryTagType, moveItem } from "./account-lifecycle";
 import { t } from "../i18n/index.ts";
 import { formatCost } from "../utils/format.ts";
+import { userFacingError } from "../utils/errors.ts";
 import { mapWithConcurrency } from "../utils/async.ts";
 import AccountFormModal from "../components/AccountFormModal.vue";
 
@@ -393,6 +406,8 @@ const usageLimits = computed<Array<{ key: UsageKey; label: string; limit: number
 const dialog = useDialog();
 const message = useMessage();
 const accounts = ref<Account[]>([]);
+const accountListLoading = ref(true);
+const accountListError = ref("");
 const usageMap = ref<Record<string, UsageWindow>>({});
 const usageEdits = ref<Record<string, AccountUsageEdits>>({});
 const usageLoading = ref<Record<string, boolean>>({});
@@ -406,6 +421,10 @@ const draggingAccountId = ref<string | null>(null);
 const orderAnnouncement = ref("");
 const now = ref(Date.now());
 let accountDrag: AccountDragState | null = null;
+
+function errorDetail(error: unknown): string {
+  return userFacingError(error, t("无法连接到本地服务，请确认程序正在运行后重试"));
+}
 
 function blankUsage(accountId: string): UsageWindow {
   return {
@@ -450,6 +469,10 @@ function syncUsageEdits(accountId: string, usage: UsageWindow) {
     const saved = usagePercentFromCost(usage[key], limit);
     const edit = existing[key];
     const wasActuallyReset = account && isUsageLimitReached(account, key, now.value);
+    if (!edit) {
+      existing[key] = mergeUsageEdit(undefined, saved, Boolean(wasActuallyReset));
+      continue;
+    }
     Object.assign(edit, mergeUsageEdit(edit, saved, Boolean(wasActuallyReset)));
   }
 }
@@ -478,7 +501,7 @@ async function saveUsage(accountId: string, key: UsageKey) {
     edit.draft = saved;
     edit.saved = saved;
   } catch (error) {
-    edit.error = String(error);
+    edit.error = errorDetail(error);
   } finally {
     edit.saving = false;
   }
@@ -540,8 +563,10 @@ function accountExpiryTagType(account: Account) {
 
 function accountExpiryLabel(account: Account): string {
   const days = accountExpiryDays(account);
+  if (days === 1) return t("剩 1 天");
   if (days > 0) return t("剩 {days} 天", { days });
   if (days === 0) return t("今天到期");
+  if (days === -1) return t("已到期 1 天");
   return t("已到期 {days} 天", { days: Number.isFinite(days) ? Math.abs(days) : 0 });
 }
 
@@ -657,7 +682,7 @@ async function persistAccountOrder(previous: Account[], movedAccountId: string):
     } else {
       accounts.value = previous;
     }
-    const failure = t("保存账号顺序失败: {error}", { error: String(error) });
+    const failure = t("保存账号顺序失败: {error}", { error: errorDetail(error) });
     orderAnnouncement.value = failure;
     message.error(failure);
   } finally {
@@ -760,10 +785,17 @@ function removeAccountState(id: string): void {
 async function refreshAccountState(id: string): Promise<void> {
   const loaded = await tauriApi.getAccounts();
   applyLoadedAccounts(loaded);
+  if (!loaded.some((account) => account.id === id)) {
+    removeAccountState(id);
+    message.warning(t("未找到该账号，已为你刷新列表"));
+    return;
+  }
   await loadAccountUsage(id);
 }
 
 async function loadAccounts() {
+  accountListLoading.value = true;
+  accountListError.value = "";
   try {
     const loaded = await tauriApi.getAccounts();
     accounts.value = loaded;
@@ -772,7 +804,10 @@ async function loadAccounts() {
       await mapWithConcurrency(loaded, 4, (account) => loadAccountUsage(account.id));
     }
   } catch (e) {
-    message.error(t("加载账号失败: {error}", { error: String(e) }));
+    accountListError.value = errorDetail(e);
+    message.error(t("加载账号失败: {error}", { error: accountListError.value }));
+  } finally {
+    accountListLoading.value = false;
   }
 }
 
@@ -784,7 +819,7 @@ async function loadQuotaLimits(): Promise<boolean> {
     return true;
   } catch (error) {
     quotaLimits.value = null;
-    quotaLimitsError.value = error instanceof Error ? error.message : String(error);
+    quotaLimitsError.value = errorDetail(error);
     return false;
   } finally {
     quotaLimitsLoading.value = false;
@@ -809,7 +844,7 @@ async function loadAccountUsage(accountId: string) {
     usageMap.value[accountId] = usage;
     syncUsageEdits(accountId, usage);
   } catch (error) {
-    usageLoadErrors.value[accountId] = String(error);
+    usageLoadErrors.value[accountId] = errorDetail(error);
   } finally {
     usageLoading.value[accountId] = false;
   }
@@ -830,7 +865,7 @@ async function onFormSave(payload: { name: string; username: string; key?: strin
       message.success(t("账号已更新"));
       showModal.value = false;
     } catch (e) {
-      message.error(t("保存失败: {error}", { error: String(e) }));
+      message.error(t("保存失败: {error}", { error: errorDetail(e) }));
     } finally {
       busy.value = false;
     }
@@ -849,7 +884,7 @@ async function onFormSave(payload: { name: string; username: string; key?: strin
       await loadAccountUsage(created.id);
       showModal.value = false;
     } catch (e) {
-      message.error(t("保存失败: {error}", { error: String(e) }));
+      message.error(t("保存失败: {error}", { error: errorDetail(e) }));
     } finally {
       busy.value = false;
     }
@@ -864,13 +899,13 @@ async function pingAccount(id: string) {
   } catch (e) {
     message.error(e instanceof DashboardRequestError && e.status === 429
       ? t("账号达到额度或限流，已进入冷却")
-      : t("Ping 失败: {error}", { error: String(e) }));
+      : t("Ping 失败: {error}", { error: errorDetail(e) }));
   } finally {
     pinging.value[id] = false;
     try {
       await refreshAccountState(id);
     } catch (e) {
-      message.error(t("加载账号失败: {error}", { error: String(e) }));
+      message.error(t("加载账号失败: {error}", { error: errorDetail(e) }));
     }
   }
 }
@@ -880,7 +915,7 @@ async function toggleAccount(id: string) {
     const updated = await tauriApi.toggleAccount(id);
     replaceAccount(updated);
   } catch (e) {
-    message.error(t("切换失败: {error}", { error: String(e) }));
+    message.error(t("切换失败: {error}", { error: errorDetail(e) }));
   }
 }
 
@@ -890,7 +925,7 @@ async function deleteAccount(id: string) {
     message.success(t("账号已删除"));
     removeAccountState(id);
   } catch (e) {
-    message.error(t("删除失败: {error}", { error: String(e) }));
+    message.error(t("删除失败: {error}", { error: errorDetail(e) }));
   }
 }
 
@@ -900,7 +935,7 @@ async function resetCooldown(id: string) {
     replaceAccount(updated);
     message.success(t("已重置冷却"));
   } catch (e) {
-    message.error(t("重置失败: {error}", { error: String(e) }));
+    message.error(t("重置失败: {error}", { error: errorDetail(e) }));
   }
 }
 
@@ -939,6 +974,11 @@ onUnmounted(() => {
 .account-list {
   display: grid;
   gap: 12px;
+}
+.account-list-state {
+  min-height: 160px;
+  display: grid;
+  place-items: center;
 }
 
 .account-card {

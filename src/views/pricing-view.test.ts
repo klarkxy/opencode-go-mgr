@@ -155,8 +155,10 @@ test("pricing catalog keeps refresh explicit and exposes accessible grouped mult
   assert.match(catalog, /onMounted\(\(\) => void loadPricing\(\)\)/);
   assert.doesNotMatch(catalog, /onMounted\(\(\) => void performPricingRefresh\(\)\)/);
   assert.match(catalog, /@click="requestPricingRefresh"/);
-  assert.match(catalog, /result\.error \?\? ""/);
-  assert.match(catalog, /class: "tiny-rate", tabindex: 0/);
+  assert.match(catalog, /result\.error \|\| t\("价格表刷新失败，详见页面提示"\)/);
+  assert.match(catalog, /message\.warning\(t\("价格表刷新失败，详见页面提示"\)\)/);
+  assert.match(catalog, /trigger: "focus"/);
+  assert.match(catalog, /class: "tiny-rate",[\s\S]*?tabindex: 0,[\s\S]*?"aria-label"/);
   assert.match(catalog, /:row-key="rowKey"/);
   assert.match(catalog, /"aria-expanded": rowExpanded\(row\)/);
   assert.match(catalog, /\.n-data-table-expand-trigger/);
@@ -166,6 +168,8 @@ test("pricing catalog keeps refresh explicit and exposes accessible grouped mult
   assert.match(catalog, /updatePricingMultipliers\(active\.revision/);
   assert.match(catalog, /updateValueOnInput: true/);
   assert.match(catalog, /onUpdateValue:[\s\S]*updateMultiplierDraft\(row\.model_id/);
+  assert.match(catalog, /disabled: disabled \|\| savingModelId\.value !== null \|\| refreshing\.value/);
+  assert.match(catalog, /true,\s*!valid,/);
   assert.match(catalog, /function hasMultiplierDraft[\s\S]*?multiplierDrafts\.value\[modelId\] !== undefined/);
   assert.doesNotMatch(catalog, /hasOwnProperty\.call\(multiplierDrafts\.value/);
   assert.doesNotMatch(catalog, /precision: 4/);
