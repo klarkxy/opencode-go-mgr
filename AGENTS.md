@@ -16,6 +16,7 @@
 - 非回环监听使用单管理员登录；Docker 可通过 `OCG_ADMIN_USERNAME` 和 `OCG_ADMIN_PASSWORD` 首次初始化（两个必须同时设置，只设一个会启动报错），未提供时由首个注册者创建管理员。
 - 设置页可通过受保护的 `/dashboard/api/settings/check-update` 手动检查 GitHub 最新 Release。内置升级公钥的已安装桌面版可继续下载、校验签名并原位安装；开发构建、CLI、Docker 与尚未进入升级通道的旧版保留发布页/手动覆盖路径。
 - 公开 GitHub Release 发布后，`.github/workflows/container.yml` 会构建并冒烟验证 `linux/amd64` 镜像，发布到 `ghcr.io/klarkxy/opencode-go-mgr`；Compose 默认使用该镜像，本地源码构建需设置 `OCG_IMAGE=ocg-manager:local` 后执行 `docker compose up -d --build`。
+- `.github/workflows/quality.yml` 在 PR / `main` 上复用单台 Linux 质量门；`release.yml` 的手动候选可只构建指定平台，`v*` tag 始终构建三平台，并在发布前校验恰好 15 个附件、升级签名与 GitHub 服务端 digest。公开发布默认关闭，只有 `OCG_RELEASE_APPROVAL_ENABLED=true` 且 `release` Environment 审批通过才会把已验证 draft 转为 published。
 - 容器固定以 UID/GID `10001` 运行并内置 `LICENSE`；Compose 透传可选的 `OCG_MANAGER_ENCRYPTION_KEY` 以支持显式密钥恢复，正常部署仍优先保留卷内 `.encryption-key`。
 - 下游访问根地址优先使用非空 `OCG_CLIENT_ROOT_URL`，其次是 SQLite 手工值，最后由前端按生产 origin / 开发 Gateway 端口自动推导；环境变量覆盖只读且不得写回 SQLite。
 - Gemini 客户端使用 `/v1beta/models/{model}:generateContent` 或 `:streamGenerateContent`（也接受 `/v1/models/...`），可用 `x-goog-api-key` 鉴权；Gemini 只是客户端格式，Gateway 始终转换到已知模型的原生上游协议。

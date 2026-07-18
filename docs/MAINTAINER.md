@@ -333,23 +333,32 @@ signatures, the pull-only Compose example, `latest.json`, and `SHA256SUMS`
 `scripts/release.mjs` does **not** erase Cargo's incremental build
 caches — repeated release builds reuse the same `target/` tree.
 
+`pnpm run release:check` runs the version and signing-key preflight without
+building a native bundle. In production CI it signs a temporary payload and
+verifies that signature against `TAURI_UPDATER_PUBLIC_KEY`, so a missing or
+mismatched key pair fails before the platform matrix consumes runner time.
+
 ## CI Workflow
 
-`.github/workflows/release.yml` runs on `workflow_dispatch` and on `v*`
-tags, with a 3‑runner matrix: Windows x64, macOS Universal, and Linux x64
-(Ubuntu 22.04). Each runner:
+`.github/workflows/quality.yml` is the reusable quality gate. It runs on pull
+requests and pushes to `main`, and `release.yml` calls it once for a release.
+One Ubuntu runner performs formatting, locked Rust and Node tests, TypeScript
+checking, a Vite production bundle, Clippy, `DESIGN.md` lint, and Compose
+validation. Node/pnpm and Rust build caches are shared across compatible runs;
+pull requests restore but do not write the Rust cache.
 
-1. Installs the matching Rust targets on macOS, and `libwebkit2gtk-4.1-dev
-   libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev
-   patchelf libfuse2 xvfb xauth xdg-utils dbus-x11` on Linux.
-2. Runs `pnpm install --frozen-lockfile`, `pnpm run build:web`,
-   `pnpm run test`, `pnpm run design:lint`, and `pnpm run build`. The build
-   receives `TAURI_SIGNING_PRIVATE_KEY`,
-   `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` from GitHub Actions secrets and
-   `TAURI_UPDATER_PUBLIC_KEY` from a repository Actions variable, with
-   `OCG_REQUIRE_UPDATER_ARTIFACTS=1`.
-3. Uploads the per‑runner `release/` directory as a
-   `release-<platform>` Actions artifact.
+`.github/workflows/release.yml` runs on `workflow_dispatch` and on `v*` tags.
+A manual candidate can select Windows x64, macOS Universal, Linux x64, or all
+three platforms. A tag always forces the complete three-platform matrix. The
+quality job runs in parallel with a Windows preflight that parses the extracted
+installer smoke, runs the release-helper tests, validates all version manifests,
+and proves that the production updater signing pair matches.
+
+After preflight, each selected native runner restores its platform Rust cache,
+installs dependencies, runs the signed `pnpm run build`, executes its CLI and
+GUI smokes, and uploads `release-<platform>` with seven-day retention. The
+expensive generic test/type/lint suite is not repeated on all three native
+runners.
 
 Each runner also runs a smoke flow on the freshly built bundle:
 
@@ -367,10 +376,12 @@ Each runner also runs a smoke flow on the freshly built bundle:
   `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\OCG Manager` survive.
   Installer processes have an explicit timeout and are waited independently
   from the `/R`-launched GUI process so a successful restart cannot hang CI;
-  the NSIS uninstaller still waits for its temporary child process tree.
+  uninstall completion is bounded and checked through removal postconditions.
   It then runs the existing off/on cleanup checks, silently uninstalls, and
-  confirms user data remains. A manual dispatch whose candidate is already
-  the latest release may use the candidate-only install path.
+  confirms user data remains. The PowerShell implementation lives in
+  `scripts/smoke-windows-release.ps1` instead of an inline YAML block. A manual
+  dispatch whose candidate is already the latest release may use the
+  candidate-only install path.
 - **macOS GUI** — mount the DMG, `codesign --verify --deep --strict`,
   check the binary is universal with `lipo -archs`, launch with
   `--startup`, wait for the dashboard.
@@ -384,9 +395,19 @@ three per-runner Actions artifacts, assembles their payloads/signatures and
 `compose.example.yaml` in `release/`, generates `latest.json` with immutable
 tag URLs and bundle-aware platform keys, regenerates `SHA256SUMS` over the
 manifest, signatures, and every other attachment, and creates or updates a
-**draft** GitHub Release. It never publishes the release. After reviewing the
-draft and the native smoke results, publish the release in GitHub or run
-`gh release edit vX.Y.Z --draft=false`.
+**draft** GitHub Release. `verify-release` then requires the exact 15-asset set,
+re-derives `latest.json`, recomputes every checksum, verifies all four updater
+signatures, and compares every downloaded artifact with the digest reported by
+GitHub Release storage.
+
+Publication is fail-closed by default. `publish-release` is skipped unless the
+repository variable `OCG_RELEASE_APPROVAL_ENABLED` is exactly `true`; when it
+is enabled, the job targets the `release` GitHub Environment and must pass that
+environment's required-reviewer approval. Configure the Environment protection
+first and only then enable the variable. With either piece absent, the verified
+Release remains a draft. After approval, the publish job compares the current
+asset/digest-set fingerprint with the verified fingerprint and refuses any draft
+that changed while it was waiting.
 
 Generate the production updater key once on a trusted workstation, writing it
 to a secure path outside the checkout (do not run this with a repository path):
@@ -448,14 +469,15 @@ development builds, CLI, and Docker retain the direct/manual path.
 
 ### CI Coverage Boundaries
 
-The repository has no `pull_request` workflow, so these checks do not run
-automatically on PRs. The container workflow covers `linux/amd64` only and
-runs after a release is published or manually dispatched. CI does not drive
-real desktop UI interactions or test container ARM64, backup/restore, database
-downgrade, migration rollback, an upstream account, or a real Gateway request.
-Its container smoke checks TCP health, dashboard HTML, auth status, the bundled
-license, and a protected settings request returning `401`. Run the relevant
-checks manually when changing uncovered paths.
+Pull requests automatically receive the platform-neutral quality gate, but
+native installer/package smokes remain manual release candidates or tag runs.
+The container workflow covers `linux/amd64` only and runs after a release is
+published or manually dispatched. CI does not drive real desktop UI interactions
+or test container ARM64, backup/restore, database downgrade, migration rollback,
+an upstream account, or a real Gateway request. Its container smoke checks TCP
+health, dashboard HTML, auth status, the bundled license, and a protected
+settings request returning `401`. Run the relevant checks manually when changing
+uncovered paths.
 
 ## Release Procedure
 
@@ -464,8 +486,8 @@ checks manually when changing uncovered paths.
    `src-tauri/Cargo.toml`.
 2. Run `cargo check --workspace --all-targets` to refresh `Cargo.lock`, then
    run `pnpm install --frozen-lockfile`, `cargo fmt --all -- --check`,
-   `pnpm run test`, `pnpm run design:lint`, and `pnpm run build`. Commit the
-   intended lockfile changes; never hand-edit them.
+   `pnpm run test`, `pnpm run design:lint`, `pnpm run release:check`, and
+   `pnpm run build`. Commit the intended lockfile changes; never hand-edit them.
 3. Compare against the previous public tag, review the diff and
    current-platform `release/` payloads, then commit the version, lockfile,
    documentation, and release-note changes.
@@ -473,12 +495,13 @@ checks manually when changing uncovered paths.
    create an annotated tag with
    `git tag -a vX.Y.Z -m "OCG Manager vX.Y.Z"`, then push the tag. Never tag a
    branch commit that will later be squash-merged.
-5. Wait for every `release.yml` matrix job and `draft-release` to pass. Review
-   the draft's seven platform payloads, `compose.example.yaml`, `SHA256SUMS`,
-   smoke logs, platform warnings, and notes generated from the previous-tag
-   diff.
-6. Publish the draft in GitHub or run
-   `gh release edit vX.Y.Z --draft=false`, then verify the public release.
+5. Wait for `quality`, `preflight`, every native matrix job, `draft-release`,
+   and `verify-release` to pass. Review the exact 15 attachments, smoke logs,
+   platform warnings, and notes generated from the previous-tag diff.
+6. Approve the waiting `release` Environment deployment. Confirm that
+   `publish-release` converted the same verified draft, then verify the public
+   release. If approval automation is intentionally disabled, leave the draft
+   unpublished until the documented recovery procedure is explicitly chosen.
 7. Wait for `container.yml`, verify the GHCR package is public, inspect its
    version and digest, and anonymously pull the full-version tag.
 
@@ -490,8 +513,9 @@ ship a new patch version; do not replace the asset or retarget the tag.
 Run these checks **before** publishing a `v*` tag. The CI smoke flow
 covers most of them; the manual parts need a real desktop.
 
-- [ ] `pnpm run test`, `pnpm run design:lint`, `pnpm run build` are
-      green on the three runners.
+- [ ] The reusable quality gate is green; signed `release:check` passed before
+      the native matrix; every selected `pnpm run build` and platform smoke is
+      green.
 - [ ] Exercise Gemini `generateContent` and `streamGenerateContent` with
       `x-goog-api-key` against both a Chat-native and a Messages-native model;
       confirm Google JSON/SSE error and usage envelopes. Confirm `countTokens`
@@ -511,8 +535,8 @@ covers most of them; the manual parts need a real desktop.
       intended release scope, and all four version manifests plus the three
       local Cargo lock entries agree.
 - [ ] Each runner's `release/SHA256SUMS` matches every payload in that
-      directory; the aggregated release checksum matches all seven platform
-      payloads plus `compose.example.yaml`.
+      directory; `verify-release` accepted the exact 15 attachments, updater
+      manifest, four signatures, checksums, and GitHub server digests.
 - [ ] On Windows, run the installer once, confirm SmartScreen warning
       text, open the dashboard, add an account, send one request.
 - [ ] On macOS, mount the DMG, confirm the **Open Anyway** flow works,
@@ -529,8 +553,8 @@ covers most of them; the manual parts need a real desktop.
 - [ ] Build the container locally and confirm UID/GID `10001`, bundled
       `LICENSE`, read-only/capability hardening, dashboard authentication, and
       backup/restore ownership on an isolated volume.
-- [ ] Review the draft GitHub Release notes and the unsigned/ad‑hoc
-      warnings before flipping `--draft=false`.
+- [ ] Review the verified draft GitHub Release notes and the unsigned/ad‑hoc
+      warnings before approving the `release` Environment deployment.
 - [ ] After publishing, confirm `container.yml` passed and anonymously pull
       `ghcr.io/klarkxy/opencode-go-mgr:<version>` by the expected digest; then
       verify the signer workflow, SBOM, and SLSA provenance.

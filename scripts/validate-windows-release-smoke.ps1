@@ -1,28 +1,20 @@
 param(
-  [string]$WorkflowPath = (Join-Path $PSScriptRoot '..\.github\workflows\release.yml')
+  [string]$WorkflowPath = (Join-Path $PSScriptRoot '..\.github\workflows\release.yml'),
+  [string]$ScriptPath = (Join-Path $PSScriptRoot 'smoke-windows-release.ps1')
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $resolvedWorkflow = (Resolve-Path -LiteralPath $WorkflowPath).Path
-$workflow = (Get-Content -LiteralPath $resolvedWorkflow -Raw) -replace "`r`n", "`n"
-$stepName = [regex]::Escape('Smoke installed GUI and overwrite bootstrap (Windows)')
-$pattern = "(?m)^      - name: $stepName[\s\S]*?^        run: \|\r?\n(?<body>(?:(?:^          [^\r\n]*|^[ \t]*$)(?:\r?\n|$))+)"
-$match = [regex]::Match($workflow, $pattern)
-if (!$match.Success) {
-  throw "Cannot extract the Windows release smoke script from $resolvedWorkflow"
-}
-
-$body = $match.Groups['body'].Value -replace '(?m)^          ', ''
-if ($body.Length -lt 5000) {
-  throw "Extracted Windows release smoke script is unexpectedly short: $($body.Length) characters"
-}
+$resolvedScript = (Resolve-Path -LiteralPath $ScriptPath).Path
+$workflow = Get-Content -LiteralPath $resolvedWorkflow -Raw
+$script = Get-Content -LiteralPath $resolvedScript -Raw
 
 $tokens = $null
 $errors = $null
-[void][System.Management.Automation.Language.Parser]::ParseInput(
-  $body,
+[void][System.Management.Automation.Language.Parser]::ParseFile(
+  $resolvedScript,
   [ref]$tokens,
   [ref]$errors
 )
@@ -33,4 +25,27 @@ if ($errors.Count) {
   throw "Windows release smoke PowerShell is invalid:`n$($messages -join "`n")"
 }
 
-Write-Host "Windows release smoke PowerShell parsed successfully ($($body.Length) characters)."
+if ($workflow -notmatch '\.\/scripts\/smoke-windows-release\.ps1\s+@parameters') {
+  throw "Release workflow does not invoke $resolvedScript"
+}
+if ($workflow -match 'function\s+Invoke-Installer') {
+  throw 'Release workflow still embeds the Windows installer implementation'
+}
+foreach ($requiredPattern in @(
+  '\.WaitForExit\(1000 \* \$TimeoutSeconds\)',
+  '\.Kill\(\$true\)',
+  'Wait-UninstallComplete',
+  'Overwrite update did not preserve the auto-start setting'
+)) {
+  if ($script -notmatch $requiredPattern) {
+    throw "Windows release smoke is missing required behavior: $requiredPattern"
+  }
+}
+if ($workflow -notmatch '\$env:USERPROFILE') {
+  throw 'Release workflow must pass the real runner profile data directory'
+}
+if ($script -match '\$env:(USERPROFILE|HOME)\s*=') {
+  throw 'Windows release smoke must not override the real runner profile'
+}
+
+Write-Host "Windows release smoke parsed successfully ($($script.Length) characters)."

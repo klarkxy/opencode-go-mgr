@@ -149,19 +149,48 @@ test("Windows release smoke waits only for bounded installer processes", () => {
     new URL("./validate-windows-release-smoke.ps1", import.meta.url),
     "utf8",
   );
-  assert.match(workflow, /function Invoke-Installer/);
-  assert.match(workflow, /run: \.\/scripts\/validate-windows-release-smoke\.ps1/);
-  assert.match(validator, /-replace "`r`n", "`n"/);
-  assert.match(workflow, /\.WaitForExit\(1000 \* \$TimeoutSeconds\)/);
-  assert.match(workflow, /\.WaitForExit\(30000\)/);
-  assert.match(workflow, /\.Kill\(\$true\)/);
-  assert.doesNotMatch(workflow, /Start-Process \$candidateInstaller[^\r\n]*-Wait/);
-  assert.doesNotMatch(workflow, /Start-Process \$previousInstaller[^\r\n]*-Wait/);
-  assert.match(workflow, /Start-Process \$uninstaller\.FullName[^\r\n]*-Wait/);
-  assert.match(workflow, /\$profile = \$env:USERPROFILE/);
-  assert.doesNotMatch(workflow, /\$env:USERPROFILE\s*=/);
-  assert.doesNotMatch(workflow, /\$env:HOME\s*=/);
-  assert.match(workflow, /Overwrite update did not preserve the auto-start setting/);
+  const smoke = readFileSync(new URL("./smoke-windows-release.ps1", import.meta.url), "utf8");
+  assert.doesNotMatch(workflow, /function Invoke-Installer/);
+  assert.match(workflow, /\.\/scripts\/smoke-windows-release\.ps1 @parameters/);
+  assert.match(validator, /Parser\]::ParseFile/);
+  assert.doesNotMatch(validator, /unexpectedly short/);
+  assert.match(smoke, /\.WaitForExit\(1000 \* \$TimeoutSeconds\)/);
+  assert.match(smoke, /\.WaitForExit\(30000\)/);
+  assert.match(smoke, /\.Kill\(\$true\)/);
+  assert.doesNotMatch(smoke, /Start-Process \$CandidateInstaller[^\r\n]*-Wait/);
+  assert.doesNotMatch(smoke, /Start-Process \$PreviousInstaller[^\r\n]*-Wait/);
+  assert.match(smoke, /Wait-UninstallComplete/);
+  assert.match(workflow, /\$env:USERPROFILE/);
+  assert.doesNotMatch(smoke, /\$env:USERPROFILE\s*=/);
+  assert.doesNotMatch(smoke, /\$env:HOME\s*=/);
+  assert.match(smoke, /Overwrite update did not preserve the auto-start setting/);
+});
+
+test("release workflow keeps reusable quality checks out of the native build matrix", () => {
+  const workflow = readFileSync(
+    new URL("../.github/workflows/release.yml", import.meta.url),
+    "utf8",
+  );
+  const quality = readFileSync(
+    new URL("../.github/workflows/quality.yml", import.meta.url),
+    "utf8",
+  );
+  const buildJob = workflow.match(/\n  build:[\s\S]*?\n  draft-release:/)?.[0] ?? "";
+
+  assert.match(quality, /\n  pull_request:/);
+  assert.match(quality, /pnpm run test/);
+  assert.match(quality, /cargo clippy --workspace --all-targets --locked -- -D warnings/);
+  assert.match(workflow, /uses: \.\/\.github\/workflows\/quality\.yml/);
+  assert.match(workflow, /if \[\[ "\$GITHUB_REF" == refs\/tags\/\* \]\]; then target=all; fi/);
+  assert.match(workflow, /pnpm run release:check/);
+  assert.match(workflow, /matrix: \$\{\{ fromJSON\(needs\.plan\.outputs\.matrix\) \}\}/);
+  assert.doesNotMatch(buildJob, /pnpm run (?:test|build:web|design:lint)/);
+  assert.doesNotMatch(buildJob, /cargo clippy/);
+  assert.match(workflow, /name: assembled-release/);
+  assert.match(workflow, /verify-release:/);
+  assert.match(workflow, /vars\.OCG_RELEASE_APPROVAL_ENABLED == 'true'/);
+  assert.match(workflow, /environment:\s+name: release/);
+  assert.match(workflow, /Refusing to publish: draft assets changed after verification/);
 });
 
 test("updater build plan accepts TAURI_SIGNING_PRIVATE_KEY content or path with a public key", () => {

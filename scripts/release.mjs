@@ -28,6 +28,7 @@ const workDir = join(root, `.release-tmp-${process.pid}`);
 const stagedReleaseDir = join(workDir, "release");
 const cliPackageDir = join(workDir, "cli");
 const updaterConfigPath = join(root, "src-tauri", "tauri.updater.conf.json");
+const checkOnly = process.argv.length === 3 && process.argv[2] === "--check";
 
 let workDirPrepared = false;
 
@@ -142,6 +143,20 @@ function updaterBuildArgs(plan, secretConfigPath) {
   return ["--config", updaterConfigPath, "--config", secretConfigPath];
 }
 
+function verifyUpdaterSigningPair(plan, tauriCli) {
+  if (!plan.enabled) return;
+  const payloadPath = join(workDir, "updater-signing-preflight.txt");
+  writeFileSync(payloadPath, "OCG Manager updater signing preflight\n");
+  run(process.execPath, [tauriCli, "signer", "sign", payloadPath], {
+    env: resolveFileSignerEnvironment(),
+  });
+  verifyUpdaterSignature({
+    payloadPath,
+    signaturePath: `${payloadPath}.sig`,
+    publicKey: plan.publicKey,
+  });
+}
+
 function prepareCliPackage(binary) {
   const cliName = process.platform === "win32" ? "ocg-manager-cli.exe" : "ocg-manager-cli";
   cpSync(requireFile(binary, "CLI binary"), join(cliPackageDir, cliName));
@@ -205,10 +220,24 @@ function replaceRelease() {
 }
 
 async function main() {
+  if (process.argv.length > 2 && !checkOnly) {
+    fail("Usage: release.mjs [--check]");
+  }
   const version = validateVersion();
-  const platform = hostPlatform();
   const updaterPlan = resolveUpdaterBuildPlan();
   const tauriCli = fileURLToPath(import.meta.resolve("@tauri-apps/cli/tauri.js"));
+  if (checkOnly) {
+    rmSync(workDir, { recursive: true, force: true });
+    workDirPrepared = true;
+    mkdirSync(workDir, { recursive: true });
+    verifyUpdaterSigningPair(updaterPlan, tauriCli);
+    console.log(
+      `Release preflight passed for v${version} (${updaterPlan.enabled ? "signed updater" : "unsigned local"}).`,
+    );
+    return;
+  }
+
+  const platform = hostPlatform();
   const artifacts = [];
   const tauriBuildEnvironment = { ...process.env };
   delete tauriBuildEnvironment.TAURI_SIGNING_PRIVATE_KEY_PATH;

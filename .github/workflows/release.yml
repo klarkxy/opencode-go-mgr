@@ -2,6 +2,17 @@ name: Cross-platform release
 
 on:
   workflow_dispatch:
+    inputs:
+      target:
+        description: Platform candidate to build; tags always build every platform
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - windows-x64
+          - macos-universal
+          - linux-x64
   push:
     tags:
       - "v*"
@@ -9,32 +20,98 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
 jobs:
+  plan:
+    name: Resolve release matrix
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+
+    steps:
+      - name: Select platforms
+        id: matrix
+        shell: bash
+        env:
+          REQUESTED_TARGET: ${{ inputs.target || 'all' }}
+        run: |
+          set -euo pipefail
+          target="$REQUESTED_TARGET"
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then target=all; fi
+          case "$target" in
+            all)
+              matrix='{"include":[{"name":"Windows x64","os":"windows-latest","artifact":"release-windows-x64"},{"name":"macOS Universal","os":"macos-15","artifact":"release-macos-universal"},{"name":"Linux x64","os":"ubuntu-22.04","artifact":"release-linux-x64"}]}'
+              ;;
+            windows-x64)
+              matrix='{"include":[{"name":"Windows x64","os":"windows-latest","artifact":"release-windows-x64"}]}'
+              ;;
+            macos-universal)
+              matrix='{"include":[{"name":"macOS Universal","os":"macos-15","artifact":"release-macos-universal"}]}'
+              ;;
+            linux-x64)
+              matrix='{"include":[{"name":"Linux x64","os":"ubuntu-22.04","artifact":"release-linux-x64"}]}'
+              ;;
+            *)
+              echo "Unsupported release target: $target" >&2
+              exit 1
+              ;;
+          esac
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+  quality:
+    uses: ./.github/workflows/quality.yml
+
+  preflight:
+    name: Release preflight
+    runs-on: windows-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          version: 10.29.2
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - name: Validate Windows release smoke
+        shell: pwsh
+        run: ./scripts/validate-windows-release-smoke.ps1
+      - name: Test release helpers
+        run: node --test scripts/generate-updater-manifest.test.mjs scripts/verify-release-assets.test.mjs
+      - name: Validate version and production signing pair
+        env:
+          OCG_REQUIRE_UPDATER_ARTIFACTS: "1"
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          TAURI_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
+        run: pnpm run release:check
+
   build:
     name: ${{ matrix.name }}
+    needs:
+      - plan
+      - preflight
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - name: Windows x64
-            os: windows-latest
-            artifact: release-windows-x64
-          - name: macOS Universal
-            os: macos-15
-            artifact: release-macos-universal
-          - name: Linux x64
-            os: ubuntu-22.04
-            artifact: release-linux-x64
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-
-      - name: Validate Windows release smoke syntax
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: ./scripts/validate-windows-release-smoke.ps1
+        with:
+          persist-credentials: false
 
       - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
         with:
@@ -55,15 +132,15 @@ jobs:
         if: runner.os == 'macOS'
         run: rustup target add x86_64-apple-darwin aarch64-apple-darwin
 
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm run build:web
-      - run: pnpm run test
-      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      - run: pnpm run design:lint
+      - name: Restore Rust build cache
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          shared-key: release-${{ matrix.artifact }}
+          workspaces: ". -> target"
+          cache-on-failure: ${{ github.event_name == 'workflow_dispatch' }}
+          save-if: "true"
 
-      - name: Validate pull-only Compose example
-        if: runner.os == 'Linux'
-        run: docker compose -f compose.example.yaml config --quiet
+      - run: pnpm install --frozen-lockfile
 
       - name: Build signed updater and platform artifacts
         env:
@@ -172,76 +249,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = 'Stop'
-
-          function Wait-Dashboard {
-            param(
-              [string]$ExpectedVersion = '',
-              [int]$Attempts = 60
-            )
-            foreach ($attempt in 1..$Attempts) {
-              try {
-                $html = (Invoke-WebRequest http://127.0.0.1:9042/dashboard/ -UseBasicParsing).Content
-                if ($html -notmatch 'id="app"') { throw 'Dashboard HTML is incomplete' }
-                if (!$ExpectedVersion) { return $null }
-                $status = Invoke-RestMethod http://127.0.0.1:9042/dashboard/api/settings/update-status
-                if ($status.current_version -eq $ExpectedVersion) { return $status }
-              } catch {}
-              Start-Sleep 1
-            }
-            throw "Installed GUI did not expose dashboard version $ExpectedVersion"
-          }
-
-          function Stop-InstalledGui {
-            param([string]$ExecutablePath)
-            if (!$ExecutablePath) { return }
-            Get-Process -Name ocg-manager -ErrorAction SilentlyContinue | Where-Object {
-              try { $_.Path -eq $ExecutablePath } catch { $false }
-            } | ForEach-Object {
-              Stop-Process -Id $_.Id -Force
-              $_.WaitForExit()
-            }
-          }
-
-          function Invoke-Installer {
-            param(
-              [string]$Path,
-              [string[]]$Arguments,
-              [string]$Label,
-              [int]$TimeoutSeconds = 180
-            )
-            Write-Host "Starting $Label"
-            # Start-Process -Wait follows the whole process tree on Windows.
-            # An updater launched with /R intentionally leaves the restarted GUI
-            # running, so wait only for the installer process itself.
-            $installerProcess = Start-Process $Path -ArgumentList $Arguments -PassThru -WindowStyle Hidden
-            if (!$installerProcess.WaitForExit(1000 * $TimeoutSeconds)) {
-              try {
-                $installerProcess.Kill($true)
-                $null = $installerProcess.WaitForExit(30000)
-              } catch {
-                Stop-Process -Id $installerProcess.Id -Force -ErrorAction SilentlyContinue
-              }
-              throw "$Label did not exit within $TimeoutSeconds seconds"
-            }
-            if ($installerProcess.ExitCode -ne 0) {
-              throw "$Label failed: $($installerProcess.ExitCode)"
-            }
-            Write-Host "Completed $Label"
-          }
-
           $candidateVersion = (Get-Content package.json -Raw | ConvertFrom-Json).version
           $candidateInstaller = (Get-Item release/*windows-x64-setup.exe).FullName
-          $installDir = Join-Path $env:RUNNER_TEMP ocg-manager-install
-          # NSIS restarts through RunAsUser, which restores the real user's
-          # environment instead of a synthetic USERPROFILE inherited by the
-          # installer. Keep the full lifecycle on this disposable runner's
-          # actual profile so the pre-update and restarted apps share state.
-          $profile = $env:USERPROFILE
-          $data = Join-Path $profile .ocg-mgr
-          if (Test-Path $data) { throw "Hosted runner profile is not clean: $data" }
-          $sentinel = Join-Path $data preserve-me
-          $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
-          $settingsUrl = 'http://127.0.0.1:9042/dashboard/api/settings'
+          $parameters = @{
+            CandidateInstaller = $candidateInstaller
+            CandidateVersion = $candidateVersion
+            InstallDirectory = (Join-Path $env:RUNNER_TEMP ocg-manager-install)
+            DataDirectory = (Join-Path $env:USERPROFILE .ocg-mgr)
+          }
 
           $latestTag = ''
           try {
@@ -252,18 +267,10 @@ jobs:
               throw 'A tag release smoke requires a current published GitHub Release for the overwrite bootstrap.'
             }
             Write-Host 'No published release is available; using the candidate-only install smoke.'
-            $latestTag = ''
           }
 
           $latestVersion = $latestTag -replace '^v', ''
-          $bootstrapOverwrite = [bool]$latestTag
-          if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch' -and $latestVersion -eq $candidateVersion) {
-            Write-Host "Candidate v$candidateVersion is already latest; skipping the same-version bootstrap overwrite."
-            $bootstrapOverwrite = $false
-          }
-
-          $previousInstaller = $null
-          if ($bootstrapOverwrite) {
+          if ($latestTag -and !($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch' -and $latestVersion -eq $candidateVersion)) {
             $previousDir = Join-Path $env:RUNNER_TEMP previous-release
             New-Item -ItemType Directory -Force $previousDir | Out-Null
             & gh release download $latestTag --repo $env:GITHUB_REPOSITORY --pattern 'ocg-manager_*_windows-x64-setup.exe' --dir $previousDir
@@ -272,92 +279,13 @@ jobs:
             if ($previousInstallers.Count -ne 1) {
               throw "Expected one published Windows installer for $latestTag, found $($previousInstallers.Count)"
             }
-            $previousInstaller = $previousInstallers[0].FullName
+            $parameters.PreviousInstaller = $previousInstallers[0].FullName
+            $parameters.PreviousTag = $latestTag
+          } elseif ($latestTag) {
+            Write-Host "Candidate v$candidateVersion is already latest; using the candidate-only install smoke."
           }
 
-          $process = $null
-          $guiPath = ''
-          try {
-            if ($bootstrapOverwrite) {
-              Invoke-Installer -Path $previousInstaller -Arguments @('/S', "/D=$installDir") -Label "published $latestTag install"
-              $gui = Get-ChildItem $installDir -Recurse -Filter ocg-manager.exe | Select-Object -First 1
-              if (!$gui) { throw 'Published GUI executable is missing' }
-              $guiPath = $gui.FullName
-              $process = Start-Process $guiPath -ArgumentList '--startup' -PassThru -WindowStyle Hidden
-              Wait-Dashboard
-
-              New-Item -ItemType Directory -Force $data | Out-Null
-              Set-Content $sentinel "preserved-from-$latestTag"
-              $settings = Invoke-RestMethod $settingsUrl
-              $settings.auto_start = $true
-              Invoke-RestMethod $settingsUrl -Method Post -ContentType 'application/json' -Body ($settings | ConvertTo-Json) | Out-Null
-              $expectedStartupValue = "`"$guiPath`" --startup"
-              $startupValue = (Get-ItemProperty -LiteralPath $runKey -Name 'OCG Manager').'OCG Manager'
-              if ($startupValue -ne $expectedStartupValue) { throw "Published install wrote unexpected startup value: $startupValue" }
-
-              $previousPid = $process.Id
-              Invoke-Installer -Path $candidateInstaller -Arguments @('/UPDATE', '/P', '/R', '/ARGS', '--startup') -Label 'candidate overwrite update'
-              foreach ($attempt in 1..30) {
-                if (!(Get-Process -Id $previousPid -ErrorAction SilentlyContinue)) { break }
-                Start-Sleep 1
-              }
-              if (Get-Process -Id $previousPid -ErrorAction SilentlyContinue) {
-                throw "Published GUI process $previousPid survived the overwrite update"
-              }
-
-              $updateStatus = Wait-Dashboard -ExpectedVersion $candidateVersion -Attempts 90
-              if ($updateStatus.current_version -ne $candidateVersion) {
-                throw "Unexpected updated GUI version: $($updateStatus.current_version)"
-              }
-              $updatedSettings = Invoke-RestMethod $settingsUrl
-              if (!$updatedSettings.auto_start) {
-                throw 'Overwrite update did not preserve the auto-start setting'
-              }
-              if ((Get-Content $sentinel -Raw).Trim() -ne "preserved-from-$latestTag") {
-                throw 'Overwrite update did not preserve the data sentinel'
-              }
-              $startupValue = (Get-ItemProperty -LiteralPath $runKey -Name 'OCG Manager').'OCG Manager'
-              if ($startupValue -ne $expectedStartupValue) { throw "Overwrite update changed startup value: $startupValue" }
-            } else {
-              Invoke-Installer -Path $candidateInstaller -Arguments @('/S', "/D=$installDir") -Label 'candidate install'
-              $gui = Get-ChildItem $installDir -Recurse -Filter ocg-manager.exe | Select-Object -First 1
-              if (!$gui) { throw 'Installed GUI executable is missing' }
-              $guiPath = $gui.FullName
-              $process = Start-Process $guiPath -ArgumentList '--startup' -PassThru -WindowStyle Hidden
-              Wait-Dashboard -ExpectedVersion $candidateVersion | Out-Null
-              New-Item -ItemType Directory -Force $data | Out-Null
-              Set-Content $sentinel 'preserved'
-            }
-
-            $settings = Invoke-RestMethod $settingsUrl
-            $settings.auto_start = $true
-            Invoke-RestMethod $settingsUrl -Method Post -ContentType 'application/json' -Body ($settings | ConvertTo-Json) | Out-Null
-            $startupValue = (Get-ItemProperty -LiteralPath $runKey -Name 'OCG Manager').'OCG Manager'
-            $expectedStartupValue = "`"$guiPath`" --startup"
-            if ($startupValue -ne $expectedStartupValue) { throw "Unexpected startup value: $startupValue" }
-
-            $settings.auto_start = $false
-            Invoke-RestMethod $settingsUrl -Method Post -ContentType 'application/json' -Body ($settings | ConvertTo-Json) | Out-Null
-            if ((Get-ItemProperty -LiteralPath $runKey).PSObject.Properties.Name -contains 'OCG Manager') { throw 'Disabling auto-start left the startup entry behind' }
-            $settings.auto_start = $true
-            Invoke-RestMethod $settingsUrl -Method Post -ContentType 'application/json' -Body ($settings | ConvertTo-Json) | Out-Null
-            $startupValue = (Get-ItemProperty -LiteralPath $runKey -Name 'OCG Manager').'OCG Manager'
-            if ($startupValue -ne $expectedStartupValue) { throw "Unexpected restored startup value: $startupValue" }
-          } finally {
-            if ($process -and !$process.HasExited) { Stop-Process -Id $process.Id -Force; $process.WaitForExit() }
-            Stop-InstalledGui $guiPath
-          }
-
-          $uninstaller = Get-ChildItem $installDir -Recurse -Filter uninstall.exe | Select-Object -First 1
-          if (!$uninstaller) { throw 'Uninstaller is missing' }
-          Write-Host 'Starting candidate uninstall'
-          # NSIS copies the uninstaller to a temporary child process. Unlike the
-          # /R updater path, waiting for this full process tree is intentional.
-          $uninstall = Start-Process $uninstaller.FullName -ArgumentList '/S' -Wait -PassThru -WindowStyle Hidden
-          if ($uninstall.ExitCode -ne 0) { throw "Candidate uninstall failed: $($uninstall.ExitCode)" }
-          Write-Host 'Completed candidate uninstall'
-          if ((Get-ItemProperty -LiteralPath $runKey).PSObject.Properties.Name -contains 'OCG Manager') { throw 'Uninstall left the startup entry behind' }
-          if (!(Test-Path $sentinel)) { throw 'Silent uninstall deleted user data' }
+          ./scripts/smoke-windows-release.ps1 @parameters
 
       - name: Smoke mounted GUI (macOS)
         if: runner.os == 'macOS'
@@ -425,11 +353,15 @@ jobs:
           name: ${{ matrix.artifact }}
           path: release/*
           if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
 
   draft-release:
     name: Draft GitHub release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    needs:
+      - quality
+      - build
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -447,6 +379,7 @@ jobs:
       - name: Assemble release and checksums
         shell: bash
         run: |
+          set -euo pipefail
           mkdir release
           find artifacts -type f ! -name SHA256SUMS -exec cp {} release/ \;
           cp compose.example.yaml release/
@@ -456,12 +389,22 @@ jobs:
             --repository "$GITHUB_REPOSITORY"
           (cd release && sha256sum * > SHA256SUMS)
 
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: assembled-release
+          path: release/*
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+          overwrite: true
+
       - name: Create or update draft release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
+          set -euo pipefail
           notes="Updater payloads include Tauri minisign signatures. The Windows installer remains unsigned by Authenticode; the macOS app uses ad-hoc signing and is not notarized."
           if [ "$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft 2>/dev/null)" = true ]; then
             gh release upload "$GITHUB_REF_NAME" release/* --clobber
@@ -472,3 +415,97 @@ jobs:
           else
             gh release create "$GITHUB_REF_NAME" release/* --draft --verify-tag --title "OCG Manager $GITHUB_REF_NAME" --notes "$notes"
           fi
+
+  verify-release:
+    name: Verify draft release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: draft-release
+    runs-on: ubuntu-latest
+    outputs:
+      asset_digest: ${{ steps.asset_metadata.outputs.digest }}
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 22
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: assembled-release
+          path: release
+
+      - name: Read GitHub Release asset digests
+        id: asset_metadata
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ready=false
+          for attempt in 1 2 3 4 5; do
+            gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" \
+              --jq '[.assets[] | {name, digest}]' > asset-metadata.json
+            if jq -e 'length == 15 and all(.[]; .digest | type == "string")' asset-metadata.json >/dev/null; then
+              ready=true
+              break
+            fi
+            sleep 3
+          done
+          if [ "$ready" != true ]; then
+            echo "GitHub did not expose all 15 immutable asset digests." >&2
+            exit 1
+          fi
+          digest=$(jq -S -c 'sort_by(.name)' asset-metadata.json | sha256sum | cut -d' ' -f1)
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+      - name: Verify checksums, updater manifest, signatures, and server digests
+        env:
+          TAURI_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
+        run: |
+          node scripts/verify-release-assets.mjs \
+            --release-dir release \
+            --tag "$GITHUB_REF_NAME" \
+            --repository "$GITHUB_REPOSITORY" \
+            --asset-metadata asset-metadata.json
+
+  publish-release:
+    name: Publish approved release
+    if: startsWith(github.ref, 'refs/tags/v') && vars.OCG_RELEASE_APPROVAL_ENABLED == 'true'
+    needs: verify-release
+    runs-on: ubuntu-latest
+    environment:
+      name: release
+      url: https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}
+    permissions:
+      contents: write
+
+    steps:
+      - name: Publish verified draft
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERIFIED_ASSET_DIGEST: ${{ needs.verify-release.outputs.asset_digest }}
+        run: |
+          set -euo pipefail
+          state=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" --jq .draft)
+          if [ "$state" != true ]; then
+            echo "Refusing to publish a release that is not the verified draft." >&2
+            exit 1
+          fi
+          current_asset_digest=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" \
+            --jq '[.assets[] | {name, digest}]' \
+            | jq -S -c 'sort_by(.name)' \
+            | sha256sum \
+            | cut -d' ' -f1)
+          if [ "$current_asset_digest" != "$VERIFIED_ASSET_DIGEST" ]; then
+            echo "Refusing to publish: draft assets changed after verification." >&2
+            exit 1
+          fi
+          gh release edit "$GITHUB_REF_NAME" --draft=false --latest
