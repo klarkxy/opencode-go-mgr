@@ -183,7 +183,11 @@ test("Windows release smoke waits only for bounded installer processes", () => {
   assert.doesNotMatch(smoke, /Start-Process \$CandidateInstaller[^\r\n]*-Wait/);
   assert.doesNotMatch(smoke, /Start-Process \$PreviousInstaller[^\r\n]*-Wait/);
   assert.match(smoke, /Wait-UninstallComplete/);
-  assert.match(smoke, /Get-ItemProperty -LiteralPath \$RunKey -ErrorAction SilentlyContinue/);
+  assert.match(smoke, /function Test-RegistryValue/);
+  assert.match(smoke, /Get-Item[^\r\n]*-ErrorAction Stop/);
+  assert.match(smoke, /catch \[System\.Management\.Automation\.ItemNotFoundException\]/);
+  assert.match(smoke, /\.GetValueNames\(\)/);
+  assert.doesNotMatch(smoke, /\.PSObject\.Properties\.Name/);
   assert.match(smoke, /-RunKey \$runKey/);
   assert.match(workflow, /\$env:USERPROFILE/);
   assert.doesNotMatch(smoke, /\$env:USERPROFILE\s*=/);
