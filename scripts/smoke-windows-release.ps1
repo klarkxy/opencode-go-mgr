@@ -82,6 +82,19 @@ function Invoke-Installer {
   Write-Host "Completed $Label"
 }
 
+function Test-RegistryValue {
+  param(
+    [string]$Path,
+    [string]$Name
+  )
+  try {
+    $key = Get-Item -LiteralPath $Path -ErrorAction Stop
+  } catch [System.Management.Automation.ItemNotFoundException] {
+    return $false
+  }
+  return [bool]($key -and ($key.GetValueNames() -contains $Name))
+}
+
 function Wait-UninstallComplete {
   param(
     [string]$ExecutablePath,
@@ -90,10 +103,7 @@ function Wait-UninstallComplete {
     [int]$Attempts = 90
   )
   foreach ($attempt in 1..$Attempts) {
-    $runValues = Get-ItemProperty -LiteralPath $RunKey -ErrorAction SilentlyContinue
-    $startupEntryPresent = $runValues -and (
-      $runValues.PSObject.Properties.Name -contains 'OCG Manager'
-    )
+    $startupEntryPresent = Test-RegistryValue -Path $RunKey -Name 'OCG Manager'
     if (
       !(Test-Path -LiteralPath $ExecutablePath) -and
       !(Test-Path -LiteralPath $UninstallerPath) -and
@@ -177,7 +187,7 @@ try {
 
   $settings.auto_start = $false
   Invoke-RestMethod $settingsUrl -Method Post -ContentType 'application/json' -Body ($settings | ConvertTo-Json) | Out-Null
-  if ((Get-ItemProperty -LiteralPath $runKey).PSObject.Properties.Name -contains 'OCG Manager') {
+  if (Test-RegistryValue -Path $runKey -Name 'OCG Manager') {
     throw 'Disabling auto-start left the startup entry behind'
   }
   $settings.auto_start = $true
@@ -196,7 +206,7 @@ $uninstaller = Get-ChildItem $installDir -Recurse -Filter uninstall.exe | Select
 if (!$uninstaller) { throw 'Uninstaller is missing' }
 Invoke-Installer -Path $uninstaller.FullName -Arguments @('/S') -Label 'candidate uninstall'
 Wait-UninstallComplete -ExecutablePath $guiPath -UninstallerPath $uninstaller.FullName -RunKey $runKey
-if ((Get-ItemProperty -LiteralPath $runKey).PSObject.Properties.Name -contains 'OCG Manager') {
+if (Test-RegistryValue -Path $runKey -Name 'OCG Manager') {
   throw 'Uninstall left the startup entry behind'
 }
 if (!(Test-Path $sentinel)) { throw 'Silent uninstall deleted user data' }
