@@ -377,6 +377,7 @@ export const deDEMessages = {
   "保存 Key": "Key speichern",
   "Key 已保存": "Key gespeichert",
   "Key 保存失败: {error}": "Key konnte nicht gespeichert werden: {error}",
+  "设置已被其他操作修改，已重新加载最新设置，请确认后再保存": "Die Einstellungen wurden an anderer Stelle geändert. Die aktuelle Version wurde neu geladen; prüfen Sie sie vor dem erneuten Speichern.",
   "自动启动设置失败: {error}": "Automatischer Start konnte nicht aktualisiert werden: {error}",
   "输入新 Key": "Neuen Key eingeben",
   "建立上游连接的初始超时（秒）": "Initiales Timeout für den Verbindungsaufbau zum Upstream (Sekunden)",

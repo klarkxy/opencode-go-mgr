@@ -375,6 +375,7 @@ export const enUSMessages = {
   "保存 Key": "Save Key",
   "Key 已保存": "Key saved",
   "Key 保存失败: {error}": "Failed to save Key: {error}",
+  "设置已被其他操作修改，已重新加载最新设置，请确认后再保存": "Settings changed elsewhere. The latest settings have been reloaded; review them before saving again.",
   "自动启动设置失败: {error}": "Failed to update auto-start: {error}",
   "输入新 Key": "Enter new Key",
   "建立上游连接的初始超时（秒）": "Initial timeout for establishing the upstream connection (seconds)",

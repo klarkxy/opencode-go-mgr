@@ -20,6 +20,26 @@ function isConfigured(value) {
   return typeof value === "string" && value.trim() !== "";
 }
 
+export function updaterPublicKeyFingerprint(publicKey) {
+  if (!isConfigured(publicKey)) throw new Error("Updater public key is empty.");
+  return createHash("sha256").update(publicKey.trim(), "utf8").digest("hex");
+}
+
+export function verifyUpdaterPublicKeyContinuity({ publicKey, expectedFingerprint }) {
+  const expected = expectedFingerprint?.trim().toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(expected ?? "")) {
+    throw new Error("Committed updater public-key fingerprint is missing or invalid.");
+  }
+  const actual = updaterPublicKeyFingerprint(publicKey);
+  if (actual !== expected) {
+    throw new Error(
+      `Updater public-key continuity check failed: expected sha256:${expected}, got sha256:${actual}. `
+      + "Do not rotate this key in place; follow the documented break-glass bootstrap procedure.",
+    );
+  }
+  return actual;
+}
+
 export function resolveUpdaterBuildPlan(env = process.env) {
   const required = env.OCG_REQUIRE_UPDATER_ARTIFACTS === "1";
   const privateKeySource = isConfigured(env.TAURI_SIGNING_PRIVATE_KEY)

@@ -22,10 +22,20 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  publish:
-    name: Publish GHCR image
+  build:
+    name: Build and verify GHCR image
     runs-on: ubuntu-24.04
     timeout-minutes: 90
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+      full_sha: ${{ steps.commit.outputs.full_sha }}
+      image: ${{ steps.release.outputs.image }}
+      minor: ${{ steps.release.outputs.minor }}
+      publish_latest: ${{ steps.release.outputs.publish_latest }}
+      short_sha: ${{ steps.commit.outputs.short_sha }}
+      stable: ${{ steps.release.outputs.stable }}
+      tag: ${{ steps.release.outputs.tag }}
+      version: ${{ steps.release.outputs.version }}
     permissions:
       contents: read
       packages: write
@@ -41,24 +51,61 @@ jobs:
         id: release
         shell: bash
         env:
+          RELEASE_PRERELEASE: ${{ github.event.release.prerelease || false }}
           RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+          REQUESTED_LATEST: ${{ inputs.publish_latest || false }}
         run: |
           set -euo pipefail
 
-          if [[ ! "$RELEASE_TAG" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
-            echo "Expected a semver tag, got: $RELEASE_TAG" >&2
+          if [[ ! "$RELEASE_TAG" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Expected a container-compatible semver tag without build metadata, got: $RELEASE_TAG" >&2
             exit 1
           fi
 
+          version=${RELEASE_TAG#v}
+          stable=false
+          minor=
+          if [[ "$version" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            stable=true
+            minor="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
+          fi
+          publish_latest=false
+          if [[ "$stable" == true ]] && { \
+            [[ "$GITHUB_EVENT_NAME" == release && "$RELEASE_PRERELEASE" != true ]] \
+            || [[ "$REQUESTED_LATEST" == true ]]; \
+          }; then
+            publish_latest=true
+          fi
+
           echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "stable=$stable" >> "$GITHUB_OUTPUT"
+          echo "minor=$minor" >> "$GITHUB_OUTPUT"
+          echo "publish_latest=$publish_latest" >> "$GITHUB_OUTPUT"
           echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
 
       - name: Check out release tag
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          ref: ${{ steps.release.outputs.tag }}
+          ref: refs/tags/${{ steps.release.outputs.tag }}
           fetch-depth: 1
           persist-credentials: false
+
+      - name: Verify exact tag source and repository version
+        shell: bash
+        env:
+          OCG_RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          expected_ref="refs/tags/$OCG_RELEASE_TAG"
+          git show-ref --verify --quiet "$expected_ref"
+          tag_commit=$(git rev-parse "$expected_ref^{commit}")
+          head_commit=$(git rev-parse HEAD)
+          if [[ "$head_commit" != "$tag_commit" ]]; then
+            echo "Checked-out commit $head_commit does not match $expected_ref ($tag_commit)." >&2
+            exit 1
+          fi
+          node scripts/release.mjs --check
 
       - name: Resolve release commit
         id: commit
@@ -160,9 +207,6 @@ jobs:
           flavor: latest=false
           tags: |
             type=semver,pattern={{version}},value=${{ steps.release.outputs.tag }}
-            type=semver,pattern={{major}}.{{minor}},value=${{ steps.release.outputs.tag }}
-            type=raw,value=latest,enable=${{ (github.event_name == 'release' && !github.event.release.prerelease) || inputs.publish_latest }}
-            type=raw,value=sha-${{ steps.commit.outputs.short_sha }},priority=100
           labels: |
             org.opencontainers.image.title=OCG Manager
             org.opencontainers.image.description=OpenCode-Go multi-account local manager and gateway
@@ -176,17 +220,175 @@ jobs:
           context: .
           file: ./Dockerfile
           platforms: linux/amd64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
+          outputs: type=image,name=${{ steps.release.outputs.image }},push=true,push-by-digest=true,name-canonical=true
           labels: ${{ steps.meta.outputs.labels }}
+          annotations: |
+            index:org.opencontainers.image.version=${{ steps.release.outputs.version }}
+            index:org.opencontainers.image.revision=${{ steps.commit.outputs.full_sha }}
           cache-from: type=gha,scope=ocg-manager-linux-amd64
           cache-to: type=gha,mode=max,scope=ocg-manager-linux-amd64
           provenance: mode=max
           sbom: true
 
+  publish:
+    name: Publish immutable and moving GHCR tags
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    concurrency:
+      group: ghcr-moving-channels
+      queue: max
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish tags without moving immutable references or rolling channels back
+        shell: bash
+        env:
+          CANDIDATE_DIGEST: ${{ needs.build.outputs.digest }}
+          CANDIDATE_VERSION: ${{ needs.build.outputs.version }}
+          IMAGE: ${{ needs.build.outputs.image }}
+          MINOR_CHANNEL: ${{ needs.build.outputs.minor }}
+          PUBLISH_LATEST: ${{ needs.build.outputs.publish_latest }}
+          SHORT_SHA: ${{ needs.build.outputs.short_sha }}
+          STABLE: ${{ needs.build.outputs.stable }}
+        run: |
+          set -euo pipefail
+          source_ref="$IMAGE@$CANDIDATE_DIGEST"
+
+          inspect_digest() {
+            local ref=$1
+            local error_file="$RUNNER_TEMP/imagetools-inspect-error"
+            local manifest
+            if manifest=$(docker buildx imagetools inspect "$ref" --format '{{json .Manifest}}' 2>"$error_file"); then
+              jq -er '.digest' <<<"$manifest"
+              return
+            fi
+            if grep -Eqi 'manifest unknown|not found|no such manifest' "$error_file"; then
+              printf ''
+              return
+            fi
+            cat "$error_file" >&2
+            return 1
+          }
+
+          inspect_version() {
+            local ref=$1
+            local error_file="$RUNNER_TEMP/imagetools-version-error"
+            local child_digest
+            local image_ref=$ref
+            local labels
+            local manifest
+            local version
+            if ! manifest=$(docker buildx imagetools inspect "$ref" --raw 2>"$error_file"); then
+              cat "$error_file" >&2
+              return 1
+            fi
+            version=$(jq -r '.annotations."org.opencontainers.image.version" // empty' <<<"$manifest")
+            if [[ -n "$version" ]]; then
+              printf '%s' "$version"
+              return
+            fi
+            child_digest=$(jq -r '
+              [.manifests[]? | select(.platform.os == "linux" and .platform.architecture == "amd64")][0].digest // empty
+            ' <<<"$manifest")
+            if [[ -n "$child_digest" ]]; then
+              image_ref="$IMAGE@$child_digest"
+            fi
+            if ! labels=$(docker buildx imagetools inspect "$image_ref" --format '{{json .Image.Config.Labels}}' 2>"$error_file"); then
+              cat "$error_file" >&2
+              return 1
+            fi
+            jq -er '."org.opencontainers.image.version"' <<<"$labels"
+          }
+
+          verify_published_digest() {
+            local ref=$1
+            local actual
+            actual=$(inspect_digest "$ref")
+            if [[ "$actual" != "$CANDIDATE_DIGEST" ]]; then
+              echo "Published digest mismatch for $ref: $actual != $CANDIDATE_DIGEST" >&2
+              exit 1
+            fi
+          }
+
+          check_immutable() {
+            local tag=$1
+            local ref="$IMAGE:$tag"
+            local existing
+            existing=$(inspect_digest "$ref")
+            node scripts/release-policy.mjs immutable-tag \
+              --tag "$tag" \
+              --candidate-digest "$CANDIDATE_DIGEST" \
+              --existing-digest "$existing"
+          }
+
+          publish_immutable() {
+            local tag=$1
+            local decision=$2
+            local ref="$IMAGE:$tag"
+            if [[ "$decision" == create ]]; then
+              docker buildx imagetools create --tag "$ref" "$source_ref"
+            else
+              echo "Immutable tag $ref already resolves to the candidate digest; leaving it unchanged."
+            fi
+            verify_published_digest "$ref"
+          }
+
+          publish_moving() {
+            local tag=$1
+            local ref="$IMAGE:$tag"
+            local existing
+            local current_version=
+            local advance
+            existing=$(inspect_digest "$ref")
+            if [[ -n "$existing" ]]; then
+              current_version=$(inspect_version "$ref")
+            fi
+            advance=$(node scripts/release-policy.mjs should-advance \
+              --candidate "$CANDIDATE_VERSION" \
+              --current "$current_version")
+            if [[ "$advance" == true ]]; then
+              docker buildx imagetools create --tag "$ref" "$source_ref"
+              verify_published_digest "$ref"
+              echo "Advanced $ref from ${current_version:-none} to $CANDIDATE_VERSION."
+            else
+              echo "Kept $ref at newer or equal version $current_version."
+            fi
+          }
+
+          version_decision=$(check_immutable "$CANDIDATE_VERSION")
+          sha_decision=$(check_immutable "sha-$SHORT_SHA")
+          publish_immutable "$CANDIDATE_VERSION" "$version_decision"
+          publish_immutable "sha-$SHORT_SHA" "$sha_decision"
+          if [[ "$STABLE" == true ]]; then
+            publish_moving "$MINOR_CHANNEL"
+            if [[ "$PUBLISH_LATEST" == true ]]; then
+              publish_moving latest
+            fi
+          fi
+
       - name: Generate signed GitHub provenance
         uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
         with:
-          subject-name: ${{ steps.release.outputs.image }}
-          subject-digest: ${{ steps.push.outputs.digest }}
+          subject-name: ${{ needs.build.outputs.image }}
+          subject-digest: ${{ needs.build.outputs.digest }}
           push-to-registry: true

@@ -9,13 +9,41 @@ import {
   reconcileApplicationModelSelection,
 } from "./application-guides.ts";
 import {
+  connectionDraftContextChanged,
   isGeminiCliBaseUrlAllowed,
   maskConnectionKey,
   normalizeClientRootUrl,
+  reconcileConnectionDrafts,
   resolveConnectionUrls,
   restoreMaskedConnectionKey,
   writeConnectionValue,
 } from "./dashboard-connection.ts";
+
+test("connection draft context changes only when copied connection values change", () => {
+  const previous = {
+    gateway_port: 9042,
+    gateway_key: "ocg-old-key",
+    client_root_url: "https://old.example.com",
+    upstream_base_url: "https://opencode.ai/zen/go",
+  };
+
+  assert.equal(connectionDraftContextChanged(previous, { ...previous }), false);
+  for (const next of [
+    { ...previous, gateway_port: 9043 },
+    { ...previous, gateway_key: "ocg-new-key" },
+    { ...previous, client_root_url: "https://new.example.com" },
+    { ...previous, upstream_base_url: "https://upstream.example.com" },
+  ]) {
+    assert.equal(connectionDraftContextChanged(previous, next), true);
+  }
+
+  const drafts = { "codex:0": "edited" };
+  assert.equal(reconcileConnectionDrafts(previous, { ...previous }, drafts), drafts);
+  assert.deepEqual(
+    reconcileConnectionDrafts(previous, { ...previous, gateway_key: "ocg-new-key" }, drafts),
+    {},
+  );
+});
 
 test("connection helpers mask display values and copy the complete value", async () => {
   assert.equal(maskConnectionKey(""), "未设置");
@@ -511,6 +539,15 @@ test("applications view uses deep-linked subpages and a responsive second naviga
   assert.match(restoreDefaults, /selectedModel\.value = models\[0\] \?\? null/);
   assert.match(restoreDefaults, /claudeDesktopDefaults\.value/);
   assert.match(applications, /snippetDrafts|clearApplicationDrafts/);
+  const settingsLoad = applications.slice(
+    applications.indexOf("async function loadSettings"),
+    applications.indexOf("async function copyValue"),
+  );
+  assert.match(settingsLoad, /reconcileConnectionDrafts\(/);
+  assert.ok(
+    settingsLoad.indexOf("snippetDrafts.value = reconcileConnectionDrafts")
+      < settingsLoad.indexOf("serviceConfig.value = nextServiceConfig"),
+  );
   assert.doesNotMatch(restoreDefaults, /loadModels|tauriApi\./);
   assert.match(applications, /tauriApi\.updateClaudeDesktopModels/);
   assert.match(applications, /v-model:value="selectedModels"/);
@@ -605,7 +642,24 @@ test("settings expose supported Windows auto-start safely", async () => {
   assert.match(settings, /:loading="regenerating"\s+:disabled="saving"/);
   assert.match(settings, /async function handleAutoStartToggle\(newValue: boolean\)/);
   assert.match(settings, /savedConfig\.value/);
-  assert.match(settings, /savedConfig\.value\.gateway_key = config\.value\.gateway_key/);
+  assert.match(settings, /savedConfig\.value\.gateway_key = result\.key/);
+  assert.match(settings, /savedConfig\.value\.revision = result\.revision/);
   assert.match(settings, /const payload = \{ \.\.\.config\.value \}/);
+  assert.match(settings, /revision: 0/);
+  assert.match(settings, /reloadSettingsAfterConflict/);
+  assert.match(settings, /error instanceof DashboardRequestError/);
+  assert.match(settings, /error\.status !== 409/);
+  assert.match(settings, /async function loadSettings\(\): Promise<boolean>/);
+  const conflictRecovery = settings.slice(
+    settings.indexOf("async function reloadSettingsAfterConflict"),
+    settings.indexOf("async function saveSettings"),
+  );
+  assert.match(conflictRecovery, /if \(await loadSettings\(\)\) \{[\s\S]*message\.warning/);
+  assert.match(conflictRecovery, /else \{[\s\S]*message\.error/);
+  assert.doesNotMatch(
+    conflictRecovery,
+    /updateSettings/,
+  );
   assert.match(api, /auto_start_supported: boolean/);
+  assert.match(api, /expected_revision: revision/);
 });

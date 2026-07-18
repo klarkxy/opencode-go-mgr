@@ -377,6 +377,7 @@ export const esESMessages = {
   "保存 Key": "Guardar Key",
   "Key 已保存": "Key guardada",
   "Key 保存失败: {error}": "No se pudo guardar la Key: {error}",
+  "设置已被其他操作修改，已重新加载最新设置，请确认后再保存": "La configuración cambió en otra operación. Se cargó la versión más reciente; revísala antes de volver a guardar.",
   "自动启动设置失败: {error}": "No se pudo actualizar el inicio automático: {error}",
   "输入新 Key": "Introduce una Key nueva",
   "建立上游连接的初始超时（秒）": "Tiempo de espera inicial para establecer la conexión ascendente (segundos)",

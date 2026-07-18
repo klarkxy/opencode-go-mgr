@@ -344,6 +344,7 @@ import { useClipboard } from "../utils/format.ts";
 import {
   isGeminiCliBaseUrlAllowed,
   maskConnectionKey,
+  reconcileConnectionDrafts,
   resolveConnectionUrls,
   restoreMaskedConnectionKey,
 } from "./dashboard-connection";
@@ -629,12 +630,18 @@ async function loadSettings(loadApplicationModels = true) {
   settingsError.value = "";
   try {
     const settings = await tauriApi.getSettings();
-    serviceConfig.value = {
+    const nextServiceConfig = {
       gateway_port: settings.gateway_port,
       gateway_key: settings.gateway_key,
       client_root_url: settings.client_root_url,
       upstream_base_url: settings.upstream_base_url || "",
     };
+    snippetDrafts.value = reconcileConnectionDrafts(
+      serviceConfig.value,
+      nextServiceConfig,
+      snippetDrafts.value,
+    );
+    serviceConfig.value = nextServiceConfig;
     settingsLoaded.value = true;
     if (loadApplicationModels) await loadModels();
   } catch (error) {

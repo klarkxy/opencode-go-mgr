@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       target:
-        description: Platform candidate to build; tags always build every platform
+        description: Platform candidate to build; production tag pushes always build every platform
         required: true
         default: all
         type: choice
@@ -21,8 +21,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
-  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+  group: release-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'workflow_dispatch' }}
 
 jobs:
   plan:
@@ -30,6 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
+      production: ${{ steps.matrix.outputs.production }}
 
     steps:
       - name: Select platforms
@@ -40,7 +41,11 @@ jobs:
         run: |
           set -euo pipefail
           target="$REQUESTED_TARGET"
-          if [[ "$GITHUB_REF" == refs/tags/* ]]; then target=all; fi
+          production=false
+          if [[ "$GITHUB_EVENT_NAME" == push && "$GITHUB_REF" == refs/tags/v* ]]; then
+            production=true
+            target=all
+          fi
           case "$target" in
             all)
               matrix='{"include":[{"name":"Windows x64","os":"windows-latest","artifact":"release-windows-x64"},{"name":"macOS Universal","os":"macos-15","artifact":"release-macos-universal"},{"name":"Linux x64","os":"ubuntu-22.04","artifact":"release-linux-x64"}]}'
@@ -60,6 +65,7 @@ jobs:
               ;;
           esac
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "production=$production" >> "$GITHUB_OUTPUT"
 
   quality:
     uses: ./.github/workflows/quality.yml
@@ -88,13 +94,8 @@ jobs:
         shell: pwsh
         run: ./scripts/validate-windows-release-smoke.ps1
       - name: Test release helpers
-        run: node --test scripts/generate-updater-manifest.test.mjs scripts/verify-release-assets.test.mjs
-      - name: Validate version and production signing pair
-        env:
-          OCG_REQUIRE_UPDATER_ARTIFACTS: "1"
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          TAURI_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
+        run: node --test scripts/generate-updater-manifest.test.mjs scripts/release-policy.test.mjs scripts/verify-release-assets.test.mjs
+      - name: Validate version and unsigned candidate contract
         run: pnpm run release:check
 
   build:
@@ -103,6 +104,8 @@ jobs:
       - plan
       - preflight
     runs-on: ${{ matrix.os }}
+    environment:
+      name: ${{ needs.plan.outputs.production == 'true' && 'release-signing' || 'release-candidate' }}
     timeout-minutes: 90
     strategy:
       fail-fast: false
@@ -142,12 +145,21 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - name: Build signed updater and platform artifacts
+      - name: Validate production signing pair and public-key continuity
+        if: needs.plan.outputs.production == 'true'
         env:
           OCG_REQUIRE_UPDATER_ARTIFACTS: "1"
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.OCG_TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.OCG_TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           TAURI_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
+        run: pnpm run release:check
+
+      - name: Build platform artifacts
+        env:
+          OCG_REQUIRE_UPDATER_ARTIFACTS: ${{ needs.plan.outputs.production == 'true' && '1' || '0' }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ needs.plan.outputs.production == 'true' && secrets.OCG_TAURI_SIGNING_PRIVATE_KEY || '' }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ needs.plan.outputs.production == 'true' && secrets.OCG_TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
+          TAURI_UPDATER_PUBLIC_KEY: ${{ needs.plan.outputs.production == 'true' && vars.TAURI_UPDATER_PUBLIC_KEY || '' }}
         run: pnpm run build
 
       - name: Smoke packaged CLI (Windows)
@@ -358,8 +370,9 @@ jobs:
 
   draft-release:
     name: Draft GitHub release
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: needs.plan.outputs.production == 'true'
     needs:
+      - plan
       - quality
       - build
     runs-on: ubuntu-latest
@@ -418,8 +431,10 @@ jobs:
 
   verify-release:
     name: Verify draft release
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: draft-release
+    if: needs.plan.outputs.production == 'true'
+    needs:
+      - plan
+      - draft-release
     runs-on: ubuntu-latest
     outputs:
       asset_digest: ${{ steps.asset_metadata.outputs.digest }}
@@ -476,16 +491,25 @@ jobs:
 
   publish-release:
     name: Publish approved release
-    if: startsWith(github.ref, 'refs/tags/v') && vars.OCG_RELEASE_APPROVAL_ENABLED == 'true'
-    needs: verify-release
+    if: needs.plan.outputs.production == 'true' && vars.OCG_RELEASE_APPROVAL_ENABLED == 'true'
+    needs:
+      - plan
+      - verify-release
     runs-on: ubuntu-latest
     environment:
       name: release
       url: https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}
+    concurrency:
+      group: release-moving-channels
+      queue: max
     permissions:
       contents: write
 
     steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
       - name: Publish verified draft
         shell: bash
         env:
@@ -508,4 +532,25 @@ jobs:
             echo "Refusing to publish: draft assets changed after verification." >&2
             exit 1
           fi
-          gh release edit "$GITHUB_REF_NAME" --draft=false --latest
+          latest_error="$RUNNER_TEMP/latest-release-error"
+          if current_latest=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2>"$latest_error"); then
+            :
+          elif grep -q '(HTTP 404)' "$latest_error"; then
+            current_latest=
+          else
+            cat "$latest_error" >&2
+            exit 1
+          fi
+          make_latest=$(node scripts/release-policy.mjs should-advance \
+            --candidate "$GITHUB_REF_NAME" \
+            --current "$current_latest")
+          release_id=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" --jq .id)
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" \
+            -F draft=false \
+            -f make_latest="$make_latest" \
+            --silent
+          if [ "$make_latest" = true ]; then
+            echo "$GITHUB_REF_NAME advanced the GitHub latest channel (previous: ${current_latest:-none})."
+          else
+            echo "$GITHUB_REF_NAME was published without rolling back newer latest release $current_latest."
+          fi

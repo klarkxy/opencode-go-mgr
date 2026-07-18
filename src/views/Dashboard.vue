@@ -324,7 +324,8 @@ async function copyConnection(target: ConnectionTarget, value: string, label: st
 async function regenerateKey() {
   refreshingKey.value = true;
   try {
-    serviceConfig.value.gateway_key = await tauriApi.regenerateGatewayKey();
+    const result = await tauriApi.regenerateGatewayKey();
+    serviceConfig.value.gateway_key = result.key;
     message.success(t("Key 已刷新"));
   } catch (e) {
     message.error(t("刷新 Key 失败: {error}", { error: String(e) }));

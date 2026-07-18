@@ -1077,6 +1077,7 @@ mod tests {
     #[test]
     fn accepts_new_models_with_an_official_id_and_complete_prices() {
         let fixture = include_str!("../tests/fixtures/opencode-go.html")
+            .replace("\r\n", "\n")
             .replace(
                 "</tbody></table>\n<table><thead><tr><th>Model</th><th>Model ID</th>",
                 "<tr><td>Future Model</td><td>$1.00</td><td>$2.00</td><td>$0.10</td><td>-</td><td>$60</td></tr></tbody></table>\n<table><thead><tr><th>Model</th><th>Model ID</th>",

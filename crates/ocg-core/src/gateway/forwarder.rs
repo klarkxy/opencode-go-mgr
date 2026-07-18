@@ -66,7 +66,15 @@ async fn forward_request_impl(
     pricing_snapshot: Arc<PricingSnapshot>,
 ) -> Result<ForwardResult> {
     ensure_safe_upstream_base_url(&config.upstream_base_url)?;
-    let key = state.decrypt_key(&account.key_cipher)?;
+    let key = match state.decrypt_key(&account.key_cipher) {
+        Ok(key) => key,
+        Err(error) => {
+            return Ok(account_preflight_failure(
+                plan,
+                format!("failed to decrypt account credentials: {error}"),
+            ));
+        }
+    };
     let mut upstream_headers = reqwest::header::HeaderMap::new();
 
     // Forward harmless client headers only. Auth and hop-by-hop/private headers
@@ -97,7 +105,16 @@ async fn forward_request_impl(
         reqwest::header::HeaderValue::from_static("application/json"),
     );
     if plan.upstream == ApiFormat::Messages {
-        upstream_headers.insert("x-api-key", reqwest::header::HeaderValue::from_str(&key)?);
+        let key_header = match reqwest::header::HeaderValue::from_str(&key) {
+            Ok(value) => value,
+            Err(error) => {
+                return Ok(account_preflight_failure(
+                    plan,
+                    format!("account key is not a valid upstream header value: {error}"),
+                ));
+            }
+        };
+        upstream_headers.insert("x-api-key", key_header);
         if !upstream_headers.contains_key("anthropic-version") {
             upstream_headers.insert(
                 "anthropic-version",
@@ -105,10 +122,16 @@ async fn forward_request_impl(
             );
         }
     } else {
-        upstream_headers.insert(
-            reqwest::header::AUTHORIZATION,
-            reqwest::header::HeaderValue::from_str(&format!("Bearer {}", key))?,
-        );
+        let authorization = match reqwest::header::HeaderValue::from_str(&format!("Bearer {key}")) {
+            Ok(value) => value,
+            Err(error) => {
+                return Ok(account_preflight_failure(
+                    plan,
+                    format!("account key is not a valid upstream header value: {error}"),
+                ));
+            }
+        };
+        upstream_headers.insert(reqwest::header::AUTHORIZATION, authorization);
     }
     upstream_headers.insert(
         reqwest::header::ACCEPT_ENCODING,
@@ -1201,6 +1224,14 @@ async fn response_text_with_timeout(
 fn error_response(format: ApiFormat, message: &str, upstream: Option<&Value>) -> Response {
     let body = format_error(format, StatusCode::BAD_GATEWAY, message, upstream);
     (StatusCode::BAD_GATEWAY, axum::Json(body)).into_response()
+}
+
+fn account_preflight_failure(plan: &RequestPlan, message: String) -> ForwardResult {
+    ForwardResult {
+        response: error_response(plan.client, &message, None),
+        action: ForwardAction::TryNextAccount,
+        error_message: Some(message),
+    }
 }
 
 fn protocol_status_error_response(

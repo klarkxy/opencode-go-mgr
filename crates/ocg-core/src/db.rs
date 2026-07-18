@@ -337,12 +337,26 @@ impl Database {
                 ALTER TABLE forward_logs ADD COLUMN cost_state TEXT NOT NULL DEFAULT 'not_applicable';
                 UPDATE forward_logs SET cost_state = CASE
                     WHEN status = 'success' THEN 'legacy_estimate'
+                    WHEN status = 'error' AND cost > 0 THEN 'legacy_estimate'
                     WHEN status = 'success_no_usage' THEN 'usage_missing'
                     WHEN status = 'success_unpriced' THEN 'unpriced'
                     WHEN status = 'outcome_unknown' THEN 'outcome_unknown'
                     ELSE 'not_applicable'
                 END;
                 INSERT OR REPLACE INTO schema_version (version) VALUES (9);",
+            )?;
+        }
+
+        if version < 10 {
+            // Repair databases that already ran the original v9 migration, which
+            // classified charged response-conversion failures as not applicable.
+            tx.execute_batch(
+                "UPDATE forward_logs
+                 SET cost_state = 'legacy_estimate'
+                 WHERE status = 'error'
+                   AND cost > 0
+                   AND cost_state = 'not_applicable';
+                 INSERT OR REPLACE INTO schema_version (version) VALUES (10);",
             )?;
         }
 
@@ -1404,7 +1418,7 @@ mod tests {
                     row.get(0)
                 })
                 .expect("schema version should load");
-            assert_eq!(version, 9, "{label}");
+            assert_eq!(version, 10, "{label}");
             let account = db
                 .get_account("old")
                 .expect("account query should work")
@@ -1482,7 +1496,7 @@ mod tests {
             })
             .expect("schema version should be readable");
         let usage = db.account_usage("old").expect("usage should load");
-        assert_eq!(version, 9);
+        assert_eq!(version, 10);
         assert_eq!(
             db.get_account("old")
                 .expect("account should load")
@@ -1631,7 +1645,7 @@ mod tests {
                 row.get(0)
             })
             .expect("schema version should load");
-        assert_eq!(version, 9);
+        assert_eq!(version, 10);
         assert_eq!(
             db.get_account("valid")
                 .expect("valid account query should work")
@@ -1649,6 +1663,157 @@ mod tests {
                 "{id}"
             );
         }
+
+        drop(db);
+        fs::remove_dir_all(dir).expect("test data dir should be removed");
+    }
+
+    #[test]
+    fn v9_migration_preserves_charged_legacy_errors() {
+        let dir = temp_data_dir("v9-charged-error-cost");
+        let conn = create_v6_database(
+            &dir,
+            ", cooldown_generic_until TEXT, cooldown_5h_until TEXT, cooldown_week_until TEXT, cooldown_month_until TEXT",
+            "",
+        );
+        conn.execute("INSERT INTO schema_version (version) VALUES (7)", [])
+            .expect("v7 schema version should be recorded");
+        let now = Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT INTO accounts
+             (id, name, key_cipher, recharge_date, created_at, updated_at)
+             VALUES ('legacy', 'legacy', 'cipher', '2026-07-01', ?1, ?1)",
+            [&now],
+        )
+        .expect("legacy account should be inserted");
+        for (status, cost) in [("error", 1.25), ("error", 0.0), ("success", 2.0)] {
+            conn.execute(
+                "INSERT INTO forward_logs
+                 (timestamp, model, account_id, account_name, status, http_status, cost)
+                 VALUES (?1, 'glm-5.2', 'legacy', 'legacy', ?2, 200, ?3)",
+                params![now, status, cost],
+            )
+            .expect("legacy forward log should be inserted");
+        }
+        drop(conn);
+
+        let db = Database::open(dir.clone()).expect("v7 database should migrate through v10");
+        let states = db
+            .conn
+            .prepare("SELECT status, cost, cost_state FROM forward_logs ORDER BY id")
+            .expect("migrated logs should prepare")
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, f64>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
+            .expect("migrated logs should query")
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .expect("migrated logs should load");
+        assert_eq!(
+            states,
+            [
+                ("error".to_string(), 1.25, "legacy_estimate".to_string()),
+                ("error".to_string(), 0.0, "not_applicable".to_string()),
+                ("success".to_string(), 2.0, "legacy_estimate".to_string()),
+            ]
+        );
+        assert_cost(
+            db.account_usage("legacy")
+                .expect("legacy usage should load")
+                .window_month,
+            3.25,
+        );
+
+        drop(db);
+        fs::remove_dir_all(dir).expect("test data dir should be removed");
+    }
+
+    #[test]
+    fn v10_migration_repairs_charged_errors_from_original_v9() {
+        let dir = temp_data_dir("v10-repair-v9-charged-error-cost");
+        let conn = create_v6_database(
+            &dir,
+            ", cooldown_generic_until TEXT, cooldown_5h_until TEXT, cooldown_week_until TEXT, cooldown_month_until TEXT",
+            "",
+        );
+        conn.execute_batch(
+            "CREATE TABLE pricing_snapshots (
+                 revision TEXT PRIMARY KEY,
+                 activated_at TEXT NOT NULL,
+                 document_updated_at TEXT NOT NULL,
+                 source_url TEXT NOT NULL,
+                 content_hash TEXT NOT NULL,
+                 snapshot_json TEXT NOT NULL
+             );
+             CREATE INDEX idx_pricing_snapshots_activated
+                 ON pricing_snapshots(activated_at DESC);
+             ALTER TABLE forward_logs ADD COLUMN pricing_revision_id TEXT;
+             ALTER TABLE forward_logs ADD COLUMN quota_multiplier REAL;
+             ALTER TABLE forward_logs ADD COLUMN local_adjustment_multiplier REAL;
+             ALTER TABLE forward_logs ADD COLUMN cache_creation_tokens INTEGER NOT NULL DEFAULT 0;
+             ALTER TABLE forward_logs ADD COLUMN service_tier TEXT;
+             ALTER TABLE forward_logs ADD COLUMN cost_state TEXT NOT NULL DEFAULT 'not_applicable';
+             INSERT INTO schema_version (version) VALUES (9);",
+        )
+        .expect("original v9 schema should be created");
+        let now = Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT INTO accounts
+             (id, name, key_cipher, recharge_date, created_at, updated_at)
+             VALUES ('legacy', 'legacy', 'cipher', '2026-07-01', ?1, ?1)",
+            [&now],
+        )
+        .expect("legacy account should be inserted");
+        for (cost, cost_state) in [
+            (1.25, "not_applicable"),
+            (0.0, "not_applicable"),
+            (4.0, "unpriced"),
+        ] {
+            conn.execute(
+                "INSERT INTO forward_logs
+                 (timestamp, model, account_id, account_name, status, http_status, cost, cost_state)
+                 VALUES (?1, 'glm-5.2', 'legacy', 'legacy', 'error', 200, ?2, ?3)",
+                params![now, cost, cost_state],
+            )
+            .expect("original v9 forward log should be inserted");
+        }
+        drop(conn);
+
+        let db = Database::open(dir.clone()).expect("v9 database should migrate through v10");
+        let version: i32 = db
+            .conn
+            .query_row("SELECT MAX(version) FROM schema_version", [], |row| {
+                row.get(0)
+            })
+            .expect("schema version should load");
+        assert_eq!(version, 10);
+        let states = db
+            .conn
+            .prepare("SELECT cost, cost_state FROM forward_logs ORDER BY id")
+            .expect("migrated logs should prepare")
+            .query_map([], |row| {
+                Ok((row.get::<_, f64>(0)?, row.get::<_, String>(1)?))
+            })
+            .expect("migrated logs should query")
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .expect("migrated logs should load");
+        assert_eq!(
+            states,
+            [
+                (1.25, "legacy_estimate".to_string()),
+                (0.0, "not_applicable".to_string()),
+                (4.0, "unpriced".to_string()),
+            ]
+        );
+        assert_cost(
+            db.account_usage("legacy")
+                .expect("legacy usage should load")
+                .window_month,
+            1.25,
+        );
 
         drop(db);
         fs::remove_dir_all(dir).expect("test data dir should be removed");
@@ -1673,7 +1838,7 @@ mod tests {
                 row.get(0)
             })
             .expect("schema version should load");
-        assert_eq!(version, 9);
+        assert_eq!(version, 10);
 
         let created_at = DateTime::parse_from_rfc3339("2026-01-02T01:30:00+02:00")
             .expect("fixed timestamp should parse")
@@ -1955,6 +2120,7 @@ mod tests {
             None,
             ForwardMetrics {
                 cost: 1.0,
+                cost_state: "priced",
                 ..ForwardMetrics::default()
             },
             None,

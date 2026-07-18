@@ -18,8 +18,10 @@ import {
   resolveFileSignerEnvironment,
   resolveMacosBundleTargets,
   resolveUpdaterBuildPlan,
+  verifyUpdaterPublicKeyContinuity,
   verifyUpdaterSignature,
 } from "./generate-updater-manifest.mjs";
+import { validateComposeVersion } from "./release-policy.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const targetDir = resolve(root, process.env.CARGO_TARGET_DIR ?? "target");
@@ -28,6 +30,7 @@ const workDir = join(root, `.release-tmp-${process.pid}`);
 const stagedReleaseDir = join(workDir, "release");
 const cliPackageDir = join(workDir, "cli");
 const updaterConfigPath = join(root, "src-tauri", "tauri.updater.conf.json");
+const updaterPublicKeyFingerprintPath = join(root, "src-tauri", "updater-public-key.sha256");
 const checkOnly = process.argv.length === 3 && process.argv[2] === "--check";
 
 let workDirPrepared = false;
@@ -75,16 +78,26 @@ function validateVersion() {
     );
   }
 
-  const githubTag = process.env.GITHUB_REF_TYPE === "tag"
+  const releaseTag = process.env.OCG_RELEASE_TAG?.trim() || (process.env.GITHUB_REF_TYPE === "tag"
     ? process.env.GITHUB_REF_NAME
     : process.env.GITHUB_REF?.startsWith("refs/tags/")
       ? process.env.GITHUB_REF.slice("refs/tags/".length)
-      : undefined;
-  if (githubTag?.startsWith("v") && githubTag !== `v${packageVersion}`) {
-    fail(`Git tag ${githubTag} does not match version ${packageVersion}.`);
+      : undefined);
+  if (releaseTag && releaseTag !== packageVersion && releaseTag !== `v${packageVersion}`) {
+    fail(`Release tag ${releaseTag} does not match version ${packageVersion}.`);
   }
 
+  validateComposeVersion(readFileSync(join(root, "compose.example.yaml"), "utf8"), packageVersion);
+
   return packageVersion;
+}
+
+function validateUpdaterPublicKey(plan) {
+  if (!plan.publicKey) return;
+  verifyUpdaterPublicKeyContinuity({
+    publicKey: plan.publicKey,
+    expectedFingerprint: readFileSync(updaterPublicKeyFingerprintPath, "utf8"),
+  });
 }
 
 function hostPlatform() {
@@ -225,18 +238,22 @@ async function main() {
   }
   const version = validateVersion();
   const updaterPlan = resolveUpdaterBuildPlan();
-  const tauriCli = fileURLToPath(import.meta.resolve("@tauri-apps/cli/tauri.js"));
+  validateUpdaterPublicKey(updaterPlan);
   if (checkOnly) {
     rmSync(workDir, { recursive: true, force: true });
     workDirPrepared = true;
     mkdirSync(workDir, { recursive: true });
-    verifyUpdaterSigningPair(updaterPlan, tauriCli);
+    if (updaterPlan.enabled) {
+      const tauriCli = fileURLToPath(import.meta.resolve("@tauri-apps/cli/tauri.js"));
+      verifyUpdaterSigningPair(updaterPlan, tauriCli);
+    }
     console.log(
       `Release preflight passed for v${version} (${updaterPlan.enabled ? "signed updater" : "unsigned local"}).`,
     );
     return;
   }
 
+  const tauriCli = fileURLToPath(import.meta.resolve("@tauri-apps/cli/tauri.js"));
   const platform = hostPlatform();
   const artifacts = [];
   const tauriBuildEnvironment = { ...process.env };

@@ -377,6 +377,7 @@ export const frFRMessages = {
   "保存 Key": "Enregistrer la Key",
   "Key 已保存": "Key enregistrée",
   "Key 保存失败: {error}": "Échec de l’enregistrement de la Key : {error}",
+  "设置已被其他操作修改，已重新加载最新设置，请确认后再保存": "Les paramètres ont été modifiés ailleurs. La dernière version a été rechargée ; vérifiez-la avant d’enregistrer à nouveau.",
   "自动启动设置失败: {error}": "Échec de la mise à jour du lancement automatique : {error}",
   "输入新 Key": "Saisissez une nouvelle Key",
   "建立上游连接的初始超时（秒）": "Délai d’expiration initial pour établir la connexion en amont (secondes)",

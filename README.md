@@ -45,8 +45,10 @@ alongside the GUI.
   codebase and a single instance lock.
 - **Headless CLI** — `ocg-manager-cli` ships with the same dashboard assets
   and is ideal for servers, Docker, and remote gateways.
-- **Manual update checks** — Settings checks the latest GitHub Release and
-  links to its release page without downloading or installing it.
+- **Signed desktop updates** — Settings checks the latest GitHub Release.
+  Updater-enabled installed desktop builds can download, verify, and install
+  the signed replacement in place; development builds, CLI, and Docker keep
+  the release-page/manual replacement path.
 - **No remote sync, no telemetry** — each node owns its own data; there is no
   cloud service, no Admin API, and no cross‑node synchronization.
 
@@ -69,10 +71,10 @@ Release), save it as `compose.yaml`, and optionally create a neighboring
 `.env` file.
 
 ```bash
-git clone --branch v1.4.2 --depth 1 https://github.com/klarkxy/opencode-go-mgr.git
+git clone --branch v1.5.0 --depth 1 https://github.com/klarkxy/opencode-go-mgr.git
 cd opencode-go-mgr
 cp .env.example .env
-# Edit .env: choose first-run administrator setup and pin OCG_IMAGE to 1.4.2.
+# Edit .env: choose first-run administrator setup and pin OCG_IMAGE to 1.5.0.
 docker compose pull
 docker compose up -d --no-build
 docker compose ps
@@ -220,10 +222,9 @@ matrix on a single machine.
 
 A CLI archive contains the executable, `dist/`, and `LICENSE`. The `dist/`
 folder must sit beside the executable so `serve` can serve the dashboard.
-`SHA256SUMS`, signing and SmartScreen/Gatekeeper caveats, and the
-unsupported list (ARM64, 32‑bit x86, RPM, Snap, app stores, and automatic
-download/install) live in the [Maintainer guide](docs/MAINTAINER.md). Settings
-can check for a new release manually.
+`SHA256SUMS`, signed-updater behavior, SmartScreen/Gatekeeper caveats, and the
+unsupported list (ARM64, 32‑bit x86, RPM, Snap, and app stores) live in the
+[Maintainer guide](docs/MAINTAINER.md).
 
 ## License
 

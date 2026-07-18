@@ -377,6 +377,7 @@ export const ptBRMessages = {
   "保存 Key": "Salvar Key",
   "Key 已保存": "Key salva",
   "Key 保存失败: {error}": "Falha ao salvar a Key: {error}",
+  "设置已被其他操作修改，已重新加载最新设置，请确认后再保存": "As configurações foram alteradas em outra operação. A versão mais recente foi recarregada; revise-a antes de salvar novamente.",
   "自动启动设置失败: {error}": "Falha ao atualizar a execução automática: {error}",
   "输入新 Key": "Digite uma nova Key",
   "建立上游连接的初始超时（秒）": "Tempo limite inicial para estabelecer a conexão upstream (segundos)",

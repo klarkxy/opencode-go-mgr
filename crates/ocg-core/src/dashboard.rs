@@ -831,14 +831,17 @@ async fn reset_account_cooldown(
 struct SettingsResponse {
     #[serde(flatten)]
     config: AppConfig,
+    revision: u64,
     auto_start_supported: bool,
     client_root_url_from_env: bool,
 }
 
 async fn get_settings(State(state): State<CoreState>) -> Json<SettingsResponse> {
+    let _settings_update = state.settings_update.lock();
     let auto_start_supported = state.auto_start_supported();
     Json(SettingsResponse {
         config: state.settings_config(),
+        revision: state.settings_revision(),
         auto_start_supported,
         client_root_url_from_env: state.client_root_url_from_env(),
     })
@@ -1015,11 +1018,30 @@ fn is_update_available(current: [u64; 3], latest: [u64; 3]) -> bool {
     latest > current
 }
 
+#[derive(Deserialize)]
+struct SettingsUpdateRequest {
+    #[serde(flatten)]
+    config: AppConfig,
+    expected_revision: u64,
+}
+
+#[derive(Serialize)]
+struct SettingsRevisionResponse {
+    revision: u64,
+}
+
 async fn update_settings(
     State(state): State<CoreState>,
-    Json(mut config): Json<AppConfig>,
-) -> Result<Json<GatewayStatus>, ApiError> {
+    Json(input): Json<SettingsUpdateRequest>,
+) -> Result<Json<SettingsRevisionResponse>, ApiError> {
     let _settings_update = state.settings_update.lock();
+    if input.expected_revision != state.settings_revision() {
+        return Err(ApiError::status(
+            StatusCode::CONFLICT,
+            "settings changed since they were loaded; reload and try again",
+        ));
+    }
+    let mut config = input.config;
     config.gateway_key = config.gateway_key.trim().to_string();
     if config.gateway_key.is_empty() {
         return Err(ApiError::bad_request("gateway key is required"));
@@ -1052,7 +1074,9 @@ async fn update_settings(
             return Err(ApiError::internal(message));
         }
     }
-    Ok(Json(status_from_state(&state)))
+    Ok(Json(SettingsRevisionResponse {
+        revision: state.settings_revision(),
+    }))
 }
 
 async fn regenerate_gateway_key(
@@ -1068,7 +1092,10 @@ async fn regenerate_gateway_key(
     state
         .set_config(config.clone())
         .map_err(ApiError::internal)?;
-    Ok(Json(serde_json::json!({ "key": config.gateway_key })))
+    Ok(Json(serde_json::json!({
+        "key": config.gateway_key,
+        "revision": state.settings_revision(),
+    })))
 }
 
 async fn gateway_status(State(state): State<CoreState>) -> Json<GatewayStatus> {
@@ -1307,10 +1334,11 @@ fn is_loopback(url: &reqwest::Url) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        AccountOrderInput, AccountUsageUpdate, ForwardLogQuery, UpdateCheckResponse,
-        apply_pricing_refresh, asset_path, create_account, dashboard_account, dashboard_summary,
-        format_error_chain, is_update_available, parse_stable_version, reorder_accounts,
-        update_account, update_account_usage, update_settings, validate_forward_log_query,
+        AccountOrderInput, AccountUsageUpdate, ForwardLogQuery, SettingsUpdateRequest,
+        UpdateCheckResponse, apply_pricing_refresh, asset_path, create_account, dashboard_account,
+        dashboard_summary, format_error_chain, is_update_available, parse_stable_version,
+        reorder_accounts, update_account, update_account_usage, update_settings,
+        validate_forward_log_query,
     };
     use crate::crypto::{KeyCipher, StaticKeyCipher};
     use crate::db::Database;
@@ -1770,10 +1798,13 @@ mod tests {
 
         let _ = update_settings(
             State(state.clone()),
-            Json(AppConfig {
-                gateway_key: "updated-gateway-key".to_string(),
-                connect_timeout_secs: 45,
-                ..AppConfig::default()
+            Json(SettingsUpdateRequest {
+                config: AppConfig {
+                    gateway_key: "updated-gateway-key".to_string(),
+                    connect_timeout_secs: 45,
+                    ..AppConfig::default()
+                },
+                expected_revision: state.settings_revision(),
             }),
         )
         .await

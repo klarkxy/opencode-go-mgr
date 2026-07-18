@@ -11,6 +11,31 @@ export function restoreMaskedConnectionKey(value: string, maskedKey: string, act
   return value.replaceAll(maskedKey, () => actualKey);
 }
 
+export interface ConnectionDraftContext {
+  gateway_port: number;
+  gateway_key: string;
+  client_root_url: string;
+  upstream_base_url: string;
+}
+
+export function connectionDraftContextChanged(
+  previous: ConnectionDraftContext,
+  next: ConnectionDraftContext,
+): boolean {
+  return previous.gateway_port !== next.gateway_port
+    || previous.gateway_key !== next.gateway_key
+    || previous.client_root_url !== next.client_root_url
+    || previous.upstream_base_url !== next.upstream_base_url;
+}
+
+export function reconcileConnectionDrafts(
+  previous: ConnectionDraftContext,
+  next: ConnectionDraftContext,
+  drafts: Record<string, string>,
+): Record<string, string> {
+  return connectionDraftContextChanged(previous, next) ? {} : drafts;
+}
+
 export interface ConnectionUrls {
   rootUrl: string;
   apiBaseUrl: string;

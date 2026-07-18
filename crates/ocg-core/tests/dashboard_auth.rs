@@ -2,7 +2,7 @@ use chrono::Utc;
 use ocg_core::crypto::{KeyCipher, StaticKeyCipher};
 use ocg_core::db::Database;
 use ocg_core::gateway;
-use ocg_core::models::ForwardLog;
+use ocg_core::models::{AppConfig, ForwardLog};
 use ocg_core::state::CoreStateInner;
 use reqwest::StatusCode;
 use serde_json::json;
@@ -35,6 +35,16 @@ fn state(label: &str) -> Arc<CoreStateInner> {
     let db = Database::open(dir.clone()).unwrap();
     let cipher: Arc<dyn KeyCipher + Send + Sync> = Arc::new(StaticKeyCipher::new("test"));
     Arc::new(CoreStateInner::new(db, dir, cipher).unwrap())
+}
+
+fn settings_payload(state: &CoreStateInner, config: &AppConfig) -> serde_json::Value {
+    settings_payload_at(config, state.settings_revision())
+}
+
+fn settings_payload_at(config: &AppConfig, expected_revision: u64) -> serde_json::Value {
+    let mut payload = serde_json::to_value(config).expect("settings should serialize");
+    payload["expected_revision"] = json!(expected_revision);
+    payload
 }
 
 #[tokio::test]
@@ -424,7 +434,7 @@ async fn loopback_settings_trim_and_require_gateway_key() {
     assert_eq!(
         client
             .post(&url)
-            .json(&config)
+            .json(&settings_payload(&state, &config))
             .send()
             .await
             .unwrap()
@@ -459,7 +469,7 @@ async fn loopback_settings_trim_and_require_gateway_key() {
     assert_eq!(
         client
             .post(&url)
-            .json(&config)
+            .json(&settings_payload(&state, &config))
             .send()
             .await
             .unwrap()
@@ -481,7 +491,7 @@ async fn loopback_settings_trim_and_require_gateway_key() {
         assert_eq!(
             client
                 .post(&url)
-                .json(&invalid)
+                .json(&settings_payload(&state, &invalid))
                 .send()
                 .await
                 .unwrap()
@@ -513,7 +523,7 @@ async fn loopback_settings_trim_and_require_gateway_key() {
         assert_eq!(
             client
                 .post(&url)
-                .json(&invalid)
+                .json(&settings_payload(&state, &invalid))
                 .send()
                 .await
                 .unwrap()
@@ -526,6 +536,52 @@ async fn loopback_settings_trim_and_require_gateway_key() {
         assert_eq!(unchanged.non_stream_timeout_secs, 345);
         assert_eq!(unchanged.stream_idle_timeout_secs, 678);
     }
+
+    gateway::stop_gateway(handle);
+}
+
+#[tokio::test]
+async fn loopback_settings_reject_stale_revision_after_key_regeneration() {
+    let state = state("settings-stale-revision");
+    let handle = gateway::start_gateway_on(state.clone(), SocketAddr::from(([127, 0, 0, 1], 0)))
+        .await
+        .unwrap();
+    let url = format!("http://127.0.0.1:{}/dashboard/api/settings", handle.port);
+    let client = reqwest::Client::new();
+    let loaded = client
+        .get(&url)
+        .send()
+        .await
+        .unwrap()
+        .json::<serde_json::Value>()
+        .await
+        .unwrap();
+    let stale_revision = loaded["revision"].as_u64().unwrap();
+    let mut stale_config: AppConfig = serde_json::from_value(loaded).unwrap();
+
+    let regenerated = client
+        .post(format!("{url}/regenerate-gateway-key"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(regenerated.status(), StatusCode::OK);
+    let regenerated = regenerated.json::<serde_json::Value>().await.unwrap();
+    let regenerated_key = regenerated["key"].as_str().unwrap();
+    assert_ne!(regenerated["revision"].as_u64().unwrap(), stale_revision);
+
+    stale_config.connect_timeout_secs += 1;
+    let stale_update = client
+        .post(&url)
+        .json(&settings_payload_at(&stale_config, stale_revision))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(stale_update.status(), StatusCode::CONFLICT);
+    assert_eq!(state.config().gateway_key, regenerated_key);
+    assert_ne!(
+        state.config().connect_timeout_secs,
+        stale_config.connect_timeout_secs
+    );
 
     gateway::stop_gateway(handle);
 }
@@ -551,7 +607,7 @@ async fn loopback_settings_gate_and_sync_auto_start() {
     assert_eq!(
         client
             .post(&unsupported_url)
-            .json(&unsupported_config)
+            .json(&settings_payload(&unsupported_state, &unsupported_config))
             .send()
             .await
             .unwrap()
@@ -579,7 +635,7 @@ async fn loopback_settings_gate_and_sync_auto_start() {
     assert_eq!(
         client
             .post(&unsupported_url)
-            .json(&preserved_config)
+            .json(&settings_payload(&unsupported_state, &preserved_config))
             .send()
             .await
             .unwrap()
@@ -591,7 +647,7 @@ async fn loopback_settings_gate_and_sync_auto_start() {
     assert_eq!(
         client
             .post(&unsupported_url)
-            .json(&preserved_config)
+            .json(&settings_payload(&unsupported_state, &preserved_config))
             .send()
             .await
             .unwrap()
@@ -615,11 +671,13 @@ async fn loopback_settings_gate_and_sync_auto_start() {
     );
     let mut supported_config = supported_state.config();
     supported_config.auto_start = true;
+    let pre_update_revision = supported_state.settings_revision();
+    let pre_update_payload = settings_payload_at(&supported_config, pre_update_revision);
     AUTO_START_FAIL.store(true, Ordering::Relaxed);
     assert_eq!(
         client
             .post(&supported_url)
-            .json(&supported_config)
+            .json(&pre_update_payload)
             .send()
             .await
             .unwrap()
@@ -627,6 +685,7 @@ async fn loopback_settings_gate_and_sync_auto_start() {
         StatusCode::INTERNAL_SERVER_ERROR
     );
     assert!(!supported_state.config().auto_start);
+    assert_ne!(supported_state.settings_revision(), pre_update_revision);
     let persisted = supported_state
         .db
         .lock()
@@ -642,7 +701,17 @@ async fn loopback_settings_gate_and_sync_auto_start() {
     assert_eq!(
         client
             .post(&supported_url)
-            .json(&supported_config)
+            .json(&pre_update_payload)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::CONFLICT
+    );
+    assert_eq!(
+        client
+            .post(&supported_url)
+            .json(&settings_payload(&supported_state, &supported_config))
             .send()
             .await
             .unwrap()

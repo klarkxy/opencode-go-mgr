@@ -596,7 +596,7 @@ it. Alternatively, run the Compose commands from a checkout containing
 `compose.yaml` and `.env.example` (preferably the matching release tag):
 
 ```bash
-git clone --branch v1.4.2 --depth 1 https://github.com/klarkxy/opencode-go-mgr.git
+git clone --branch v1.5.0 --depth 1 https://github.com/klarkxy/opencode-go-mgr.git
 cd opencode-go-mgr
 cp .env.example .env
 # PowerShell: Copy-Item .env.example .env
@@ -610,9 +610,9 @@ The repository's source-capable `compose.yaml` defaults to
 `ghcr.io/klarkxy/opencode-go-mgr:latest`; the Release
 `compose.example.yaml` defaults to its matching full version. For repeatable
 production deployments, set `OCG_IMAGE` in `.env` to a full release tag such
-as `ghcr.io/klarkxy/opencode-go-mgr:1.4.2`. The full version and
+as `ghcr.io/klarkxy/opencode-go-mgr:1.5.0`. The full version and
 `sha-<commit>` tags identify one release and are intended not to move;
-`1.4` and `latest` move forward. Only a digest such as
+`1.5` and `latest` move forward. Only a digest such as
 `ghcr.io/klarkxy/opencode-go-mgr@sha256:...` is technically immutable. To build the current checkout
 instead, set `OCG_IMAGE=ocg-manager:local` and run
 `docker compose up -d --build`. `NPM_REGISTRY` and `CARGO_REGISTRY` are build
@@ -690,9 +690,9 @@ Each stable image includes an SPDX SBOM, BuildKit SLSA provenance, and a
 GitHub signed provenance attestation. Inspect and verify a release with:
 
 ```bash
-docker buildx imagetools inspect ghcr.io/klarkxy/opencode-go-mgr:1.4.2
+docker buildx imagetools inspect ghcr.io/klarkxy/opencode-go-mgr:1.5.0
 gh attestation verify \
-  oci://ghcr.io/klarkxy/opencode-go-mgr:1.4.2 \
+  oci://ghcr.io/klarkxy/opencode-go-mgr:1.5.0 \
   --repo klarkxy/opencode-go-mgr
 ```
 

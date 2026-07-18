@@ -400,6 +400,8 @@ let forwardRequest = 0;
 async function loadForwardLogs() {
   const request = ++forwardRequest;
   forwardLoading.value = true;
+  forwardLogs.value = [];
+  forwardTotals.value = emptySummary();
   try {
     const result = await tauriApi.getForwardLogs({
       limit: pageSize,
@@ -416,7 +418,11 @@ async function loadForwardLogs() {
     forwardLogs.value = result.items;
     forwardTotals.value = result.summary;
   } catch (e) {
-    if (request === forwardRequest) message.error(t("加载请求日志失败: {error}", { error: String(e) }));
+    if (request === forwardRequest) {
+      forwardLogs.value = [];
+      forwardTotals.value = emptySummary();
+      message.error(t("加载请求日志失败: {error}", { error: String(e) }));
+    }
   } finally {
     if (request === forwardRequest) forwardLoading.value = false;
   }

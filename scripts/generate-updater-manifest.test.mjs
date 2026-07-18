@@ -9,6 +9,8 @@ import {
   resolveFileSignerEnvironment,
   resolveMacosBundleTargets,
   resolveUpdaterBuildPlan,
+  updaterPublicKeyFingerprint,
+  verifyUpdaterPublicKeyContinuity,
   verifyUpdaterSignature,
   writeUpdaterManifest,
 } from "./generate-updater-manifest.mjs";
@@ -140,6 +142,27 @@ test("macOS signed builds include the app bundle required by Tauri updater artif
   assert.equal(resolveMacosBundleTargets(true), "app,dmg");
 });
 
+test("updater public-key continuity uses a committed SHA-256 fingerprint", () => {
+  const publicKey = "  production-public-key\n";
+  const fingerprint = updaterPublicKeyFingerprint(publicKey);
+  assert.match(fingerprint, /^[0-9a-f]{64}$/);
+  assert.equal(
+    verifyUpdaterPublicKeyContinuity({ publicKey, expectedFingerprint: `${fingerprint}\n` }),
+    fingerprint,
+  );
+  assert.throws(
+    () => verifyUpdaterPublicKeyContinuity({
+      publicKey: "different-key",
+      expectedFingerprint: fingerprint,
+    }),
+    /continuity check failed.*break-glass bootstrap/,
+  );
+  assert.throws(
+    () => verifyUpdaterPublicKeyContinuity({ publicKey, expectedFingerprint: "replace-me" }),
+    /fingerprint is missing or invalid/,
+  );
+});
+
 test("Windows release smoke waits only for bounded installer processes", () => {
   const workflow = readFileSync(
     new URL("../.github/workflows/release.yml", import.meta.url),
@@ -176,13 +199,26 @@ test("release workflow keeps reusable quality checks out of the native build mat
     "utf8",
   );
   const buildJob = workflow.match(/\n  build:[\s\S]*?\n  draft-release:/)?.[0] ?? "";
+  const preflightJob = workflow.match(/\n  preflight:[\s\S]*?\n  build:/)?.[0] ?? "";
+  const containerWorkflow = readFileSync(
+    new URL("../.github/workflows/container.yml", import.meta.url),
+    "utf8",
+  );
 
   assert.match(quality, /\n  pull_request:/);
   assert.match(quality, /pnpm run test/);
   assert.match(quality, /cargo clippy --workspace --all-targets --locked -- -D warnings/);
   assert.match(workflow, /uses: \.\/\.github\/workflows\/quality\.yml/);
-  assert.match(workflow, /if \[\[ "\$GITHUB_REF" == refs\/tags\/\* \]\]; then target=all; fi/);
+  assert.match(
+    workflow,
+    /if \[\[ "\$GITHUB_EVENT_NAME" == push && "\$GITHUB_REF" == refs\/tags\/v\* \]\]; then/,
+  );
   assert.match(workflow, /pnpm run release:check/);
+  assert.doesNotMatch(preflightJob, /TAURI_SIGNING_PRIVATE_KEY|OCG_REQUIRE_UPDATER_ARTIFACTS/);
+  assert.match(buildJob, /release-signing' \|\| 'release-candidate/);
+  assert.match(buildJob, /if: needs\.plan\.outputs\.production == 'true'/);
+  assert.match(buildJob, /secrets\.OCG_TAURI_SIGNING_PRIVATE_KEY/);
+  assert.doesNotMatch(buildJob, /secrets\.TAURI_SIGNING_PRIVATE_KEY/);
   assert.match(workflow, /matrix: \$\{\{ fromJSON\(needs\.plan\.outputs\.matrix\) \}\}/);
   assert.doesNotMatch(buildJob, /pnpm run (?:test|build:web|design:lint)/);
   assert.doesNotMatch(buildJob, /cargo clippy/);
@@ -191,6 +227,13 @@ test("release workflow keeps reusable quality checks out of the native build mat
   assert.match(workflow, /vars\.OCG_RELEASE_APPROVAL_ENABLED == 'true'/);
   assert.match(workflow, /environment:\s+name: release/);
   assert.match(workflow, /Refusing to publish: draft assets changed after verification/);
+  assert.match(workflow, /group: release-moving-channels\s+queue: max/);
+  assert.match(workflow, /release-policy\.mjs should-advance/);
+  assert.match(quality, /windows-tauri:/);
+  assert.match(quality, /cargo test -p ocg-manager --lib --locked/);
+  assert.match(containerWorkflow, /push-by-digest=true/);
+  assert.match(containerWorkflow, /release-policy\.mjs immutable-tag/);
+  assert.match(containerWorkflow, /group: ghcr-moving-channels\s+queue: max/);
 });
 
 test("updater build plan accepts TAURI_SIGNING_PRIVATE_KEY content or path with a public key", () => {

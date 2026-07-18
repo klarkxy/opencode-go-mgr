@@ -12,8 +12,13 @@ import { fileURLToPath } from "node:url";
 
 import {
   buildUpdaterManifest,
+  verifyUpdaterPublicKeyContinuity,
   verifyUpdaterSignature,
 } from "./generate-updater-manifest.mjs";
+
+const updaterPublicKeyFingerprintPath = fileURLToPath(
+  new URL("../src-tauri/updater-public-key.sha256", import.meta.url),
+);
 
 function fail(message) {
   throw new Error(message);
@@ -80,6 +85,7 @@ export async function verifyReleaseAssets({
   tag,
   repository,
   assetMetadataPath,
+  expectedPublicKeyFingerprint,
   publicKey,
 }) {
   const directory = resolve(releaseDir);
@@ -119,6 +125,10 @@ export async function verifyReleaseAssets({
   }
 
   if (publicKey) {
+    verifyUpdaterPublicKeyContinuity({
+      publicKey,
+      expectedFingerprint: expectedPublicKeyFingerprint,
+    });
     const signedPayloads = [
       `ocg-manager_${expectedManifest.version}_windows-x64-setup.exe`,
       `ocg-manager_${expectedManifest.version}_macos-universal.app.tar.gz`,
@@ -172,6 +182,7 @@ function parseArguments(argv) {
   if (!options.publicKey) {
     fail("TAURI_UPDATER_PUBLIC_KEY is required when verifying a GitHub Release.");
   }
+  options.expectedPublicKeyFingerprint = readFileSync(updaterPublicKeyFingerprintPath, "utf8");
   return options;
 }
 

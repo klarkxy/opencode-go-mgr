@@ -1,7 +1,7 @@
 {
   "name": "ocg-manager-ui",
   "private": true,
-  "version": "1.4.2",
+  "version": "1.5.0",
   "packageManager": "pnpm@10.29.2",
   "type": "module",
   "scripts": {
@@ -11,7 +11,7 @@
     "build:web": "vue-tsc && vite build",
     "release:check": "node scripts/release.mjs --check",
     "test:rust": "cargo test --workspace --locked",
-    "test:web": "node --experimental-strip-types --test scripts/generate-updater-manifest.test.mjs scripts/verify-release-assets.test.mjs src/i18n.test.ts src/views/account-lifecycle.test.ts src/views/accounts-usage.test.ts src/views/dashboard-connection.test.ts src/views/pricing-view.test.ts src/views/settings-update.test.ts src/views/logs.test.ts src/theme.test.ts",
+    "test:web": "node --experimental-strip-types --test scripts/generate-updater-manifest.test.mjs scripts/release-policy.test.mjs scripts/verify-release-assets.test.mjs src/i18n.test.ts src/views/account-lifecycle.test.ts src/views/accounts-usage.test.ts src/views/dashboard-connection.test.ts src/views/pricing-view.test.ts src/views/settings-update.test.ts src/views/logs.test.ts src/theme.test.ts",
     "typecheck": "vue-tsc --noEmit",
     "test": "pnpm run test:web && pnpm run typecheck && pnpm exec vite build && pnpm run test:rust",
     "design:lint": "npx -y @google/design.md@0.3.0 lint DESIGN.md"

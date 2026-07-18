@@ -64,6 +64,50 @@ test("dashboard request errors preserve status for localized handling", async ()
   );
 });
 
+test("settings API maps the loaded revision to conditional writes and returns new revisions", async () => {
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { location: { pathname: "/dashboard" }, dispatchEvent() {} },
+  });
+
+  const requests: Array<{ url: string; body: Record<string, unknown> | null }> = [];
+  Object.defineProperty(globalThis, "fetch", {
+    configurable: true,
+    value: async (input: string, init: RequestInit = {}) => {
+      requests.push({
+        url: input,
+        body: init.body ? JSON.parse(String(init.body)) as Record<string, unknown> : null,
+      });
+      const response = input.endsWith("/regenerate-gateway-key")
+        ? { key: "ocg-new-key", revision: 9 }
+        : { revision: 8 };
+      return new Response(JSON.stringify(response), {
+        headers: { "Content-Type": "application/json" },
+      });
+    },
+  });
+
+  const result = await tauriApi.updateSettings({
+    revision: 7,
+    gateway_port: 9042,
+    gateway_key: "ocg-old-key",
+    upstream_base_url: "https://opencode.ai/zen/go",
+    client_root_url: "",
+    client_root_url_from_env: false,
+    auto_start: false,
+    auto_start_supported: false,
+    connect_timeout_secs: 30,
+    non_stream_timeout_secs: 900,
+    stream_idle_timeout_secs: 300,
+  });
+  const regenerated = await tauriApi.regenerateGatewayKey();
+
+  assert.deepEqual(result, { revision: 8 });
+  assert.deepEqual(regenerated, { key: "ocg-new-key", revision: 9 });
+  assert.equal(requests[0]?.body?.expected_revision, 7);
+  assert.equal("revision" in (requests[0]?.body ?? {}), false);
+});
+
 test("account API sends purchase dates and the complete reorder payload", async () => {
   Object.defineProperty(globalThis, "window", {
     configurable: true,
@@ -144,6 +188,13 @@ test("logs view shows top stats, extra filters, sorting, and a useful empty stat
   assert.doesNotMatch(source, /getForwardLogs\(200\)|filteredForwardLogs/);
   assert.match(source, /const request = \+\+forwardRequest/);
   assert.match(source, /request !== forwardRequest/);
+  const forwardLoad = source.slice(
+    source.indexOf("async function loadForwardLogs"),
+    source.indexOf("async function loadAccounts"),
+  );
+  assert.ok(forwardLoad.indexOf("forwardLogs.value = []") < forwardLoad.indexOf("await tauriApi.getForwardLogs"));
+  assert.ok(forwardLoad.indexOf("forwardTotals.value = emptySummary()") < forwardLoad.indexOf("await tauriApi.getForwardLogs"));
+  assert.match(forwardLoad, /catch \(e\)[\s\S]*request === forwardRequest[\s\S]*forwardLogs\.value = \[\]/);
   assert.match(source, /Promise\.all\(\[loadForwardLogs\(\), loadForwardLogModels\(\)\]\)/);
   assert.match(source, /row\.cost_state === "legacy_estimate"/);
   assert.match(source, /success_unpriced: \{ label: t\("无价格"\)/);

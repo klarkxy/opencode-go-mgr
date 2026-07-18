@@ -412,7 +412,7 @@ fn query_forward_logs_filters_before_limit_and_summarizes_all_matches() {
 }
 
 #[test]
-fn daily_cost_by_model_groups_success_rows_only() {
+fn daily_cost_by_model_groups_chargeable_rows_only() {
     let dir = temp_data_dir("daily");
     let db = Database::open(dir).unwrap();
     let today = Utc::now();
@@ -422,6 +422,7 @@ fn daily_cost_by_model_groups_success_rows_only() {
         ("kimi-k2.7-code", "success", 3.0, 1),
         ("glm-5.2", "error", 9.0, 0),
     ] {
+        let charged = status == "success";
         db.log_forward(&ForwardLog {
             id: 0,
             timestamp: today - Duration::days(offset),
@@ -434,12 +435,17 @@ fn daily_cost_by_model_groups_success_rows_only() {
             completion_tokens: 0,
             cached_tokens: 0,
             cache_creation_tokens: 0,
-            cost: Some(cost),
+            cost: charged.then_some(cost),
             pricing_revision_id: None,
             quota_multiplier: None,
             local_adjustment_multiplier: None,
             service_tier: None,
-            cost_state: "legacy_estimate".into(),
+            cost_state: if charged {
+                "legacy_estimate"
+            } else {
+                "not_applicable"
+            }
+            .into(),
             error_message: None,
         })
         .unwrap();

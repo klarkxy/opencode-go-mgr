@@ -246,6 +246,7 @@ impl StreamConverter {
         Ok(output)
     }
 
+    #[cfg(test)]
     pub(crate) fn error_event(&self, message: &str) -> Vec<Bytes> {
         if self.is_terminal() {
             return Vec::new();

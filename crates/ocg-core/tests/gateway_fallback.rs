@@ -968,6 +968,82 @@ async fn routes_all_client_formats_to_each_models_native_protocol() {
 }
 
 #[tokio::test]
+async fn inference_skips_accounts_with_unusable_stored_credentials() {
+    struct Case {
+        client_path: &'static str,
+        model: &'static str,
+        upstream_path: &'static str,
+        upstream_body: &'static str,
+    }
+
+    for case in [
+        Case {
+            client_path: "/v1/chat/completions",
+            model: "deepseek-v4-flash",
+            upstream_path: "/v1/chat/completions",
+            upstream_body: SUCCESS_BODY,
+        },
+        Case {
+            client_path: "/v1/responses",
+            model: "deepseek-v4-flash",
+            upstream_path: "/v1/chat/completions",
+            upstream_body: SUCCESS_BODY,
+        },
+        Case {
+            client_path: "/v1/messages",
+            model: "minimax-m2.7",
+            upstream_path: "/v1/messages",
+            upstream_body: MESSAGES_SUCCESS_BODY,
+        },
+    ] {
+        let replies = HashMap::from([(
+            "key-good".to_string(),
+            VecDeque::from([MockReply {
+                status: 200,
+                body: case.upstream_body,
+            }]),
+        )]);
+        let (base_url, calls, stop_mock) = start_mock_upstream(replies).await;
+        let (state, dir) = build_state(base_url, &["placeholder", "bad\nheader", "key-good"]);
+        state
+            .db
+            .lock()
+            .update_account(
+                "acct-1",
+                &AccountUpdate {
+                    name: None,
+                    username: None,
+                    password: None,
+                    key: None,
+                    enabled: None,
+                    referral_code: None,
+                    purchase_date: None,
+                },
+                Some("!!!not-base64!!!"),
+                None,
+            )
+            .unwrap();
+        let (port, gateway_handle) = start_gateway(state.clone()).await;
+
+        let (status, _) = protocol_call(port, case.client_path, case.model).await;
+        assert_eq!(status, StatusCode::OK, "{}", case.client_path);
+        let calls = calls.lock().unwrap();
+        assert_eq!(calls.len(), 1, "{}", case.client_path);
+        assert_eq!(calls[0].key, "key-good", "{}", case.client_path);
+        assert_eq!(calls[0].path, case.upstream_path, "{}", case.client_path);
+        drop(calls);
+        let logs = state.db.lock().list_forward_logs(10).unwrap();
+        assert_eq!(logs.len(), 1, "{}", case.client_path);
+        assert_eq!(logs[0].account_id, "acct-3", "{}", case.client_path);
+        assert_eq!(logs[0].status, "success", "{}", case.client_path);
+
+        gateway::stop_gateway(gateway_handle);
+        let _ = stop_mock.send(());
+        let _ = fs::remove_dir_all(dir);
+    }
+}
+
+#[tokio::test]
 async fn converts_streams_across_chat_messages_and_responses() {
     struct Case {
         client_path: &'static str,
@@ -1803,20 +1879,22 @@ async fn dashboard_port_change_is_saved_for_next_restart() {
     let requested_port = free_port();
     let mut config = state.config();
     config.gateway_port = requested_port;
+    let mut settings_payload = serde_json::to_value(&config).unwrap();
+    settings_payload["expected_revision"] = serde_json::json!(state.settings_revision());
     let client = reqwest::Client::new();
     let response = client
         .post(format!(
             "http://127.0.0.1:{}/dashboard/api/settings",
             current_port
         ))
-        .json(&config)
+        .json(&settings_payload)
         .send()
         .await
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
-    let status: serde_json::Value = response.json().await.unwrap();
-    assert_eq!(status["port"].as_u64(), Some(current_port as u64));
+    let result: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(result["revision"].as_u64(), Some(state.settings_revision()));
     assert_eq!(state.config().gateway_port, requested_port);
     assert_eq!(state.active_gateway_port(), current_port);
 

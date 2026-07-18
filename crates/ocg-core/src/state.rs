@@ -10,7 +10,7 @@ use std::fmt;
 use std::path::PathBuf;
 use std::sync::{
     Arc, OnceLock,
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
 };
 use std::time::Duration;
 
@@ -100,6 +100,7 @@ pub struct CoreStateInner {
     pub config: Mutex<AppConfig>,
     client_root_url_override: Option<String>,
     pub settings_update: Mutex<()>,
+    settings_revision: AtomicU64,
     pub gateway: Mutex<Option<GatewayHandle>>,
     pub dashboard_session_token: String,
     dashboard_local_mode: AtomicBool,
@@ -160,6 +161,12 @@ impl CoreStateInner {
             config: Mutex::new(config),
             client_root_url_override,
             settings_update: Mutex::new(()),
+            // Use a per-runtime random epoch so a browser tab left open across a
+            // process restart cannot accidentally match the new runtime's first
+            // revision. The low 48 bits leave ample room for monotonic increments.
+            settings_revision: AtomicU64::new(
+                (uuid::Uuid::new_v4().as_u128() as u64) & 0x0000_FFFF_FFFF_FFFF,
+            ),
             gateway: Mutex::new(None),
             dashboard_session_token: uuid::Uuid::new_v4().simple().to_string(),
             dashboard_local_mode: AtomicBool::new(false),
@@ -185,6 +192,10 @@ impl CoreStateInner {
             config.client_root_url.clone_from(client_root_url);
         }
         config
+    }
+
+    pub fn settings_revision(&self) -> u64 {
+        self.settings_revision.load(Ordering::Acquire)
     }
 
     pub fn client_root_url_from_env(&self) -> bool {
@@ -368,6 +379,7 @@ impl CoreStateInner {
         let mut current_client = self.http_client.lock();
         *current_config = config;
         *current_client = http_client;
+        self.settings_revision.fetch_add(1, Ordering::AcqRel);
         Ok(())
     }
 
@@ -539,6 +551,29 @@ mod tests {
             serde_json::from_str(&stored).expect("stored config should deserialize");
         assert_eq!(stored.client_root_url, "https://saved.example.com");
         assert_eq!(stored.connect_timeout_secs, 45);
+
+        drop(state);
+        fs::remove_dir_all(dir).expect("test data directory should be removed");
+    }
+
+    #[test]
+    fn settings_revision_advances_only_after_successful_commit() {
+        let dir = temp_data_dir("settings-revision");
+        let db = Database::open(dir.clone()).expect("test database should open");
+        let cipher: Arc<dyn KeyCipher + Send + Sync> = Arc::new(StaticKeyCipher::new("state-test"));
+        let state = CoreStateInner::new(db, dir.clone(), cipher).expect("state should initialize");
+        let initial_revision = state.settings_revision();
+
+        let mut valid = state.config();
+        valid.connect_timeout_secs += 1;
+        state.set_config(valid).expect("valid settings should save");
+        assert_eq!(state.settings_revision(), initial_revision + 1);
+
+        let committed_revision = state.settings_revision();
+        let mut invalid = state.config();
+        invalid.connect_timeout_secs = 0;
+        assert!(state.set_config(invalid).is_err());
+        assert_eq!(state.settings_revision(), committed_revision);
 
         drop(state);
         fs::remove_dir_all(dir).expect("test data directory should be removed");

@@ -298,11 +298,14 @@ signatures, the pull-only Compose example, `latest.json`, and `SHA256SUMS`
 `scripts/release.mjs` does the heavy lifting:
 
 1. Validates that `package.json`, `src-tauri/tauri.conf.json`, the
-   workspace `Cargo.toml`, and `src-tauri/Cargo.toml` all agree on the
-   version. It also checks the Git tag, if any, against that version.
+   workspace `Cargo.toml`, `src-tauri/Cargo.toml`, and both versioned fields
+   in `compose.example.yaml` all agree. It also checks the Git tag, if any,
+   against that version.
 2. Resolves the updater signing mode before creating the staging tree. With
    `OCG_REQUIRE_UPDATER_ARTIFACTS=1`, either a missing private key or missing
-   `TAURI_UPDATER_PUBLIC_KEY` fails before `release/` can be replaced.
+   `TAURI_UPDATER_PUBLIC_KEY` fails before `release/` can be replaced. A
+   configured public key must also match the committed SHA-256 continuity
+   baseline in `src-tauri/updater-public-key.sha256`.
 3. When a signing key is configured, merges
    `src-tauri/tauri.updater.conf.json` plus an ephemeral public-key config and
    enables Tauri updater artifacts. `TAURI_SIGNING_PRIVATE_KEY` accepts either
@@ -333,30 +336,39 @@ signatures, the pull-only Compose example, `latest.json`, and `SHA256SUMS`
 `scripts/release.mjs` does **not** erase Cargo's incremental build
 caches — repeated release builds reuse the same `target/` tree.
 
-`pnpm run release:check` runs the version and signing-key preflight without
-building a native bundle. In production CI it signs a temporary payload and
-verifies that signature against `TAURI_UPDATER_PUBLIC_KEY`, so a missing or
-mismatched key pair fails before the platform matrix consumes runner time.
+`pnpm run release:check` validates versions, Compose, and any configured
+signing key without building a native bundle. The keyless preflight exercises
+the unsigned contract. After tag jobs receive `release-signing` approval, each
+runner signs a temporary payload and verifies it against the continuity-checked
+`TAURI_UPDATER_PUBLIC_KEY` before starting the expensive native build.
 
 ## CI Workflow
 
 `.github/workflows/quality.yml` is the reusable quality gate. It runs on pull
 requests and pushes to `main`, and `release.yml` calls it once for a release.
-One Ubuntu runner performs formatting, locked Rust and Node tests, TypeScript
+The Ubuntu job performs formatting, locked Rust and Node tests, TypeScript
 checking, a Vite production bundle, Clippy, `DESIGN.md` lint, and Compose
-validation. Node/pnpm and Rust build caches are shared across compatible runs;
-pull requests restore but do not write the Rust cache.
+validation. A bounded Windows job compiles and runs the Tauri library tests so
+the Windows-only auto-start implementation is covered before release. Node/pnpm
+and Rust build caches are shared across compatible runs; pull requests restore
+but do not write the Rust cache.
 
 `.github/workflows/release.yml` runs on `workflow_dispatch` and on `v*` tags.
 A manual candidate can select Windows x64, macOS Universal, Linux x64, or all
-three platforms. A tag always forces the complete three-platform matrix. The
-quality job runs in parallel with a Windows preflight that parses the extracted
-installer smoke, runs the release-helper tests, validates all version manifests,
-and proves that the production updater signing pair matches.
+three platforms. Manual candidates enter the keyless `release-candidate`
+Environment and intentionally produce unsigned smoke artifacts, even when a
+manual dispatch selects a tag as its ref. Only a `push` event for a `v*` tag
+forces the complete three-platform matrix and enters the protected
+`release-signing` Environment. The quality job runs in parallel with a keyless
+Windows preflight that parses the extracted installer smoke, runs the
+release-helper tests, and validates all version manifests.
 
-After preflight, each selected native runner restores its platform Rust cache,
-installs dependencies, runs the signed `pnpm run build`, executes its CLI and
-GUI smokes, and uploads `release-<platform>` with seven-day retention. The
+After preflight, each selected native runner restores its platform Rust cache
+and installs dependencies. Tag jobs can read the signing secrets only after the
+`release-signing` approval, then prove the signing pair and committed public-key
+fingerprint before running the signed build. Manual jobs never reference that
+Environment's secrets and run the ordinary unsigned build. Both paths execute
+CLI/GUI smokes and upload `release-<platform>` with seven-day retention. The
 expensive generic test/type/lint suite is not repeated on all three native
 runners.
 
@@ -409,6 +421,12 @@ Release remains a draft. After approval, the publish job compares the current
 asset/digest-set fingerprint with the verified fingerprint and refuses any draft
 that changed while it was waiting.
 
+The publication job is serialized in the repository-wide
+`release-moving-channels` queue. Immediately before publishing it compares the
+candidate with the current GitHub latest release and advances `latest` only for
+a strictly newer stable SemVer. A delayed older run can therefore publish its
+immutable release without rolling the moving latest channel back.
+
 Generate the production updater key once on a trusted workstation, writing it
 to a secure path outside the checkout (do not run this with a repository path):
 
@@ -416,8 +434,15 @@ to a secure path outside the checkout (do not run this with a repository path):
 node node_modules/@tauri-apps/cli/tauri.js signer generate -w <secure-path-outside-repository>/ocg-updater.key
 ```
 
-Store the private-key content and password as the two GitHub Actions secrets
-named above. Keep at least two independently stored encrypted backups of both
+Create a protected GitHub Environment named `release-signing`. Restrict its
+deployment policy to protected `v*` tags, require an independent reviewer,
+prevent self-review, and disable administrator bypass where the repository plan
+supports those controls. Store the private-key content and password only as
+that Environment's `OCG_TAURI_SIGNING_PRIVATE_KEY` and
+`OCG_TAURI_SIGNING_PRIVATE_KEY_PASSWORD` secrets. Do not keep repository-level
+copies; delete legacy repository secrets named `TAURI_SIGNING_PRIVATE_KEY` and
+`TAURI_SIGNING_PRIVATE_KEY_PASSWORD` after the migration. Keep at least two
+independently stored encrypted backups of both
 the private key and its password. If they are lost, already-installed clients
 that trust the matching public key cannot receive another in-app update and
 will need a new direct-install bootstrap. The public key is safe to share; this
@@ -426,17 +451,33 @@ Actions variable instead of committing it. Store the generated key contents,
 not local filesystem paths, in GitHub. Updater signatures prove that a payload
 was issued by this project, but are separate from operating-system code signing.
 
+The committed `src-tauri/updater-public-key.sha256` is the production trust
+continuity anchor. Normal CI has no override: a mismatched repository variable
+fails both signing preflight and release verification. Key rotation is a
+break-glass recovery, not a routine secret update. Generate and back up the new
+pair, prepare a direct-install bootstrap for every existing client, and update
+the committed fingerprint in an explicitly reviewed security change. Do not
+change the variable or fingerprint alone; old installed clients cannot trust a
+release signed only by the replacement key.
+
 Publishing the GitHub Release triggers `.github/workflows/container.yml`.
 That workflow checks out the release tag, builds and smoke-tests the hardened
-`linux/amd64` container, pushes `X.Y.Z`, `X.Y`, stable-release `latest`, and
-`sha-<12-character-commit>` tags to `ghcr.io/klarkxy/opencode-go-mgr`, and
-records an SPDX SBOM, BuildKit SLSA provenance, and GitHub signed provenance.
-Treat `X.Y.Z` and `sha-*` as release-specific tags that must not be moved;
-`X.Y` and `latest` are moving channels. Only the manifest digest is technically
-immutable.
+`linux/amd64` container, pushes the verified result by digest without assigning
+a mutable name, and then enters a repository-wide serialized tag queue. It
+creates `X.Y.Z` and `sha-<12-character-commit>` only when absent, accepts an
+existing tag only when it already has the exact candidate digest, and fails on
+any mismatch. Stable `X.Y` and opted-in `latest` move only when the candidate
+SemVer is newer than the version label currently on that channel. The workflow
+also records an SPDX SBOM, BuildKit SLSA provenance, and GitHub signed
+provenance. `X.Y.Z` and `sha-*` are release-specific immutable tags; `X.Y` and
+`latest` are monotonic moving channels.
 
 A manual dispatch can backfill an existing release tag and must opt in before
-updating `latest`. Its GitHub signing certificate identifies the workflow ref
+updating `latest`. The checkout uses the exact `refs/tags/<tag>` ref, verifies
+that HEAD resolves from that tag, and runs the repository version preflight
+before any image publication. Rebuilding different bytes for an existing
+full-version or `sha-*` tag fails instead of overwriting it; only an exact-digest
+replay is accepted. Its GitHub signing certificate identifies the workflow ref
 that triggered the dispatch, even though the build checks out the requested
 tag. Do not describe a historical manual backfill as tag-triggered provenance;
 normal `release.published` runs use the release tag context.
@@ -470,7 +511,9 @@ development builds, CLI, and Docker retain the direct/manual path.
 ### CI Coverage Boundaries
 
 Pull requests automatically receive the platform-neutral quality gate, but
-native installer/package smokes remain manual release candidates or tag runs.
+the additional Windows job covers compilation and unit tests for Windows-only
+Tauri behavior. Native installer/package smokes remain manual release candidates
+or tag runs.
 The container workflow covers `linux/amd64` only and runs after a release is
 published or manually dispatched. CI does not drive real desktop UI interactions
 or test container ARM64, backup/restore, database downgrade, migration rollback,
@@ -482,8 +525,9 @@ uncovered paths.
 ## Release Procedure
 
 1. Choose `X.Y.Z` and set it in `package.json`,
-   `src-tauri/tauri.conf.json`, the workspace `Cargo.toml`, and
-   `src-tauri/Cargo.toml`.
+   `src-tauri/tauri.conf.json`, the workspace `Cargo.toml`,
+   `src-tauri/Cargo.toml`, and the header plus default image in
+   `compose.example.yaml`.
 2. Run `cargo check --workspace --all-targets` to refresh `Cargo.lock`, then
    run `pnpm install --frozen-lockfile`, `cargo fmt --all -- --check`,
    `pnpm run test`, `pnpm run design:lint`, `pnpm run release:check`, and
@@ -495,9 +539,11 @@ uncovered paths.
    create an annotated tag with
    `git tag -a vX.Y.Z -m "OCG Manager vX.Y.Z"`, then push the tag. Never tag a
    branch commit that will later be squash-merged.
-5. Wait for `quality`, `preflight`, every native matrix job, `draft-release`,
-   and `verify-release` to pass. Review the exact 15 attachments, smoke logs,
-   platform warnings, and notes generated from the previous-tag diff.
+5. Approve only the `v*` tag deployment waiting on the `release-signing`
+   Environment. Then wait for `quality`, `preflight`, every native matrix job,
+   `draft-release`, and `verify-release` to pass. Review the exact 15
+   attachments, smoke logs, platform warnings, and notes generated from the
+   previous-tag diff.
 6. Approve the waiting `release` Environment deployment. Confirm that
    `publish-release` converted the same verified draft, then verify the public
    release. If approval automation is intentionally disabled, leave the draft
@@ -513,9 +559,9 @@ ship a new patch version; do not replace the asset or retarget the tag.
 Run these checks **before** publishing a `v*` tag. The CI smoke flow
 covers most of them; the manual parts need a real desktop.
 
-- [ ] The reusable quality gate is green; signed `release:check` passed before
-      the native matrix; every selected `pnpm run build` and platform smoke is
-      green.
+- [ ] Both Ubuntu and Windows jobs in the reusable quality gate are green;
+      the tag-only signed `release:check` passed after `release-signing`
+      approval; every selected `pnpm run build` and platform smoke is green.
 - [ ] Exercise Gemini `generateContent` and `streamGenerateContent` with
       `x-goog-api-key` against both a Chat-native and a Messages-native model;
       confirm Google JSON/SSE error and usage envelopes. Confirm `countTokens`
@@ -532,8 +578,8 @@ covers most of them; the manual parts need a real desktop.
       non-loopback dashboard, verify the mapping API returns `401` without a
       valid session.
 - [ ] `git diff --check` is clean, the previous-tag diff contains only the
-      intended release scope, and all four version manifests plus the three
-      local Cargo lock entries agree.
+      intended release scope, and all four code version manifests,
+      `compose.example.yaml`, plus the three local Cargo lock entries agree.
 - [ ] Each runner's `release/SHA256SUMS` matches every payload in that
       directory; `verify-release` accepted the exact 15 attachments, updater
       manifest, four signatures, checksums, and GitHub server digests.

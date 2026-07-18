@@ -37,6 +37,7 @@ export interface AccountUpdate {
 }
 
 export interface AppConfig {
+  revision: number;
   gateway_port: number;
   gateway_key: string;
   upstream_base_url: string;
@@ -339,14 +340,17 @@ export const tauriApi = {
       method: "PUT",
       body: jsonBody(models),
     }),
-  updateSettings: async (config: AppConfig) => {
-    await request<unknown>("/settings", { method: "POST", body: jsonBody(config) });
+  updateSettings: (config: AppConfig) => {
+    const { revision, ...settings } = config;
+    return request<{ revision: number }>("/settings", {
+      method: "POST",
+      body: jsonBody({ ...settings, expected_revision: revision }),
+    });
   },
   regenerateGatewayKey: async () => {
-    const result = await request<{ key: string }>("/settings/regenerate-gateway-key", {
+    return request<{ key: string; revision: number }>("/settings/regenerate-gateway-key", {
       method: "POST",
     });
-    return result.key;
   },
   checkForUpdate: () => request<UpdateCheckResult>("/settings/check-update"),
   getUpdateStatus: () => request<UpdateStatus>("/settings/update-status"),

@@ -414,6 +414,7 @@ const savedConfig = ref<AppConfig | null>(null);
 
 // ponytail: keep this pre-load fallback in sync with AppConfig::default().
 const config = ref<AppConfig>({
+  revision: 0,
   gateway_port: 9042,
   gateway_key: "",
   upstream_base_url: "https://opencode.ai/zen/go",
@@ -528,14 +529,27 @@ const updateDownloadPercentage = computed(() => {
   return Math.min(100, Math.max(0, Math.round((status.downloaded / status.total) * 100)));
 });
 
-async function loadSettings() {
+async function loadSettings(): Promise<boolean> {
+  loaded.value = false;
   try {
     config.value = await tauriApi.getSettings();
     savedConfig.value = { ...config.value };
     loaded.value = true;
+    return true;
   } catch (e) {
     message.error(t("加载设置失败: {error}", { error: String(e) }));
+    return false;
   }
+}
+
+async function reloadSettingsAfterConflict(error: unknown): Promise<boolean> {
+  if (!(error instanceof DashboardRequestError) || error.status !== 409) return false;
+  if (await loadSettings()) {
+    message.warning(t("设置已被其他操作修改，已重新加载最新设置，请确认后再保存"));
+  } else {
+    message.error(t("保存失败: {error}", { error: String(error) }));
+  }
+  return true;
 }
 
 async function saveSettings() {
@@ -548,11 +562,15 @@ async function saveSettings() {
   saving.value = true;
   const payload = { ...config.value };
   try {
-    await tauriApi.updateSettings(payload);
-    savedConfig.value = payload;
+    const result = await tauriApi.updateSettings(payload);
+    payload.revision = result.revision;
+    config.value.revision = result.revision;
+    savedConfig.value = { ...payload };
     message.success(t("设置已保存"));
   } catch (e) {
-    message.error(t("保存失败: {error}", { error: String(e) }));
+    if (!(await reloadSettingsAfterConflict(e))) {
+      message.error(t("保存失败: {error}", { error: String(e) }));
+    }
   } finally {
     saving.value = false;
   }
@@ -563,13 +581,17 @@ async function handleAutoStartToggle(newValue: boolean) {
   const next = { ...savedConfig.value, auto_start: newValue };
   saving.value = true;
   try {
-    await tauriApi.updateSettings(next);
-    savedConfig.value = next;
+    const result = await tauriApi.updateSettings(next);
+    next.revision = result.revision;
+    savedConfig.value = { ...next };
     config.value.auto_start = newValue;
+    config.value.revision = result.revision;
     message.success(t("设置已保存"));
   } catch (e) {
-    config.value.auto_start = savedConfig.value.auto_start;
-    message.error(t("自动启动设置失败: {error}", { error: String(e) }));
+    if (!(await reloadSettingsAfterConflict(e))) {
+      config.value.auto_start = savedConfig.value.auto_start;
+      message.error(t("自动启动设置失败: {error}", { error: String(e) }));
+    }
   } finally {
     saving.value = false;
   }
@@ -585,14 +607,20 @@ async function saveGatewayKey() {
   const payload = { ...savedConfig.value, gateway_key: key };
   saving.value = true;
   try {
-    await tauriApi.updateSettings(payload);
-    savedConfig.value = payload;
+    const result = await tauriApi.updateSettings(payload);
+    payload.revision = result.revision;
+    savedConfig.value = { ...payload };
     config.value.gateway_key = key;
+    config.value.revision = result.revision;
     gatewayKeyDraft.value = "";
     editingGatewayKey.value = false;
     message.success(t("Key 已保存"));
   } catch (e) {
-    message.error(t("Key 保存失败: {error}", { error: String(e) }));
+    if (await reloadSettingsAfterConflict(e)) {
+      cancelGatewayKeyEdit();
+    } else {
+      message.error(t("Key 保存失败: {error}", { error: String(e) }));
+    }
   } finally {
     saving.value = false;
   }
@@ -639,8 +667,13 @@ async function copyKey() {
 async function regenerateKey() {
   regenerating.value = true;
   try {
-    config.value.gateway_key = await tauriApi.regenerateGatewayKey();
-    if (savedConfig.value) savedConfig.value.gateway_key = config.value.gateway_key;
+    const result = await tauriApi.regenerateGatewayKey();
+    config.value.gateway_key = result.key;
+    config.value.revision = result.revision;
+    if (savedConfig.value) {
+      savedConfig.value.gateway_key = result.key;
+      savedConfig.value.revision = result.revision;
+    }
     cancelGatewayKeyEdit();
     message.success(t("Key 已重新生成"));
   } catch (e) {
