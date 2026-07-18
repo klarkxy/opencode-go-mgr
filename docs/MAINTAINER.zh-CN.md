@@ -162,9 +162,10 @@ Desktop 三个角色模型的持久化行为。
 - `selector.rs` 选下一个账号并跳过禁用、冷却、本次已失败的账号；`limit.rs`
   解析上游 429 中的重置时长；`pricing.rs` 从当前 OpenCode Go 价格快照计算
   token 对应的额度消耗，面板窗口额度也来自同一快照。`PricingModel` 的
-  `official_price_multiplier` 表示官方 token 表价已经包含的倍率，实际
-  `quota_multiplier = (月额度 / Usage) / official_price_multiplier`；
-  `deepseek-v4-pro` 和 `mimo-v2.5-pro` 为 `4`，Grok 等其他模型默认 `1`。
+  `official_price_multiplier` 表示官方 token 表价相对供应商基准已经包含的倍率，
+  仅用于说明；实际 `quota_multiplier = 月额度 / Usage`。
+  `deepseek-v4-pro` 和 `mimo-v2.5-pro` 为 `4`，Grok 等其他模型默认 `1`；该字段
+  不能抵消单独的 Go Usage 换算。
 - 价格刷新只由用户通过受保护的 `GET/POST /dashboard/api/pricing[/refresh]`
   发起。抓取器仅允许 OpenCode Go HTTPS 主机和同主机重定向，总时限 20 秒、响应
   体上限 2 MiB；任何校验失败都不会激活不完整数据，`pricing_snapshots` 会保留

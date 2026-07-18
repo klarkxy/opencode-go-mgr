@@ -145,7 +145,7 @@ function renderOfficialPriceMultiplier(row: PricingModel) {
     trigger: () => h(NTag, { size: "small", bordered: false, type: "info" }, {
       default: () => formatPricingMultiplier(multiplier),
     }),
-    default: () => t("官方表格中的 token 单价已经包含此倍率；结算不会重复乘。"),
+    default: () => t("官方表格中的 token 单价相对供应商基准已包含此倍率；Go Usage 额度仍需单独换算。"),
   });
 }
 

@@ -561,13 +561,14 @@ requests the gateway actually forwards — not by the upstream's authoritative
 billing. Token rates, window limits, and each model's `Usage` come from the
 active OpenCode Go USD snapshot.
 
-- The derived multiplier is `monthly limit / Usage`. When the official token
-  rate already includes a multiplier, the remaining Go multiplier is
-  `monthly limit / Usage / official_price_multiplier`, preventing it from
-  being applied twice.
+- The Go quota multiplier is always `monthly limit / Usage`. Any
+  `official_price_multiplier` is informational: it describes how the published
+  token rate compares with the supplier baseline and does not replace the
+  model-specific Usage allowance.
 - The official rates for `deepseek-v4-pro` (DS V4 Pro) and `mimo-v2.5-pro`
-  currently include `4x`, so their remaining multiplier is `1x`; Grok's
-  listed rate does not include it and therefore retains the derived `4x`.
+  already include `4x` relative to their supplier baseline, while their `$15`
+  Usage allowance still requires a separate `60 / 15 = 4x` quota conversion.
+  Grok also has `$15` Usage and therefore uses the same quota conversion.
 - The applicable local MiniMax adjustment is applied last. No supplier API
   price, CNY value, or exchange rate participates in the calculation.
 

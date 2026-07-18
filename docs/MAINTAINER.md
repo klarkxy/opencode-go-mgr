@@ -180,10 +180,11 @@ difference, and the Claude Desktop three-role persistence behavior.
   `pricing.rs` loads the active OpenCode Go pricing snapshot and derives
   quota cost from token usage; the dashboard windows use the limits stored in
   that same snapshot. `PricingModel` records the multiplier already included
-  in an official token rate as `official_price_multiplier`; the applied
-  `quota_multiplier` is `(monthly limit / Usage) / official_price_multiplier`.
-  `official_price_multiplier` is `4` for `deepseek-v4-pro` and
-  `mimo-v2.5-pro`, and defaults to `1` for Grok and other models.
+  in an official token rate relative to the supplier baseline as the
+  informational `official_price_multiplier`; the applied `quota_multiplier`
+  is always `monthly limit / Usage`. `official_price_multiplier` is `4` for
+  `deepseek-v4-pro` and `mimo-v2.5-pro`, and defaults to `1` for Grok and
+  other models. It must not reduce the separate Go Usage conversion.
 - Pricing refresh is user-triggered through protected
   `GET/POST /dashboard/api/pricing[/refresh]`. The fetcher is restricted to
   the OpenCode Go HTTPS host, same-host redirects, a 20-second deadline, and

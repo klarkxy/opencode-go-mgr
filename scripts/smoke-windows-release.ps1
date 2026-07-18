@@ -86,10 +86,19 @@ function Wait-UninstallComplete {
   param(
     [string]$ExecutablePath,
     [string]$UninstallerPath,
+    [string]$RunKey,
     [int]$Attempts = 90
   )
   foreach ($attempt in 1..$Attempts) {
-    if (!(Test-Path -LiteralPath $ExecutablePath) -and !(Test-Path -LiteralPath $UninstallerPath)) {
+    $runValues = Get-ItemProperty -LiteralPath $RunKey -ErrorAction SilentlyContinue
+    $startupEntryPresent = $runValues -and (
+      $runValues.PSObject.Properties.Name -contains 'OCG Manager'
+    )
+    if (
+      !(Test-Path -LiteralPath $ExecutablePath) -and
+      !(Test-Path -LiteralPath $UninstallerPath) -and
+      !$startupEntryPresent
+    ) {
       return
     }
     Start-Sleep 1
@@ -186,7 +195,7 @@ try {
 $uninstaller = Get-ChildItem $installDir -Recurse -Filter uninstall.exe | Select-Object -First 1
 if (!$uninstaller) { throw 'Uninstaller is missing' }
 Invoke-Installer -Path $uninstaller.FullName -Arguments @('/S') -Label 'candidate uninstall'
-Wait-UninstallComplete -ExecutablePath $guiPath -UninstallerPath $uninstaller.FullName
+Wait-UninstallComplete -ExecutablePath $guiPath -UninstallerPath $uninstaller.FullName -RunKey $runKey
 if ((Get-ItemProperty -LiteralPath $runKey).PSObject.Properties.Name -contains 'OCG Manager') {
   throw 'Uninstall left the startup entry behind'
 }

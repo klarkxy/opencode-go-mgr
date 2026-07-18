@@ -47,4 +47,6 @@ test("pricing catalog refreshes only on explicit action and keeps exact-rate aff
   assert.match(catalog, /class: "tiny-rate", tabindex: 0/);
   assert.match(catalog, /row\.adjustments/);
   assert.match(catalog, /row\.official_price_multiplier/);
+  assert.match(catalog, /官方表格中的 token 单价相对供应商基准已包含此倍率；Go Usage 额度仍需单独换算。/);
+  assert.doesNotMatch(catalog, /官方表格中的 token 单价已经包含此倍率；结算不会重复乘。/);
 });

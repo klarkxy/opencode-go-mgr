@@ -346,7 +346,7 @@ export const deDEMessages = {
   "额度有效价格": "Effektive Kontingentpreise",
   "无": "Keine",
   "适用于：{scope}": "Gilt für: {scope}",
-  "官方表格中的 token 单价已经包含此倍率；结算不会重复乘。": "Der offizielle Token-Preis enthält diesen Multiplikator bereits; er wird bei der Abrechnung nicht doppelt angewendet.",
+  "官方表格中的 token 单价相对供应商基准已包含此倍率；Go Usage 额度仍需单独换算。": "Der Token-Preis in der offiziellen Tabelle enthält diesen Multiplikator bereits gegenüber dem Anbieter-Basispreis; das Go-Usage-Kontingent muss weiterhin separat umgerechnet werden.",
   "精确值：{value} / 百万 tokens": "Exakt: {value} / Million Tokens",
   "结果未知": "Ergebnis unbekannt",
   "无价格": "Ohne Preis",

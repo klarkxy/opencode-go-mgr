@@ -1081,6 +1081,16 @@ pub async fn forward_get(
                 continue;
             }
         };
+        let authorization = match HeaderValue::from_str(&format!("Bearer {key}")) {
+            Ok(value) => value,
+            Err(error) => {
+                last_transport_error = Some(anyhow::anyhow!(
+                    "account key is not a valid upstream header value: {error}"
+                ));
+                failed_ids.push(account.id);
+                continue;
+            }
+        };
         let url = format!(
             "{}{}",
             config.upstream_base_url.trim_end_matches('/'),
@@ -1091,7 +1101,7 @@ pub async fn forward_get(
         loop {
             let resp = match client
                 .get(&url)
-                .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", key))
+                .header(reqwest::header::AUTHORIZATION, authorization.clone())
                 .timeout(StdDuration::from_secs(config.non_stream_timeout_secs))
                 .send()
                 .await

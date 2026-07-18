@@ -610,16 +610,16 @@ async fn application_models_falls_back_after_rate_limit_but_not_5xx() {
 }
 
 #[tokio::test]
-async fn application_models_skips_an_account_with_a_broken_key() {
+async fn application_models_skip_accounts_with_unusable_stored_credentials() {
     let replies = HashMap::from([(
-        "key-2".to_string(),
+        "key-good".to_string(),
         VecDeque::from([MockReply {
             status: 200,
             body: r#"{"object":"list","data":[{"id":"deepseek-v4-flash"}]}"#,
         }]),
     )]);
     let (base_url, calls, stop_mock) = start_mock_upstream(replies).await;
-    let (state, dir) = build_state(base_url, &["key-1", "key-2"]);
+    let (state, dir) = build_state(base_url, &["placeholder", "bad\nheader", "key-good"]);
     state
         .db
         .lock()
@@ -648,7 +648,10 @@ async fn application_models_skips_an_account_with_a_broken_key() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(calls.lock().unwrap()[0].key, "key-2");
+    let calls = calls.lock().unwrap();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].key, "key-good");
+    drop(calls);
 
     gateway::stop_gateway(gateway_handle);
     let _ = stop_mock.send(());

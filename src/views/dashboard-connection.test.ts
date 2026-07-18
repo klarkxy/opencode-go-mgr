@@ -640,6 +640,13 @@ test("accounts confirm deletes through a dialog and keep modal state fresh", asy
   assert.match(accounts, /editingAccount\.value = account/);
 });
 
+test("account form rejects whitespace-only required credentials", async () => {
+  const accountForm = await readFile(new URL("../components/AccountFormModal.vue", import.meta.url), "utf8");
+
+  assert.match(accountForm, /name:\s*\{\s*required: true,\s*whitespace: true,/);
+  assert.match(accountForm, /base\.key = \{\s*required: true,\s*whitespace: true,/);
+});
+
 test("settings expose supported Windows auto-start safely", async () => {
   const settings = await readFile(new URL("./Settings.vue", import.meta.url), "utf8");
   const api = await readFile(new URL("../api/tauri.ts", import.meta.url), "utf8");

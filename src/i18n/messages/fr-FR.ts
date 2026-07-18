@@ -346,7 +346,7 @@ export const frFRMessages = {
   "额度有效价格": "Tarifs de quota effectifs",
   "无": "Aucun",
   "适用于：{scope}": "S'applique à : {scope}",
-  "官方表格中的 token 单价已经包含此倍率；结算不会重复乘。": "Le tarif officiel par token inclut déjà ce multiplicateur ; il n'est pas appliqué deux fois.",
+  "官方表格中的 token 单价相对供应商基准已包含此倍率；Go Usage 额度仍需单独换算。": "Le tarif par token du tableau officiel inclut déjà ce multiplicateur par rapport au tarif de référence du fournisseur ; le quota Go Usage doit toujours être converti séparément.",
   "精确值：{value} / 百万 tokens": "Exact : {value} / million de tokens",
   "结果未知": "Résultat inconnu",
   "无价格": "Sans prix",

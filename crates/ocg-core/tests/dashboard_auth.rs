@@ -541,6 +541,31 @@ async fn loopback_settings_trim_and_require_gateway_key() {
 }
 
 #[tokio::test]
+async fn loopback_settings_accept_legacy_payload_without_revision() {
+    let state = state("settings-legacy-payload");
+    let handle = gateway::start_gateway_on(state.clone(), SocketAddr::from(([127, 0, 0, 1], 0)))
+        .await
+        .unwrap();
+    let url = format!("http://127.0.0.1:{}/dashboard/api/settings", handle.port);
+
+    let mut config = state.config();
+    config.connect_timeout_secs = 17;
+    let payload = serde_json::to_value(&config).unwrap();
+    assert!(payload.get("expected_revision").is_none());
+
+    let response = reqwest::Client::new()
+        .post(&url)
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(state.config().connect_timeout_secs, 17);
+
+    gateway::stop_gateway(handle);
+}
+
+#[tokio::test]
 async fn loopback_settings_reject_stale_revision_after_key_regeneration() {
     let state = state("settings-stale-revision");
     let handle = gateway::start_gateway_on(state.clone(), SocketAddr::from(([127, 0, 0, 1], 0)))

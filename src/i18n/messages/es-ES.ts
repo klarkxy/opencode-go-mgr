@@ -346,7 +346,7 @@ export const esESMessages = {
   "额度有效价格": "Tarifas efectivas de cuota",
   "无": "Ninguno",
   "适用于：{scope}": "Se aplica a: {scope}",
-  "官方表格中的 token 单价已经包含此倍率；结算不会重复乘。": "La tarifa oficial por token ya incluye este multiplicador; no se vuelve a aplicar en la liquidación.",
+  "官方表格中的 token 单价相对供应商基准已包含此倍率；Go Usage 额度仍需单独换算。": "La tarifa por token de la tabla oficial ya incluye este multiplicador respecto a la referencia del proveedor; la cuota de Go Usage aún debe convertirse por separado.",
   "精确值：{value} / 百万 tokens": "Exacto: {value} / millón de tokens",
   "结果未知": "Resultado desconocido",
   "无价格": "Sin precio",

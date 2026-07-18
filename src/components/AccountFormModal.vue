@@ -163,7 +163,12 @@ const expiresOn = computed(() => {
 
 const rules = computed<FormRules>(() => {
   const base: FormRules = {
-    name: { required: true, message: t("名称不能为空"), trigger: ["input", "blur"] },
+    name: {
+      required: true,
+      whitespace: true,
+      message: t("名称不能为空"),
+      trigger: ["input", "blur"],
+    },
     purchaseDate: [
       { required: true, message: t("请选择购买日期"), trigger: ["change", "blur"] },
       {
@@ -177,7 +182,12 @@ const rules = computed<FormRules>(() => {
     ],
   };
   if (!isEdit.value) {
-    base.key = { required: true, message: t("请填写 API Key"), trigger: ["input", "blur"] };
+    base.key = {
+      required: true,
+      whitespace: true,
+      message: t("请填写 API Key"),
+      trigger: ["input", "blur"],
+    };
   }
   return base;
 });

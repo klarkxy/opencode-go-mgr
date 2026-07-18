@@ -346,7 +346,7 @@ export const ptBRMessages = {
   "额度有效价格": "Tarifas efetivas de cota",
   "无": "Nenhum",
   "适用于：{scope}": "Aplica-se a: {scope}",
-  "官方表格中的 token 单价已经包含此倍率；结算不会重复乘。": "A tarifa oficial por token já inclui este multiplicador; ele não é aplicado novamente na cobrança.",
+  "官方表格中的 token 单价相对供应商基准已包含此倍率；Go Usage 额度仍需单独换算。": "A tarifa por token da tabela oficial já inclui este multiplicador em relação ao preço-base do provedor; a cota do Go Usage ainda precisa ser convertida separadamente.",
   "精确值：{value} / 百万 tokens": "Exato: {value} / milhão de tokens",
   "结果未知": "Resultado desconhecido",
   "无价格": "Sem preço",

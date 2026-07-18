@@ -1022,7 +1022,8 @@ fn is_update_available(current: [u64; 3], latest: [u64; 3]) -> bool {
 struct SettingsUpdateRequest {
     #[serde(flatten)]
     config: AppConfig,
-    expected_revision: u64,
+    #[serde(default)]
+    expected_revision: Option<u64>,
 }
 
 #[derive(Serialize)]
@@ -1035,7 +1036,10 @@ async fn update_settings(
     Json(input): Json<SettingsUpdateRequest>,
 ) -> Result<Json<SettingsRevisionResponse>, ApiError> {
     let _settings_update = state.settings_update.lock();
-    if input.expected_revision != state.settings_revision() {
+    if input
+        .expected_revision
+        .is_some_and(|revision| revision != state.settings_revision())
+    {
         return Err(ApiError::status(
             StatusCode::CONFLICT,
             "settings changed since they were loaded; reload and try again",
@@ -1804,7 +1808,7 @@ mod tests {
                     connect_timeout_secs: 45,
                     ..AppConfig::default()
                 },
-                expected_revision: state.settings_revision(),
+                expected_revision: Some(state.settings_revision()),
             }),
         )
         .await

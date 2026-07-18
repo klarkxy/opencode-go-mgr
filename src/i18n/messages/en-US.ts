@@ -344,7 +344,7 @@ export const enUSMessages = {
   "额度有效价格": "Effective quota rates",
   "无": "None",
   "适用于：{scope}": "Applies to: {scope}",
-  "官方表格中的 token 单价已经包含此倍率；结算不会重复乘。": "The official token rate already includes this multiplier; accounting does not apply it twice.",
+  "官方表格中的 token 单价相对供应商基准已包含此倍率；Go Usage 额度仍需单独换算。": "The official table's token rate already includes this multiplier relative to the provider baseline; the Go Usage quota still requires a separate conversion.",
   "精确值：{value} / 百万 tokens": "Exact: {value} / million tokens",
   "结果未知": "Outcome unknown",
   "无价格": "Unpriced",

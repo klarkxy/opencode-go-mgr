@@ -11,7 +11,7 @@ pub const SOURCE_URL: &str = "https://opencode.ai/docs/go/";
 const SOURCE_HOST: &str = "opencode.ai";
 const MAX_DOCUMENT_BYTES: usize = 2 * 1024 * 1024;
 const MONTHLY_LIMIT: f64 = 60.0;
-const ADJUSTMENT_POLICY_VERSION: &str = "local-v2";
+const ADJUSTMENT_POLICY_VERSION: &str = "local-v3";
 
 // Audit reference only; the runtime never fetches supplier pricing pages:
 // https://platform.minimaxi.com/docs/guides/pricing-paygo
@@ -58,10 +58,12 @@ pub struct PricingModel {
     pub cache_read: f64,
     pub cache_write: Option<f64>,
     pub usage: f64,
-    /// Usage weighting already included in the official table's token rates.
+    /// Multiplier already reflected in the official token rates relative to
+    /// the supplier baseline. This is informational and does not replace the
+    /// model-specific Go Usage conversion below.
     #[serde(default = "default_official_price_multiplier")]
     pub official_price_multiplier: f64,
-    /// Remaining multiplier applied by the server after the official rates.
+    /// Go quota multiplier applied after the official rates: monthly limit / Usage.
     pub quota_multiplier: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub min_input_tokens: Option<i64>,
@@ -348,7 +350,7 @@ fn seed_model(
         cache_write,
         usage,
         official_price_multiplier,
-        quota_multiplier: MONTHLY_LIMIT / usage / official_price_multiplier,
+        quota_multiplier: MONTHLY_LIMIT / usage,
         min_input_tokens: None,
         max_input_tokens: None,
         adjustments: Vec::new(),
@@ -515,7 +517,7 @@ pub fn parse_official_html(html: &str) -> Result<PricingSnapshot> {
             cache_write,
             usage,
             official_price_multiplier,
-            quota_multiplier: limits.window_month / usage / official_price_multiplier,
+            quota_multiplier: limits.window_month / usage,
             min_input_tokens: minimum,
             max_input_tokens: maximum,
             adjustments: Vec::new(),
@@ -628,15 +630,16 @@ fn add_adjustments(models: &mut [PricingModel]) {
 fn apply_local_pricing_policy(models: &mut [PricingModel], monthly_limit: f64) {
     for model in models.iter_mut() {
         model.official_price_multiplier = official_price_multiplier(&model.model_id);
-        model.quota_multiplier = monthly_limit / model.usage / model.official_price_multiplier;
+        model.quota_multiplier = monthly_limit / model.usage;
     }
     add_adjustments(models);
 }
 
 fn official_price_multiplier(model_id: &str) -> f64 {
     match model_id {
-        // OpenCode Go already publishes these two token rates with their 4x
-        // Usage weighting included. Applying 60 / 15 again would double-count it.
+        // OpenCode Go publishes these two token rates at 4x their supplier
+        // baseline. Their separate $15 Usage allowance still consumes the
+        // shared $60 quota at 4x, so this value must remain informational.
         "deepseek-v4-pro" | "mimo-v2.5-pro" => 4.0,
         _ => 1.0,
     }
@@ -895,9 +898,12 @@ mod tests {
     }
 
     #[test]
-    fn pro_table_rates_do_not_apply_the_included_four_x_twice() {
+    fn pro_usage_allowance_is_applied_after_the_official_table_rates() {
         let snapshot = embedded_seed();
-        for model_id in ["deepseek-v4-pro", "mimo-v2.5-pro"] {
+        for (model_id, prompt, cached, completion, official_monthly_requests) in [
+            ("deepseek-v4-pro", 82_750, 82_000, 290, 17_150.0),
+            ("mimo-v2.5-pro", 86_790, 86_000, 305, 16_300.0),
+        ] {
             let model = snapshot
                 .models
                 .iter()
@@ -905,11 +911,15 @@ mod tests {
                 .unwrap();
             assert_eq!(model.usage, 15.0);
             assert_eq!(model.official_price_multiplier, 4.0);
-            assert_eq!(model.quota_multiplier, 1.0);
+            assert_eq!(model.quota_multiplier, 4.0);
 
-            let estimate = snapshot.estimate(model_id, 1_000_000, 0, 0, 0, None);
-            assert!((estimate.cost.unwrap() - 0.435).abs() < 1e-12);
-            assert_eq!(estimate.quota_multiplier, Some(1.0));
+            let estimate = snapshot.estimate(model_id, prompt, completion, cached, 0, None);
+            let estimated_monthly_requests = snapshot.limits.window_month / estimate.cost.unwrap();
+            assert!(
+                (estimated_monthly_requests / official_monthly_requests - 1.0).abs() < 0.01,
+                "{model_id}: {estimated_monthly_requests} != {official_monthly_requests}",
+            );
+            assert_eq!(estimate.quota_multiplier, Some(4.0));
         }
 
         let grok = snapshot
@@ -927,12 +937,12 @@ mod tests {
     }
 
     #[test]
-    fn policy_upgrade_rebases_persisted_pro_multipliers() {
+    fn policy_upgrade_repairs_persisted_pro_quota_multipliers() {
         let mut snapshot = embedded_seed();
-        snapshot.adjustment_policy_version = "minimax-v1".to_string();
+        snapshot.adjustment_policy_version = "local-v2".to_string();
         for model in &mut snapshot.models {
-            model.official_price_multiplier = 1.0;
-            model.quota_multiplier = snapshot.limits.window_month / model.usage;
+            model.quota_multiplier =
+                snapshot.limits.window_month / model.usage / model.official_price_multiplier;
         }
 
         let upgraded = ensure_current_adjustment_policy(snapshot);
@@ -943,7 +953,7 @@ mod tests {
                 .find(|entry| entry.model_id == model_id)
                 .unwrap();
             assert_eq!(model.official_price_multiplier, 4.0);
-            assert_eq!(model.quota_multiplier, 1.0);
+            assert_eq!(model.quota_multiplier, 4.0);
         }
     }
 
@@ -967,7 +977,7 @@ mod tests {
                 .find(|entry| entry.model_id == model_id)
                 .unwrap();
             assert_eq!(model.official_price_multiplier, 4.0);
-            assert_eq!(model.quota_multiplier, 1.0);
+            assert_eq!(model.quota_multiplier, 4.0);
         }
     }
 
@@ -1036,7 +1046,7 @@ mod tests {
                 .find(|entry| entry.model_id == model_id)
                 .unwrap();
             assert_eq!(model.official_price_multiplier, 4.0);
-            assert_eq!(model.quota_multiplier, 1.0);
+            assert_eq!(model.quota_multiplier, 4.0);
         }
     }
 
