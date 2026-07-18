@@ -815,14 +815,13 @@ async function loadAccountUsage(accountId: string) {
   }
 }
 
-async function onFormSave(payload: { name: string; username: string; password?: string; key?: string; purchase_date?: string }) {
+async function onFormSave(payload: { name: string; username: string; key?: string; purchase_date?: string }) {
   if (editingAccount.value) {
     const update: AccountUpdate = {
       name: payload.name,
       username: payload.username,
       purchase_date: payload.purchase_date,
     };
-    if (payload.password !== undefined) update.password = payload.password;
     if (payload.key !== undefined) update.key = payload.key;
     busy.value = true;
     try {
@@ -840,7 +839,6 @@ async function onFormSave(payload: { name: string; username: string; password?: 
       name: payload.name,
       username: payload.username,
       key: payload.key || "",
-      password: payload.password,
       purchase_date: payload.purchase_date,
     };
     busy.value = true;

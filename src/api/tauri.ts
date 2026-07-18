@@ -173,8 +173,6 @@ export interface PricingModel {
   cache_read: number | null;
   cache_write: number | null;
   usage: number;
-  /** Multiplier already included in the token rates published by OpenCode Go. */
-  official_price_multiplier?: number;
   quota_multiplier: number;
   min_input_tokens?: number | null;
   max_input_tokens?: number | null;
@@ -193,8 +191,27 @@ export interface PricingSnapshot {
 }
 
 export interface PricingRefreshResult extends PricingSnapshot {
-  refresh_status: "success" | "failed_no_change";
+  refresh_status: "success" | "unchanged" | "needs_confirmation" | "failed_no_change";
+  multiplier_changes?: PricingMultiplierChange[];
+  official_content_hash?: string;
   error?: string | null;
+}
+
+export interface PricingMultiplierChange {
+  model_id: string;
+  current_multiplier: number;
+  official_multiplier: number;
+}
+
+export interface PricingRefreshRequest {
+  policy?: "keep_current" | "use_official";
+  expected_revision?: string;
+  expected_official_content_hash?: string;
+}
+
+export interface PricingMultiplierUpdate {
+  model_id: string;
+  multiplier: number;
 }
 
 export interface DashboardSummary {
@@ -332,7 +349,15 @@ export const tauriApi = {
 
   getSettings: () => request<AppConfig>("/settings"),
   getPricing: () => request<PricingSnapshot>("/pricing"),
-  refreshPricing: () => request<PricingRefreshResult>("/pricing/refresh", { method: "POST" }),
+  refreshPricing: (refresh: PricingRefreshRequest = {}) => request<PricingRefreshResult>("/pricing/refresh", {
+    method: "POST",
+    body: jsonBody(refresh),
+  }),
+  updatePricingMultipliers: (expectedRevision: string, multipliers: PricingMultiplierUpdate[]) =>
+    request<PricingSnapshot>("/pricing/multipliers", {
+      method: "PUT",
+      body: jsonBody({ expected_revision: expectedRevision, multipliers }),
+    }),
   getApplicationModels: () => request<string[]>("/application-models"),
   getClaudeDesktopModels: () => request<ClaudeDesktopModels>("/claude-desktop/models"),
   updateClaudeDesktopModels: (models: ClaudeDesktopModels) =>

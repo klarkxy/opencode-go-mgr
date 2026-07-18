@@ -154,7 +154,7 @@
                         <span>{{ field }}</span>
                         <n-select
                           :value="modelValues[field]"
-                          :options="modelOptions"
+                          :options="activeModelOptions"
                           :loading="modelsLoading"
                           :disabled="!settingsLoaded || (activeGuide.id === 'claude-desktop' && !claudeDesktopModelsLoaded)"
                           :placeholder="t('选择模型 ID')"
@@ -168,7 +168,7 @@
                         <span>models</span>
                         <n-select
                           v-model:value="selectedModels"
-                          :options="modelOptions"
+                          :options="activeModelOptions"
                           :loading="modelsLoading"
                           :disabled="!settingsLoaded"
                           :placeholder="t('选择模型 ID')"
@@ -368,7 +368,6 @@ const settingsLoaded = ref(false);
 const settingsError = ref("");
 const modelsLoading = ref(false);
 const modelsError = ref("");
-const modelsInitialized = ref(false);
 const claudeDesktopModelsLoaded = ref(false);
 const claudeDesktopDefaults = ref<ClaudeDesktopModels>({ sonnet: "", opus: "", haiku: "" });
 const applicationModelIds = ref<string[]>([]);
@@ -445,10 +444,15 @@ const applicationSelectOptions = computed<(SelectOption | SelectGroupOption)[]>(
     })),
   }));
 });
+const activeModelOptions = computed<SelectOption[]>(() => (
+  activeGuide.value.id === "claude-desktop"
+    ? modelOptions.value
+    : applicationModelIds.value.map((modelId) => ({ label: modelId, value: modelId }))
+));
 const primaryModelOptions = computed<SelectOption[]>(() => (
   activeGuide.value.multipleModels
-    ? modelOptions.value.filter(({ value }) => typeof value === "string" && selectedModels.value.includes(value))
-    : modelOptions.value
+    ? activeModelOptions.value.filter(({ value }) => typeof value === "string" && selectedModels.value.includes(value))
+    : activeModelOptions.value
 ));
 
 const connectionUrls = computed(() => resolveConnectionUrls(
@@ -559,15 +563,15 @@ async function loadModels() {
       ...Object.values(claudeDesktopModels ?? claudeDesktopDefaults.value).filter(Boolean),
     ])];
     modelOptions.value = availableIds.map((modelId) => ({ label: modelId, value: modelId }));
-    const defaultSelectedModels = modelIds.length ? modelIds : availableIds;
-    const fallbackModel = availableIds[0] ?? "";
+    const defaultSelectedModels = modelIds;
+    const fallbackModel = modelIds[0] ?? "";
     for (const guide of applicationGuides) {
       if (!isApplicationId(guide.id)) continue;
       if (!guide.modelFields?.length) {
         const selection = reconcileApplicationModelSelection(
           selectedModelsByApplication.value[guide.id],
           selectedModelByApplication.value[guide.id],
-          availableIds,
+          modelIds,
           defaultSelectedModels,
           Boolean(guide.multipleModels),
         );
@@ -589,7 +593,7 @@ async function loadModels() {
       if (guide.id === "claude-desktop") continue;
       let changed = false;
       for (const field of guide.modelFields) {
-        if (!availableIds.includes(modelValues.value[field])) {
+        if (!modelIds.includes(modelValues.value[field])) {
           const nextModel = guide.id === "claude-code"
             ? recommendClaudeCodeModel(field, modelIds) || fallbackModel
             : fallbackModel;
@@ -619,7 +623,6 @@ async function loadModels() {
     }
     modelsError.value = errors.join("；");
   } finally {
-    modelsInitialized.value = true;
     modelsLoading.value = false;
   }
 }
@@ -763,7 +766,7 @@ onMounted(() => {
 });
 
 onActivated(() => {
-  if (!settingsLoading.value) void loadSettings(!modelsInitialized.value);
+  if (!settingsLoading.value) void loadSettings();
 });
 
 onUnmounted(() => {

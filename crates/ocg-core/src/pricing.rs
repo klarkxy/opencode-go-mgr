@@ -11,29 +11,10 @@ pub const SOURCE_URL: &str = "https://opencode.ai/docs/go/";
 const SOURCE_HOST: &str = "opencode.ai";
 const MAX_DOCUMENT_BYTES: usize = 2 * 1024 * 1024;
 const MONTHLY_LIMIT: f64 = 60.0;
-const ADJUSTMENT_POLICY_VERSION: &str = "local-v3";
+const ADJUSTMENT_POLICY_VERSION: &str = "local-v4";
 
 // Audit reference only; the runtime never fetches supplier pricing pages:
 // https://platform.minimaxi.com/docs/guides/pricing-paygo
-
-const REQUIRED_MODEL_IDS: &[&str] = &[
-    "grok-4.5",
-    "glm-5.2",
-    "glm-5.1",
-    "kimi-k3",
-    "kimi-k2.7-code",
-    "kimi-k2.6",
-    "mimo-v2.5",
-    "mimo-v2.5-pro",
-    "minimax-m3",
-    "minimax-m2.7",
-    "minimax-m2.5",
-    "qwen3.7-max",
-    "qwen3.7-plus",
-    "qwen3.6-plus",
-    "deepseek-v4-pro",
-    "deepseek-v4-flash",
-];
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PricingLimits {
@@ -58,12 +39,8 @@ pub struct PricingModel {
     pub cache_read: f64,
     pub cache_write: Option<f64>,
     pub usage: f64,
-    /// Multiplier already reflected in the official token rates relative to
-    /// the supplier baseline. This is informational and does not replace the
-    /// model-specific Go Usage conversion below.
-    #[serde(default = "default_official_price_multiplier")]
-    pub official_price_multiplier: f64,
-    /// Go quota multiplier applied after the official rates: monthly limit / Usage.
+    /// Editable OpenCode Go multiplier applied after the official token rates.
+    /// Fresh official snapshots derive it as monthly limit / model Usage.
     pub quota_multiplier: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub min_input_tokens: Option<i64>,
@@ -302,7 +279,7 @@ pub fn embedded_seed() -> PricingSnapshot {
             60.0,
         ),
     ];
-    apply_local_pricing_policy(&mut models, MONTHLY_LIMIT);
+    apply_official_pricing_policy(&mut models, MONTHLY_LIMIT);
     sort_models(&mut models);
     PricingSnapshot {
         revision: format!("seed-2026-07-17-{ADJUSTMENT_POLICY_VERSION}"),
@@ -324,11 +301,33 @@ pub(crate) fn ensure_current_adjustment_policy(mut snapshot: PricingSnapshot) ->
     if snapshot.adjustment_policy_version == ADJUSTMENT_POLICY_VERSION {
         return snapshot;
     }
-    apply_local_pricing_policy(&mut snapshot.models, snapshot.limits.window_month);
+
+    // local-v2 and older divided the Go multiplier by a separate supplier-price
+    // multiplier for two Pro models. Manual multiplier editing did not exist in
+    // those revisions, so repairing them from the official Usage column is safe.
+    // local-v3 already stores the correct applied multiplier, while local-v4+
+    // may contain user edits and must never be silently rebased by a policy bump.
+    if legacy_policy_needs_multiplier_repair(&snapshot.adjustment_policy_version) {
+        apply_official_multipliers(&mut snapshot.models, snapshot.limits.window_month);
+    }
+    add_adjustments(&mut snapshot.models);
     snapshot.adjustment_policy_version = ADJUSTMENT_POLICY_VERSION.to_string();
-    snapshot.revision = revision_for_content_hash(&snapshot.content_hash);
+    snapshot.revision = unique_revision_for_content_hash(&snapshot.content_hash);
     snapshot.activated_at = Utc::now().to_rfc3339();
     snapshot
+}
+
+pub(crate) fn stamp_pricing_activation(mut snapshot: PricingSnapshot) -> PricingSnapshot {
+    snapshot.revision = unique_revision_for_content_hash(&snapshot.content_hash);
+    snapshot.activated_at = Utc::now().to_rfc3339();
+    snapshot
+}
+
+fn legacy_policy_needs_multiplier_repair(version: &str) -> bool {
+    version
+        .strip_prefix("local-v")
+        .and_then(|value| value.parse::<u32>().ok())
+        .is_none_or(|version| version < 3)
 }
 
 fn seed_model(
@@ -340,7 +339,6 @@ fn seed_model(
     cache_write: Option<f64>,
     usage: f64,
 ) -> PricingModel {
-    let official_price_multiplier = official_price_multiplier(id);
     PricingModel {
         model_id: id.to_string(),
         display_name: name.to_string(),
@@ -349,7 +347,6 @@ fn seed_model(
         cache_read,
         cache_write,
         usage,
-        official_price_multiplier,
         quota_multiplier: MONTHLY_LIMIT / usage,
         min_input_tokens: None,
         max_input_tokens: None,
@@ -507,7 +504,6 @@ pub fn parse_official_html(html: &str) -> Result<PricingSnapshot> {
         if usage <= 0.0 {
             bail!("{display_name} Usage must be positive");
         }
-        let official_price_multiplier = official_price_multiplier(&id);
         models.push(PricingModel {
             model_id: id,
             display_name,
@@ -516,7 +512,6 @@ pub fn parse_official_html(html: &str) -> Result<PricingSnapshot> {
             cache_read,
             cache_write,
             usage,
-            official_price_multiplier,
             quota_multiplier: limits.window_month / usage,
             min_input_tokens: minimum,
             max_input_tokens: maximum,
@@ -524,21 +519,14 @@ pub fn parse_official_html(html: &str) -> Result<PricingSnapshot> {
         });
     }
 
+    if models.is_empty() {
+        bail!("OpenCode Go pricing and model ID tables must not be empty");
+    }
+
     let covered = models
         .iter()
         .map(|model| model.model_id.as_str())
         .collect::<HashSet<_>>();
-    let missing = REQUIRED_MODEL_IDS
-        .iter()
-        .copied()
-        .filter(|id| !covered.contains(id))
-        .collect::<Vec<_>>();
-    if !missing.is_empty() {
-        bail!(
-            "OpenCode Go pricing table is missing known models: {}",
-            missing.join(", ")
-        );
-    }
     let missing_prices = seen_model_ids
         .iter()
         .filter(|id| !covered.contains(id.as_str()))
@@ -550,8 +538,11 @@ pub fn parse_official_html(html: &str) -> Result<PricingSnapshot> {
             missing_prices.join(", ")
         );
     }
-    validate_qwen_tiers(&models, "qwen3.7-plus")?;
-    validate_qwen_tiers(&models, "qwen3.6-plus")?;
+    for id in ["qwen3.7-plus", "qwen3.6-plus"] {
+        if covered.contains(id) {
+            validate_qwen_tiers(&models, id)?;
+        }
+    }
 
     let document_updated_at = parse_document_updated_at(html)?;
     let content_hash = format!("{:x}", Sha256::digest(html.as_bytes()));
@@ -559,7 +550,7 @@ pub fn parse_official_html(html: &str) -> Result<PricingSnapshot> {
     // pricing policy. This prevents a policy update from colliding with an
     // older snapshot when the Go HTML itself is unchanged.
     let revision = revision_for_content_hash(&content_hash);
-    apply_local_pricing_policy(&mut models, limits.window_month);
+    apply_official_pricing_policy(&mut models, limits.window_month);
     sort_models(&mut models);
 
     Ok(PricingSnapshot {
@@ -627,31 +618,28 @@ fn add_adjustments(models: &mut [PricingModel]) {
     }
 }
 
-fn apply_local_pricing_policy(models: &mut [PricingModel], monthly_limit: f64) {
-    for model in models.iter_mut() {
-        model.official_price_multiplier = official_price_multiplier(&model.model_id);
-        model.quota_multiplier = monthly_limit / model.usage;
-    }
+fn apply_official_pricing_policy(models: &mut [PricingModel], monthly_limit: f64) {
+    apply_official_multipliers(models, monthly_limit);
     add_adjustments(models);
 }
 
-fn official_price_multiplier(model_id: &str) -> f64 {
-    match model_id {
-        // OpenCode Go publishes these two token rates at 4x their supplier
-        // baseline. Their separate $15 Usage allowance still consumes the
-        // shared $60 quota at 4x, so this value must remain informational.
-        "deepseek-v4-pro" | "mimo-v2.5-pro" => 4.0,
-        _ => 1.0,
+fn apply_official_multipliers(models: &mut [PricingModel], monthly_limit: f64) {
+    for model in models.iter_mut() {
+        model.quota_multiplier = monthly_limit / model.usage;
     }
-}
-
-fn default_official_price_multiplier() -> f64 {
-    1.0
 }
 
 fn revision_for_content_hash(content_hash: &str) -> String {
     let prefix = content_hash.chars().take(16).collect::<String>();
     format!("go-{prefix}-{ADJUSTMENT_POLICY_VERSION}")
+}
+
+fn unique_revision_for_content_hash(content_hash: &str) -> String {
+    format!(
+        "{}-{}",
+        revision_for_content_hash(content_hash),
+        uuid::Uuid::new_v4().simple()
+    )
 }
 
 fn sort_models(models: &mut [PricingModel]) {
@@ -877,7 +865,7 @@ fn collapse_whitespace(input: &str) -> String {
 mod tests {
     use super::{
         embedded_seed, ensure_current_adjustment_policy, fetch_official_snapshot,
-        parse_official_html,
+        legacy_policy_needs_multiplier_repair, parse_official_html,
     };
 
     #[test]
@@ -910,7 +898,6 @@ mod tests {
                 .find(|entry| entry.model_id == model_id)
                 .unwrap();
             assert_eq!(model.usage, 15.0);
-            assert_eq!(model.official_price_multiplier, 4.0);
             assert_eq!(model.quota_multiplier, 4.0);
 
             let estimate = snapshot.estimate(model_id, prompt, completion, cached, 0, None);
@@ -928,7 +915,6 @@ mod tests {
             .find(|entry| entry.model_id == "grok-4.5")
             .unwrap();
         assert_eq!(grok.usage, 15.0);
-        assert_eq!(grok.official_price_multiplier, 1.0);
         assert_eq!(grok.quota_multiplier, 4.0);
         assert_eq!(
             snapshot.estimate("grok-4.5", 1_000_000, 0, 0, 0, None).cost,
@@ -941,8 +927,9 @@ mod tests {
         let mut snapshot = embedded_seed();
         snapshot.adjustment_policy_version = "local-v2".to_string();
         for model in &mut snapshot.models {
-            model.quota_multiplier =
-                snapshot.limits.window_month / model.usage / model.official_price_multiplier;
+            if matches!(model.model_id.as_str(), "deepseek-v4-pro" | "mimo-v2.5-pro") {
+                model.quota_multiplier = 1.0;
+            }
         }
 
         let upgraded = ensure_current_adjustment_policy(snapshot);
@@ -952,20 +939,23 @@ mod tests {
                 .iter()
                 .find(|entry| entry.model_id == model_id)
                 .unwrap();
-            assert_eq!(model.official_price_multiplier, 4.0);
             assert_eq!(model.quota_multiplier, 4.0);
         }
     }
 
     #[test]
-    fn old_snapshot_json_defaults_then_rebases_official_price_multiplier() {
+    fn legacy_snapshot_json_drops_old_price_multiplier_and_repairs_applied_multiplier() {
         let mut value = serde_json::to_value(embedded_seed()).unwrap();
-        value["adjustment_policy_version"] = serde_json::Value::String("minimax-v1".into());
+        value["adjustment_policy_version"] = serde_json::Value::String("local-v2".into());
         for model in value["models"].as_array_mut().unwrap() {
-            model
-                .as_object_mut()
-                .unwrap()
-                .remove("official_price_multiplier");
+            let object = model.as_object_mut().unwrap();
+            if matches!(
+                object.get("model_id").and_then(serde_json::Value::as_str),
+                Some("deepseek-v4-pro" | "mimo-v2.5-pro")
+            ) {
+                object.insert("official_price_multiplier".into(), serde_json::json!(4.0));
+                object.insert("quota_multiplier".into(), serde_json::json!(1.0));
+            }
         }
 
         let persisted = serde_json::from_value(value).unwrap();
@@ -976,9 +966,37 @@ mod tests {
                 .iter()
                 .find(|entry| entry.model_id == model_id)
                 .unwrap();
-            assert_eq!(model.official_price_multiplier, 4.0);
             assert_eq!(model.quota_multiplier, 4.0);
         }
+        assert!(
+            !serde_json::to_string(&upgraded)
+                .unwrap()
+                .contains("official_price_multiplier")
+        );
+    }
+
+    #[test]
+    fn editable_policy_versions_are_never_rebased() {
+        assert!(legacy_policy_needs_multiplier_repair("local-v2"));
+        assert!(!legacy_policy_needs_multiplier_repair("local-v3"));
+        assert!(!legacy_policy_needs_multiplier_repair("local-v4"));
+        assert!(!legacy_policy_needs_multiplier_repair("local-v99"));
+
+        let mut snapshot = embedded_seed();
+        snapshot.adjustment_policy_version = "local-v3".to_string();
+        snapshot
+            .models
+            .iter_mut()
+            .filter(|model| model.model_id == "qwen3.7-plus")
+            .for_each(|model| model.quota_multiplier = 0.75);
+        let upgraded = ensure_current_adjustment_policy(snapshot);
+        assert!(
+            upgraded
+                .models
+                .iter()
+                .filter(|model| model.model_id == "qwen3.7-plus")
+                .all(|model| model.quota_multiplier == 0.75)
+        );
     }
 
     #[test]
@@ -1045,20 +1063,81 @@ mod tests {
                 .iter()
                 .find(|entry| entry.model_id == model_id)
                 .unwrap();
-            assert_eq!(model.official_price_multiplier, 4.0);
             assert_eq!(model.quota_multiplier, 4.0);
         }
     }
 
     #[test]
-    fn rejects_incomplete_fixture_without_replacing_lkg() {
+    fn rejects_model_id_without_a_matching_price_row() {
         let fixture = include_str!("../tests/fixtures/opencode-go.html");
         let incomplete = fixture.replace("<tr><td>Grok 4.5</td><td>$2.00</td><td>$6.00</td><td>$0.50</td><td>-</td><td>$15</td></tr>", "");
         assert!(
             parse_official_html(&incomplete)
                 .unwrap_err()
                 .to_string()
-                .contains("missing known models")
+                .contains("model ID table contains models without pricing rows")
+        );
+    }
+
+    #[test]
+    fn accepts_official_model_removal_when_both_tables_still_match() {
+        let fixture = include_str!("../tests/fixtures/opencode-go.html")
+            .replace(
+                "<tr><td>Grok 4.5</td><td>$2.00</td><td>$6.00</td><td>$0.50</td><td>-</td><td>$15</td></tr>",
+                "",
+            )
+            .replace(
+                "<tr><td>Grok 4.5</td><td>grok-4.5</td><td>x</td><td>x</td></tr>",
+                "",
+            );
+        let snapshot = parse_official_html(&fixture).unwrap();
+        assert!(
+            snapshot
+                .models
+                .iter()
+                .all(|model| model.model_id != "grok-4.5")
+        );
+    }
+
+    #[test]
+    fn qwen_tier_validation_is_conditional_on_the_model_being_present() {
+        let fixture = include_str!("../tests/fixtures/opencode-go.html")
+            .replace(
+                "<tr><td>Qwen3.7 Plus (&#x2264; 256K tokens)</td><td>$0.40</td><td>$1.60</td><td>$0.04</td><td>$0.50</td><td>$60</td></tr>",
+                "",
+            )
+            .replace(
+                "<tr><td>Qwen3.7 Plus (&gt; 256K tokens)</td><td>$1.20</td><td>$4.80</td><td>$0.12</td><td>$1.50</td><td>$60</td></tr>",
+                "",
+            )
+            .replace(
+                "<tr><td>Qwen3.7 Plus</td><td>qwen3.7-plus</td><td>x</td><td>x</td></tr>",
+                "",
+            );
+        let snapshot = parse_official_html(&fixture).unwrap();
+        assert!(
+            snapshot
+                .models
+                .iter()
+                .all(|model| model.model_id != "qwen3.7-plus")
+        );
+    }
+
+    #[test]
+    fn rejects_structurally_valid_but_empty_catalog() {
+        let fixture = r#"
+            <p>5 hour limit — $12 of usage</p>
+            <p>Weekly limit — $30 of usage</p>
+            <p>Monthly limit — $60 of usage</p>
+            <table><thead><tr><th>Model</th><th>Input</th><th>Output</th><th>Cached Read</th><th>Cached Write</th><th>Usage</th></tr></thead><tbody></tbody></table>
+            <table><thead><tr><th>Model</th><th>Model ID</th><th>Endpoint</th><th>AI SDK Package</th></tr></thead><tbody></tbody></table>
+            <time datetime="2026-07-17T15:53:00.000Z">Jul 17, 2026</time>
+        "#;
+        assert!(
+            parse_official_html(fixture)
+                .unwrap_err()
+                .to_string()
+                .contains("must not be empty")
         );
     }
 

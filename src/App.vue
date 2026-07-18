@@ -271,8 +271,8 @@ function renderIcon(icon: Component) {
 const menuOptions = computed(() => [
   { label: t("仪表盘"), key: "dashboard", icon: renderIcon(DashboardOutlined) },
   { label: t("账号"), key: "accounts", icon: renderIcon(KeyOutlined) },
-  { label: t("应用"), key: "apps", icon: renderIcon(AppstoreOutlined) },
   { label: t("价格表"), key: "pricing", icon: renderIcon(DollarCircleOutlined) },
+  { label: t("应用"), key: "apps", icon: renderIcon(AppstoreOutlined) },
   { label: t("日志"), key: "logs", icon: renderIcon(FileTextOutlined) },
   { label: t("设置"), key: "settings", icon: renderIcon(SettingOutlined) },
 ]);

@@ -537,9 +537,12 @@ test("applications view uses deep-linked subpages and a responsive second naviga
   assert.match(modelRow, /@click="restoreApplicationDefaults"/);
   assert.equal(applications.match(/@click="restoreApplicationDefaults"/g)?.length, 1);
   assert.match(app, /<KeepAlive>\s*<Applications v-if="activeKey === 'apps'" \/>\s*<\/KeepAlive>/);
-  assert.match(applications, /modelsInitialized\.value = true/);
-  assert.match(applications, /onActivated\(\(\) => \{[\s\S]*?loadSettings\(!modelsInitialized\.value\)/);
+  assert.doesNotMatch(applications, /modelsInitialized/);
+  assert.match(applications, /onActivated\(\(\) => \{[\s\S]*?if \(!settingsLoading\.value\) void loadSettings\(\)/);
   assert.match(applications, /applicationModelIds\.value = modelIds/);
+  assert.match(applications, /activeGuide\.value\.id === "claude-desktop"[\s\S]*?modelOptions\.value[\s\S]*?applicationModelIds\.value\.map/);
+  assert.match(applications, /reconcileApplicationModelSelection\([\s\S]*?modelIds,[\s\S]*?defaultSelectedModels/);
+  assert.match(applications, /if \(!modelIds\.includes\(modelValues\.value\[field\]\)\)/);
   assert.match(applications, /selectedModelsByApplication\.value\[currentApplication\.value\]/);
   assert.match(applications, /selectedModelByApplication\.value\[currentApplication\.value\]/);
   assert.match(restoreDefaults, /recommendClaudeCodeModel\(field, models\)/);
@@ -613,7 +616,12 @@ test("settings expose the downstream display root and bounded request timeouts",
   assert.doesNotMatch(settings, /PricingCatalog/);
   assert.match(pricing, /<PricingCatalog \/>/);
   assert.match(api, /getPricing: \(\) => request<PricingSnapshot>\("\/pricing"\)/);
-  assert.match(api, /refreshPricing: \(\) => request<PricingRefreshResult>\("\/pricing\/refresh", \{ method: "POST" \}\)/);
+  assert.match(api, /refreshPricing: \(refresh: PricingRefreshRequest = \{\}\) => request<PricingRefreshResult>/);
+  assert.match(api, /body: jsonBody\(refresh\)/);
+  assert.match(api, /official_content_hash\?: string/);
+  assert.match(api, /expected_official_content_hash\?: string/);
+  assert.match(api, /updatePricingMultipliers:[\s\S]*request<PricingSnapshot>\("\/pricing\/multipliers"/);
+  assert.match(api, /body: jsonBody\(\{ expected_revision: expectedRevision, multipliers \}\)/);
 });
 
 test("accounts derive quota limits from the active pricing snapshot", async () => {
@@ -645,6 +653,32 @@ test("account form rejects whitespace-only required credentials", async () => {
 
   assert.match(accountForm, /name:\s*\{\s*required: true,\s*whitespace: true,/);
   assert.match(accountForm, /base\.key = \{\s*required: true,\s*whitespace: true,/);
+  assert.match(accountForm, /purchaseDate: \[\s*\{\s*required: true,\s*type: "number",/);
+});
+
+test("account form keeps identity first and does not collect managed password or expiry", async () => {
+  const accountForm = await readFile(new URL("../components/AccountFormModal.vue", import.meta.url), "utf8");
+  const template = accountForm.slice(accountForm.indexOf("<template>"), accountForm.indexOf("<script setup"));
+
+  assert.ok(template.indexOf('path="username"') < template.indexOf('path="name"'));
+  assert.doesNotMatch(template, /path="password"|t\(['"]到期日期['"]\)/);
+  assert.doesNotMatch(accountForm, /payload\.password|clearPassword/);
+});
+
+test("new account names follow the login account until the name is edited", async () => {
+  const accountForm = await readFile(new URL("../components/AccountFormModal.vue", import.meta.url), "utf8");
+
+  assert.match(accountForm, /@update:value="handleUsernameUpdate"/);
+  assert.match(accountForm, /@update:value="handleNameUpdate"/);
+  assert.match(
+    accountForm,
+    /function handleUsernameUpdate\(value: string\) \{\s*form\.value\.username = value;\s*if \(!isEdit\.value && !nameWasEdited\.value\) \{\s*form\.value\.name = value;/,
+  );
+  assert.match(
+    accountForm,
+    /function handleNameUpdate\(value: string\) \{\s*form\.value\.name = value;\s*if \(!isEdit\.value\) \{\s*nameWasEdited\.value = true;/,
+  );
+  assert.match(accountForm, /nameWasEdited\.value = isEdit\.value/);
 });
 
 test("settings expose supported Windows auto-start safely", async () => {

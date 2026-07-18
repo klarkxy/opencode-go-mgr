@@ -87,9 +87,10 @@ browser.
 
 ## Connect Your First Client
 
-1. In **Accounts**, add an OpenCode-Go account with its key. You can also
-   save the OpenCode-Go `username` and `password`; the gateway uses the
-   password to refresh upstream sessions when needed.
+1. In **Accounts**, add an OpenCode-Go account with its key. The login account
+   is optional; when entered first, it is copied into the required display
+   name until you edit that name yourself. The dashboard does not collect or
+   manage the OpenCode-Go login password.
 2. In the dashboard's **Connection Center**, copy the **Gateway Key** and the
    **API Base URL** (`http://127.0.0.1:9042/v1`).
 3. Point your client at the base URL with the Gateway Key. The
@@ -316,10 +317,14 @@ Base URL conventions per client:
 - VS Code Copilot Chat needs the full `/v1/chat/completions` URL. Codex needs
   `/v1` plus `wire_api = "responses"`.
 
-Model choices and edited snippets are cached separately per application while
-the current dashboard page remains alive; a page reload resets this in-memory
-state. **Restore defaults** resets the active application's model selection
-and snippet drafts.
+Selectable models are the intersection of the upstream's current catalog,
+models the gateway knows how to route, and the active pricing snapshot. The
+Applications view synchronizes this list whenever you return to it, so an
+accepted pricing refresh also updates model choices. Model selections and
+edited snippets are cached separately per application while the current
+dashboard page remains alive; a page reload resets this in-memory state.
+**Restore defaults** resets the active application's model selection and
+snippet drafts.
 
 Claude Desktop is the exception with durable model mappings: before its
 configuration is copied, the selected `sonnet`, `opus`, and `haiku` targets
@@ -340,10 +345,11 @@ accounting.
   cost recorded by OCG Manager continues to accumulate above that baseline.
   Reaching 100% is still only a warning; it does not stop the gateway from
   selecting the account.
-- **Credentials.** You can paste an OpenCode-Go `username` and `password`
-  alongside the key; both the key and the saved password are only obfuscated
-  on disk. The gateway uses the password to refresh upstream sessions when
-  needed.
+- **Identity and credentials.** The name is the account's required primary
+  display label. The login account is optional; on creation, entering it first
+  copies it into the name until you edit the name yourself. The dashboard
+  stores the account key but does not collect or manage the OpenCode-Go login
+  password.
 - **Purchase date.** New accounts default to the browser's current date, and
   the value remains editable. Expiry is the same day in the next natural
   month, clamped to that month's last day when necessary: `2026-01-31`
@@ -357,6 +363,23 @@ accounting.
   this same SQLite-backed order.
 - **Cooldown reset.** You can reset a cooldown manually from this view. The
   bar snaps back to its local estimate as soon as the cooldown is cleared.
+
+### Pricing
+
+The **Pricing** view shows the active revision, documentation timestamp,
+window limits, four USD token rates, `Usage`, and one official quota multiplier.
+Combinable prices use the standard tier as the complete root row. Expanding it
+shows higher-context Qwen tiers and MiniMax long-context, high-speed, priority,
+or combined upgrade tiers.
+
+The official multiplier defaults to `monthly limit / Usage`, but can be edited
+for temporary promotions. Saving creates a persistent revision used by later
+local quota estimates. The application contacts only
+`https://opencode.ai/docs/go/`, and only after you press refresh. When fetched
+official multipliers differ from the active values, the dashboard shows the
+differences and asks whether to keep the current values or use the latest
+official values; it does not activate new prices or model choices before that
+decision. A failed fetch or validation keeps the last successful snapshot.
 
 ### Logs
 
@@ -387,12 +410,6 @@ The **Settings** view exposes the persistent gateway configuration:
   idle value is enforced between response chunks. Existing installations are
   migrated from 30/120/300 only when that complete old default tuple is still
   untouched.
-- **OpenCode Go quota pricing** — shows the active revision, documentation
-  timestamp, window limits, USD token rates, `Usage`, any multiplier already
-  included in the official listed rate, the remaining Go multiplier, and
-  local MiniMax adjustments. The application contacts only
-  `https://opencode.ai/docs/go/`, and only after you press refresh. A failed
-  refresh leaves the last successful snapshot active.
 - **Check for updates / Update now** — updater-enabled installed desktop
   builds check the latest GitHub Release and can download, verify, and
   install its signed platform package. Version 1.4.1 needs the one-time
@@ -561,14 +578,11 @@ requests the gateway actually forwards — not by the upstream's authoritative
 billing. Token rates, window limits, and each model's `Usage` come from the
 active OpenCode Go USD snapshot.
 
-- The Go quota multiplier is always `monthly limit / Usage`. Any
-  `official_price_multiplier` is informational: it describes how the published
-  token rate compares with the supplier baseline and does not replace the
-  model-specific Usage allowance.
-- The official rates for `deepseek-v4-pro` (DS V4 Pro) and `mimo-v2.5-pro`
-  already include `4x` relative to their supplier baseline, while their `$15`
-  Usage allowance still requires a separate `60 / 15 = 4x` quota conversion.
-  Grok also has `$15` Usage and therefore uses the same quota conversion.
+- The official multiplier defaults to `monthly limit / Usage`. A user can
+  override it for a temporary promotion; subsequent requests use the active
+  persisted value, and refresh never overwrites it without confirmation.
+- `deepseek-v4-pro` (DS V4 Pro), `mimo-v2.5-pro`, and Grok currently have a
+  `$15` Usage allowance, which corresponds to a `60 / 15 = 4x` multiplier.
 - The applicable local MiniMax adjustment is applied last. No supplier API
   price, CNY value, or exchange rate participates in the calculation.
 
