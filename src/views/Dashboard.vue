@@ -108,7 +108,7 @@
           </div>
         </div>
         <p v-if="connectionUrls.insecureHttp" class="connection-warning" role="status">
-          {{ t("非本机 HTTP 会明文传输 Gateway Key 与请求内容，请仅在可信网络中使用。") }}
+          {{ t("非本机 HTTP 会明文传输 Key 与请求内容，请仅在可信网络中使用。") }}
         </p>
       </div>
       <img :src="characterImage" alt="" class="hero-character" aria-hidden="true" />
@@ -161,7 +161,11 @@
         <h3 class="card-title">{{ t("账号概览") }}</h3>
         <span class="card-desc">{{ t("账号数：{count}", { count: formatNumber(accounts.length) }) }}</span>
       </div>
-      <n-empty v-if="accounts.length === 0" :description="t('暂无账号，请前往账号页添加')" />
+      <n-empty v-if="accounts.length === 0" :description="t('暂无账号')">
+        <template #extra>
+          <n-button size="small" @click="goToAccounts">{{ t("前往账号页添加") }}</n-button>
+        </template>
+      </n-empty>
       <div v-else class="account-grid">
         <article v-for="account in accounts" :key="account.id" class="account-cell">
           <div class="account-top">
@@ -329,6 +333,13 @@ async function regenerateKey() {
   }
 }
 
+function goToAccounts() {
+  const url = new URL(window.location.href);
+  url.searchParams.set("view", "accounts");
+  window.history.pushState(null, "", url);
+  window.dispatchEvent(new Event("popstate"));
+}
+
 let lifecycleClock: number | undefined;
 
 onMounted(async () => {
@@ -423,14 +434,14 @@ onUnmounted(() => {
 .connection-head h2 {
   margin: 0;
   color: var(--ocg-ink);
-  font: 700 20px/1.2 "Bahnschrift", "Segoe UI Variable Display", sans-serif;
+  font: 700 var(--ocg-font-xl)/1.2 "Bahnschrift", "Segoe UI Variable Display", sans-serif;
 }
 .ready-mark {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   color: var(--ocg-success);
-  font: 700 16px/1 "Cascadia Mono", Consolas, monospace;
+  font: 700 var(--ocg-font-sm)/1 "Cascadia Mono", Consolas, monospace;
   letter-spacing: 0.08em;
 }
 .ready-mark > span {
@@ -448,7 +459,7 @@ onUnmounted(() => {
   display: grid;
   grid-template-columns: 28px minmax(0, 1fr) auto;
   align-items: center;
-  min-height: 48px;
+  min-height: 44px;
   padding: 6px 8px 6px 12px;
   border: 1px solid var(--ocg-border);
   border-radius: 10px;
@@ -462,7 +473,7 @@ onUnmounted(() => {
 .connection-value code {
   display: block;
   overflow: hidden;
-  font: 16px/1.4 "Cascadia Mono", Consolas, monospace;
+  font: var(--ocg-font-md)/1.4 "Cascadia Mono", Consolas, monospace;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -474,7 +485,7 @@ onUnmounted(() => {
 .connection-warning {
   margin: 10px 2px 0;
   color: var(--ocg-warning);
-  font-size: var(--ocg-font-size);
+  font-size: var(--ocg-font-sm);
   line-height: 1.5;
 }
 .hero-character {
@@ -527,19 +538,19 @@ onUnmounted(() => {
 }
 .kpi-card strong {
   color: var(--ocg-ink);
-  font: 700 22px/1.1 "Bahnschrift", "Segoe UI Variable Display", sans-serif;
+  font: 700 var(--ocg-font-xl)/1.1 "Bahnschrift", "Segoe UI Variable Display", sans-serif;
   font-variant-numeric: tabular-nums;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .kpi-card small {
   color: var(--ocg-subtle);
-  font-size: var(--ocg-font-size);
+  font-size: var(--ocg-font-sm);
 }
 .kpi-card span:last-child {
   margin-top: 3px;
   color: var(--ocg-subtle);
-  font-size: var(--ocg-font-size);
+  font-size: var(--ocg-font-xs);
 }
 
 .card {
@@ -558,12 +569,12 @@ onUnmounted(() => {
 .card-title {
   margin: 0;
   color: var(--ocg-ink);
-  font: 650 18px/1.3 "Bahnschrift", "Segoe UI Variable Display", sans-serif;
+  font: 650 var(--ocg-font-lg)/1.3 "Bahnschrift", "Segoe UI Variable Display", sans-serif;
 }
 .card-desc {
   margin: 3px 0 0;
   color: var(--ocg-subtle);
-  font-size: var(--ocg-font-size);
+  font-size: var(--ocg-font-sm);
 }
 .chart-card {
   padding-bottom: 12px;
@@ -574,7 +585,7 @@ onUnmounted(() => {
   justify-content: flex-end;
   gap: 8px 16px;
   color: var(--ocg-subtle);
-  font-size: var(--ocg-font-size);
+  font-size: var(--ocg-font-sm);
 }
 .chart-stats b {
   color: var(--ocg-ink);
@@ -592,7 +603,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 5px;
   color: var(--ocg-muted);
-  font-size: var(--ocg-font-size);
+  font-size: var(--ocg-font-sm);
 }
 .legend-dot {
   width: 7px;
@@ -629,13 +640,13 @@ onUnmounted(() => {
 .account-top strong {
   overflow: hidden;
   color: var(--ocg-ink);
-  font-size: var(--ocg-font-size);
+  font-size: var(--ocg-font-md);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .account-status {
   flex: 0 0 auto;
-  font-size: var(--ocg-font-size);
+  font-size: var(--ocg-font-sm);
   font-weight: 650;
 }
 .account-status.active { color: var(--ocg-success); }
@@ -648,7 +659,7 @@ onUnmounted(() => {
   display: grid;
   gap: 2px;
   color: var(--ocg-subtle);
-  font-size: var(--ocg-font-size);
+  font-size: var(--ocg-font-sm);
   line-height: 1.5;
 }
 .account-usage-row {
@@ -666,7 +677,7 @@ onUnmounted(() => {
 }
 .account-usage-empty {
   color: var(--ocg-subtle);
-  font-size: var(--ocg-font-size);
+  font-size: var(--ocg-font-sm);
 }
 
 @media (max-width: 900px) {
@@ -719,7 +730,7 @@ onUnmounted(() => {
     padding: 12px;
   }
   .kpi-card strong {
-    font-size: 18px;
+    font-size: var(--ocg-font-lg);
   }
   .chart-head {
     align-items: flex-start;

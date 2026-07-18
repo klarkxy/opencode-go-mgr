@@ -224,10 +224,15 @@ export function getThemeTokens(theme: ThemeName, osTheme: string | null | undefi
 export function applyTheme(root: HTMLElement, resolved: ResolvedTheme, tokens: ThemeTokens): void {
   root.dataset.theme = resolved;
   root.style.colorScheme = tokens.colorScheme;
-  // 基准字号：全 UI 统一 16px，视觉层级靠字重/颜色而非字号缩放（见 toNaiveThemeOverrides 注释）。
-  // 收口为 token 后，若需整体调整基准字号只需改这一处。
-  root.style.setProperty("--ocg-font-size", "16px");
+  // 字号阶梯：层级由六档字号与字重共同承担（见 DESIGN.md Typography）。
+  // 收口为 token 后，若需整体调整字号只需改这一处。
   const values: Record<string, string> = {
+    "--ocg-font-xs": "12px",
+    "--ocg-font-sm": "13px",
+    "--ocg-font-md": "14px",
+    "--ocg-font-lg": "16px",
+    "--ocg-font-xl": "20px",
+    "--ocg-font-2xl": "24px",
     "--ocg-canvas": tokens.canvas,
     "--ocg-surface": tokens.surface,
     "--ocg-surface-raised": tokens.surfaceRaised,
@@ -282,16 +287,15 @@ export function toNaiveThemeOverrides(tokens: ThemeTokens): GlobalThemeOverrides
       borderRadius: "10px",
       fontFamily: '"Segoe UI Variable Text", "Noto Sans SC", "Microsoft YaHei UI", sans-serif',
       fontFamilyMono: '"Cascadia Mono", Consolas, monospace',
-      fontSize: "16px",
-      // All sizes unified to 16px: the design intentionally uses a single base
-      // size across the UI, with visual hierarchy driven by weight and color
-      // instead of font-size scaling.
-      fontSizeMini: "16px",
-      fontSizeTiny: "16px",
-      fontSizeSmall: "16px",
-      fontSizeMedium: "16px",
+      fontSize: "14px",
+      // 字号阶梯（对应 --ocg-font-* token）：层级由字号与字重共同承担，
+      // 12/13 用于说明与辅助文本，14 为正文基准，16/20 用于标题与关键数字。
+      fontSizeMini: "12px",
+      fontSizeTiny: "12px",
+      fontSizeSmall: "13px",
+      fontSizeMedium: "14px",
       fontSizeLarge: "16px",
-      fontSizeHuge: "16px",
+      fontSizeHuge: "20px",
       lineHeight: "1.6",
     },
     Input: {

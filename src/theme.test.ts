@@ -76,7 +76,12 @@ test("theme tokens drive CSS and Naive UI from the same values", () => {
 
     assert.equal(root.dataset.theme, resolved);
     const expectedProperties = {
-      "--ocg-font-size": "16px",
+      "--ocg-font-xs": "12px",
+      "--ocg-font-sm": "13px",
+      "--ocg-font-md": "14px",
+      "--ocg-font-lg": "16px",
+      "--ocg-font-xl": "20px",
+      "--ocg-font-2xl": "24px",
       "--ocg-canvas": tokens.canvas,
       "--ocg-surface": tokens.surface,
       "--ocg-surface-raised": tokens.surfaceRaised,
@@ -107,15 +112,18 @@ test("theme tokens drive CSS and Naive UI from the same values", () => {
     assert.equal(common.tableHeaderColor, tokens.primarySoft);
     assert.equal(common.hoverColor, tokens.primarySoft);
     assert.equal(common.pressedColor, tokens.canvas);
-    for (const fontSize of [
-      common.fontSize,
-      common.fontSizeMini,
-      common.fontSizeTiny,
-      common.fontSizeSmall,
-      common.fontSizeMedium,
-      common.fontSizeLarge,
-      common.fontSizeHuge,
-    ]) assert.equal(fontSize, "16px");
+    const expectedFontSizes = {
+      fontSize: "14px",
+      fontSizeMini: "12px",
+      fontSizeTiny: "12px",
+      fontSizeSmall: "13px",
+      fontSizeMedium: "14px",
+      fontSizeLarge: "16px",
+      fontSizeHuge: "20px",
+    } as const;
+    for (const [key, expected] of Object.entries(expectedFontSizes)) {
+      assert.equal(common[key as keyof typeof expectedFontSizes], expected, `${resolved} ${key}`);
+    }
     assert.equal(common.lineHeight, "1.6");
     assert.equal(
       overrides.Input!.border,
