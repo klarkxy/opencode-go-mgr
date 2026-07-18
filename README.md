@@ -6,13 +6,12 @@
   <img src="assets/logo/ocg_logo_final_transparent.png" alt="OCG Manager Logo" width="140">
 </p>
 
-OCG Manager is a local, multi-account operations console for OpenCode‑Go. It
-stores your OpenCode‑Go account keys in a local SQLite database, exposes a
-multi-protocol gateway rooted at `http://127.0.0.1:9042`, and serves a Vue 3
-dashboard from that same gateway. OpenAI and Anthropic clients use `/v1`, while
-Gemini and Claude Desktop use dedicated compatibility paths. The desktop build
-is a Tauri v2 tray app for Windows, macOS, and Linux; a headless CLI is shipped
-alongside the GUI.
+OCG Manager is a local operations console for OpenCode-Go accounts. It stores
+your account keys in a local SQLite database and serves them through a
+multi-protocol gateway at `http://127.0.0.1:9042` — the same port that hosts
+the management dashboard. Clients can speak OpenAI, Anthropic, Gemini, or
+Claude Desktop protocol; the gateway converts each request to the model's
+native OpenCode-Go protocol and converts the response back.
 
 <p align="center">
   <img src="assets/opencode娘.png" alt="OpenCode-Go mascot" width="360">
@@ -20,55 +19,78 @@ alongside the GUI.
 
 ## Highlights
 
-- **OpenAI / Anthropic / Gemini compatible gateway** — Chat Completions,
-  Responses, Messages, Gemini `generateContent` / `streamGenerateContent`, and
-  model discovery are accepted on the same port. Requests are routed to the
-  model's native OpenCode‑Go protocol and converted back to the client format.
-- **Claude Desktop aliases** — `/claude-desktop/v1/messages` and
-  `/claude-desktop/v1/models` expose the Claude model names expected by the
-  desktop client while routing each alias to a configured OpenCode‑Go model.
-- **Controllable local multi-account rotation** — drag account cards to persist
-  their priority. The gateway follows that list order while skipping disabled,
-  cooling, or already-failed accounts for fast failover.
-- **Purchase-cycle reminders** — each account records its purchase date and an
-  expiry date one natural month later. Accounts and Dashboard show the remaining
-  days without automatically disabling an expired account.
-- **OpenCode Go quota accounting** — 5-hour, weekly, and monthly usage bars
-  are estimated in USD from the active OpenCode Go documentation snapshot.
-  Settings can refresh that snapshot on demand; failed refreshes keep the
-  last successful revision.
-- **Dashboard first run** — the first visitor on a non‑loopback bind creates
-  the single administrator account; the desktop and CLI builds bind loopback
-  by default and skip login.
-- **Tray app on every desktop platform** — the Windows installer, the macOS
-  Universal DMG, and the Linux AppImage/`.deb` all share the same Tauri v2
-  codebase and a single instance lock.
-- **Headless CLI** — `ocg-manager-cli` ships with the same dashboard assets
-  and is ideal for servers, Docker, and remote gateways.
-- **Signed desktop updates** — Settings checks the latest GitHub Release.
-  Updater-enabled installed desktop builds can download, verify, and install
-  the signed replacement in place; development builds, CLI, and Docker keep
-  the release-page/manual replacement path.
-- **No remote sync, no telemetry** — each node owns its own data; there is no
-  cloud service, no Admin API, and no cross‑node synchronization.
+- **Multi-protocol gateway** — OpenAI Chat Completions / Responses, Anthropic
+  Messages, Gemini `generateContent` / `streamGenerateContent`, model
+  discovery, and Claude Desktop aliases on one port.
+- **Local multi-account rotation** — drag account cards to persist priority;
+  the gateway skips disabled, cooling, or already-failed accounts.
+- **Purchase-cycle reminders** — per-account purchase dates and monthly
+  expiry with remaining days in the dashboard; expiry never blocks an account.
+- **OpenCode Go quota estimates** — 5-hour, weekly, and monthly usage bars
+  from a USD pricing snapshot you can refresh in Settings.
+- **13 client guides** — copy-ready configuration snippets for Claude Code,
+  Claude Desktop, Codex, Gemini CLI, and nine other tools.
+- **Tray app and headless CLI** — a Tauri v2 tray app for Windows, macOS, and
+  Linux, plus `ocg-manager-cli` for servers and Docker.
+- **Signed desktop updates** — installed desktop builds check, verify, and
+  install updates from Settings.
+- **No remote sync, no telemetry** — every node owns its own data.
 
 ## Download
 
 Download the GUI installer or CLI archive for your platform from the
-[latest GitHub Release](https://github.com/klarkxy/opencode-go-mgr/releases/latest).
-Download `SHA256SUMS` from the same release and compare the matching entry with
-the artifact's SHA-256 before installing. On PowerShell use
-`Get-FileHash <file> -Algorithm SHA256`; on macOS use `shasum -a 256 <file>`;
-on Linux use `sha256sum <file>`.
+[latest GitHub Release](https://github.com/klarkxy/opencode-go-mgr/releases/latest),
+and verify it against `SHA256SUMS` from the same release before installing:
+`Get-FileHash <file> -Algorithm SHA256` on PowerShell, `shasum -a 256 <file>`
+on macOS, or `sha256sum <file>` on Linux.
+
+| Platform | GUI | CLI |
+| --- | --- | --- |
+| Windows 10/11 x64 | `ocg-manager_<version>_windows-x64-setup.exe` (NSIS) | `ocg-manager-cli_<version>_windows-x64.zip` |
+| macOS 11+ Intel and Apple Silicon | `ocg-manager_<version>_macos-universal.dmg` | `ocg-manager-cli_<version>_macos-universal.tar.gz` |
+| Linux x64 | `ocg-manager_<version>_linux-x64.AppImage` and `.deb` | `ocg-manager-cli_<version>_linux-x64.tar.gz` |
+
+Each CLI archive contains the executable, `dist/`, and `LICENSE`; keep `dist/`
+beside the executable so `serve` can serve the dashboard. There is no
+cross-compile matrix: `pnpm run build` only produces artifacts for the current
+native platform. Signed-updater behavior, SmartScreen/Gatekeeper caveats, and
+the unsupported list (ARM64, 32-bit x86, RPM, Snap, app stores) are covered in
+the [Maintainer guide](docs/MAINTAINER.md).
+
+## Quick Start
+
+```text
+Gateway: http://127.0.0.1:9042/v1
+Auth:    Authorization: Bearer <key>
+```
+
+The key shown in the dashboard is the **Gateway Key** — the only secret your
+client needs. The gateway injects the stored OpenCode-Go account key on the
+upstream side.
+
+1. Install and launch OCG Manager. The dashboard opens in your system browser
+   once the gateway is ready; use the tray icon to reopen it.
+2. Add an OpenCode-Go account in the **Accounts** view and copy the Gateway
+   Key.
+3. Point your client at `http://127.0.0.1:9042/v1`. The **Applications** view
+   has per-client configuration guides.
+
+The smallest end-to-end check — a streaming Chat Completions request:
+
+```bash
+curl http://127.0.0.1:9042/v1/chat/completions \
+  -H "Authorization: Bearer ocg-xxxxxxxx-xxxxxxxx" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"glm-5.2","messages":[{"role":"user","content":"hello"}],"stream":true}'
+```
 
 ### Docker quick start
 
-The public headless image is `ghcr.io/klarkxy/opencode-go-mgr` and can be
-pulled without a registry login. The published image currently targets
-`linux/amd64`. For a pull-only deployment without the source tree, use the
-included [`compose.example.yaml`](compose.example.yaml) (also attached to each
-Release), save it as `compose.yaml`, and optionally create a neighboring
-`.env` file.
+The public headless image is `ghcr.io/klarkxy/opencode-go-mgr` (currently
+`linux/amd64`, no registry login required). For a pull-only deployment without
+the source tree, save [`compose.example.yaml`](compose.example.yaml) (also
+attached to each Release) as `compose.yaml` and optionally create a
+neighboring `.env`. Or run from a checkout:
 
 ```bash
 git clone --branch v1.5.0 --depth 1 https://github.com/klarkxy/opencode-go-mgr.git
@@ -85,112 +107,61 @@ dashboard URL. See the [Docker guide](docs/USER.md#docker) for credentials,
 persistence, backup/restore, HTTPS, upgrades, digest/attestation verification,
 and local source builds.
 
-## Quick Start
+## Supported Models And Protocols
 
-The default gateway address and the header that carries the local key:
+Each known model is mapped to its native OpenCode-Go protocol. Requests in a
+different protocol are converted automatically — text, system instructions,
+images, tool calls and results, reasoning content, completion status, errors,
+and usage fields.
 
-```text
-Gateway: http://127.0.0.1:9042/v1
-Auth:    Authorization: Bearer <key>
-```
+| Client protocol | Models |
+| --- | --- |
+| OpenAI Chat Completions | `glm-5.2`, `glm-5.1`, `kimi-k2.7-code`, `kimi-k2.6`, `deepseek-v4-pro`, `deepseek-v4-flash`, `mimo-v2.5`, `mimo-v2.5-pro` |
+| Anthropic Messages | `minimax-m3`, `minimax-m2.7`, `minimax-m2.5`, `qwen3.7-max`, `qwen3.7-plus`, `qwen3.6-plus` |
 
-The key shown in the dashboard is the **Gateway Key**. It is the only secret
-your client needs; the gateway uses the OpenCode‑Go account key that the
-dashboard already stores.
+- **Gemini is a client-only format**: `/v1beta/models/{model}:generateContent`
+  and `:streamGenerateContent` (plus `/v1/models/...` aliases) are converted
+  to the selected model's native protocol; clients may authenticate with
+  `x-goog-api-key`. Requests never go to Google.
+- **Claude Desktop** uses `/claude-desktop/v1/...` with the aliases
+  `claude-sonnet-4-6`, `claude-opus-4-6`, and `claude-haiku-4-5-20251001`;
+  each alias is rewritten to its saved model mapping.
+- **Unknown models** keep the request's native Chat Completions or Messages
+  protocol. Unknown models on Responses or Gemini, and unknown Claude Desktop
+  aliases, are rejected with `400` — the gateway never guesses a protocol by
+  trial, because that could double-bill a request.
 
-The smallest end‑to‑end check — a streaming Chat Completions request against a
-representative model:
-
-```bash
-curl http://127.0.0.1:9042/v1/chat/completions \
-  -H "Authorization: Bearer ocg-xxxxxxxx-xxxxxxxx" \
-  -H "Content-Type: application/json" \
-  -d '{"model":"glm-5.2","messages":[{"role":"user","content":"hello"}],"stream":true}'
-```
-
-On a normal desktop launch, OCG Manager opens the dashboard in your system
-browser after the Gateway is ready. Add an OpenCode‑Go account, copy the
-Gateway Key, and use the **Applications** view for client-specific paths and
-configuration. OpenAI-compatible clients normally use
-`http://127.0.0.1:9042/v1`. If the browser does not open or you close the tab,
-use the tray icon to reopen the dashboard.
-
-Gateway replay is deliberately conservative. Only a DNS/TCP/TLS connection
-failure that proves the request was not sent is retried once on the same
-account. `401`, `403`, and `429` may select another account; `408`, `5xx`,
-post-connect failures, body timeouts, and interrupted streams are never
-replayed because the upstream may already have consumed quota. Ambiguous
-failures are reported as `upstream_outcome_unknown`. The default connect,
-non-stream total, and stream-idle timeouts are 30, 900, and 300 seconds.
+Replay is deliberately conservative: only a pre-send DNS/TCP/TLS connection
+failure is retried once on the same account; `401`/`403`/`429` may fail over
+to another account; `408`, `5xx`, post-connect failures, body timeouts, and
+interrupted streams are never replayed. The Gemini compatibility boundary
+(`countTokens`/`embedContent` `501`, rejected fields) and the full replay
+rules live in the [User guide](docs/USER.md#limits).
 
 ## True And False Circuit Breakers
 
-The 5‑hour, weekly, and monthly usage bars are **local estimates** derived
-from the requests the gateway has forwarded. They are not the upstream's
-authoritative view of your billing window.
+The 5-hour, weekly, and monthly usage bars are **local estimates**, not the
+upstream's authoritative billing view.
 
-- **False circuit breaker (local estimate):** when the local estimate reaches
-  the limit, the gateway **keeps sending** requests with that account. Local
-  accounting and upstream billing/reset boundaries may not match, so a full
-  local bar is a warning, not proof that the upstream account is blocked.
+- **False circuit breaker (local estimate):** a full local bar is only a
+  warning — the gateway **keeps sending** requests with that account.
+- **True circuit breaker (upstream 429):** the gateway parses the `Resets in …`
+  phrase, stores `cooldown_until`, and switches to the next available account.
+  An unrecognized 429 cools down for five minutes; if every enabled account is
+  cooling down, the gateway returns `429` with the soonest reset time.
 
-- **True circuit breaker (upstream 429):** the gateway writes the upstream
-  error, parses the `Resets in …` phrase from the response, stores
-  `cooldown_until`, and switches to the next available account. The known
-  5‑hour, weekly, and monthly limit messages use the reset duration reported
-  by the upstream; an unrecognized 429 falls back to a five‑minute cooldown.
-  If every enabled account is cooling down, the gateway returns `429` with
-  the soonest reset time.
-
-While a true circuit breaker is active, the dashboard forces the matching
-5‑hour, weekly, or monthly bar to 100% and marks it as an error, even when
-the local estimate is lower. The account becomes eligible automatically
-after `cooldown_until`, or immediately after you reset its cooldown in the
-dashboard.
-
-## Supported Models And Protocols
-
-Each known model is mapped to its native OpenCode‑Go protocol. Requests in a
-different protocol are converted automatically; this includes text, system
-instructions, images, tool calls and tool results, reasoning content,
-completion status, errors, and usage fields.
-
-- **OpenAI Chat Completions** — `glm-5.2`, `glm-5.1`, `kimi-k2.7-code`,
-  `kimi-k2.6`, `deepseek-v4-pro`, `deepseek-v4-flash`, `mimo-v2.5`,
-  `mimo-v2.5-pro`.
-- **Anthropic Messages** — `minimax-m3`, `minimax-m2.7`, `minimax-m2.5`,
-  `qwen3.7-max`, `qwen3.7-plus`, `qwen3.6-plus`.
-
-Gemini is a client-only format: both
-`/v1beta/models/{model}:generateContent` and
-`:streamGenerateContent` are supported, with `/v1/models/...` accepted as an
-API-version alias. The request is converted to the selected model's known
-native protocol. Gemini clients may authenticate with `x-goog-api-key`.
-Claude Desktop uses `/claude-desktop/v1/...` and the advertised aliases
-`claude-sonnet-4-6`, `claude-opus-4-6`, and
-`claude-haiku-4-5-20251001`; each alias is rewritten to its saved model mapping.
-
-Unknown models keep the request's native Chat Completions or Messages
-protocol. Unknown models requested through Responses or Gemini, and unknown
-Claude Desktop aliases, are rejected with `400` — the gateway will not guess a
-protocol by trial because that could double-bill the request.
-
-Gemini `countTokens` and `embedContent` currently return `501`. Non-empty
-`safetySettings`, `cachedContent`, `fileData`, Google Search, and `urlContext`
-are rejected with `400` because their semantics cannot be preserved safely.
-`topK` and `thinkingConfig` are accepted only as cross-protocol compatibility
-hints; do not assume behavior equivalent to a native Gemini backend. Other
-non-null `generationConfig` fields return `400` unless they are explicitly
-mapped by the gateway. See the
-[User guide](docs/USER.md#limits) for the complete compatibility boundary.
+While a true circuit breaker is active, the dashboard forces the matching bar
+to 100% and marks it as an error. The account recovers automatically after
+`cooldown_until`, or immediately when you reset its cooldown. Details:
+[User guide](docs/USER.md#true-and-false-circuit-breakers).
 
 ## Documentation
 
 - [中文 README](README.zh-CN.md) · [English README](README.md)
 - [User guide](docs/USER.md) · [用户指南](docs/USER.zh-CN.md)
 - [Maintainer guide](docs/MAINTAINER.md) · [维护者指南](docs/MAINTAINER.zh-CN.md)
-- [OpenCode‑Go anti‑abuse statement](OPENCODE_GO_ANTI_ABUSE.md) ·
-  [OpenCode‑Go 防滥用声明](OPENCODE_GO_ANTI_ABUSE.zh-CN.md)
+- [OpenCode-Go anti-abuse statement](OPENCODE_GO_ANTI_ABUSE.md) ·
+  [OpenCode-Go 防滥用声明](OPENCODE_GO_ANTI_ABUSE.zh-CN.md)
 - [Contributors / 贡献者](CONTRIBUTORS.md)
 
 ## Development
@@ -200,31 +171,11 @@ pnpm install
 pnpm run dev
 ```
 
-Before you start, exit any running release tray app so the single‑instance
-lock and port `9042` are free. Tauri starts Vite, waits for the Gateway to be
-ready, and opens `http://127.0.0.1:30001/dashboard/`. Vue, CSS, and frontend
-TypeScript changes use Vite HMR; Rust changes use Cargo's incremental
-compiler and restart the process. Checks, builds, release validation, and
-the supported platform matrix live in the
-[Maintainer guide](docs/MAINTAINER.md).
-
-## Release Artifacts
-
-`pnpm run build` builds the GUI and CLI for the **current supported native
-platform** and atomically replaces `release/`. There is no cross‑compile
-matrix on a single machine.
-
-| Platform | GUI | CLI |
-| --- | --- | --- |
-| Windows 10/11 x64 | `ocg-manager_<version>_windows-x64-setup.exe` (NSIS) | `ocg-manager-cli_<version>_windows-x64.zip` |
-| macOS 11+ Intel and Apple Silicon | `ocg-manager_<version>_macos-universal.dmg` | `ocg-manager-cli_<version>_macos-universal.tar.gz` |
-| Linux x64 | `ocg-manager_<version>_linux-x64.AppImage` and `.deb` | `ocg-manager-cli_<version>_linux-x64.tar.gz` |
-
-A CLI archive contains the executable, `dist/`, and `LICENSE`. The `dist/`
-folder must sit beside the executable so `serve` can serve the dashboard.
-`SHA256SUMS`, signed-updater behavior, SmartScreen/Gatekeeper caveats, and the
-unsupported list (ARM64, 32‑bit x86, RPM, Snap, and app stores) live in the
-[Maintainer guide](docs/MAINTAINER.md).
+Exit any running release tray app first so the single-instance lock and port
+`9042` are free. Tauri starts Vite and opens
+`http://127.0.0.1:30001/dashboard/` once the gateway is ready; the frontend
+hot-reloads, Rust changes rebuild and restart. Checks, builds, and the release
+pipeline live in the [Maintainer guide](docs/MAINTAINER.md).
 
 ## License
 
