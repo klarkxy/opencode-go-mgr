@@ -1,4 +1,6 @@
-use crate::gateway::forwarder::{forward_get, forward_request, rate_limited_response};
+use crate::gateway::forwarder::{
+    ForwardAction, forward_get, forward_request, rate_limited_response,
+};
 use crate::gateway::protocol::{
     ApiFormat, ProtocolError, RequestPlan, format_error, prepare_gemini_request, prepare_request,
 };
@@ -274,7 +276,9 @@ async fn execute_plan(
     client: reqwest::Client,
 ) -> axum::response::Response {
     let selector = AccountSelector::new();
-    let is_stream_request = plan.stream;
+    // One logical client request, including safe retries and account fallback,
+    // must use one immutable pricing revision from start to finish.
+    let pricing_snapshot = state.pricing_snapshot();
 
     let mut last_error: Option<String> = None;
     let mut failed_ids: Vec<String> = Vec::new();
@@ -316,44 +320,59 @@ async fn execute_plan(
 
         let mut retried_same_account = false;
         loop {
-            match forward_request(&client, &state, &account, &config, &plan, headers.clone()).await
+            match forward_request(
+                &client,
+                &state,
+                &account,
+                &config,
+                &plan,
+                headers.clone(),
+                pricing_snapshot.clone(),
+            )
+            .await
             {
-                Ok(result) => {
-                    if result.success {
-                        return result.response;
-                    }
-                    last_error = result.error_message.clone();
-                    if result.retryable && !is_stream_request && !retried_same_account {
+                Ok(result) => match result.action {
+                    ForwardAction::Return => return result.response,
+                    ForwardAction::RetrySameAccount if !retried_same_account => {
                         retried_same_account = true;
+                        let _ = state.db.lock().log_gateway(
+                                "warn",
+                                "gateway",
+                                &format!(
+                                    "account {} connection failed before the request was sent; retrying once: {:?}",
+                                    account.name, result.error_message
+                                ),
+                            );
+                        continue;
+                    }
+                    ForwardAction::RetrySameAccount => return result.response,
+                    ForwardAction::TryNextAccount => {
+                        last_error = result.error_message.clone();
+                        failed_ids.push(account.id.clone());
                         let _ = state.db.lock().log_gateway(
                             "warn",
                             "gateway",
                             &format!(
-                                "account {} transient failure, retrying once: {:?}",
+                                "account {} was rejected, switching to next: {:?}",
                                 account.name, result.error_message
                             ),
                         );
-                        continue;
+                        break;
                     }
-                    failed_ids.push(account.id.clone());
-                    let _ = state.db.lock().log_gateway(
-                        "warn",
-                        "gateway",
-                        &format!(
-                            "account {} failed, switching to next: {:?}",
-                            account.name, result.error_message
-                        ),
-                    );
-                    break;
-                }
+                },
                 Err(e) => {
-                    last_error = Some(format!("forward error: {}", e));
-                    if !is_stream_request && !retried_same_account {
-                        retried_same_account = true;
-                        continue;
-                    }
-                    failed_ids.push(account.id.clone());
-                    break;
+                    let message = format!("forward error: {e}");
+                    let _ = state.db.lock().log_gateway(
+                        "error",
+                        "gateway",
+                        &format!("account {} forward failed locally: {e}", account.name),
+                    );
+                    return protocol_error_response(
+                        client_format,
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        &message,
+                        None,
+                    );
                 }
             }
         }

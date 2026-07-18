@@ -1,7 +1,10 @@
 use crate::crypto::KeyCipher;
 use crate::db::Database;
 use crate::models::{AppConfig, normalize_client_root_url};
-use parking_lot::Mutex;
+use crate::pricing::{
+    PricingEstimate, PricingSnapshot, embedded_seed, ensure_current_adjustment_policy,
+};
+use parking_lot::{Mutex, RwLock};
 use serde::Serialize;
 use std::fmt;
 use std::path::PathBuf;
@@ -89,7 +92,8 @@ impl std::error::Error for DesktopUpdateStartError {
 }
 
 // Note: Mutex lock ordering is (1) settings_update, (2) db, (3) config,
-// (4) http_client, (5) gateway. desktop_update_status is never held while acquiring another lock.
+// (4) http_client, (5) gateway, (6) pricing. desktop_update_status and the async
+// pricing_refresh guard are never held while acquiring another sync lock.
 // Never acquire in reverse order; always drop one before acquiring another where possible.
 pub struct CoreStateInner {
     pub db: Mutex<Database>,
@@ -104,6 +108,8 @@ pub struct CoreStateInner {
     desktop_update_status: Mutex<DesktopUpdateStatus>,
     pub dashboard_dir: Mutex<Option<PathBuf>>,
     http_client: Mutex<reqwest::Client>,
+    pricing: RwLock<Arc<PricingSnapshot>>,
+    pub pricing_refresh: tokio::sync::Mutex<()>,
     pub data_dir: PathBuf,
     pub cipher: Arc<dyn KeyCipher + Send + Sync>,
 }
@@ -133,6 +139,21 @@ impl CoreStateInner {
             // Persist generated defaults and drop fields removed from AppConfig.
             save_config(&db, &config)?;
         }
+        let pricing = match db.latest_pricing_snapshot()? {
+            Some(snapshot) => {
+                let previous_revision = snapshot.revision.clone();
+                let snapshot = ensure_current_adjustment_policy(snapshot);
+                if snapshot.revision != previous_revision {
+                    db.insert_pricing_snapshot(&snapshot)?;
+                }
+                snapshot
+            }
+            None => {
+                let snapshot = embedded_seed();
+                db.insert_pricing_snapshot(&snapshot)?;
+                snapshot
+            }
+        };
         let http_client = build_http_client(&config)?;
         Ok(Self {
             db: Mutex::new(db),
@@ -147,6 +168,8 @@ impl CoreStateInner {
             desktop_update_status: Mutex::new(DesktopUpdateStatus::new()),
             dashboard_dir: Mutex::new(None),
             http_client: Mutex::new(http_client),
+            pricing: RwLock::new(Arc::new(pricing)),
+            pricing_refresh: tokio::sync::Mutex::new(()),
             data_dir,
             cipher,
         })
@@ -172,6 +195,40 @@ impl CoreStateInner {
         let config = self.config.lock();
         let client = self.http_client.lock();
         (config.clone(), client.clone())
+    }
+
+    pub fn pricing_snapshot(&self) -> Arc<PricingSnapshot> {
+        self.pricing.read().clone()
+    }
+
+    pub fn activate_pricing_snapshot(&self, snapshot: PricingSnapshot) -> crate::Result<()> {
+        // Keep database persistence and the in-memory active pointer behind the
+        // documented db -> pricing lock order, so readers never observe a
+        // partially activated revision.
+        let db = self.db.lock();
+        let mut active = self.pricing.write();
+        db.insert_pricing_snapshot(&snapshot)?;
+        *active = Arc::new(snapshot);
+        Ok(())
+    }
+
+    pub fn estimate_cost(
+        &self,
+        model: &str,
+        prompt: i64,
+        completion: i64,
+        cached: i64,
+        cache_creation: i64,
+        service_tier: Option<&str>,
+    ) -> PricingEstimate {
+        self.pricing_snapshot().estimate(
+            model,
+            prompt,
+            completion,
+            cached,
+            cache_creation,
+            service_tier,
+        )
     }
 
     pub fn active_gateway_port(&self) -> u16 {
@@ -363,6 +420,17 @@ fn load_config(db: &Database) -> crate::Result<(AppConfig, bool)> {
         config.claude_desktop_models.normalize();
         needs_persist = serde_json::to_string(&config)? != value;
     }
+    // v1.4.2 shipped 30/120/300 as one default tuple. Migrate that exact,
+    // untouched tuple once while preserving every user-customized combination.
+    if (
+        config.connect_timeout_secs,
+        config.non_stream_timeout_secs,
+        config.stream_idle_timeout_secs,
+    ) == (30, 120, 300)
+    {
+        config.non_stream_timeout_secs = 900;
+        needs_persist = true;
+    }
     if config.gateway_key.is_empty() {
         config.gateway_key = generate_gateway_key();
         needs_persist = true;
@@ -378,7 +446,6 @@ fn save_config(db: &Database, config: &AppConfig) -> crate::Result<()> {
 fn build_http_client(config: &AppConfig) -> crate::Result<reqwest::Client> {
     Ok(reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(config.connect_timeout_secs))
-        .read_timeout(Duration::from_secs(config.stream_idle_timeout_secs))
         .build()?)
 }
 

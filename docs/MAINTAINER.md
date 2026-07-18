@@ -159,8 +159,28 @@ Pair them with `pnpm run build:web` for a final smoke test.
   to the known model's native Chat Completions or Messages path and back into
   Google JSON/SSE envelopes. `selector.rs` picks the next account and skips
   disabled / cooled-down / already-failed accounts. `limit.rs` parses the
-  upstream 429 reset phrase. `cost.rs` aggregates token counts into the local
-  5-hour / weekly / monthly windows.
+  upstream 429 reset phrase. `pricing.rs` loads the active OpenCode Go pricing
+  snapshot and derives quota cost from token usage; the dashboard windows use
+  the limits stored in that same snapshot. `PricingModel` records the multiplier
+  already included in an official token rate as `official_price_multiplier`;
+  the applied `quota_multiplier` is
+  `(monthly limit / Usage) / official_price_multiplier`.
+  `official_price_multiplier` is `4` for `deepseek-v4-pro` and
+  `mimo-v2.5-pro`, and defaults to `1` for Grok and other models.
+- Pricing refresh is user-triggered through protected
+  `GET/POST /dashboard/api/pricing[/refresh]`. The fetcher is restricted to the
+  OpenCode Go HTTPS host, same-host redirects, a 20-second deadline, and a
+  2 MiB body. Validation failure never activates a partial snapshot;
+  `pricing_snapshots` retains the last successful revision. MiniMax context,
+  priority, and high-speed adjustments are local policy and never trigger a
+  supplier-site request.
+- `forwarder.rs` returns an explicit action to `handler.rs`: only a pre-send
+  DNS/TCP/TLS connection failure can retry once on the same account;
+  `401`/`403`/`429` can select another account. `408`, `5xx`, post-connect
+  failures, body timeouts, and stream interruptions are never replayed and
+  ambiguous results are logged as `outcome_unknown`. The shared reqwest client
+  has only a 30-second connect timeout; non-stream requests use a 900-second
+  total deadline and streams enforce the 300-second idle timeout per chunk.
 - Claude Desktop has isolated `/claude-desktop/v1/messages` and
   `/claude-desktop/v1/models` routes. Its three advertised Claude aliases are
   rewritten from `AppConfig.claude_desktop_models` before entering the normal

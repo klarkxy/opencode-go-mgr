@@ -145,6 +145,11 @@ test("logs view shows top stats, extra filters, sorting, and a useful empty stat
   assert.match(source, /const request = \+\+forwardRequest/);
   assert.match(source, /request !== forwardRequest/);
   assert.match(source, /Promise\.all\(\[loadForwardLogs\(\), loadForwardLogModels\(\)\]\)/);
+  assert.match(source, /row\.cost_state === "legacy_estimate"/);
+  assert.match(source, /success_unpriced: \{ label: t\("无价格"\)/);
+  assert.match(source, /outcome_unknown: \{ label: t\("结果未知"\)/);
+  assert.doesNotMatch(source, /legacy_estimate: \{ label:/);
+  assert.match(template, /额度消耗（估算）/);
   const clearFilters = source.slice(source.indexOf("function clearFilters"), source.indexOf("function toggleSortOrder"));
   assert.doesNotMatch(clearFilters, /sortBy\.value|sortOrder\.value/);
 });

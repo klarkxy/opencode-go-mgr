@@ -155,7 +155,7 @@ impl Default for AppConfig {
             client_root_url: String::new(),
             auto_start: false,
             connect_timeout_secs: 30,
-            non_stream_timeout_secs: 120,
+            non_stream_timeout_secs: 900,
             stream_idle_timeout_secs: 300,
             claude_desktop_models: ClaudeDesktopModels::default(),
         }
@@ -348,16 +348,45 @@ pub struct ForwardLog {
     pub prompt_tokens: i64,
     pub completion_tokens: i64,
     pub cached_tokens: i64,
-    pub cost: f64,
+    pub cache_creation_tokens: i64,
+    pub cost: Option<f64>,
+    pub pricing_revision_id: Option<String>,
+    pub quota_multiplier: Option<f64>,
+    pub local_adjustment_multiplier: Option<f64>,
+    pub service_tier: Option<String>,
+    pub cost_state: String,
     pub error_message: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone)]
 pub struct ForwardMetrics {
     pub prompt_tokens: i64,
     pub completion_tokens: i64,
     pub cached_tokens: i64,
+    pub cache_creation_tokens: i64,
     pub cost: f64,
+    pub pricing_revision_id: Option<String>,
+    pub quota_multiplier: Option<f64>,
+    pub local_adjustment_multiplier: Option<f64>,
+    pub service_tier: Option<String>,
+    pub cost_state: &'static str,
+}
+
+impl Default for ForwardMetrics {
+    fn default() -> Self {
+        Self {
+            prompt_tokens: 0,
+            completion_tokens: 0,
+            cached_tokens: 0,
+            cache_creation_tokens: 0,
+            cost: 0.0,
+            pricing_revision_id: None,
+            quota_multiplier: None,
+            local_adjustment_multiplier: None,
+            service_tier: None,
+            cost_state: "not_applicable",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

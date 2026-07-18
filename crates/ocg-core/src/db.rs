@@ -1,4 +1,5 @@
 use crate::models::*;
+use crate::pricing::{PricingLimits, PricingSnapshot};
 use anyhow::Result;
 use chrono::{DateTime, Duration, Utc};
 use rusqlite::{
@@ -316,8 +317,70 @@ impl Database {
             )?;
         }
 
+        if version < 9 {
+            tx.execute_batch(
+                "CREATE TABLE IF NOT EXISTS pricing_snapshots (
+                    revision TEXT PRIMARY KEY,
+                    activated_at TEXT NOT NULL,
+                    document_updated_at TEXT NOT NULL,
+                    source_url TEXT NOT NULL,
+                    content_hash TEXT NOT NULL,
+                    snapshot_json TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_pricing_snapshots_activated
+                    ON pricing_snapshots(activated_at DESC);
+                ALTER TABLE forward_logs ADD COLUMN pricing_revision_id TEXT;
+                ALTER TABLE forward_logs ADD COLUMN quota_multiplier REAL;
+                ALTER TABLE forward_logs ADD COLUMN local_adjustment_multiplier REAL;
+                ALTER TABLE forward_logs ADD COLUMN cache_creation_tokens INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE forward_logs ADD COLUMN service_tier TEXT;
+                ALTER TABLE forward_logs ADD COLUMN cost_state TEXT NOT NULL DEFAULT 'not_applicable';
+                UPDATE forward_logs SET cost_state = CASE
+                    WHEN status = 'success' THEN 'legacy_estimate'
+                    WHEN status = 'success_no_usage' THEN 'usage_missing'
+                    WHEN status = 'success_unpriced' THEN 'unpriced'
+                    WHEN status = 'outcome_unknown' THEN 'outcome_unknown'
+                    ELSE 'not_applicable'
+                END;
+                INSERT OR REPLACE INTO schema_version (version) VALUES (9);",
+            )?;
+        }
+
         tx.commit()?;
         Ok(())
+    }
+
+    pub fn insert_pricing_snapshot(&self, snapshot: &PricingSnapshot) -> Result<()> {
+        let snapshot_json = serde_json::to_string(snapshot)?;
+        self.conn.execute(
+            "INSERT OR IGNORE INTO pricing_snapshots
+             (revision, activated_at, document_updated_at, source_url, content_hash, snapshot_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                snapshot.revision,
+                snapshot.activated_at,
+                snapshot.document_updated_at,
+                snapshot.source_url,
+                snapshot.content_hash,
+                snapshot_json,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn latest_pricing_snapshot(&self) -> Result<Option<PricingSnapshot>> {
+        let snapshot_json = self
+            .conn
+            .query_row(
+                "SELECT snapshot_json FROM pricing_snapshots
+                 ORDER BY datetime(activated_at) DESC, rowid DESC LIMIT 1",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        snapshot_json
+            .map(|json| serde_json::from_str(&json).map_err(Into::into))
+            .transpose()
     }
 
     // Accounts
@@ -493,8 +556,11 @@ impl Database {
     pub fn log_forward(&self, log: &ForwardLog) -> Result<i64> {
         self.conn.execute(
             "INSERT INTO forward_logs
-             (timestamp, model, account_id, account_name, status, http_status, prompt_tokens, completion_tokens, cached_tokens, cost, error_message)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+             (timestamp, model, account_id, account_name, status, http_status,
+              prompt_tokens, completion_tokens, cached_tokens, cache_creation_tokens, cost,
+              pricing_revision_id, quota_multiplier, local_adjustment_multiplier,
+              service_tier, cost_state, error_message)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
             params![
                 log.timestamp.to_rfc3339(),
                 log.model,
@@ -505,7 +571,13 @@ impl Database {
                 log.prompt_tokens,
                 log.completion_tokens,
                 log.cached_tokens,
-                log.cost,
+                log.cache_creation_tokens,
+                log.cost.unwrap_or(0.0),
+                log.pricing_revision_id,
+                log.quota_multiplier,
+                log.local_adjustment_multiplier,
+                log.service_tier,
+                log.cost_state,
                 log.error_message,
             ],
         )?;
@@ -523,6 +595,17 @@ impl Database {
         metrics: ForwardMetrics,
         error_message: Option<&str>,
     ) -> Result<()> {
+        let cost_state = match (metrics.cost_state, status) {
+            ("not_applicable", "outcome_unknown") => "outcome_unknown",
+            ("not_applicable", "success_no_usage") => "usage_missing",
+            ("not_applicable", "success_unpriced") => "unpriced",
+            (state, _) => state,
+        };
+        let stored_cost = if cost_state == "priced" {
+            metrics.cost
+        } else {
+            0.0
+        };
         self.conn.execute(
             "UPDATE forward_logs
              SET status = ?2,
@@ -530,8 +613,14 @@ impl Database {
                  prompt_tokens = ?4,
                  completion_tokens = ?5,
                  cached_tokens = ?6,
-                 cost = ?7,
-                 error_message = COALESCE(?8, error_message)
+                 cache_creation_tokens = ?7,
+                 cost = ?8,
+                 pricing_revision_id = ?9,
+                 quota_multiplier = ?10,
+                 local_adjustment_multiplier = ?11,
+                 service_tier = ?12,
+                 cost_state = ?13,
+                 error_message = COALESCE(?14, error_message)
              WHERE id = ?1",
             params![
                 id,
@@ -540,7 +629,13 @@ impl Database {
                 metrics.prompt_tokens,
                 metrics.completion_tokens,
                 metrics.cached_tokens,
-                metrics.cost,
+                metrics.cache_creation_tokens,
+                stored_cost,
+                metrics.pricing_revision_id,
+                metrics.quota_multiplier,
+                metrics.local_adjustment_multiplier,
+                metrics.service_tier,
+                cost_state,
                 error_message
             ],
         )?;
@@ -591,8 +686,11 @@ impl Database {
 
     pub fn list_forward_logs(&self, limit: i64) -> Result<Vec<ForwardLog>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, timestamp, model, account_id, account_name, status, http_status, prompt_tokens, completion_tokens, cached_tokens, cost, error_message
-             FROM forward_logs ORDER BY id DESC LIMIT ?1"
+            "SELECT id, timestamp, model, account_id, account_name, status, http_status,
+                    prompt_tokens, completion_tokens, cached_tokens, cache_creation_tokens, cost,
+                    pricing_revision_id, quota_multiplier, local_adjustment_multiplier,
+                    service_tier, cost_state, error_message
+             FROM forward_logs ORDER BY id DESC LIMIT ?1",
         )?;
         let rows = stmt.query_map([limit], forward_log_from_row)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.into())
@@ -635,7 +733,10 @@ impl Database {
         )?;
 
         let items_sql = format!(
-            "SELECT id, timestamp, model, account_id, account_name, status, http_status, prompt_tokens, completion_tokens, cached_tokens, cost, error_message
+            "SELECT id, timestamp, model, account_id, account_name, status, http_status,
+                    prompt_tokens, completion_tokens, cached_tokens, cache_creation_tokens, cost,
+                    pricing_revision_id, quota_multiplier, local_adjustment_multiplier,
+                    service_tier, cost_state, error_message
              FROM forward_logs{filter}
              {order_clause}
              LIMIT ? OFFSET ?"
@@ -805,6 +906,18 @@ impl Database {
     }
 
     pub fn account_usage(&self, account_id: &str) -> Result<UsageWindow> {
+        let limits = self
+            .latest_pricing_snapshot()?
+            .unwrap_or_else(crate::pricing::embedded_seed)
+            .limits;
+        self.account_usage_with_limits(account_id, &limits)
+    }
+
+    pub fn account_usage_with_limits(
+        &self,
+        account_id: &str,
+        limits: &PricingLimits,
+    ) -> Result<UsageWindow> {
         let now = Utc::now();
         let five_hours_ago = (now - Duration::hours(5)).to_rfc3339();
         let week_ago = (now - Duration::days(7)).to_rfc3339();
@@ -831,7 +944,7 @@ impl Database {
 
         let total_success_cost = if baselines.iter().any(Option::is_some) {
             self.conn.query_row(
-                "SELECT COALESCE(SUM(cost), 0) FROM forward_logs WHERE account_id = ?1 AND status = 'success'",
+                "SELECT COALESCE(SUM(cost), 0) FROM forward_logs WHERE account_id = ?1 AND cost_state IN ('priced', 'legacy_estimate')",
                 [account_id],
                 |row| row.get(0),
             )?
@@ -842,30 +955,45 @@ impl Database {
         let window_5h: f64 = self
             .conn
             .query_row(
-                "SELECT COALESCE(SUM(cost), 0) FROM forward_logs WHERE account_id = ?1 AND status = 'success' AND timestamp > ?2",
+                "SELECT COALESCE(SUM(cost), 0) FROM forward_logs WHERE account_id = ?1 AND cost_state IN ('priced', 'legacy_estimate') AND timestamp > ?2",
                 params![account_id, five_hours_ago],
                 |row| row.get(0),
             )?;
         let window_week: f64 = self
             .conn
             .query_row(
-                "SELECT COALESCE(SUM(cost), 0) FROM forward_logs WHERE account_id = ?1 AND status = 'success' AND timestamp > ?2",
+                "SELECT COALESCE(SUM(cost), 0) FROM forward_logs WHERE account_id = ?1 AND cost_state IN ('priced', 'legacy_estimate') AND timestamp > ?2",
                 params![account_id, week_ago],
                 |row| row.get(0),
             )?;
         let window_month: f64 = self
             .conn
             .query_row(
-                "SELECT COALESCE(SUM(cost), 0) FROM forward_logs WHERE account_id = ?1 AND status = 'success' AND timestamp > ?2",
+                "SELECT COALESCE(SUM(cost), 0) FROM forward_logs WHERE account_id = ?1 AND cost_state IN ('priced', 'legacy_estimate') AND timestamp > ?2",
                 params![account_id, month_ago],
                 |row| row.get(0),
             )?;
 
         Ok(UsageWindow {
             account_id: account_id.to_string(),
-            window_5h: effective_usage(window_5h, baselines[0], total_success_cost, 12.0),
-            window_week: effective_usage(window_week, baselines[1], total_success_cost, 30.0),
-            window_month: effective_usage(window_month, baselines[2], total_success_cost, 60.0),
+            window_5h: effective_usage(
+                window_5h,
+                baselines[0],
+                total_success_cost,
+                limits.window_5h,
+            ),
+            window_week: effective_usage(
+                window_week,
+                baselines[1],
+                total_success_cost,
+                limits.window_week,
+            ),
+            window_month: effective_usage(
+                window_month,
+                baselines[2],
+                total_success_cost,
+                limits.window_month,
+            ),
         })
     }
 
@@ -881,17 +1009,17 @@ impl Database {
         let month_ago = (now - Duration::days(30)).to_rfc3339();
 
         let today: f64 = self.conn.query_row(
-            "SELECT COALESCE(SUM(cost), 0) FROM forward_logs WHERE status = 'success' AND timestamp > ?1",
+            "SELECT COALESCE(SUM(cost), 0) FROM forward_logs WHERE cost_state IN ('priced', 'legacy_estimate') AND timestamp > ?1",
             [&today_start],
             |row| row.get(0),
         )?;
         let week: f64 = self.conn.query_row(
-            "SELECT COALESCE(SUM(cost), 0) FROM forward_logs WHERE status = 'success' AND timestamp > ?1",
+            "SELECT COALESCE(SUM(cost), 0) FROM forward_logs WHERE cost_state IN ('priced', 'legacy_estimate') AND timestamp > ?1",
             [&week_ago],
             |row| row.get(0),
         )?;
         let month: f64 = self.conn.query_row(
-            "SELECT COALESCE(SUM(cost), 0) FROM forward_logs WHERE status = 'success' AND timestamp > ?1",
+            "SELECT COALESCE(SUM(cost), 0) FROM forward_logs WHERE cost_state IN ('priced', 'legacy_estimate') AND timestamp > ?1",
             [&month_ago],
             |row| row.get(0),
         )?;
@@ -902,8 +1030,8 @@ impl Database {
     /// Aggregate `forward_logs` into per-day, per-model cost buckets covering
     /// the last `days` calendar days (UTC). Rows with zero activity on a given
     /// day are omitted — the frontend synthesizes empty days so the x-axis
-    /// never collapses. Only `status = 'success'` rows count, matching the
-    /// convention of `total_usage` / `usage_for_account`.
+    /// never collapses. Priced rows and preserved legacy estimates count,
+    /// including an upstream success whose local response conversion failed.
     pub fn daily_cost_by_model(&self, days: i64) -> Result<Vec<DailyModelCost>> {
         // Bone-simple SQLite date math: store timestamps as RFC3339 strings,
         // so group by `substr(timestamp, 1, 10)` to collapse to YYYY-MM-DD.
@@ -915,7 +1043,7 @@ impl Database {
         let mut stmt = self.conn.prepare(
             "SELECT substr(timestamp, 1, 10) AS day, model, COALESCE(SUM(cost), 0)
              FROM forward_logs
-             WHERE status = 'success' AND timestamp > ?1
+             WHERE cost_state IN ('priced', 'legacy_estimate') AND timestamp > ?1
              GROUP BY day, model
              ORDER BY day ASC, model ASC",
         )?;
@@ -935,21 +1063,21 @@ fn usage_baseline_update_sql(window: UsageWindowKind) -> &'static str {
         UsageWindowKind::FiveHours => {
             "UPDATE accounts
              SET usage_5h_baseline_percent = ?2,
-                 usage_5h_anchor_success_cost = (SELECT COALESCE(SUM(cost), 0) FROM forward_logs WHERE account_id = ?1 AND status = 'success'),
+                 usage_5h_anchor_success_cost = (SELECT COALESCE(SUM(cost), 0) FROM forward_logs WHERE account_id = ?1 AND cost_state IN ('priced', 'legacy_estimate')),
                  updated_at = ?3
              WHERE id = ?1"
         }
         UsageWindowKind::Week => {
             "UPDATE accounts
              SET usage_week_baseline_percent = ?2,
-                 usage_week_anchor_success_cost = (SELECT COALESCE(SUM(cost), 0) FROM forward_logs WHERE account_id = ?1 AND status = 'success'),
+                 usage_week_anchor_success_cost = (SELECT COALESCE(SUM(cost), 0) FROM forward_logs WHERE account_id = ?1 AND cost_state IN ('priced', 'legacy_estimate')),
                  updated_at = ?3
              WHERE id = ?1"
         }
         UsageWindowKind::Month => {
             "UPDATE accounts
              SET usage_month_baseline_percent = ?2,
-                 usage_month_anchor_success_cost = (SELECT COALESCE(SUM(cost), 0) FROM forward_logs WHERE account_id = ?1 AND status = 'success'),
+                 usage_month_anchor_success_cost = (SELECT COALESCE(SUM(cost), 0) FROM forward_logs WHERE account_id = ?1 AND cost_state IN ('priced', 'legacy_estimate')),
                  updated_at = ?3
              WHERE id = ?1"
         }
@@ -1016,6 +1144,9 @@ fn forward_log_order(sort_by: Option<&str>, sort_order: Option<&str>) -> String 
 }
 
 fn forward_log_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ForwardLog> {
+    let raw_cost = row.get::<_, f64>(11)?;
+    let cost_state = row.get::<_, String>(16)?;
+    let cost = matches!(cost_state.as_str(), "priced" | "legacy_estimate").then_some(raw_cost);
     Ok(ForwardLog {
         id: row.get(0)?,
         timestamp: parse_datetime(row.get::<_, String>(1)?),
@@ -1027,8 +1158,14 @@ fn forward_log_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ForwardLog>
         prompt_tokens: row.get(7)?,
         completion_tokens: row.get(8)?,
         cached_tokens: row.get(9)?,
-        cost: row.get(10)?,
-        error_message: row.get(11)?,
+        cache_creation_tokens: row.get(10)?,
+        cost,
+        pricing_revision_id: row.get(12)?,
+        quota_multiplier: row.get(13)?,
+        local_adjustment_multiplier: row.get(14)?,
+        service_tier: row.get(15)?,
+        cost_state,
+        error_message: row.get(17)?,
     })
 }
 
@@ -1140,7 +1277,13 @@ mod tests {
             prompt_tokens: 0,
             completion_tokens: 0,
             cached_tokens: 0,
-            cost,
+            cache_creation_tokens: 0,
+            cost: Some(cost),
+            pricing_revision_id: None,
+            quota_multiplier: None,
+            local_adjustment_multiplier: None,
+            service_tier: None,
+            cost_state: "legacy_estimate".into(),
             error_message: None,
         }
     }
@@ -1261,7 +1404,7 @@ mod tests {
                     row.get(0)
                 })
                 .expect("schema version should load");
-            assert_eq!(version, 8, "{label}");
+            assert_eq!(version, 9, "{label}");
             let account = db
                 .get_account("old")
                 .expect("account query should work")
@@ -1339,7 +1482,7 @@ mod tests {
             })
             .expect("schema version should be readable");
         let usage = db.account_usage("old").expect("usage should load");
-        assert_eq!(version, 8);
+        assert_eq!(version, 9);
         assert_eq!(
             db.get_account("old")
                 .expect("account should load")
@@ -1488,7 +1631,7 @@ mod tests {
                 row.get(0)
             })
             .expect("schema version should load");
-        assert_eq!(version, 8);
+        assert_eq!(version, 9);
         assert_eq!(
             db.get_account("valid")
                 .expect("valid account query should work")
@@ -1530,7 +1673,7 @@ mod tests {
                 row.get(0)
             })
             .expect("schema version should load");
-        assert_eq!(version, 8);
+        assert_eq!(version, 9);
 
         let created_at = DateTime::parse_from_rfc3339("2026-01-02T01:30:00+02:00")
             .expect("fixed timestamp should parse")

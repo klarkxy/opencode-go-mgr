@@ -683,7 +683,13 @@ async fn loopback_forward_logs_apply_filters_before_pagination() {
                 prompt_tokens,
                 completion_tokens: prompt_tokens * 2,
                 cached_tokens: 0,
-                cost: prompt_tokens as f64 / 100.0,
+                cache_creation_tokens: 0,
+                cost: Some(prompt_tokens as f64 / 100.0),
+                pricing_revision_id: None,
+                quota_multiplier: None,
+                local_adjustment_multiplier: None,
+                service_tier: None,
+                cost_state: "legacy_estimate".into(),
                 error_message: None,
             })
             .unwrap();

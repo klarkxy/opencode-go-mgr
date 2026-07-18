@@ -171,7 +171,7 @@ fn core_state_scrubs_removed_config_fields() {
     let config = state.config();
     assert_eq!(config.client_root_url, "");
     assert_eq!(config.connect_timeout_secs, 30);
-    assert_eq!(config.non_stream_timeout_secs, 120);
+    assert_eq!(config.non_stream_timeout_secs, 900);
     assert_eq!(config.stream_idle_timeout_secs, 300);
 
     let persisted = state.db.lock().get_setting("config").unwrap().unwrap();
@@ -180,8 +180,40 @@ fn core_state_scrubs_removed_config_fields() {
     let persisted: serde_json::Value = serde_json::from_str(&persisted).unwrap();
     assert_eq!(persisted["client_root_url"], "");
     assert_eq!(persisted["connect_timeout_secs"], 30);
-    assert_eq!(persisted["non_stream_timeout_secs"], 120);
+    assert_eq!(persisted["non_stream_timeout_secs"], 900);
     assert_eq!(persisted["stream_idle_timeout_secs"], 300);
+}
+
+#[test]
+fn core_state_migrates_only_the_untouched_legacy_timeout_tuple() {
+    let legacy_dir = temp_data_dir("legacy-timeout-defaults");
+    let legacy_db = Database::open(legacy_dir.clone()).unwrap();
+    legacy_db
+        .set_setting(
+            "config",
+            r#"{"gateway_port":9042,"gateway_key":"gw","upstream_base_url":"https://example.com","client_root_url":"","auto_start":false,"connect_timeout_secs":30,"non_stream_timeout_secs":120,"stream_idle_timeout_secs":300}"#,
+        )
+        .unwrap();
+    let cipher: Arc<dyn KeyCipher + Send + Sync> = Arc::new(StaticKeyCipher::new("k"));
+    let state = Arc::new(CoreStateInner::new(legacy_db, legacy_dir, cipher).unwrap());
+    assert_eq!(state.config().non_stream_timeout_secs, 900);
+    let persisted: serde_json::Value =
+        serde_json::from_str(&state.db.lock().get_setting("config").unwrap().unwrap()).unwrap();
+    assert_eq!(persisted["non_stream_timeout_secs"], 900);
+
+    let custom_dir = temp_data_dir("customized-timeout-defaults");
+    let custom_db = Database::open(custom_dir.clone()).unwrap();
+    custom_db
+        .set_setting(
+            "config",
+            r#"{"gateway_port":9042,"gateway_key":"gw","upstream_base_url":"https://example.com","client_root_url":"","auto_start":false,"connect_timeout_secs":31,"non_stream_timeout_secs":120,"stream_idle_timeout_secs":300}"#,
+        )
+        .unwrap();
+    let cipher: Arc<dyn KeyCipher + Send + Sync> = Arc::new(StaticKeyCipher::new("k"));
+    let state = Arc::new(CoreStateInner::new(custom_db, custom_dir, cipher).unwrap());
+    assert_eq!(state.config().connect_timeout_secs, 31);
+    assert_eq!(state.config().non_stream_timeout_secs, 120);
+    assert_eq!(state.config().stream_idle_timeout_secs, 300);
 }
 
 #[test]
@@ -250,7 +282,13 @@ fn list_forward_logs_binds_limit_parameter() {
         prompt_tokens: 1,
         completion_tokens: 2,
         cached_tokens: 0,
-        cost: 0.01,
+        cache_creation_tokens: 0,
+        cost: Some(0.01),
+        pricing_revision_id: None,
+        quota_multiplier: None,
+        local_adjustment_multiplier: None,
+        service_tier: None,
+        cost_state: "legacy_estimate".into(),
         error_message: None,
     })
     .unwrap();
@@ -281,7 +319,13 @@ fn query_forward_logs_filters_before_limit_and_summarizes_all_matches() {
             prompt_tokens: prompt,
             completion_tokens: completion,
             cached_tokens: cached,
-            cost,
+            cache_creation_tokens: 0,
+            cost: Some(cost),
+            pricing_revision_id: None,
+            quota_multiplier: None,
+            local_adjustment_multiplier: None,
+            service_tier: None,
+            cost_state: "legacy_estimate".into(),
             error_message: None,
         })
         .unwrap();
@@ -300,7 +344,13 @@ fn query_forward_logs_filters_before_limit_and_summarizes_all_matches() {
             prompt_tokens: 1_000,
             completion_tokens: 1_000,
             cached_tokens: 1_000,
-            cost: 100.0,
+            cache_creation_tokens: 0,
+            cost: Some(100.0),
+            pricing_revision_id: None,
+            quota_multiplier: None,
+            local_adjustment_multiplier: None,
+            service_tier: None,
+            cost_state: "legacy_estimate".into(),
             error_message: None,
         })
         .unwrap();
@@ -383,7 +433,13 @@ fn daily_cost_by_model_groups_success_rows_only() {
             prompt_tokens: 0,
             completion_tokens: 0,
             cached_tokens: 0,
-            cost,
+            cache_creation_tokens: 0,
+            cost: Some(cost),
+            pricing_revision_id: None,
+            quota_multiplier: None,
+            local_adjustment_multiplier: None,
+            service_tier: None,
+            cost_state: "legacy_estimate".into(),
             error_message: None,
         })
         .unwrap();

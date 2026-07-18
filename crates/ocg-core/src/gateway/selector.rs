@@ -154,7 +154,13 @@ mod tests {
             prompt_tokens: 0,
             completion_tokens: 0,
             cached_tokens: 0,
-            cost: 1000.0,
+            cache_creation_tokens: 0,
+            cost: Some(1000.0),
+            pricing_revision_id: None,
+            quota_multiplier: None,
+            local_adjustment_multiplier: None,
+            service_tier: None,
+            cost_state: "legacy_estimate".into(),
             error_message: None,
         })
         .unwrap();

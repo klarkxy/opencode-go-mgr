@@ -18,6 +18,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration as StdDuration;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 #[derive(Clone)]
 struct MockReply {
@@ -44,6 +45,7 @@ struct MockState {
 
 #[derive(Clone)]
 struct DelayedReply {
+    status: StatusCode,
     content_type: &'static str,
     chunks: Vec<(StdDuration, &'static str)>,
     calls: Arc<AtomicUsize>,
@@ -130,10 +132,20 @@ async fn start_delayed_messages_upstream(
     content_type: &'static str,
     chunks: Vec<(StdDuration, &'static str)>,
 ) -> (String, Arc<AtomicUsize>, tokio::sync::oneshot::Sender<()>) {
+    start_delayed_upstream(StatusCode::OK, content_type, chunks).await
+}
+
+async fn start_delayed_upstream(
+    status: StatusCode,
+    content_type: &'static str,
+    chunks: Vec<(StdDuration, &'static str)>,
+) -> (String, Arc<AtomicUsize>, tokio::sync::oneshot::Sender<()>) {
     let calls = Arc::new(AtomicUsize::new(0));
     let app = Router::new()
         .route("/v1/messages", post(delayed_reply))
+        .route("/v1/models", get(delayed_reply))
         .with_state(DelayedReply {
+            status,
             content_type,
             chunks,
             calls: calls.clone(),
@@ -152,6 +164,34 @@ async fn start_delayed_messages_upstream(
     (format!("http://{}", addr), calls, shutdown_tx)
 }
 
+async fn start_raw_disconnect_upstream(
+    response: Vec<u8>,
+) -> (String, Arc<AtomicUsize>, tokio::sync::oneshot::Sender<()>) {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+    let calls_h = calls.clone();
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = &mut shutdown_rx => break,
+                accepted = listener.accept() => {
+                    let Ok((mut socket, _)) = accepted else { break };
+                    calls_h.fetch_add(1, Ordering::Relaxed);
+                    let mut request = vec![0_u8; 16 * 1024];
+                    let _ = socket.read(&mut request).await;
+                    let _ = socket.write_all(&response).await;
+                    let _ = socket.shutdown().await;
+                }
+            }
+        }
+    });
+    (format!("http://{addr}"), calls, shutdown_tx)
+}
+
 async fn delayed_reply(State(state): State<DelayedReply>) -> Response {
     state.calls.fetch_add(1, Ordering::Relaxed);
     let stream =
@@ -164,7 +204,7 @@ async fn delayed_reply(State(state): State<DelayedReply>) -> Response {
             ))
         });
     Response::builder()
-        .status(StatusCode::OK)
+        .status(state.status)
         .header("content-type", state.content_type)
         .body(Body::from_stream(stream))
         .unwrap()
@@ -469,7 +509,46 @@ async fn model_discovery_keeps_rate_limit_cooldown_without_logging() {
 }
 
 #[tokio::test]
-async fn application_models_falls_back_after_rate_limit() {
+async fn model_discovery_falls_back_once_for_429() {
+    let replies = HashMap::from([
+        (
+            "key-1".to_string(),
+            VecDeque::from([MockReply {
+                status: 429,
+                body: LIMITED_BODY,
+            }]),
+        ),
+        (
+            "key-2".to_string(),
+            VecDeque::from([MockReply {
+                status: 200,
+                body: r#"{"object":"list","data":[{"id":"deepseek-v4-flash"}]}"#,
+            }]),
+        ),
+    ]);
+    let (base_url, calls, stop_mock) = start_mock_upstream(replies).await;
+    let (state, dir) = build_state(base_url, &["key-1", "key-2"]);
+    let (port, gateway_handle) = start_gateway(state).await;
+
+    let (status, body) = models(port).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        calls
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|call| call.key.as_str())
+            .collect::<Vec<_>>(),
+        ["key-1", "key-2"]
+    );
+
+    gateway::stop_gateway(gateway_handle);
+    let _ = stop_mock.send(());
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn application_models_falls_back_after_rate_limit_but_not_5xx() {
     let replies = HashMap::from([
         (
             "key-1".to_string(),
@@ -504,11 +583,7 @@ async fn application_models_falls_back_after_rate_limit() {
         .send()
         .await
         .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(
-        response.json::<serde_json::Value>().await.unwrap(),
-        serde_json::json!(["deepseek-v4-flash"])
-    );
+    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
     assert_eq!(
         calls
             .lock()
@@ -516,7 +591,7 @@ async fn application_models_falls_back_after_rate_limit() {
             .iter()
             .map(|call| call.key.as_str())
             .collect::<Vec<_>>(),
-        ["key-1", "key-2", "key-2", "key-3"]
+        ["key-1", "key-2"]
     );
     assert!(
         state
@@ -641,7 +716,7 @@ async fn application_models_maps_upstream_failure_to_bad_gateway() {
             body: r#"{"error":"upstream unavailable"}"#,
         }]),
     )]);
-    let (base_url, _calls, stop_mock) = start_mock_upstream(replies).await;
+    let (base_url, calls, stop_mock) = start_mock_upstream(replies).await;
     let (state, dir) = build_state(base_url, &["key-1"]);
     let (port, gateway_handle) = start_gateway(state).await;
 
@@ -653,6 +728,127 @@ async fn application_models_maps_upstream_failure_to_bad_gateway() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    assert_eq!(calls.lock().unwrap().len(), 1);
+
+    gateway::stop_gateway(gateway_handle);
+    let _ = stop_mock.send(());
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn model_discovery_408_is_returned_without_replay_or_fallback() {
+    let replies = HashMap::from([
+        (
+            "key-1".to_string(),
+            VecDeque::from([MockReply {
+                status: 408,
+                body: r#"{"error":"request timed out"}"#,
+            }]),
+        ),
+        (
+            "key-2".to_string(),
+            VecDeque::from([MockReply {
+                status: 200,
+                body: r#"{"object":"list","data":[]}"#,
+            }]),
+        ),
+    ]);
+    let (base_url, calls, stop_mock) = start_mock_upstream(replies).await;
+    let (state, dir) = build_state(base_url, &["key-1", "key-2"]);
+    let (port, gateway_handle) = start_gateway(state).await;
+
+    let (status, body) = models(port).await;
+    assert_eq!(status, StatusCode::REQUEST_TIMEOUT, "{body}");
+    assert_eq!(calls.lock().unwrap().len(), 1);
+
+    gateway::stop_gateway(gateway_handle);
+    let _ = stop_mock.send(());
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn model_discovery_auth_failure_falls_back_without_same_account_replay() {
+    let replies = HashMap::from([
+        (
+            "key-1".to_string(),
+            VecDeque::from([MockReply {
+                status: 403,
+                body: r#"{"error":"expired key"}"#,
+            }]),
+        ),
+        (
+            "key-2".to_string(),
+            VecDeque::from([MockReply {
+                status: 200,
+                body: r#"{"object":"list","data":[]}"#,
+            }]),
+        ),
+    ]);
+    let (base_url, calls, stop_mock) = start_mock_upstream(replies).await;
+    let (state, dir) = build_state(base_url, &["key-1", "key-2"]);
+    let (port, gateway_handle) = start_gateway(state).await;
+
+    let (status, body) = models(port).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        calls
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|call| call.key.as_str())
+            .collect::<Vec<_>>(),
+        ["key-1", "key-2"]
+    );
+
+    gateway::stop_gateway(gateway_handle);
+    let _ = stop_mock.send(());
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn model_discovery_body_timeout_is_not_replayed_or_failed_over() {
+    let (base_url, calls, stop_mock) = start_delayed_upstream(
+        StatusCode::OK,
+        "application/json",
+        vec![(StdDuration::from_secs(10), r#"{"object":"list","data":[]}"#)],
+    )
+    .await;
+    let (state, dir) = build_state(base_url, &["key-1", "key-2"]);
+    let mut config = state.config();
+    config.non_stream_timeout_secs = 1;
+    state.set_config(config).unwrap();
+    let (port, gateway_handle) = start_gateway(state).await;
+
+    let (status, body) = tokio::time::timeout(StdDuration::from_secs(5), models(port))
+        .await
+        .expect("model body read should honor the non-stream timeout");
+    assert_eq!(status, StatusCode::BAD_GATEWAY, "{body}");
+    assert_eq!(calls.load(Ordering::Relaxed), 1);
+
+    gateway::stop_gateway(gateway_handle);
+    let _ = stop_mock.send(());
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn truncated_model_discovery_body_is_not_replayed_or_failed_over() {
+    let raw_response = concat!(
+        "HTTP/1.1 200 OK\r\n",
+        "content-type: application/json\r\n",
+        "content-length: 4096\r\n",
+        "connection: close\r\n",
+        "\r\n",
+        "{\"object\":\"list\",\"data\":["
+    )
+    .as_bytes()
+    .to_vec();
+    let (base_url, calls, stop_mock) = start_raw_disconnect_upstream(raw_response).await;
+    let (state, dir) = build_state(base_url, &["key-1", "key-2"]);
+    let (port, gateway_handle) = start_gateway(state).await;
+
+    let (status, body) = models(port).await;
+    assert_eq!(status, StatusCode::BAD_GATEWAY, "{body}");
+    assert_eq!(calls.load(Ordering::Relaxed), 1);
 
     gateway::stop_gateway(gateway_handle);
     let _ = stop_mock.send(());
@@ -761,6 +957,9 @@ async fn routes_all_client_formats_to_each_models_native_protocol() {
         let log = state.db.lock().list_forward_logs(1).unwrap().remove(0);
         assert_eq!((log.prompt_tokens, log.completion_tokens), (10, 2));
         assert_eq!(log.status, "success");
+        assert_eq!(log.cost_state, "priced");
+        assert!(log.cost.is_some());
+        assert!(log.pricing_revision_id.is_some());
 
         gateway::stop_gateway(gateway_handle);
         let _ = stop_mock.send(());
@@ -890,6 +1089,72 @@ async fn stream_can_outlive_non_stream_timeout() {
 }
 
 #[tokio::test]
+async fn streamed_request_with_non_sse_success_body_timeout_is_not_replayed() {
+    let (base_url, calls, stop_mock) = start_delayed_upstream(
+        StatusCode::OK,
+        "application/json",
+        vec![(StdDuration::from_secs(10), MESSAGES_SUCCESS_BODY)],
+    )
+    .await;
+    let (state, dir) = build_state(base_url, &["key-1", "key-2"]);
+    let mut config = state.config();
+    config.stream_idle_timeout_secs = 1;
+    state.set_config(config).unwrap();
+    let (port, gateway_handle) = start_gateway(state.clone()).await;
+
+    let (status, body) = tokio::time::timeout(
+        StdDuration::from_secs(5),
+        protocol_stream_call(port, "/v1/messages", "minimax-m2.7"),
+    )
+    .await
+    .expect("non-SSE stream response should honor the idle timeout");
+    assert_eq!(status, StatusCode::GATEWAY_TIMEOUT, "{body}");
+    assert!(body.contains("upstream_outcome_unknown"), "{body}");
+    assert_eq!(calls.load(Ordering::Relaxed), 1);
+    let log = state.db.lock().list_forward_logs(1).unwrap().remove(0);
+    assert_eq!(log.status, "outcome_unknown");
+    assert_eq!(log.http_status, Some(200));
+
+    gateway::stop_gateway(gateway_handle);
+    let _ = stop_mock.send(());
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn streamed_request_with_stalled_error_body_returns_status_without_replay() {
+    let (base_url, calls, stop_mock) = start_delayed_upstream(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "application/json",
+        vec![(
+            StdDuration::from_secs(10),
+            r#"{"error":"late failure details"}"#,
+        )],
+    )
+    .await;
+    let (state, dir) = build_state(base_url, &["key-1", "key-2"]);
+    let mut config = state.config();
+    config.stream_idle_timeout_secs = 1;
+    state.set_config(config).unwrap();
+    let (port, gateway_handle) = start_gateway(state.clone()).await;
+
+    let (status, body) = tokio::time::timeout(
+        StdDuration::from_secs(5),
+        protocol_stream_call(port, "/v1/messages", "minimax-m2.7"),
+    )
+    .await
+    .expect("error response body should honor the idle timeout");
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{body}");
+    assert!(body.to_ascii_lowercase().contains("timed out"), "{body}");
+    assert_eq!(calls.load(Ordering::Relaxed), 1);
+    let log = state.db.lock().list_forward_logs(1).unwrap().remove(0);
+    assert_eq!(log.status, "error");
+
+    gateway::stop_gateway(gateway_handle);
+    let _ = stop_mock.send(());
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
 async fn stream_idle_timeout_emits_protocol_error_and_updates_log() {
     let (base_url, calls, stop_mock) = start_delayed_messages_upstream(
         "text/event-stream",
@@ -915,9 +1180,12 @@ async fn stream_idle_timeout_emits_protocol_error_and_updates_log() {
     .expect("idle timeout should finish before the test watchdog");
     assert_eq!(status, StatusCode::OK);
     assert!(body.contains("event: error"), "{body}");
+    assert!(body.contains("upstream_outcome_unknown"), "{body}");
     assert_eq!(calls.load(Ordering::Relaxed), 1);
     let log = state.db.lock().list_forward_logs(1).unwrap().remove(0);
-    assert_eq!(log.status, "error");
+    assert_eq!(log.status, "outcome_unknown");
+    assert_eq!(log.cost_state, "outcome_unknown");
+    assert_eq!(log.cost, None);
     assert!(log.error_message.is_some());
 
     gateway::stop_gateway(gateway_handle);
@@ -926,7 +1194,7 @@ async fn stream_idle_timeout_emits_protocol_error_and_updates_log() {
 }
 
 #[tokio::test]
-async fn non_stream_body_timeout_is_retryable() {
+async fn non_stream_body_timeout_is_outcome_unknown_and_is_not_replayed() {
     let (base_url, calls, stop_mock) = start_delayed_messages_upstream(
         "application/json",
         vec![(StdDuration::from_millis(1_200), MESSAGES_SUCCESS_BODY)],
@@ -944,19 +1212,175 @@ async fn non_stream_body_timeout_is_retryable() {
     )
     .await
     .expect("non-stream timeout should finish before the test watchdog");
-    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
+    assert_eq!(status, StatusCode::GATEWAY_TIMEOUT, "{body}");
+    assert_eq!(
+        body["error"]["type"],
+        serde_json::json!("upstream_outcome_unknown")
+    );
     let message = body["error"]["message"].as_str().unwrap_or_default();
     let message = message.to_ascii_lowercase();
     assert!(
         message.contains("timeout") || message.contains("timed out"),
         "{body}"
     );
-    assert_eq!(calls.load(Ordering::Relaxed), 2);
+    assert_eq!(calls.load(Ordering::Relaxed), 1);
     let log = state.db.lock().list_forward_logs(1).unwrap().remove(0);
-    assert_eq!(log.status, "error");
+    assert_eq!(log.status, "outcome_unknown");
+    assert_eq!(log.cost_state, "outcome_unknown");
+    assert_eq!(log.cost, None);
 
     gateway::stop_gateway(gateway_handle);
     let _ = stop_mock.send(());
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn truncated_non_stream_success_body_is_outcome_unknown_and_not_replayed() {
+    let raw_response = concat!(
+        "HTTP/1.1 200 OK\r\n",
+        "content-type: application/json\r\n",
+        "content-length: 4096\r\n",
+        "connection: close\r\n",
+        "\r\n",
+        "{\"id\":\"partial"
+    )
+    .as_bytes()
+    .to_vec();
+    let (base_url, calls, stop_mock) = start_raw_disconnect_upstream(raw_response).await;
+    let (state, dir) = build_state(base_url, &["key-1", "key-2"]);
+    let (port, gateway_handle) = start_gateway(state.clone()).await;
+
+    let (status, body) = tokio::time::timeout(
+        StdDuration::from_secs(5),
+        protocol_call(port, "/v1/messages", "minimax-m2.7"),
+    )
+    .await
+    .expect("truncated body should fail before the watchdog");
+    assert_eq!(status, StatusCode::BAD_GATEWAY, "{body}");
+    assert_eq!(
+        body["error"]["type"],
+        serde_json::json!("upstream_outcome_unknown")
+    );
+    assert_eq!(calls.load(Ordering::Relaxed), 1);
+    let log = state.db.lock().list_forward_logs(1).unwrap().remove(0);
+    assert_eq!(log.status, "outcome_unknown");
+
+    gateway::stop_gateway(gateway_handle);
+    let _ = stop_mock.send(());
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn interrupted_stream_is_outcome_unknown_and_not_replayed() {
+    let payload = MESSAGES_STREAM_HEAD;
+    let raw_response = format!(
+        "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\nconnection: close\r\n\r\n{:X}\r\n{}\r\n",
+        payload.len(),
+        payload
+    )
+    .into_bytes();
+    let (base_url, calls, stop_mock) = start_raw_disconnect_upstream(raw_response).await;
+    let (state, dir) = build_state(base_url, &["key-1", "key-2"]);
+    let (port, gateway_handle) = start_gateway(state.clone()).await;
+
+    let (status, body) = tokio::time::timeout(
+        StdDuration::from_secs(5),
+        protocol_stream_call(port, "/v1/messages", "minimax-m2.7"),
+    )
+    .await
+    .expect("interrupted stream should fail before the watchdog");
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body.contains("upstream_outcome_unknown"), "{body}");
+    assert_eq!(calls.load(Ordering::Relaxed), 1);
+    let log = state.db.lock().list_forward_logs(1).unwrap().remove(0);
+    assert_eq!(log.status, "outcome_unknown");
+
+    gateway::stop_gateway(gateway_handle);
+    let _ = stop_mock.send(());
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn upstream_408_is_outcome_unknown_and_does_not_fail_over() {
+    let replies = HashMap::from([
+        (
+            "key-1".to_string(),
+            VecDeque::from([MockReply {
+                status: 408,
+                body: r#"{"error":{"message":"request timed out"}}"#,
+            }]),
+        ),
+        (
+            "key-2".to_string(),
+            VecDeque::from([MockReply {
+                status: 200,
+                body: MESSAGES_SUCCESS_BODY,
+            }]),
+        ),
+    ]);
+    let (base_url, calls, stop_mock) = start_mock_upstream(replies).await;
+    let (state, dir) = build_state(base_url, &["key-1", "key-2"]);
+    let (port, gateway_handle) = start_gateway(state.clone()).await;
+
+    let (status, body) = protocol_call(port, "/v1/messages", "minimax-m2.7").await;
+    assert_eq!(status, StatusCode::GATEWAY_TIMEOUT, "{body}");
+    assert_eq!(
+        body["error"]["type"],
+        serde_json::json!("upstream_outcome_unknown")
+    );
+    assert_eq!(calls.lock().unwrap().len(), 1);
+    assert_eq!(
+        state.db.lock().list_forward_logs(1).unwrap()[0].status,
+        "outcome_unknown"
+    );
+
+    gateway::stop_gateway(gateway_handle);
+    let _ = stop_mock.send(());
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn connect_failure_retries_once_without_account_fallback() {
+    let upstream_port = free_port();
+    let (state, dir) = build_state(
+        format!("http://127.0.0.1:{upstream_port}"),
+        &["key-1", "key-2"],
+    );
+    let mut config = state.config();
+    config.connect_timeout_secs = 1;
+    state.set_config(config).unwrap();
+    let (port, gateway_handle) = start_gateway(state.clone()).await;
+
+    let (status, _) = protocol_call(port, "/v1/messages", "minimax-m2.7").await;
+    assert_eq!(status, StatusCode::BAD_GATEWAY);
+    let logs = state.db.lock().list_forward_logs(10).unwrap();
+    assert_eq!(logs.len(), 2);
+    assert!(logs.iter().all(|log| log.account_id == "acct-1"));
+    assert!(logs.iter().all(|log| log.status == "error"));
+
+    gateway::stop_gateway(gateway_handle);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn streaming_connect_failure_is_safe_to_retry_once() {
+    let upstream_port = free_port();
+    let (state, dir) = build_state(
+        format!("http://127.0.0.1:{upstream_port}"),
+        &["key-1", "key-2"],
+    );
+    let mut config = state.config();
+    config.connect_timeout_secs = 1;
+    state.set_config(config).unwrap();
+    let (port, gateway_handle) = start_gateway(state.clone()).await;
+
+    let (status, _) = protocol_stream_call(port, "/v1/messages", "minimax-m2.7").await;
+    assert_eq!(status, StatusCode::BAD_GATEWAY);
+    let logs = state.db.lock().list_forward_logs(10).unwrap();
+    assert_eq!(logs.len(), 2);
+    assert!(logs.iter().all(|log| log.account_id == "acct-1"));
+
+    gateway::stop_gateway(gateway_handle);
     let _ = fs::remove_dir_all(dir);
 }
 
@@ -998,20 +1422,14 @@ async fn messages_forwards_account_key_as_x_api_key() {
 }
 
 #[tokio::test]
-async fn converted_messages_request_keeps_retry_and_account_fallback() {
+async fn converted_messages_request_does_not_replay_upstream_5xx() {
     let replies = HashMap::from([
         (
             "key-1".to_string(),
-            VecDeque::from([
-                MockReply {
-                    status: 500,
-                    body: r#"{"error":"temporary"}"#,
-                },
-                MockReply {
-                    status: 500,
-                    body: r#"{"error":"still temporary"}"#,
-                },
-            ]),
+            VecDeque::from([MockReply {
+                status: 500,
+                body: r#"{"error":"temporary"}"#,
+            }]),
         ),
         (
             "key-2".to_string(),
@@ -1026,15 +1444,15 @@ async fn converted_messages_request_keeps_retry_and_account_fallback() {
     let (port, gateway_handle) = start_gateway(state).await;
 
     let (status, body) = protocol_call(port, "/v1/messages", "deepseek-v4-flash").await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["type"], "message");
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(body["type"], "error");
     let calls = calls.lock().unwrap();
     assert_eq!(
         calls
             .iter()
             .map(|call| call.key.as_str())
             .collect::<Vec<_>>(),
-        ["key-1", "key-1", "key-2"]
+        ["key-1"]
     );
     assert!(calls.iter().all(|call| call.path == "/v1/chat/completions"));
     drop(calls);
@@ -1049,16 +1467,10 @@ async fn manual_order_drives_fallback_while_ineligible_accounts_are_skipped() {
     let replies = HashMap::from([
         (
             "key-2".to_string(),
-            VecDeque::from([
-                MockReply {
-                    status: 500,
-                    body: r#"{"error":"temporary"}"#,
-                },
-                MockReply {
-                    status: 500,
-                    body: r#"{"error":"still temporary"}"#,
-                },
-            ]),
+            VecDeque::from([MockReply {
+                status: 401,
+                body: r#"{"error":{"message":"expired key"}}"#,
+            }]),
         ),
         (
             "key-1".to_string(),
@@ -1112,7 +1524,7 @@ async fn manual_order_drives_fallback_while_ineligible_accounts_are_skipped() {
             .iter()
             .map(|call| call.key.as_str())
             .collect::<Vec<_>>(),
-        ["key-2", "key-2", "key-1"]
+        ["key-2", "key-1"]
     );
 
     gateway::stop_gateway(gateway_handle);
@@ -1219,20 +1631,14 @@ async fn falls_back_past_five_limited_accounts_to_sixth_success() {
 }
 
 #[tokio::test]
-async fn retries_transient_failure_once_on_same_account_before_fallback() {
+async fn upstream_5xx_is_returned_without_same_account_retry_or_fallback() {
     let replies = HashMap::from([
         (
             "key-1".to_string(),
-            VecDeque::from([
-                MockReply {
-                    status: 500,
-                    body: r#"{"error":"temporary"}"#,
-                },
-                MockReply {
-                    status: 500,
-                    body: r#"{"error":"still temporary"}"#,
-                },
-            ]),
+            VecDeque::from([MockReply {
+                status: 500,
+                body: r#"{"error":"temporary"}"#,
+            }]),
         ),
         (
             "key-2".to_string(),
@@ -1247,7 +1653,7 @@ async fn retries_transient_failure_once_on_same_account_before_fallback() {
     let (port, gateway_handle) = start_gateway(state.clone()).await;
 
     let (status, _) = chat(port).await;
-    assert_eq!(status, 200);
+    assert_eq!(status, 500);
 
     let call_keys = calls
         .lock()
@@ -1255,7 +1661,7 @@ async fn retries_transient_failure_once_on_same_account_before_fallback() {
         .iter()
         .map(|c| c.key.clone())
         .collect::<Vec<_>>();
-    assert_eq!(call_keys, ["key-1", "key-1", "key-2"].map(str::to_string));
+    assert_eq!(call_keys, ["key-1"].map(str::to_string));
 
     gateway::stop_gateway(gateway_handle);
     let _ = stop_mock.send(());
@@ -1263,20 +1669,14 @@ async fn retries_transient_failure_once_on_same_account_before_fallback() {
 }
 
 #[tokio::test]
-async fn keeps_same_account_when_transient_retry_succeeds() {
+async fn auth_failure_fails_over_without_same_account_replay() {
     let replies = HashMap::from([
         (
             "key-1".to_string(),
-            VecDeque::from([
-                MockReply {
-                    status: 500,
-                    body: r#"{"error":"temporary"}"#,
-                },
-                MockReply {
-                    status: 200,
-                    body: SUCCESS_BODY,
-                },
-            ]),
+            VecDeque::from([MockReply {
+                status: 403,
+                body: r#"{"error":{"message":"forbidden key"}}"#,
+            }]),
         ),
         (
             "key-2".to_string(),
@@ -1299,7 +1699,7 @@ async fn keeps_same_account_when_transient_retry_succeeds() {
         .iter()
         .map(|c| c.key.clone())
         .collect::<Vec<_>>();
-    assert_eq!(call_keys, ["key-1", "key-1"].map(str::to_string));
+    assert_eq!(call_keys, ["key-1", "key-2"].map(str::to_string));
 
     gateway::stop_gateway(gateway_handle);
     let _ = stop_mock.send(());

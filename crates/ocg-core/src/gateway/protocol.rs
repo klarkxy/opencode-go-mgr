@@ -774,8 +774,8 @@ fn gemini_status_for_kind(kind: &str) -> &'static str {
     }
 }
 
-pub fn extract_usage(format: ApiFormat, payload: &Value) -> UsageCounts {
-    let usage = match format {
+fn usage_payload(format: ApiFormat, payload: &Value) -> Option<&Value> {
+    match format {
         ApiFormat::ChatCompletions => payload.get("usage"),
         ApiFormat::Messages => payload
             .get("usage")
@@ -784,7 +784,28 @@ pub fn extract_usage(format: ApiFormat, payload: &Value) -> UsageCounts {
             .get("usage")
             .or_else(|| payload.pointer("/response/usage")),
         ApiFormat::Gemini => payload.get("usageMetadata"),
+    }
+}
+
+pub fn has_usage(format: ApiFormat, payload: &Value) -> bool {
+    usage_payload(format, payload).is_some_and(Value::is_object)
+}
+
+pub fn has_complete_usage(format: ApiFormat, payload: &Value) -> bool {
+    let Some(usage) = usage_payload(format, payload).filter(|value| value.is_object()) else {
+        return false;
     };
+    let has_u64 = |key: &str| usage.get(key).is_some_and(Value::is_u64);
+    match format {
+        ApiFormat::ChatCompletions => has_u64("prompt_tokens") && has_u64("completion_tokens"),
+        ApiFormat::Messages => has_u64("input_tokens") && has_u64("output_tokens"),
+        ApiFormat::Responses => has_u64("input_tokens") && has_u64("output_tokens"),
+        ApiFormat::Gemini => has_u64("promptTokenCount") && has_u64("candidatesTokenCount"),
+    }
+}
+
+pub fn extract_usage(format: ApiFormat, payload: &Value) -> UsageCounts {
+    let usage = usage_payload(format, payload);
     let Some(usage) = usage else {
         return UsageCounts::default();
     };
@@ -1447,6 +1468,9 @@ fn chat_request_to_messages(body: Value) -> Result<Value, ProtocolError> {
     copy(&body, &mut out, "stream", "stream");
     copy(&body, &mut out, "temperature", "temperature");
     copy(&body, &mut out, "top_p", "top_p");
+    if let Some(service_tier) = body.get("service_tier").and_then(Value::as_str) {
+        out.insert("service_tier".into(), json!(service_tier));
+    }
     match body.get("stop") {
         Some(Value::String(stop)) => {
             out.insert("stop_sequences".into(), json!([stop]));
@@ -1655,6 +1679,9 @@ fn responses_request_to_messages(
     copy(&body, &mut out, "stream", "stream");
     copy(&body, &mut out, "temperature", "temperature");
     copy(&body, &mut out, "top_p", "top_p");
+    if let Some(service_tier) = body.get("service_tier").and_then(Value::as_str) {
+        out.insert("service_tier".into(), json!(service_tier));
+    }
     out.insert(
         "max_tokens".into(),
         body.get("max_output_tokens")
@@ -3006,6 +3033,68 @@ mod tests {
         .expect("highspeed model should be routable");
         assert_eq!(plan.upstream, ApiFormat::Messages);
         assert_eq!(plan.service_tier.as_deref(), Some("priority"));
+    }
+
+    #[test]
+    fn chat_request_to_messages_preserves_string_service_tier() {
+        let plan = prepare_request(
+            ApiFormat::ChatCompletions,
+            bytes(json!({
+                "model": "minimax-m3",
+                "messages": [{"role": "user", "content": "hi"}],
+                "service_tier": "priority"
+            })),
+        )
+        .expect("Chat request should convert");
+        let body: Value = serde_json::from_slice(&plan.body).expect("body is JSON");
+        assert_eq!(plan.upstream, ApiFormat::Messages);
+        assert_eq!(body["service_tier"], "priority");
+        assert_eq!(plan.service_tier.as_deref(), Some("priority"));
+
+        let ignored = prepare_request(
+            ApiFormat::ChatCompletions,
+            bytes(json!({
+                "model": "minimax-m3",
+                "messages": [{"role": "user", "content": "hi"}],
+                "service_tier": 1
+            })),
+        )
+        .expect("non-string service tier should retain compatibility");
+        let body: Value = serde_json::from_slice(&ignored.body).expect("body is JSON");
+        assert!(body.get("service_tier").is_none());
+        assert_eq!(ignored.service_tier, None);
+    }
+
+    #[test]
+    fn responses_request_to_messages_preserves_string_service_tier() {
+        let plan = prepare_request(
+            ApiFormat::Responses,
+            bytes(json!({
+                "model": "minimax-m3",
+                "store": false,
+                "input": "hi",
+                "service_tier": "priority"
+            })),
+        )
+        .expect("Responses request should convert");
+        let body: Value = serde_json::from_slice(&plan.body).expect("body is JSON");
+        assert_eq!(plan.upstream, ApiFormat::Messages);
+        assert_eq!(body["service_tier"], "priority");
+        assert_eq!(plan.service_tier.as_deref(), Some("priority"));
+
+        let ignored = prepare_request(
+            ApiFormat::Responses,
+            bytes(json!({
+                "model": "minimax-m3",
+                "store": false,
+                "input": "hi",
+                "service_tier": {"tier": "priority"}
+            })),
+        )
+        .expect("non-string service tier should retain compatibility");
+        let body: Value = serde_json::from_slice(&ignored.body).expect("body is JSON");
+        assert!(body.get("service_tier").is_none());
+        assert_eq!(ignored.service_tier, None);
     }
 
     #[test]

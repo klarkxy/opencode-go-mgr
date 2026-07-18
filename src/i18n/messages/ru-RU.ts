@@ -338,4 +338,4 @@ export const ruRUMessages = {
   "MESSAGES ENDPOINT": "MESSAGES ENDPOINT",
   "RESPONSES ENDPOINT": "RESPONSES ENDPOINT",
   "5小时": "5 часов",
-} satisfies Messages;
+} satisfies Partial<Messages>;

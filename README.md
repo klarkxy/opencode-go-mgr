@@ -33,8 +33,10 @@ alongside the GUI.
 - **Purchase-cycle reminders** — each account records its purchase date and an
   expiry date one natural month later. Accounts and Dashboard show the remaining
   days without automatically disabling an expired account.
-- **Local cost accounting** — 5‑hour, weekly, and monthly usage bars are
-  estimated from the requests the gateway actually forwards.
+- **OpenCode Go quota accounting** — 5-hour, weekly, and monthly usage bars
+  are estimated in USD from the active OpenCode Go documentation snapshot.
+  Settings can refresh that snapshot on demand; failed refreshes keep the
+  last successful revision.
 - **Dashboard first run** — the first visitor on a non‑loopback bind creates
   the single administrator account; the desktop and CLI builds bind loopback
   by default and skip login.
@@ -110,6 +112,14 @@ Gateway Key, and use the **Applications** view for client-specific paths and
 configuration. OpenAI-compatible clients normally use
 `http://127.0.0.1:9042/v1`. If the browser does not open or you close the tab,
 use the tray icon to reopen the dashboard.
+
+Gateway replay is deliberately conservative. Only a DNS/TCP/TLS connection
+failure that proves the request was not sent is retried once on the same
+account. `401`, `403`, and `429` may select another account; `408`, `5xx`,
+post-connect failures, body timeouts, and interrupted streams are never
+replayed because the upstream may already have consumed quota. Ambiguous
+failures are reported as `upstream_outcome_unknown`. The default connect,
+non-stream total, and stream-idle timeouts are 30, 900, and 300 seconds.
 
 ## True And False Circuit Breakers
 

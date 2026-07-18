@@ -1,13 +1,13 @@
 use crate::db::Database;
-use crate::gateway::cost::cost_from_counts_with_tier;
 use crate::gateway::limit::{parse_reset, parse_usage_limit_window};
 use crate::gateway::protocol::{
-    ApiFormat, RequestPlan, UsageCounts, extract_usage, format_error, merge_stream_usage,
-    transform_response,
+    ApiFormat, RequestPlan, UsageCounts, error_body, extract_usage, format_error,
+    has_complete_usage, has_usage, merge_stream_usage, transform_response,
 };
 use crate::gateway::protocol_stream::StreamConverter;
 use crate::gateway::selector::AccountSelector;
 use crate::models::{Account, AppConfig, ForwardLog, ForwardMetrics};
+use crate::pricing::PricingSnapshot;
 use crate::state::CoreState;
 use anyhow::Result;
 use axum::body::Body;
@@ -22,10 +22,16 @@ use serde_json::Value;
 use std::sync::Arc;
 use std::time::Duration as StdDuration;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ForwardAction {
+    Return,
+    RetrySameAccount,
+    TryNextAccount,
+}
+
 pub struct ForwardResult {
     pub response: Response,
-    pub success: bool,
-    pub retryable: bool,
+    pub(crate) action: ForwardAction,
     pub error_message: Option<String>,
 }
 
@@ -36,8 +42,18 @@ pub async fn forward_request(
     config: &AppConfig,
     plan: &RequestPlan,
     headers: HeaderMap,
+    pricing_snapshot: Arc<PricingSnapshot>,
 ) -> Result<ForwardResult> {
-    forward_request_impl(client, state, account, config, plan, headers).await
+    forward_request_impl(
+        client,
+        state,
+        account,
+        config,
+        plan,
+        headers,
+        pricing_snapshot,
+    )
+    .await
 }
 
 async fn forward_request_impl(
@@ -47,6 +63,7 @@ async fn forward_request_impl(
     config: &AppConfig,
     plan: &RequestPlan,
     headers: HeaderMap,
+    pricing_snapshot: Arc<PricingSnapshot>,
 ) -> Result<ForwardResult> {
     ensure_safe_upstream_base_url(&config.upstream_base_url)?;
     let key = state.decrypt_key(&account.key_cipher)?;
@@ -109,37 +126,113 @@ async fn forward_request_impl(
     );
 
     let model = plan.model.clone();
-
     let upstream_req = client
         .post(&url)
         .headers(upstream_headers)
         .body(plan.body.clone());
-    let upstream_req = if plan.stream {
-        upstream_req
+    let upstream_resp = if plan.stream {
+        match tokio::time::timeout(
+            StdDuration::from_secs(config.stream_idle_timeout_secs),
+            upstream_req.send(),
+        )
+        .await
+        {
+            Ok(result) => result,
+            Err(_) => {
+                let detail = format!(
+                    "upstream did not return response headers within {}s",
+                    config.stream_idle_timeout_secs
+                );
+                let error_message = outcome_unknown_message(&detail);
+                {
+                    let db = state.db.lock();
+                    log_forward(
+                        &db,
+                        account,
+                        &model,
+                        "outcome_unknown",
+                        None,
+                        metadata_metrics(
+                            &pricing_snapshot,
+                            plan.service_tier.as_deref(),
+                            "outcome_unknown",
+                        ),
+                        Some(&error_message),
+                    )?;
+                }
+                return Ok(ForwardResult {
+                    response: outcome_unknown_response(
+                        plan.client,
+                        StatusCode::GATEWAY_TIMEOUT,
+                        &detail,
+                    ),
+                    action: ForwardAction::Return,
+                    error_message: Some(error_message),
+                });
+            }
+        }
     } else {
-        upstream_req.timeout(StdDuration::from_secs(config.non_stream_timeout_secs))
+        upstream_req
+            .timeout(StdDuration::from_secs(config.non_stream_timeout_secs))
+            .send()
+            .await
     };
 
-    let upstream_resp = match upstream_req.send().await {
+    let upstream_resp = match upstream_resp {
         Ok(resp) => resp,
         Err(e) => {
-            let error_message = format!("upstream request failed: {}", e);
+            let connect_failure = e.is_connect();
+            let outcome_unknown = !connect_failure;
+            let detail = if e.is_timeout() {
+                format!("upstream request timed out: {e}")
+            } else {
+                format!("upstream request failed: {e}")
+            };
+            let error_message = if outcome_unknown {
+                outcome_unknown_message(&detail)
+            } else {
+                detail.clone()
+            };
             {
                 let db = state.db.lock();
                 log_forward(
                     &db,
                     account,
                     &model,
-                    "error",
+                    if outcome_unknown {
+                        "outcome_unknown"
+                    } else {
+                        "error"
+                    },
                     None,
-                    ForwardMetrics::default(),
+                    metadata_metrics(
+                        &pricing_snapshot,
+                        plan.service_tier.as_deref(),
+                        if outcome_unknown {
+                            "outcome_unknown"
+                        } else {
+                            "not_applicable"
+                        },
+                    ),
                     Some(&error_message),
                 )?;
             }
+            let status = if e.is_timeout() {
+                StatusCode::GATEWAY_TIMEOUT
+            } else {
+                StatusCode::BAD_GATEWAY
+            };
             return Ok(ForwardResult {
-                response: error_response(plan.client, &error_message, None),
-                success: false,
-                retryable: true,
+                response: if outcome_unknown {
+                    outcome_unknown_response(plan.client, status, &detail)
+                } else {
+                    error_response(plan.client, &error_message, None)
+                },
+                action: if connect_failure {
+                    ForwardAction::RetrySameAccount
+                } else {
+                    ForwardAction::Return
+                },
                 error_message: Some(error_message),
             });
         }
@@ -153,11 +246,17 @@ async fn forward_request_impl(
         .map(|ct| ct.contains("text/event-stream"))
         .unwrap_or(false);
 
+    let body_timeout = plan
+        .stream
+        .then(|| StdDuration::from_secs(config.stream_idle_timeout_secs));
+
     if status.is_server_error() {
-        let text = upstream_resp
-            .text()
+        // A response status is authoritative even if its error body stalls. Keep
+        // that status and never replay the request; the bounded read only affects
+        // how much safe diagnostic text we can return.
+        let text = response_text_with_timeout(upstream_resp, body_timeout)
             .await
-            .unwrap_or_else(|error| response_body_error(&error));
+            .unwrap_or_else(ResponseBodyFailure::into_detail);
         let error_message = format!(
             "upstream error {}: {}",
             status.as_u16(),
@@ -171,28 +270,33 @@ async fn forward_request_impl(
                 &model,
                 "error",
                 Some(status.as_u16() as i32),
-                ForwardMetrics::default(),
+                metadata_metrics(
+                    &pricing_snapshot,
+                    plan.service_tier.as_deref(),
+                    "not_applicable",
+                ),
                 Some(&error_message),
             )?;
         }
         return Ok(ForwardResult {
-            response: error_response(plan.client, &error_message, None),
-            success: false,
-            retryable: true,
+            response: protocol_status_error_response(plan.client, status, &error_message, None),
+            action: ForwardAction::Return,
             error_message: Some(error_message),
         });
     }
 
     if status.is_client_error() {
-        let text = upstream_resp
-            .text()
+        // As above, a known 4xx proves the upstream rejected the request. Body
+        // read failures must not turn into a replay or account fallback except
+        // for the explicit 401/403/429 status policy below.
+        let text = response_text_with_timeout(upstream_resp, body_timeout)
             .await
-            .unwrap_or_else(|error| response_body_error(&error));
+            .unwrap_or_else(ResponseBodyFailure::into_detail);
 
         if status.as_u16() == 429 {
             // 429 from opencode-go carries the exact reset window ("Resets in 13 days" / "4 days" / "13min").
-            // Parse it, cool the account down until then, and fail over to the next account
-            // (success: false). 5xx/transport errors are environment-level — no cooldown, just failover.
+            // Parse it, cool the account down until then, and fail over to the next account.
+            // Unlike a rejected 429, ambiguous transport failures and 5xx responses are not replayed.
             let cooldown = parse_reset(&text).unwrap_or_else(|| Duration::minutes(5));
             let until = Utc::now() + cooldown;
             let error_message = format!(
@@ -208,7 +312,11 @@ async fn forward_request_impl(
                     &model,
                     "client_error",
                     Some(429),
-                    ForwardMetrics::default(),
+                    metadata_metrics(
+                        &pricing_snapshot,
+                        plan.service_tier.as_deref(),
+                        "not_applicable",
+                    ),
                     Some(&text),
                 )?;
                 db.set_account_rate_limit(
@@ -220,30 +328,37 @@ async fn forward_request_impl(
             }
             return Ok(ForwardResult {
                 response: error_response(plan.client, &error_message, None),
-                success: false,
-                retryable: false,
+                action: ForwardAction::TryNextAccount,
                 error_message: Some(error_message),
             });
         }
 
         if status.as_u16() == 408 {
-            let error_message = format!("upstream timeout 408: {}", sanitize_upstream_error(&text));
+            let detail = format!("upstream returned 408: {}", sanitize_upstream_error(&text));
+            let error_message = outcome_unknown_message(&detail);
             {
                 let db = state.db.lock();
                 log_forward(
                     &db,
                     account,
                     &model,
-                    "client_error",
+                    "outcome_unknown",
                     Some(408),
-                    ForwardMetrics::default(),
+                    metadata_metrics(
+                        &pricing_snapshot,
+                        plan.service_tier.as_deref(),
+                        "outcome_unknown",
+                    ),
                     Some(&error_message),
                 )?;
             }
             return Ok(ForwardResult {
-                response: error_response(plan.client, &error_message, None),
-                success: false,
-                retryable: true,
+                response: outcome_unknown_response(
+                    plan.client,
+                    StatusCode::GATEWAY_TIMEOUT,
+                    &detail,
+                ),
+                action: ForwardAction::Return,
                 error_message: Some(error_message),
             });
         }
@@ -263,14 +378,17 @@ async fn forward_request_impl(
                     &model,
                     "client_error",
                     Some(status.as_u16() as i32),
-                    ForwardMetrics::default(),
+                    metadata_metrics(
+                        &pricing_snapshot,
+                        plan.service_tier.as_deref(),
+                        "not_applicable",
+                    ),
                     Some(&sanitize_upstream_error(&text)),
                 )?;
             }
             return Ok(ForwardResult {
                 response: error_response(plan.client, &error_message, None),
-                success: false,
-                retryable: false,
+                action: ForwardAction::TryNextAccount,
                 error_message: Some(error_message),
             });
         }
@@ -285,7 +403,11 @@ async fn forward_request_impl(
                 &model,
                 "client_error",
                 Some(status.as_u16() as i32),
-                ForwardMetrics::default(),
+                metadata_metrics(
+                    &pricing_snapshot,
+                    plan.service_tier.as_deref(),
+                    "not_applicable",
+                ),
                 Some(&sanitize_upstream_error(&text)),
             )?;
         }
@@ -294,8 +416,7 @@ async fn forward_request_impl(
         let body = format_error(plan.client, status, &message, upstream_error.as_ref());
         return Ok(ForwardResult {
             response: (status, axum::Json(body)).into_response(),
-            success: true,
-            retryable: false,
+            action: ForwardAction::Return,
             error_message: None,
         });
     }
@@ -323,12 +444,30 @@ async fn forward_request_impl(
                 &model,
                 "streaming",
                 Some(status.as_u16() as i32),
-                ForwardMetrics::default(),
+                metadata_metrics(
+                    &pricing_snapshot,
+                    plan.service_tier.as_deref(),
+                    "not_applicable",
+                ),
                 None,
             )?
         };
 
-        let stream = upstream_resp.bytes_stream();
+        let stream_idle_timeout = StdDuration::from_secs(config.stream_idle_timeout_secs);
+        let stream = futures_util::stream::unfold(
+            (Box::pin(upstream_resp.bytes_stream()), false),
+            move |(mut stream, finished)| async move {
+                if finished {
+                    return None;
+                }
+                match tokio::time::timeout(stream_idle_timeout, stream.next()).await {
+                    Ok(Some(Ok(chunk))) => Some((StreamRead::Chunk(chunk), (stream, false))),
+                    Ok(Some(Err(error))) => Some((StreamRead::Failed(error), (stream, true))),
+                    Ok(None) => None,
+                    Err(_) => Some((StreamRead::IdleTimeout, (stream, true))),
+                }
+            },
+        );
         let state_h = state.clone();
         let st = Arc::new(Mutex::new(StreamState::default()));
         let converter = Arc::new(Mutex::new(StreamConverter::new(plan)));
@@ -337,11 +476,13 @@ async fn forward_request_impl(
 
         let st_map = st.clone();
         let converter_map = converter.clone();
+        let pricing_map = pricing_snapshot.clone();
+        let service_tier_map = plan.service_tier.clone();
 
         let mapped = stream
             .flat_map(move |result| {
                 let (chunks, stop) = match result {
-                    Ok(chunk) => {
+                    StreamRead::Chunk(chunk) => {
                         let stopped = {
                             let state = st_map.lock();
                             state.error || state.terminal
@@ -354,20 +495,26 @@ async fn forward_request_impl(
                             match converted {
                                 Ok(chunks) => (chunks, false),
                                 Err(error) => {
-                                    let msg =
+                                    let detail =
                                         format!("stream conversion failed: {}", error.message);
+                                    let msg = outcome_unknown_message(&detail);
                                     {
                                         let mut state = st_map.lock();
                                         state.error = true;
+                                        state.outcome_unknown = true;
                                         state.error_message = Some(msg.clone());
                                     }
-                                    let chunks = converter_map.lock().error_event(&msg);
+                                    let chunks = converter_map.lock().outcome_unknown_event(&msg);
                                     let db = state_h.db.lock();
                                     let _ = db.update_forward_log(
                                         initial_id,
-                                        "error",
+                                        "outcome_unknown",
                                         None,
-                                        ForwardMetrics::default(),
+                                        metadata_metrics(
+                                            &pricing_map,
+                                            service_tier_map.as_deref(),
+                                            "outcome_unknown",
+                                        ),
                                         Some(&msg),
                                     );
                                     (chunks, true)
@@ -375,32 +522,60 @@ async fn forward_request_impl(
                             }
                         }
                     }
-                    Err(e) => {
+                    StreamRead::Failed(error) => {
                         if converter_map.lock().is_terminal() {
                             (Vec::new(), true)
                         } else {
-                            // Update the streaming row to "error" rather than inserting a new
-                            // row, then report the failure in the caller's SSE protocol.
-                            let msg = if e.is_timeout() {
-                                format!(
-                                    "stream error: upstream stream idle timeout after {}s",
-                                    stream_idle_timeout_secs
-                                )
-                            } else {
-                                format!("stream error: {e}")
-                            };
+                            let detail = format!("upstream stream interrupted: {error}");
+                            let msg = outcome_unknown_message(&detail);
                             {
                                 let mut state = st_map.lock();
                                 state.error = true;
+                                state.outcome_unknown = true;
                                 state.error_message = Some(msg.clone());
                             }
-                            let chunks = converter_map.lock().error_event(&msg);
+                            let chunks = converter_map.lock().outcome_unknown_event(&msg);
                             let db = state_h.db.lock();
                             let _ = db.update_forward_log(
                                 initial_id,
-                                "error",
+                                "outcome_unknown",
                                 None,
-                                ForwardMetrics::default(),
+                                metadata_metrics(
+                                    &pricing_map,
+                                    service_tier_map.as_deref(),
+                                    "outcome_unknown",
+                                ),
+                                Some(&msg),
+                            );
+                            (chunks, true)
+                        }
+                    }
+                    StreamRead::IdleTimeout => {
+                        if converter_map.lock().is_terminal() {
+                            (Vec::new(), true)
+                        } else {
+                            let detail = format!(
+                                "upstream stream idle timeout after {}s",
+                                stream_idle_timeout_secs
+                            );
+                            let msg = outcome_unknown_message(&detail);
+                            {
+                                let mut state = st_map.lock();
+                                state.error = true;
+                                state.outcome_unknown = true;
+                                state.error_message = Some(msg.clone());
+                            }
+                            let chunks = converter_map.lock().outcome_unknown_event(&msg);
+                            let db = state_h.db.lock();
+                            let _ = db.update_forward_log(
+                                initial_id,
+                                "outcome_unknown",
+                                None,
+                                metadata_metrics(
+                                    &pricing_map,
+                                    service_tier_map.as_deref(),
+                                    "outcome_unknown",
+                                ),
                                 Some(&msg),
                             );
                             (chunks, true)
@@ -430,6 +605,15 @@ async fn forward_request_impl(
             let converter_f = converter.clone();
             let mdl = model.clone();
             let service_tier_f = plan.service_tier.clone();
+            let pricing_f = pricing_snapshot.clone();
+            let stream_guard = StreamOutcomeGuard::new(
+                state.clone(),
+                initial_id,
+                st.clone(),
+                model.clone(),
+                pricing_snapshot.clone(),
+                plan.service_tier.clone(),
+            );
             // `unfold` is a clean "run once, then end" stream. The DB write is the
             // unfold's state transition, the body emits a single empty chunk, and
             // the stream then terminates — no need for once() + flatten gymnastics.
@@ -440,18 +624,21 @@ async fn forward_request_impl(
                     converter_f,
                     mdl,
                     initial_id,
+                    guard: stream_guard,
                 },
                 move |state| {
                     let service_tier = service_tier_f.clone();
+                    let pricing = pricing_f.clone();
                     async move {
-                        let (db_h, st_f, converter_f, mdl, initial_id) = match state {
+                        let (db_h, st_f, converter_f, mdl, initial_id, mut guard) = match state {
                             FinalizerState::Init {
                                 db_h,
                                 st_f,
                                 converter_f,
                                 mdl,
                                 initial_id,
-                            } => (db_h, st_f, converter_f, mdl, initial_id),
+                                guard,
+                            } => (db_h, st_f, converter_f, mdl, initial_id, guard),
                             FinalizerState::Done => return None,
                         };
                         let (output, finish_error) = if st_f.lock().error {
@@ -461,43 +648,69 @@ async fn forward_request_impl(
                             match converter.finish() {
                                 Ok(chunks) => (join_chunks(chunks), None),
                                 Err(error) => {
-                                    let message =
-                                        format!("stream conversion failed: {}", error.message);
+                                    let detail = format!(
+                                        "upstream stream ended before a complete response: {}",
+                                        error.message
+                                    );
+                                    let message = outcome_unknown_message(&detail);
                                     {
                                         let mut state = st_f.lock();
                                         state.error = true;
+                                        state.outcome_unknown = true;
                                         state.error_message = Some(message.clone());
                                     }
-                                    let chunks = converter.error_event(&message);
+                                    let chunks = converter.outcome_unknown_event(&message);
                                     (join_chunks(chunks), Some(message))
                                 }
                             }
                         };
                         let stream_error = st_f.lock().error_message.clone();
-                        let (status_str, prompt, completion, cached, cost) = {
+                        let (status_str, metrics) = {
                             let g = st_f.lock();
                             if g.error {
-                                // ponytail: the mapped Err arm already wrote the
-                                // 'error' row. Don't overwrite it back to success.
-                                ("error".to_string(), 0, 0, 0, 0.0)
+                                let status = if g.outcome_unknown {
+                                    "outcome_unknown"
+                                } else {
+                                    "error"
+                                };
+                                (
+                                    status.to_string(),
+                                    metadata_metrics(
+                                        &pricing,
+                                        service_tier.as_deref(),
+                                        if g.outcome_unknown {
+                                            "outcome_unknown"
+                                        } else {
+                                            "not_applicable"
+                                        },
+                                    ),
+                                )
                             } else if g.has_usage {
                                 let (p, c, cached, cache_creation) = token_counts(g.usage);
-                                (
-                                    "success".to_string(),
+                                let metrics = pricing_metrics(
+                                    &pricing,
+                                    &mdl,
                                     p,
                                     c,
                                     cached,
-                                    cost_from_counts_with_tier(
-                                        &mdl,
-                                        p,
-                                        c,
-                                        cached,
-                                        cache_creation,
+                                    cache_creation,
+                                    service_tier.as_deref(),
+                                );
+                                let status = if metrics.cost_state == "priced" {
+                                    "success"
+                                } else {
+                                    "success_unpriced"
+                                };
+                                (status.to_string(), metrics)
+                            } else {
+                                (
+                                    "success_no_usage".to_string(),
+                                    metadata_metrics(
+                                        &pricing,
                                         service_tier.as_deref(),
+                                        "usage_missing",
                                     ),
                                 )
-                            } else {
-                                ("success_no_usage".to_string(), 0, 0, 0, 0.0)
                             }
                         };
                         let db = db_h.db.lock();
@@ -505,12 +718,7 @@ async fn forward_request_impl(
                             initial_id,
                             &status_str,
                             None,
-                            ForwardMetrics {
-                                prompt_tokens: prompt,
-                                completion_tokens: completion,
-                                cached_tokens: cached,
-                                cost,
-                            },
+                            metrics,
                             finish_error.as_deref().or(stream_error.as_deref()),
                         ) {
                             let _ = db.log_gateway(
@@ -519,6 +727,7 @@ async fn forward_request_impl(
                                 &format!("failed to finalize streaming row {}: {}", initial_id, e),
                             );
                         }
+                        guard.disarm();
                         Some((
                             Ok::<bytes::Bytes, std::io::Error>(output),
                             FinalizerState::Done,
@@ -530,31 +739,39 @@ async fn forward_request_impl(
 
         Ok(ForwardResult {
             response: response_builder.body(Body::from_stream(mapped.chain(finalizer)))?,
-            success: true,
-            retryable: false,
+            action: ForwardAction::Return,
             error_message: None,
         })
     } else {
-        let text = match upstream_resp.text().await {
+        let text = match response_text_with_timeout(upstream_resp, body_timeout).await {
             Ok(text) => text,
             Err(error) => {
-                let error_message = response_body_error(&error);
+                let downstream_status = if error.is_timeout() {
+                    StatusCode::GATEWAY_TIMEOUT
+                } else {
+                    StatusCode::BAD_GATEWAY
+                };
+                let detail = error.into_detail();
+                let error_message = outcome_unknown_message(&detail);
                 {
                     let db = state.db.lock();
                     log_forward(
                         &db,
                         account,
                         &model,
-                        "error",
+                        "outcome_unknown",
                         Some(status.as_u16() as i32),
-                        ForwardMetrics::default(),
+                        metadata_metrics(
+                            &pricing_snapshot,
+                            plan.service_tier.as_deref(),
+                            "outcome_unknown",
+                        ),
                         Some(&error_message),
                     )?;
                 }
                 return Ok(ForwardResult {
-                    response: error_response(plan.client, &error_message, None),
-                    success: false,
-                    retryable: true,
+                    response: outcome_unknown_response(plan.client, downstream_status, &detail),
+                    action: ForwardAction::Return,
                     error_message: Some(error_message),
                 });
             }
@@ -570,29 +787,41 @@ async fn forward_request_impl(
                     &model,
                     "error",
                     Some(status.as_u16() as i32),
-                    ForwardMetrics::default(),
+                    metadata_metrics(
+                        &pricing_snapshot,
+                        plan.service_tier.as_deref(),
+                        "not_applicable",
+                    ),
                     Some(message),
                 )?;
                 return Ok(ForwardResult {
                     response: error_response(plan.client, message, None),
-                    success: true,
-                    retryable: false,
+                    action: ForwardAction::Return,
                     error_message: Some(message.to_string()),
                 });
             }
         };
 
-        let usage = extract_usage(plan.upstream, &upstream_json);
-        let (prompt_tokens, completion_tokens, cached_tokens, cache_creation_tokens) =
-            token_counts(usage);
-        let cost = cost_from_counts_with_tier(
-            &model,
-            prompt_tokens,
-            completion_tokens,
-            cached_tokens,
-            cache_creation_tokens,
-            plan.service_tier.as_deref(),
-        );
+        let metrics = if has_complete_usage(plan.upstream, &upstream_json) {
+            let usage = extract_usage(plan.upstream, &upstream_json);
+            let (prompt_tokens, completion_tokens, cached_tokens, cache_creation_tokens) =
+                token_counts(usage);
+            pricing_metrics(
+                &pricing_snapshot,
+                &model,
+                prompt_tokens,
+                completion_tokens,
+                cached_tokens,
+                cache_creation_tokens,
+                plan.service_tier.as_deref(),
+            )
+        } else {
+            metadata_metrics(
+                &pricing_snapshot,
+                plan.service_tier.as_deref(),
+                "usage_missing",
+            )
+        };
         let response_json = match transform_response(plan, &upstream_json) {
             Ok(value) => value,
             Err(error) => {
@@ -604,18 +833,12 @@ async fn forward_request_impl(
                     &model,
                     "error",
                     Some(status.as_u16() as i32),
-                    ForwardMetrics {
-                        prompt_tokens,
-                        completion_tokens,
-                        cached_tokens,
-                        cost,
-                    },
+                    metrics.clone(),
                     Some(&message),
                 )?;
                 return Ok(ForwardResult {
                     response: error_response(plan.client, &message, Some(&upstream_json)),
-                    success: true,
-                    retryable: false,
+                    action: ForwardAction::Return,
                     error_message: Some(message),
                 });
             }
@@ -627,30 +850,145 @@ async fn forward_request_impl(
                 &db,
                 account,
                 &model,
-                "success",
-                Some(status.as_u16() as i32),
-                ForwardMetrics {
-                    prompt_tokens,
-                    completion_tokens,
-                    cached_tokens,
-                    cost,
+                match metrics.cost_state {
+                    "priced" => "success",
+                    "usage_missing" => "success_no_usage",
+                    _ => "success_unpriced",
                 },
+                Some(status.as_u16() as i32),
+                metrics,
                 None,
             )?;
         }
 
         Ok(ForwardResult {
             response: (status, axum::Json(response_json)).into_response(),
-            success: true,
-            retryable: false,
+            action: ForwardAction::Return,
             error_message: None,
         })
     }
 }
 
-// ponytail: `unfold` with an Init/Done state is the simplest "run once, then
-// end" stream. The DB write is the unfold's transition; one empty chunk is
-// yielded so the chain's last poll has something to send; Done terminates.
+struct StreamOutcomeGuard {
+    state: CoreState,
+    log_id: i64,
+    stream_state: Arc<Mutex<StreamState>>,
+    model: String,
+    pricing: Arc<PricingSnapshot>,
+    service_tier: Option<String>,
+    armed: bool,
+}
+
+impl StreamOutcomeGuard {
+    fn new(
+        state: CoreState,
+        log_id: i64,
+        stream_state: Arc<Mutex<StreamState>>,
+        model: String,
+        pricing: Arc<PricingSnapshot>,
+        service_tier: Option<String>,
+    ) -> Self {
+        Self {
+            state,
+            log_id,
+            stream_state,
+            model,
+            pricing,
+            service_tier,
+            armed: true,
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for StreamOutcomeGuard {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+
+        let (status, metrics, error_message) = {
+            let stream = self.stream_state.lock();
+            if !stream.terminal && !stream.error {
+                let message = outcome_unknown_message(
+                    "downstream disconnected before the upstream stream outcome was confirmed",
+                );
+                (
+                    "outcome_unknown",
+                    metadata_metrics(
+                        &self.pricing,
+                        self.service_tier.as_deref(),
+                        "outcome_unknown",
+                    ),
+                    Some(message),
+                )
+            } else if stream.error {
+                let status = if stream.outcome_unknown {
+                    "outcome_unknown"
+                } else {
+                    "error"
+                };
+                (
+                    status,
+                    metadata_metrics(
+                        &self.pricing,
+                        self.service_tier.as_deref(),
+                        if stream.outcome_unknown {
+                            "outcome_unknown"
+                        } else {
+                            "not_applicable"
+                        },
+                    ),
+                    stream.error_message.clone(),
+                )
+            } else if stream.has_usage {
+                let (prompt, completion, cached, cache_creation) = token_counts(stream.usage);
+                let metrics = pricing_metrics(
+                    &self.pricing,
+                    &self.model,
+                    prompt,
+                    completion,
+                    cached,
+                    cache_creation,
+                    self.service_tier.as_deref(),
+                );
+                let status = if metrics.cost_state == "priced" {
+                    "success"
+                } else {
+                    "success_unpriced"
+                };
+                (status, metrics, None)
+            } else {
+                (
+                    "success_no_usage",
+                    metadata_metrics(&self.pricing, self.service_tier.as_deref(), "usage_missing"),
+                    None,
+                )
+            }
+        };
+
+        let db = self.state.db.lock();
+        if let Err(error) =
+            db.update_forward_log(self.log_id, status, None, metrics, error_message.as_deref())
+        {
+            let _ = db.log_gateway(
+                "warn",
+                "forwarder",
+                &format!(
+                    "failed to finalize dropped streaming row {}: {}",
+                    self.log_id, error
+                ),
+            );
+        }
+    }
+}
+
+// `unfold` with an Init/Done state runs the normal finalizer once. The guard
+// handles the complementary path where Hyper drops the body because the
+// downstream client disconnected before polling that finalizer.
 enum FinalizerState {
     Init {
         db_h: CoreState,
@@ -658,8 +996,15 @@ enum FinalizerState {
         converter_f: Arc<Mutex<StreamConverter>>,
         mdl: String,
         initial_id: i64,
+        guard: StreamOutcomeGuard,
     },
     Done,
+}
+
+enum StreamRead {
+    Chunk(bytes::Bytes),
+    Failed(reqwest::Error),
+    IdleTimeout,
 }
 
 fn join_chunks(chunks: Vec<bytes::Bytes>) -> bytes::Bytes {
@@ -730,13 +1075,15 @@ pub async fn forward_get(
             {
                 Ok(response) => response,
                 Err(error) => {
-                    last_transport_error = Some(error.into());
-                    if !retried_same_account {
+                    // A connect error occurs before an HTTP response exists and
+                    // is the only transport failure safe to repeat. Retry this
+                    // account once, then return the failure without trying a
+                    // different account. Any post-connect failure is ambiguous.
+                    if error.is_connect() && !retried_same_account {
                         retried_same_account = true;
                         continue;
                     }
-                    failed_ids.push(account.id.clone());
-                    break;
+                    return Err(error.into());
                 }
             };
 
@@ -744,13 +1091,9 @@ pub async fn forward_get(
             let body = match resp.text().await {
                 Ok(body) => body,
                 Err(error) => {
-                    last_transport_error = Some(anyhow::anyhow!(response_body_error(&error)));
-                    if !retried_same_account {
-                        retried_same_account = true;
-                        continue;
-                    }
-                    failed_ids.push(account.id.clone());
-                    break;
+                    // Headers may already represent a completed upstream call;
+                    // never replay when reading the response body fails.
+                    return Err(anyhow::anyhow!(response_body_error(&error)));
                 }
             };
 
@@ -763,15 +1106,6 @@ pub async fn forward_get(
                     &body,
                     parse_usage_limit_window(&body),
                 )?;
-            }
-            if status.is_server_error() || status.as_u16() == 408 {
-                last_http_error = Some((status, body));
-                if !retried_same_account {
-                    retried_same_account = true;
-                    continue;
-                }
-                failed_ids.push(account.id.clone());
-                break;
             }
             if matches!(status.as_u16(), 401 | 403 | 429) {
                 last_http_error = Some((status, body));
@@ -823,9 +1157,76 @@ fn response_body_error(error: &reqwest::Error) -> String {
     }
 }
 
+#[derive(Debug)]
+enum ResponseBodyFailure {
+    IdleTimeout(StdDuration),
+    Transport(reqwest::Error),
+}
+
+impl ResponseBodyFailure {
+    fn is_timeout(&self) -> bool {
+        match self {
+            Self::IdleTimeout(_) => true,
+            Self::Transport(error) => error.is_timeout(),
+        }
+    }
+
+    fn into_detail(self) -> String {
+        match self {
+            Self::IdleTimeout(timeout) => format!(
+                "upstream response body timed out after {}s",
+                timeout.as_secs()
+            ),
+            Self::Transport(error) => response_body_error(&error),
+        }
+    }
+}
+
+async fn response_text_with_timeout(
+    response: reqwest::Response,
+    timeout: Option<StdDuration>,
+) -> std::result::Result<String, ResponseBodyFailure> {
+    match timeout {
+        Some(timeout) => match tokio::time::timeout(timeout, response.text()).await {
+            Ok(result) => result.map_err(ResponseBodyFailure::Transport),
+            Err(_) => Err(ResponseBodyFailure::IdleTimeout(timeout)),
+        },
+        None => response
+            .text()
+            .await
+            .map_err(ResponseBodyFailure::Transport),
+    }
+}
+
 fn error_response(format: ApiFormat, message: &str, upstream: Option<&Value>) -> Response {
     let body = format_error(format, StatusCode::BAD_GATEWAY, message, upstream);
     (StatusCode::BAD_GATEWAY, axum::Json(body)).into_response()
+}
+
+fn protocol_status_error_response(
+    format: ApiFormat,
+    status: StatusCode,
+    message: &str,
+    upstream: Option<&Value>,
+) -> Response {
+    let body = format_error(format, status, message, upstream);
+    (status, axum::Json(body)).into_response()
+}
+
+fn outcome_unknown_message(detail: &str) -> String {
+    format!(
+        "upstream outcome is unknown: {detail}; the request may have completed and consumed quota; the gateway did not retry it"
+    )
+}
+
+fn outcome_unknown_response(format: ApiFormat, status: StatusCode, detail: &str) -> Response {
+    let message = outcome_unknown_message(detail);
+    let mut body = error_body(format, "upstream_outcome_unknown", &message);
+    if format == ApiFormat::Gemini {
+        body["error"]["code"] = serde_json::json!(status.as_u16());
+        body["error"]["status"] = serde_json::json!("UPSTREAM_OUTCOME_UNKNOWN");
+    }
+    (status, axum::Json(body)).into_response()
 }
 
 pub(crate) fn rate_limited_response(
@@ -850,6 +1251,12 @@ fn log_forward(
     metrics: ForwardMetrics,
     error_message: Option<&str>,
 ) -> Result<i64> {
+    let cost_state = match (metrics.cost_state, status) {
+        ("not_applicable", "outcome_unknown") => "outcome_unknown",
+        ("not_applicable", "success_no_usage") => "usage_missing",
+        ("not_applicable", "success_unpriced") => "unpriced",
+        (state, _) => state,
+    };
     db.log_forward(&ForwardLog {
         id: 0,
         timestamp: Utc::now(),
@@ -861,9 +1268,59 @@ fn log_forward(
         prompt_tokens: metrics.prompt_tokens,
         completion_tokens: metrics.completion_tokens,
         cached_tokens: metrics.cached_tokens,
-        cost: metrics.cost,
+        cache_creation_tokens: metrics.cache_creation_tokens,
+        cost: (cost_state == "priced").then_some(metrics.cost),
+        pricing_revision_id: metrics.pricing_revision_id,
+        quota_multiplier: metrics.quota_multiplier,
+        local_adjustment_multiplier: metrics.local_adjustment_multiplier,
+        service_tier: metrics.service_tier,
+        cost_state: cost_state.to_string(),
         error_message: error_message.map(|s| s.to_string()),
     })
+}
+
+fn pricing_metrics(
+    snapshot: &PricingSnapshot,
+    model: &str,
+    prompt_tokens: i64,
+    completion_tokens: i64,
+    cached_tokens: i64,
+    cache_creation_tokens: i64,
+    service_tier: Option<&str>,
+) -> ForwardMetrics {
+    let estimate = snapshot.estimate(
+        model,
+        prompt_tokens,
+        completion_tokens,
+        cached_tokens,
+        cache_creation_tokens,
+        service_tier,
+    );
+    ForwardMetrics {
+        prompt_tokens,
+        completion_tokens,
+        cached_tokens,
+        cache_creation_tokens,
+        cost: estimate.cost.unwrap_or(0.0),
+        pricing_revision_id: estimate.pricing_revision_id,
+        quota_multiplier: estimate.quota_multiplier,
+        local_adjustment_multiplier: estimate.local_adjustment_multiplier,
+        service_tier: service_tier.map(str::to_string),
+        cost_state: estimate.cost_state,
+    }
+}
+
+fn metadata_metrics(
+    snapshot: &PricingSnapshot,
+    service_tier: Option<&str>,
+    cost_state: &'static str,
+) -> ForwardMetrics {
+    ForwardMetrics {
+        pricing_revision_id: Some(snapshot.revision.clone()),
+        service_tier: service_tier.map(str::to_string),
+        cost_state,
+        ..ForwardMetrics::default()
+    }
 }
 
 // ----- SSE usage accumulation -----
@@ -879,6 +1336,7 @@ struct StreamState {
     terminal: bool,
     /// Set by the mapped Err arm so the finalizer can skip its status overwrite.
     error: bool,
+    outcome_unknown: bool,
     error_message: Option<String>,
 }
 
@@ -996,20 +1454,6 @@ fn process_chunk_for_usage(st: &mut StreamState, format: ApiFormat, chunk: &byte
             }
         }
     }
-}
-
-fn has_usage(format: ApiFormat, payload: &Value) -> bool {
-    match format {
-        ApiFormat::ChatCompletions => payload.get("usage"),
-        ApiFormat::Messages => payload
-            .get("usage")
-            .or_else(|| payload.pointer("/message/usage")),
-        ApiFormat::Responses => payload
-            .get("usage")
-            .or_else(|| payload.pointer("/response/usage")),
-        ApiFormat::Gemini => payload.get("usageMetadata"),
-    }
-    .is_some_and(Value::is_object)
 }
 
 fn token_counts(usage: UsageCounts) -> (i64, i64, i64, i64) {

@@ -338,4 +338,4 @@ export const jaJPMessages = {
   "MESSAGES ENDPOINT": "MESSAGES ENDPOINT",
   "RESPONSES ENDPOINT": "RESPONSES ENDPOINT",
   "5小时": "5時間",
-} satisfies Messages;
+} satisfies Partial<Messages>;

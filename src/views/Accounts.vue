@@ -137,7 +137,24 @@
         </n-space>
       </template>
 
-      <div v-if="usageLoadErrors[account.id]" class="usage-load-error" role="alert">
+      <div v-if="quotaLimitsError" class="usage-load-error" role="alert">
+        <span>{{ t("用量加载失败") }}</span>
+        <n-button
+          text
+          size="tiny"
+          type="primary"
+          :loading="quotaLimitsLoading"
+          @click="retryQuotaLimits"
+        >
+          {{ t("重试") }}
+        </n-button>
+      </div>
+      <div v-else-if="quotaLimitsLoading || !quotaLimits" class="usage-strip">
+        <div class="usage-segment">
+          <n-progress type="line" :height="8" :percentage="0" processing :show-indicator="false" />
+        </div>
+      </div>
+      <div v-else-if="usageLoadErrors[account.id]" class="usage-load-error" role="alert">
         <span>{{ t("用量加载失败") }}</span>
         <n-button
           text
@@ -402,7 +419,7 @@ import {
   UpOutlined,
 } from "@vicons/antd";
 import { DashboardRequestError, tauriApi } from "../api/tauri";
-import type { Account, AccountInput, AccountUpdate, UsageWindow } from "../api/tauri";
+import type { Account, AccountInput, AccountUpdate, PricingLimits, UsageWindow } from "../api/tauri";
 import {
   isCooling,
   isUsageLimitReached,
@@ -446,11 +463,18 @@ const vUsageSliderLabel = {
   updated: (el: HTMLElement, { value }: { value: string }) => setUsageSliderLabel(el, value),
 };
 
-const usageLimits = computed<Array<{ key: UsageKey; label: string; limit: number }>>(() => [
-  { key: "window_5h", label: t("5小时"), limit: 12 },
-  { key: "window_week", label: t("本周"), limit: 30 },
-  { key: "window_month", label: t("本月"), limit: 60 },
-]);
+const quotaLimits = ref<PricingLimits | null>(null);
+const quotaLimitsLoading = ref(false);
+const quotaLimitsError = ref("");
+const usageLimits = computed<Array<{ key: UsageKey; label: string; limit: number }>>(() => {
+  const limits = quotaLimits.value;
+  if (!limits) return [];
+  return [
+    { key: "window_5h", label: t("5小时"), limit: limits.window_5h },
+    { key: "window_week", label: t("本周"), limit: limits.window_week },
+    { key: "window_month", label: t("本月"), limit: limits.window_month },
+  ];
+});
 
 const message = useMessage();
 const accounts = ref<Account[]>([]);
@@ -863,10 +887,37 @@ async function loadAccounts() {
     accounts.value = loaded;
     drafts.value = nextDrafts;
     // 限流并发拉取用量，避免账号多时 N 次请求同时打到后端
-    await mapWithConcurrency(loaded, 4, (account) => loadAccountUsage(account.id));
+    if (quotaLimits.value) {
+      await mapWithConcurrency(loaded, 4, (account) => loadAccountUsage(account.id));
+    }
   } catch (e) {
     message.error(t("加载账号失败: {error}", { error: String(e) }));
   }
+}
+
+async function loadQuotaLimits(): Promise<boolean> {
+  quotaLimitsLoading.value = true;
+  quotaLimitsError.value = "";
+  try {
+    quotaLimits.value = (await tauriApi.getPricing()).limits;
+    return true;
+  } catch (error) {
+    quotaLimits.value = null;
+    quotaLimitsError.value = error instanceof Error ? error.message : String(error);
+    return false;
+  } finally {
+    quotaLimitsLoading.value = false;
+  }
+}
+
+async function initializeAccounts() {
+  await loadQuotaLimits();
+  await loadAccounts();
+}
+
+async function retryQuotaLimits() {
+  if (!await loadQuotaLimits()) return;
+  await mapWithConcurrency(accounts.value, 4, (account) => loadAccountUsage(account.id));
 }
 
 async function loadAccountUsage(accountId: string) {
@@ -986,7 +1037,7 @@ onMounted(() => {
   clock = window.setInterval(() => {
     now.value = Date.now();
   }, 1000);
-  void loadAccounts();
+  void initializeAccounts();
 });
 onUnmounted(() => {
   window.clearInterval(clock);

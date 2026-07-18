@@ -110,7 +110,13 @@ export interface ForwardLog {
   prompt_tokens: number;
   completion_tokens: number;
   cached_tokens: number;
-  cost: number;
+  cache_creation_tokens: number;
+  cost: number | null;
+  cost_state?: string | null;
+  pricing_revision_id?: string | null;
+  quota_multiplier?: number | null;
+  local_adjustment_multiplier?: number | null;
+  service_tier?: string | null;
   error_message: string | null;
 }
 
@@ -144,6 +150,50 @@ export interface UsageWindow {
   window_5h: number;
   window_week: number;
   window_month: number;
+}
+
+export interface PricingLimits {
+  window_5h: number;
+  window_week: number;
+  window_month: number;
+}
+
+export interface PricingAdjustment {
+  label: string;
+  multiplier: number;
+  applies_to: string;
+}
+
+export interface PricingModel {
+  model_id: string;
+  display_name: string;
+  input: number;
+  output: number;
+  cache_read: number | null;
+  cache_write: number | null;
+  usage: number;
+  /** Multiplier already included in the token rates published by OpenCode Go. */
+  official_price_multiplier?: number;
+  quota_multiplier: number;
+  min_input_tokens?: number | null;
+  max_input_tokens?: number | null;
+  adjustments: PricingAdjustment[];
+}
+
+export interface PricingSnapshot {
+  revision: string;
+  activated_at: string;
+  document_updated_at: string | null;
+  source_url: string;
+  content_hash: string;
+  adjustment_policy_version: string;
+  limits: PricingLimits;
+  models: PricingModel[];
+}
+
+export interface PricingRefreshResult extends PricingSnapshot {
+  refresh_status: "success" | "failed_no_change";
+  error?: string | null;
 }
 
 export interface DashboardSummary {
@@ -280,6 +330,8 @@ export const tauriApi = {
     request<Account>(`/accounts/${id}/reset-cooldown`, { method: "POST" }),
 
   getSettings: () => request<AppConfig>("/settings"),
+  getPricing: () => request<PricingSnapshot>("/pricing"),
+  refreshPricing: () => request<PricingRefreshResult>("/pricing/refresh", { method: "POST" }),
   getApplicationModels: () => request<string[]>("/application-models"),
   getClaudeDesktopModels: () => request<ClaudeDesktopModels>("/claude-desktop/models"),
   updateClaudeDesktopModels: (models: ClaudeDesktopModels) =>

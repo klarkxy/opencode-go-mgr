@@ -162,8 +162,21 @@ ocg-manager-cli --data-dir /tmp/ocg-cli-test serve --port 19042
   模型。模型配置由受保护的 `/dashboard/api/claude-desktop/models` 读写；常规
   settings 更新必须保留它。
 - `selector.rs` 选下一个账号并跳过禁用、冷却、本次已失败的账号；`limit.rs`
-  解析上游 429 中的重置时长；`cost.rs` 把 token 数聚合成 5 小时、本周、本月
-  窗口。
+  解析上游 429 中的重置时长；`pricing.rs` 从当前 OpenCode Go 价格快照计算
+  token 对应的额度消耗，面板窗口额度也来自同一快照。`PricingModel` 的
+  `official_price_multiplier` 表示官方 token 表价已经包含的倍率，实际
+  `quota_multiplier = (月额度 / Usage) / official_price_multiplier`；
+  `deepseek-v4-pro` 和 `mimo-v2.5-pro` 为 `4`，Grok 等其他模型默认 `1`。
+- 价格刷新只由用户通过受保护的
+  `GET/POST /dashboard/api/pricing[/refresh]` 发起。抓取器仅允许 OpenCode Go HTTPS 主机
+  和同主机重定向，总时限 20 秒、响应体上限 2 MiB；任何校验失败都不会激活
+  不完整数据，`pricing_snapshots` 会保留最后成功 revision。MiniMax 长上下文、
+  priority 和 high-speed 调整是本地策略，运行时不会访问供应商价格页。
+- `forwarder.rs` 向 `handler.rs` 返回显式动作：只有能证明请求尚未发出的
+  DNS/TCP/TLS 建连失败可以在同一账号重试一次；`401`/`403`/`429` 可以切换
+  账号。`408`、`5xx`、建连后的失败、响应体超时和流式中断均不得重放，无法
+  确认的结果记为 `outcome_unknown`。共享 reqwest client 只设置 30 秒建连超时；
+  非流式请求使用 900 秒总时限，流式请求按 chunk 执行 300 秒空闲时限。
 
 ### 管理面板
 

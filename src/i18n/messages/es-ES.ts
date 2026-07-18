@@ -338,4 +338,4 @@ export const esESMessages = {
   "MESSAGES ENDPOINT": "MESSAGES ENDPOINT",
   "RESPONSES ENDPOINT": "RESPONSES ENDPOINT",
   "5小时": "5 horas",
-} satisfies Messages;
+} satisfies Partial<Messages>;

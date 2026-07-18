@@ -338,4 +338,4 @@ export const koKRMessages = {
   "MESSAGES ENDPOINT": "MESSAGES ENDPOINT",
   "RESPONSES ENDPOINT": "RESPONSES ENDPOINT",
   "5小时": "5시간",
-} satisfies Messages;
+} satisfies Partial<Messages>;

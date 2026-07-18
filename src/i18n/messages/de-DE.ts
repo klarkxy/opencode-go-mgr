@@ -338,4 +338,4 @@ export const deDEMessages = {
   "MESSAGES ENDPOINT": "MESSAGES ENDPOINT",
   "RESPONSES ENDPOINT": "RESPONSES ENDPOINT",
   "5小时": "5 Stunden",
-} satisfies Messages;
+} satisfies Partial<Messages>;

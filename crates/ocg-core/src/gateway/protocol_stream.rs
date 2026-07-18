@@ -279,6 +279,39 @@ impl StreamConverter {
         }
     }
 
+    pub(crate) fn outcome_unknown_event(&self, message: &str) -> Vec<Bytes> {
+        if self.is_terminal() {
+            return Vec::new();
+        }
+        match self.target {
+            ApiFormat::Messages => vec![sse_json(
+                Some("error"),
+                &json!({"type":"error","error":{"type":"upstream_outcome_unknown","message":message}}),
+            )],
+            ApiFormat::ChatCompletions => vec![
+                sse_json(
+                    None,
+                    &json!({"error":{"type":"upstream_outcome_unknown","code":"upstream_outcome_unknown","message":message}}),
+                ),
+                done_frame(),
+            ],
+            ApiFormat::Responses => vec![sse_json(
+                Some("response.failed"),
+                &json!({
+                    "type":"response.failed",
+                    "sequence_number":self.output.sequence,
+                    "response":self.failed_response_object("upstream_outcome_unknown", message)
+                }),
+            )],
+            ApiFormat::Gemini => vec![sse_json(
+                None,
+                &json!({
+                    "error":{"code":500,"message":message,"status":"UPSTREAM_OUTCOME_UNKNOWN"}
+                }),
+            )],
+        }
+    }
+
     pub(crate) fn is_terminal(&self) -> bool {
         self.input.terminal || self.output.terminal
     }

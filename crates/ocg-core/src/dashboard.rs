@@ -6,6 +6,7 @@ use crate::gateway::{
     protocol::supported_model_ids,
 };
 use crate::models::*;
+use crate::pricing::{PricingSnapshot, fetch_official_snapshot};
 use crate::state::{CoreState, DesktopUpdateStartError, DesktopUpdateStatus};
 use axum::{
     Json, Router,
@@ -46,6 +47,8 @@ pub fn api_router(state: CoreState) -> Router<CoreState> {
         .route("/settings/check-update", get(check_update))
         .route("/settings/update-status", get(get_update_status))
         .route("/settings/install-update", post(install_update))
+        .route("/pricing", get(get_pricing))
+        .route("/pricing/refresh", post(refresh_pricing))
         .route(
             "/settings/regenerate-gateway-key",
             post(regenerate_gateway_key),
@@ -398,6 +401,76 @@ fn clean_optional(value: Option<String>) -> Option<String> {
     })
 }
 
+async fn get_pricing(State(state): State<CoreState>) -> Result<Json<PricingSnapshot>, ApiError> {
+    Ok(Json(state.pricing_snapshot().as_ref().clone()))
+}
+
+#[derive(Debug, Serialize)]
+struct PricingRefreshResponse {
+    #[serde(flatten)]
+    snapshot: PricingSnapshot,
+    refresh_status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+async fn refresh_pricing(
+    State(state): State<CoreState>,
+) -> Result<Json<PricingRefreshResponse>, ApiError> {
+    let _guard = state.pricing_refresh.try_lock().map_err(|_| {
+        ApiError::status(
+            StatusCode::CONFLICT,
+            "OpenCode Go pricing refresh is already running",
+        )
+    })?;
+
+    apply_pricing_refresh(&state, fetch_official_snapshot().await).map(Json)
+}
+
+fn apply_pricing_refresh(
+    state: &CoreState,
+    result: crate::Result<PricingSnapshot>,
+) -> Result<PricingRefreshResponse, ApiError> {
+    match result {
+        Ok(snapshot) => {
+            let active = state.pricing_snapshot();
+            let snapshot = if active.content_hash == snapshot.content_hash
+                && active.adjustment_policy_version == snapshot.adjustment_policy_version
+            {
+                active.as_ref().clone()
+            } else {
+                state
+                    .activate_pricing_snapshot(snapshot.clone())
+                    .map_err(ApiError::internal)?;
+                snapshot
+            };
+            let _ = state.db.lock().log_gateway(
+                "info",
+                "pricing",
+                &format!("activated OpenCode Go pricing {}", snapshot.revision),
+            );
+            Ok(PricingRefreshResponse {
+                snapshot,
+                refresh_status: "success",
+                error: None,
+            })
+        }
+        Err(error) => {
+            let message = error.to_string();
+            let _ = state.db.lock().log_gateway(
+                "warn",
+                "pricing",
+                &format!("OpenCode Go pricing refresh failed: {message}"),
+            );
+            Ok(PricingRefreshResponse {
+                snapshot: state.pricing_snapshot().as_ref().clone(),
+                refresh_status: "failed_no_change",
+                error: Some(message),
+            })
+        }
+    }
+}
+
 fn encrypted_optional(
     state: &CoreState,
     value: &Option<String>,
@@ -691,10 +764,11 @@ async fn account_usage(
     State(state): State<CoreState>,
     Path(id): Path<String>,
 ) -> Result<Json<UsageWindow>, ApiError> {
+    let limits = state.pricing_snapshot().limits.clone();
     state
         .db
         .lock()
-        .account_usage(&id)
+        .account_usage_with_limits(&id, &limits)
         .map(Json)
         .map_err(ApiError::internal)
 }
@@ -723,6 +797,7 @@ async fn update_account_usage(
     }
     let percent = (update.percent * 10.0).round() / 10.0;
 
+    let limits = state.pricing_snapshot().limits.clone();
     let db = state.db.lock();
     if !db
         .set_account_usage_baseline(&id, window, percent)
@@ -730,7 +805,9 @@ async fn update_account_usage(
     {
         return Err(ApiError::not_found("account not found"));
     }
-    db.account_usage(&id).map(Json).map_err(ApiError::internal)
+    db.account_usage_with_limits(&id, &limits)
+        .map(Json)
+        .map_err(ApiError::internal)
 }
 
 async fn reset_account_cooldown(
@@ -1230,10 +1307,10 @@ fn is_loopback(url: &reqwest::Url) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        AccountOrderInput, AccountUsageUpdate, ForwardLogQuery, UpdateCheckResponse, asset_path,
-        create_account, dashboard_account, dashboard_summary, format_error_chain,
-        is_update_available, parse_stable_version, reorder_accounts, update_account,
-        update_account_usage, update_settings, validate_forward_log_query,
+        AccountOrderInput, AccountUsageUpdate, ForwardLogQuery, UpdateCheckResponse,
+        apply_pricing_refresh, asset_path, create_account, dashboard_account, dashboard_summary,
+        format_error_chain, is_update_available, parse_stable_version, reorder_accounts,
+        update_account, update_account_usage, update_settings, validate_forward_log_query,
     };
     use crate::crypto::{KeyCipher, StaticKeyCipher};
     use crate::db::Database;
@@ -1301,6 +1378,29 @@ mod tests {
         assert!(asset_path(root, "/secret.txt").is_none());
         assert!(asset_path(root, r"nested\secret.txt").is_none());
         assert!(asset_path(root, "C:/secret.txt").is_none());
+    }
+
+    #[test]
+    fn failed_pricing_refresh_preserves_last_known_good_snapshot() {
+        let dir = temp_data_dir("pricing-lkg");
+        let cipher: Arc<dyn KeyCipher + Send + Sync> =
+            Arc::new(StaticKeyCipher::new("pricing-test"));
+        let state = Arc::new(
+            CoreStateInner::new(Database::open(dir.clone()).unwrap(), dir.clone(), cipher).unwrap(),
+        );
+        let before = state.pricing_snapshot();
+
+        let response = apply_pricing_refresh(
+            &state,
+            Err(anyhow::anyhow!("fixture parser rejected the document")),
+        )
+        .unwrap();
+
+        assert_eq!(response.refresh_status, "failed_no_change");
+        assert_eq!(response.snapshot.revision, before.revision);
+        assert_eq!(state.pricing_snapshot().revision, before.revision);
+        drop(state);
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

@@ -338,4 +338,4 @@ export const frFRMessages = {
   "MESSAGES ENDPOINT": "MESSAGES ENDPOINT",
   "RESPONSES ENDPOINT": "RESPONSES ENDPOINT",
   "5小时": "5 heures",
-} satisfies Messages;
+} satisfies Partial<Messages>;

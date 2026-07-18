@@ -63,13 +63,13 @@ export const messages: Record<Locale, Messages> = {
   "zh-CN": zhCNMessages,
   "zh-TW": zhTWMessages,
   "en-US": enUSMessages,
-  "ja-JP": jaJPMessages,
-  "ko-KR": koKRMessages,
-  "es-ES": esESMessages,
-  "fr-FR": frFRMessages,
-  "de-DE": deDEMessages,
-  "pt-BR": ptBRMessages,
-  "ru-RU": ruRUMessages,
+  "ja-JP": { ...enUSMessages, ...jaJPMessages },
+  "ko-KR": { ...enUSMessages, ...koKRMessages },
+  "es-ES": { ...enUSMessages, ...esESMessages },
+  "fr-FR": { ...enUSMessages, ...frFRMessages },
+  "de-DE": { ...enUSMessages, ...deDEMessages },
+  "pt-BR": { ...enUSMessages, ...ptBRMessages },
+  "ru-RU": { ...enUSMessages, ...ruRUMessages },
 };
 
 const naiveLocales = {

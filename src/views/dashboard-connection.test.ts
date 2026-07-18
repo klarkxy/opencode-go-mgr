@@ -556,7 +556,7 @@ test("settings expose the downstream display root and bounded request timeouts",
   assert.match(settings, /config\.non_stream_timeout_secs"\s+:min="1"\s+:max="3600"\s+:precision="0"/);
   assert.match(settings, /config\.stream_idle_timeout_secs"\s+:min="1"\s+:max="3600"\s+:precision="0"/);
   assert.match(settings, /connect_timeout_secs: 30/);
-  assert.match(settings, /non_stream_timeout_secs: 120/);
+  assert.match(settings, /non_stream_timeout_secs: 900/);
   assert.match(settings, /stream_idle_timeout_secs: 300/);
   assert.match(settings, /if \(!timeoutsValid\(\)\)/);
   assert.match(api, /client_root_url: string/);
@@ -565,6 +565,16 @@ test("settings expose the downstream display root and bounded request timeouts",
   assert.match(api, /non_stream_timeout_secs: number/);
   assert.match(api, /stream_idle_timeout_secs: number/);
   assert.doesNotMatch(dashboard, /ref<AppConfig>/);
+  assert.match(settings, /<PricingCatalog \/>/);
+  assert.match(api, /getPricing: \(\) => request<PricingSnapshot>\("\/pricing"\)/);
+  assert.match(api, /refreshPricing: \(\) => request<PricingRefreshResult>\("\/pricing\/refresh", \{ method: "POST" \}\)/);
+});
+
+test("accounts derive quota limits from the active pricing snapshot", async () => {
+  const accounts = await readFile(new URL("./Accounts.vue", import.meta.url), "utf8");
+  assert.match(accounts, /quotaLimits = ref<PricingLimits \| null>\(null\)/);
+  assert.match(accounts, /quotaLimits\.value = \(await tauriApi\.getPricing\(\)\)\.limits/);
+  assert.doesNotMatch(accounts, /window_5h:\s*12|window_week:\s*30|window_month:\s*60/);
 });
 
 test("accounts keep one enabled control instead of a duplicate status badge", async () => {

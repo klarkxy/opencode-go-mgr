@@ -297,7 +297,11 @@ forwarded, including the timestamp, the chosen account, the model, the
 status code, the upstream error if any, and the streamed usage when the
 upstream emitted a usage chunk. Rows with `success_no_usage` mean the
 stream finished without a usage chunk. A usage chunk makes token counts
-accurate; cost is still estimated from the local model price table.
+accurate; quota use is still estimated from the active OpenCode Go pricing
+snapshot. An
+`outcome_unknown` row means the upstream may already have completed and
+charged the request, but the Gateway lost the response or timed out. Such a
+request is not replayed automatically and its local cost remains unknown.
 
 ### Settings
 
@@ -310,8 +314,17 @@ The **Settings** view exposes the persistent gateway configuration:
 - **Auto‑start on login** — only the installed Windows desktop build
   exposes this switch. Development builds, the CLI, Docker, macOS, and
   Linux dashboards hide it.
-- **Connect / non‑stream / stream‑idle timeouts** — apply to upstream
-  HTTP requests.
+- **Connect / non‑stream / stream‑idle timeouts** — default to 30, 900, and
+  300 seconds. The non-stream value is a whole-request deadline; the stream
+  idle value is enforced between response chunks. Existing installations are
+  migrated from 30/120/300 only when that complete old default tuple is still
+  untouched.
+- **OpenCode Go quota pricing** — shows the active revision, documentation
+  timestamp, window limits, USD token rates, `Usage`, any multiplier already
+  included in the official listed rate, the remaining Go multiplier, and local
+  MiniMax adjustments. The application contacts only
+  `https://opencode.ai/docs/go/`, and only after you press refresh. A failed
+  refresh leaves the last successful snapshot active.
 - **Check for updates / Update now** — updater-enabled installed desktop
   builds check the latest GitHub Release and can download, verify, and install
   its signed platform package. Version 1.4.1 needs the one-time direct
@@ -462,20 +475,37 @@ the Accounts view. The selector skips:
 A `429` with a recognized `Resets in …` phrase writes `cooldown_until` and
 the gateway tries the next account. `401` and `403` responses fail over
 without writing a cooldown — they are an authentication problem, not a
-quota problem. `5xx` and network errors are retried once for non‑streaming
-requests before moving to the next account. When every enabled account is
-cooling down, the gateway returns `429` with the soonest reset time.
+quota problem. A DNS/TCP/TLS connection failure that proves the request was
+not sent is retried once on the same account, including for streaming calls.
+The Gateway does not replay `408`, `5xx`, post-connect transport failures,
+response-body timeouts, or interrupted streams. Ambiguous failures are
+reported and logged as `upstream_outcome_unknown` because the upstream may
+already have consumed quota. When every enabled account is cooling down, the
+gateway returns `429` with the soonest reset time.
 
 ### Cost Accounting
 
 The 5‑hour, weekly, and monthly bars are local estimates. They are driven
 by the requests the gateway actually forwards, not by the upstream's
-authoritative billing. An upstream usage chunk provides accurate streaming
-token counts, but cost always remains an estimate calculated from the
-local model price table. Without a usage chunk, the log row ends with
-`success_no_usage`. A manually saved percentage becomes the baseline for
-that window; successful costs recorded after the save are added to it until
-the next manual change or a recognized upstream limit reset.
+authoritative billing. Token rates, window limits, and each model's `Usage`
+come from the active OpenCode Go USD snapshot. The derived multiplier is
+`monthly limit / Usage`. When the official token rate already includes a
+multiplier, the remaining Go multiplier is
+`monthly limit / Usage / official_price_multiplier`, preventing it from being
+applied twice. The official rates for `deepseek-v4-pro` (DS V4 Pro) and
+`mimo-v2.5-pro` currently include `4x`, so their remaining multiplier is `1x`;
+Grok's listed rate does not include it and therefore retains the derived `4x`.
+The applicable local MiniMax adjustment is applied last. No supplier API
+price, CNY value, or exchange rate participates in the calculation.
+
+Without a streaming usage chunk, the log row ends with `success_no_usage`.
+Models absent from the snapshot are still forwarded, but finish as
+`success_unpriced`, display no quota cost, and do not enter quota totals.
+Pre-snapshot successful rows retain their old value and are marked as a
+legacy estimate; they are never recalculated. A manually saved percentage
+becomes the baseline for that window; successful priced costs recorded after
+the save are added to it until the next manual change or a recognized
+upstream limit reset.
 
 The dashboard always pairs a bar with the account's cooldown state. While
 a true circuit breaker is active, the matching bar is forced to 100% and
@@ -744,7 +774,7 @@ intentionally want to delete all stored accounts, credentials, and keys.
   in automatic tool mode; explicitly forcing one returns a `400` error.
   Function, custom, and namespace tools are converted normally.
 - Streaming token counts are accurate only when upstream emits usage
-  chunks; cost always uses the local price table. Without usage, logs end
+  chunks; cost uses the active OpenCode Go pricing snapshot. Without usage, logs end
   as `success_no_usage`.
 - The current HTTP dashboard does not expose the older isolated WebView
   browser command.

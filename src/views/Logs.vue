@@ -47,7 +47,7 @@
             <div class="stat-value">{{ formatNumber(forwardTotals.cached_tokens) }}</div>
           </div>
           <div class="stat-card">
-            <div class="stat-label">{{ t("成本") }}</div>
+            <div class="stat-label">{{ t("额度消耗（估算）") }}</div>
             <div class="stat-value">{{ formatCost(forwardTotals.cost, 5) }}</div>
           </div>
         </div>
@@ -129,7 +129,7 @@
           :data="forwardLogs"
           :loading="forwardLoading"
           :pagination="forwardPagination"
-          :scroll-x="1280"
+          :scroll-x="1470"
           remote
           size="small"
           @update:page="changeForwardPage"
@@ -235,6 +235,8 @@ const dateFormatter = computed(() => new Intl.DateTimeFormat(locale.value, {
 const statusMeta = computed<Record<string, { label: string; type: "success" | "warning" | "error" | "default" }>>(() => ({
   success: { label: t("成功"), type: "success" },
   success_no_usage: { label: t("成功·无用量"), type: "success" },
+  success_unpriced: { label: t("无价格"), type: "warning" },
+  outcome_unknown: { label: t("结果未知"), type: "warning" },
   streaming: { label: t("进行中"), type: "warning" },
   client_error: { label: t("客户端错误"), type: "error" },
   error: { label: t("错误"), type: "error" },
@@ -247,7 +249,7 @@ const sortOptions = computed(() => [
   { label: t("输入"), value: "prompt_tokens" },
   { label: t("输出"), value: "completion_tokens" },
   { label: t("缓存"), value: "cached_tokens" },
-  { label: t("成本"), value: "cost" },
+  { label: t("额度消耗（估算）"), value: "cost" },
 ]);
 const hasFilters = computed(() =>
   !!statusFilter.value
@@ -263,6 +265,13 @@ function formatDate(value: string): string {
 
 function toIsoString(ms: number): string {
   return new Date(ms).toISOString();
+}
+
+function formatQuotaCost(row: ForwardLog): string {
+  if (row.cost === null || row.cost_state === "unpriced" || row.cost_state === "outcome_unknown") {
+    return "—";
+  }
+  return formatCost(row.cost, 5);
 }
 
 const gatewayColumns = computed(() => [
@@ -281,14 +290,19 @@ const forwardColumns = computed(() => [
     width: 112,
     render: (row: ForwardLog) => {
       const meta = statusMeta.value[row.status] ?? { label: row.status, type: "default" as const };
-      return h(NTag, { type: meta.type, size: "small", bordered: false }, { default: () => meta.label });
+      const tags = [h(NTag, { type: meta.type, size: "small", bordered: false }, { default: () => meta.label })];
+      if (row.cost_state === "legacy_estimate") {
+        tags.push(h(NTag, { type: "default", size: "small", bordered: false }, { default: () => t("旧口径") }));
+      }
+      return h("div", { class: "status-tags" }, tags);
     },
   },
   { title: "HTTP", key: "http_status", width: 72 },
   { title: t("输入"), key: "prompt_tokens", width: 92, align: "right" as const, render: (row: ForwardLog) => formatNumber(row.prompt_tokens) },
   { title: t("输出"), key: "completion_tokens", width: 92, align: "right" as const, render: (row: ForwardLog) => formatNumber(row.completion_tokens) },
   { title: t("缓存"), key: "cached_tokens", width: 92, align: "right" as const, render: (row: ForwardLog) => formatNumber(row.cached_tokens) },
-  { title: t("成本"), key: "cost", width: 112, align: "right" as const, render: (row: ForwardLog) => formatCost(row.cost, 5) },
+  { title: t("缓存写"), key: "cache_creation_tokens", width: 92, align: "right" as const, render: (row: ForwardLog) => formatNumber(row.cache_creation_tokens) },
+  { title: t("额度消耗（估算）"), key: "cost", width: 152, align: "right" as const, render: formatQuotaCost },
   { title: t("错误"), key: "error_message", minWidth: 220, ellipsis: { tooltip: true } },
 ]);
 
@@ -469,6 +483,11 @@ onMounted(() => {
 }
 .log-toolbar {
   margin-bottom: 8px;
+}
+:deep(.status-tags) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
 }
 
 @media (max-width: 1200px) {

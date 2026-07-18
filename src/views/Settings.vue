@@ -317,6 +317,8 @@
         </div>
       </section>
     </div>
+
+    <PricingCatalog />
   </div>
 </template>
 
@@ -348,6 +350,7 @@ import { THEME_OPTIONS } from "../theme";
 import type { ResolvedTheme, ThemeName } from "../theme";
 import { t } from "../i18n/index.ts";
 import type { MessageKey } from "../i18n/index.ts";
+import PricingCatalog from "../components/PricingCatalog.vue";
 import { useClipboard } from "../utils/format.ts";
 import {
   maskConnectionKey,
@@ -405,7 +408,7 @@ const config = ref<AppConfig>({
   auto_start: false,
   auto_start_supported: false,
   connect_timeout_secs: 30,
-  non_stream_timeout_secs: 120,
+  non_stream_timeout_secs: 900,
   stream_idle_timeout_secs: 300,
 });
 
