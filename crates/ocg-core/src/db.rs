@@ -1,7 +1,7 @@
 use crate::models::*;
 use crate::pricing::{PricingLimits, PricingSnapshot};
 use anyhow::Result;
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Duration, Local, NaiveDate, TimeZone, Utc};
 use rusqlite::{
     Connection, OptionalExtension, Row, params, params_from_iter,
     types::{Type, Value},
@@ -76,6 +76,32 @@ fn ensure_account_text_column(tx: &rusqlite::Transaction<'_>, column: &'static s
     Ok(())
 }
 
+/// 幂等地为指定表添加列。若列已存在则跳过，避免 v1.4.2 -> v1.5.0 升级时
+/// 旧 v9 migration（HEAD 固定窗口）和 upstream v9（cost_state）冲突导致的
+/// "duplicate column" 错误。
+fn ensure_column(
+    tx: &rusqlite::Transaction<'_>,
+    table: &str,
+    column: &str,
+    definition: &str,
+) -> Result<()> {
+    let exists = {
+        let mut stmt = tx.prepare(&format!("PRAGMA table_info({table})"))?;
+        let columns = stmt.query_map([], |row| row.get::<_, String>(1))?;
+        columns
+            .collect::<rusqlite::Result<Vec<_>>>()?
+            .iter()
+            .any(|existing| existing == column)
+    };
+    if !exists {
+        tx.execute(
+            &format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"),
+            [],
+        )?;
+    }
+    Ok(())
+}
+
 impl Database {
     pub fn open(data_dir: PathBuf) -> Result<Self> {
         std::fs::create_dir_all(&data_dir)?;
@@ -95,13 +121,29 @@ impl Database {
         )?;
 
         let tx = self.conn.unchecked_transaction()?;
-        let version: i32 = tx
+        let mut version: i32 = tx
             .query_row(
                 "SELECT version FROM schema_version ORDER BY version DESC LIMIT 1",
                 [],
                 |row| row.get(0),
             )
             .unwrap_or(0);
+
+        // 修复：v1.4.2 -> v1.5.0 升级时，旧 v9 migration（HEAD 固定窗口）只添加了
+        // usage_*_window_* 列，没有添加 upstream v9 的 cost_state 等 forward_logs 列。
+        // 检测 cost_state 列是否存在，不存在则把 version 回退到 8，让 v9/v10/v11
+        // 重跑（v9/v11 已改成幂等，不会因列已存在而报错）。
+        let has_cost_state = {
+            let mut stmt = tx.prepare("PRAGMA table_info(forward_logs)")?;
+            let columns = stmt.query_map([], |row| row.get::<_, String>(1))?;
+            columns
+                .collect::<rusqlite::Result<Vec<_>>>()?
+                .iter()
+                .any(|existing| existing == "cost_state")
+        };
+        if !has_cost_state && version >= 9 {
+            version = 8;
+        }
 
         if version < 1 {
             tx.execute_batch(
@@ -328,14 +370,26 @@ impl Database {
                     snapshot_json TEXT NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_pricing_snapshots_activated
-                    ON pricing_snapshots(activated_at DESC);
-                ALTER TABLE forward_logs ADD COLUMN pricing_revision_id TEXT;
-                ALTER TABLE forward_logs ADD COLUMN quota_multiplier REAL;
-                ALTER TABLE forward_logs ADD COLUMN local_adjustment_multiplier REAL;
-                ALTER TABLE forward_logs ADD COLUMN cache_creation_tokens INTEGER NOT NULL DEFAULT 0;
-                ALTER TABLE forward_logs ADD COLUMN service_tier TEXT;
-                ALTER TABLE forward_logs ADD COLUMN cost_state TEXT NOT NULL DEFAULT 'not_applicable';
-                UPDATE forward_logs SET cost_state = CASE
+                    ON pricing_snapshots(activated_at DESC);",
+            )?;
+            ensure_column(&tx, "forward_logs", "pricing_revision_id", "TEXT")?;
+            ensure_column(&tx, "forward_logs", "quota_multiplier", "REAL")?;
+            ensure_column(&tx, "forward_logs", "local_adjustment_multiplier", "REAL")?;
+            ensure_column(
+                &tx,
+                "forward_logs",
+                "cache_creation_tokens",
+                "INTEGER NOT NULL DEFAULT 0",
+            )?;
+            ensure_column(&tx, "forward_logs", "service_tier", "TEXT")?;
+            ensure_column(
+                &tx,
+                "forward_logs",
+                "cost_state",
+                "TEXT NOT NULL DEFAULT 'not_applicable'",
+            )?;
+            tx.execute_batch(
+                "UPDATE forward_logs SET cost_state = CASE
                     WHEN status = 'success' THEN 'legacy_estimate'
                     WHEN status = 'error' AND cost > 0 THEN 'legacy_estimate'
                     WHEN status = 'success_no_usage' THEN 'usage_missing'
@@ -357,6 +411,128 @@ impl Database {
                    AND cost > 0
                    AND cost_state = 'not_applicable';
                  INSERT OR REPLACE INTO schema_version (version) VALUES (10);",
+            )?;
+        }
+
+        if version < 11 {
+            // v11: 用固定窗口替代滚动窗口 + baseline 机制。
+            // 5h/周窗口记一条"窗口起点时间戳"和"起点用量偏移"（手动校准用）。
+            // 月窗口无新列：起点 = purchase_date 00:00，终点 = purchase_expires_on(purchase_date) 00:00。
+            // 旧的 6 个 baseline 列保留不读不写，避免 DROP COLUMN 迁移风险。
+            ensure_column(&tx, "accounts", "usage_5h_window_started_at", "TEXT")?;
+            ensure_column(
+                &tx,
+                "accounts",
+                "usage_5h_window_cost_offset",
+                "REAL NOT NULL DEFAULT 0 CHECK (usage_5h_window_cost_offset >= 0)",
+            )?;
+            ensure_column(&tx, "accounts", "usage_week_window_started_at", "TEXT")?;
+            ensure_column(
+                &tx,
+                "accounts",
+                "usage_week_window_cost_offset",
+                "REAL NOT NULL DEFAULT 0 CHECK (usage_week_window_cost_offset >= 0)",
+            )?;
+            tx.execute(
+                "INSERT OR REPLACE INTO schema_version (version) VALUES (11)",
+                [],
+            )?;
+        }
+
+        if version < 12 {
+            // v12:
+            // - 重建 accounts 表去掉 usage_5h/week_window_cost_offset 的 CHECK (>= 0) 约束。
+            //   SQLite 不支持 ALTER TABLE DROP CONSTRAINT，必须 rename + create + copy + drop。
+            //   允许手动校准时 offset 为负数（target_cost < actual_cost 的情况），避免向左拉
+            //   滑块时锁死在实际 cost 对应的百分比（Bug 1.5）。
+            // - 新增 usage_month_window_cost_offset 列（无 CHECK），支持月窗口手动校准。
+            let needs_rebuild: bool = {
+                let sql: String = tx
+                    .query_row(
+                        "SELECT sql FROM sqlite_master WHERE type='table' AND name='accounts'",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .unwrap_or_default();
+                sql.contains("usage_5h_window_cost_offset >= 0")
+                    || sql.contains("usage_week_window_cost_offset >= 0")
+                    || !sql.contains("usage_month_window_cost_offset")
+            };
+            if needs_rebuild {
+                tx.execute_batch("PRAGMA foreign_keys=OFF;")?;
+                tx.execute_batch("ALTER TABLE accounts RENAME TO accounts_v11_backup;")?;
+                tx.execute_batch(
+                    "CREATE TABLE accounts (
+                        id TEXT PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        username TEXT,
+                        password_cipher TEXT,
+                        key_cipher TEXT NOT NULL,
+                        enabled INTEGER NOT NULL DEFAULT 1,
+                        referral_code TEXT,
+                        recharge_date TEXT NOT NULL,
+                        cooldown_until TEXT,
+                        cooldown_generic_until TEXT,
+                        cooldown_5h_until TEXT,
+                        cooldown_week_until TEXT,
+                        cooldown_month_until TEXT,
+                        last_error TEXT,
+                        usage_5h_baseline_percent REAL,
+                        usage_5h_anchor_success_cost REAL,
+                        usage_week_baseline_percent REAL,
+                        usage_week_anchor_success_cost REAL,
+                        usage_month_baseline_percent REAL,
+                        usage_month_anchor_success_cost REAL,
+                        sort_order INTEGER NOT NULL DEFAULT 0,
+                        usage_5h_window_started_at TEXT,
+                        usage_5h_window_cost_offset REAL NOT NULL DEFAULT 0,
+                        usage_week_window_started_at TEXT,
+                        usage_week_window_cost_offset REAL NOT NULL DEFAULT 0,
+                        usage_month_window_cost_offset REAL NOT NULL DEFAULT 0,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL
+                    );",
+                )?;
+                // accounts_v11_backup 不含 usage_month_window_cost_offset 列，用字面量 0
+                // 填充（NOT NULL DEFAULT 0 列拒绝显式 NULL，所以不能写 NULL）。
+                tx.execute_batch(
+                    "INSERT INTO accounts (
+                        id, name, username, password_cipher, key_cipher, enabled, referral_code,
+                        recharge_date, cooldown_until, cooldown_generic_until, cooldown_5h_until,
+                        cooldown_week_until, cooldown_month_until, last_error,
+                        usage_5h_baseline_percent, usage_5h_anchor_success_cost,
+                        usage_week_baseline_percent, usage_week_anchor_success_cost,
+                        usage_month_baseline_percent, usage_month_anchor_success_cost,
+                        sort_order, usage_5h_window_started_at, usage_5h_window_cost_offset,
+                        usage_week_window_started_at, usage_week_window_cost_offset,
+                        usage_month_window_cost_offset, created_at, updated_at
+                    )
+                    SELECT
+                        id, name, username, password_cipher, key_cipher, enabled, referral_code,
+                        recharge_date, cooldown_until, cooldown_generic_until, cooldown_5h_until,
+                        cooldown_week_until, cooldown_month_until, last_error,
+                        usage_5h_baseline_percent, usage_5h_anchor_success_cost,
+                        usage_week_baseline_percent, usage_week_anchor_success_cost,
+                        usage_month_baseline_percent, usage_month_anchor_success_cost,
+                        sort_order, usage_5h_window_started_at, usage_5h_window_cost_offset,
+                        usage_week_window_started_at, usage_week_window_cost_offset,
+                        0, created_at, updated_at
+                    FROM accounts_v11_backup;
+                    DROP TABLE accounts_v11_backup;
+                    PRAGMA foreign_keys=ON;",
+                )?;
+            } else {
+                // 已重建过的库只需补 usage_month_window_cost_offset 列。
+                ensure_column(
+                    &tx,
+                    "accounts",
+                    "usage_month_window_cost_offset",
+                    "REAL NOT NULL DEFAULT 0",
+                )?;
+            }
+            tx.execute(
+                "INSERT OR REPLACE INTO schema_version (version) VALUES (12)",
+                [],
             )?;
         }
 
@@ -853,9 +1029,9 @@ impl Database {
             params![id, new_cooldown],
         )?;
 
-        if let Some(window) = window {
-            tx.execute(usage_baseline_update_sql(window), params![id, 0.0, now_rfc])?;
-        }
+        // ponytail: 不再在 429 时设置 baseline。固定窗口的"重置"由 forward_logs 自然驱动；
+        // 冷却到期后账号恢复可用，用量窗口照常计算。429 仅用于阻断选择器重试。
+        // 旧 baseline 列保留不读不写，避免迁移风险。
         tx.commit()?;
         Ok(())
     }
@@ -904,18 +1080,105 @@ impl Database {
     }
 
     // Usage
-    /// Calibrate one usage window and atomically snapshot all successful cost so far.
-    /// Returns `false` when the account no longer exists.
-    pub fn set_account_usage_baseline(
+    /// 手动校准一个固定窗口的"当前已用百分比"与"距上游重置还剩多久"。
+    /// `percent` = 当前已用百分比（0-100），`resets_in_minutes` = 距上游重置还剩多少分钟
+    /// （None 表示从 now 起算满窗口时长；月窗口忽略此参数——窗口由 purchase_date/expires_on 决定）。
+    /// `limit` = 当前窗口的限额（从 PricingSnapshot 读取，避免硬编码）。
+    pub fn calibrate_account_usage(
         &self,
         account_id: &str,
         window: UsageWindowKind,
         percent: f64,
+        resets_in_minutes: Option<i64>,
+        limit: f64,
     ) -> Result<bool> {
-        let changed = self.conn.execute(
-            usage_baseline_update_sql(window),
-            params![account_id, percent, Utc::now().to_rfc3339()],
-        )?;
+        let now = Utc::now();
+        // (started_at, offset_col, started_col_or_empty)
+        // started_col 为空字符串表示月窗口——不写 started_at 列（起点固定为 purchase_date）。
+        let (started_at, started_col, offset_col): (Option<DateTime<Utc>>, &str, &str) = match window {
+            UsageWindowKind::FiveHours => {
+                let window_len = Duration::hours(5);
+                let ends_at = now
+                    + Duration::minutes(resets_in_minutes.unwrap_or_else(|| window_len.num_minutes()));
+                let started_at = ends_at - window_len;
+                (Some(started_at), "usage_5h_window_started_at", "usage_5h_window_cost_offset")
+            }
+            UsageWindowKind::Week => {
+                let window_len = Duration::days(7);
+                let ends_at = now
+                    + Duration::minutes(resets_in_minutes.unwrap_or_else(|| window_len.num_minutes()));
+                let started_at = ends_at - window_len;
+                (Some(started_at), "usage_week_window_started_at", "usage_week_window_cost_offset")
+            }
+            UsageWindowKind::Month => {
+                // 月窗口的起点/终点由 purchase_date 决定，不写 started_at 列。
+                // resets_in_minutes 被忽略——窗口已由账号购买日期固定。
+                (None, "", "usage_month_window_cost_offset")
+            }
+        };
+
+        // 计算 actual_cost：窗口内已有 forward_logs 的 cost 总和。
+        // 5h/周窗口的起点是刚算出的 started_at；月窗口的起点是 purchase_date 00:00 本地时区。
+        let actual_cost: f64 = match started_at {
+            Some(started) => self.conn.query_row(
+                "SELECT COALESCE(SUM(cost), 0) FROM forward_logs
+                 WHERE account_id = ?1
+                   AND cost_state IN ('priced', 'legacy_estimate')
+                   AND timestamp >= ?2",
+                params![account_id, started.to_rfc3339()],
+                |row| row.get(0),
+            )?,
+            None => {
+                let purchase_date: String = self
+                    .conn
+                    .query_row(
+                        "SELECT recharge_date FROM accounts WHERE id = ?1",
+                        [account_id],
+                        |row| row.get(0),
+                    )
+                    .optional()?
+                    .ok_or_else(|| anyhow::anyhow!("account not found"))?;
+                let started = month_window_start_utc(&purchase_date)?;
+                self.conn.query_row(
+                    "SELECT COALESCE(SUM(cost), 0) FROM forward_logs
+                     WHERE account_id = ?1
+                       AND cost_state IN ('priced', 'legacy_estimate')
+                       AND timestamp >= ?2",
+                    params![account_id, started.to_rfc3339()],
+                    |row| row.get(0),
+                )?
+            }
+        };
+
+        let target_cost = limit * percent / 100.0;
+        // Bug 1.5 修复：去掉 max(0, ...) 钳制，允许负 offset。
+        // 之前 max(0, target - actual) 配合 schema CHECK (offset >= 0) 让向左拉
+        // 滑块时被锁死在实际 cost 对应的百分比。现在 offset 可以为负，
+        // compute_fixed_window 返回 offset + actual = target_cost，与用户输入一致。
+        let offset = target_cost - actual_cost;
+
+        let changed = if started_col.is_empty() {
+            // 月窗口：只更新 cost_offset（started_at 由 purchase_date 派生，不存储）
+            self.conn.execute(
+                "UPDATE accounts
+                 SET usage_month_window_cost_offset = ?2,
+                     updated_at = ?3
+                 WHERE id = ?1",
+                params![account_id, offset, now.to_rfc3339()],
+            )?
+        } else {
+            let started = started_at.unwrap();
+            self.conn.execute(
+                &format!(
+                    "UPDATE accounts
+                     SET {started_col} = ?2,
+                         {offset_col} = ?3,
+                         updated_at = ?4
+                     WHERE id = ?1"
+                ),
+                params![account_id, started.to_rfc3339(), offset, now.to_rfc3339()],
+            )?
+        };
         Ok(changed > 0)
     }
 
@@ -933,81 +1196,78 @@ impl Database {
         limits: &PricingLimits,
     ) -> Result<UsageWindow> {
         let now = Utc::now();
-        let five_hours_ago = (now - Duration::hours(5)).to_rfc3339();
-        let week_ago = (now - Duration::days(7)).to_rfc3339();
-        let month_ago = (now - Duration::days(30)).to_rfc3339();
+        let row = self.conn.query_row(
+            "SELECT usage_5h_window_started_at, usage_5h_window_cost_offset,
+                    usage_week_window_started_at, usage_week_window_cost_offset,
+                    usage_month_window_cost_offset,
+                    recharge_date
+             FROM accounts WHERE id = ?1",
+            [account_id],
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, f64>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, f64>(3)?,
+                    row.get::<_, f64>(4)?,
+                    row.get::<_, String>(5)?,
+                ))
+            },
+        );
+        let (started_5h_str, offset_5h, started_week_str, offset_week, offset_month, purchase_date) =
+            match row.optional()? {
+                Some(v) => v,
+                None => {
+                    return Ok(UsageWindow {
+                        account_id: account_id.to_string(),
+                        window_5h: 0.0,
+                        window_week: 0.0,
+                        window_month: 0.0,
+                        resets_in_5h: None,
+                        resets_in_week: None,
+                        resets_in_month: None,
+                    })
+                }
+            };
 
-        let baselines: [Option<(f64, f64)>; 3] = self
-            .conn
-            .query_row(
-                "SELECT usage_5h_baseline_percent, usage_5h_anchor_success_cost,
-                        usage_week_baseline_percent, usage_week_anchor_success_cost,
-                        usage_month_baseline_percent, usage_month_anchor_success_cost
-                 FROM accounts WHERE id = ?1",
-                [account_id],
-                |row| {
-                    Ok([
-                        row.get::<_, Option<f64>>(0)?.zip(row.get(1)?),
-                        row.get::<_, Option<f64>>(2)?.zip(row.get(3)?),
-                        row.get::<_, Option<f64>>(4)?.zip(row.get(5)?),
-                    ])
-                },
-            )
-            .optional()?
-            .unwrap_or([None; 3]);
-
-        let total_success_cost = if baselines.iter().any(Option::is_some) {
-            self.conn.query_row(
-                "SELECT COALESCE(SUM(cost), 0) FROM forward_logs WHERE account_id = ?1 AND cost_state IN ('priced', 'legacy_estimate')",
-                [account_id],
-                |row| row.get(0),
-            )?
-        } else {
-            0.0
-        };
-
-        let window_5h: f64 = self
-            .conn
-            .query_row(
-                "SELECT COALESCE(SUM(cost), 0) FROM forward_logs WHERE account_id = ?1 AND cost_state IN ('priced', 'legacy_estimate') AND timestamp > ?2",
-                params![account_id, five_hours_ago],
-                |row| row.get(0),
-            )?;
-        let window_week: f64 = self
-            .conn
-            .query_row(
-                "SELECT COALESCE(SUM(cost), 0) FROM forward_logs WHERE account_id = ?1 AND cost_state IN ('priced', 'legacy_estimate') AND timestamp > ?2",
-                params![account_id, week_ago],
-                |row| row.get(0),
-            )?;
-        let window_month: f64 = self
-            .conn
-            .query_row(
-                "SELECT COALESCE(SUM(cost), 0) FROM forward_logs WHERE account_id = ?1 AND cost_state IN ('priced', 'legacy_estimate') AND timestamp > ?2",
-                params![account_id, month_ago],
-                |row| row.get(0),
-            )?;
+        let (cost_5h, reset_5h) = compute_fixed_window(
+            &self.conn,
+            account_id,
+            started_5h_str.as_deref(),
+            offset_5h,
+            Duration::hours(5),
+            limits.window_5h,
+            now,
+            "usage_5h_window_started_at",
+            "usage_5h_window_cost_offset",
+        )?;
+        let (cost_week, reset_week) = compute_fixed_window(
+            &self.conn,
+            account_id,
+            started_week_str.as_deref(),
+            offset_week,
+            Duration::days(7),
+            limits.window_week,
+            now,
+            "usage_week_window_started_at",
+            "usage_week_window_cost_offset",
+        )?;
+        let (cost_month, reset_month) = compute_month_window(
+            &self.conn,
+            account_id,
+            &purchase_date,
+            offset_month,
+            limits.window_month,
+        )?;
 
         Ok(UsageWindow {
             account_id: account_id.to_string(),
-            window_5h: effective_usage(
-                window_5h,
-                baselines[0],
-                total_success_cost,
-                limits.window_5h,
-            ),
-            window_week: effective_usage(
-                window_week,
-                baselines[1],
-                total_success_cost,
-                limits.window_week,
-            ),
-            window_month: effective_usage(
-                window_month,
-                baselines[2],
-                total_success_cost,
-                limits.window_month,
-            ),
+            window_5h: cost_5h,
+            window_week: cost_week,
+            window_month: cost_month,
+            resets_in_5h: reset_5h,
+            resets_in_week: reset_week,
+            resets_in_month: reset_month,
         })
     }
 
@@ -1072,32 +1332,170 @@ impl Database {
     }
 }
 
-fn usage_baseline_update_sql(window: UsageWindowKind) -> &'static str {
-    match window {
-        UsageWindowKind::FiveHours => {
-            "UPDATE accounts
-             SET usage_5h_baseline_percent = ?2,
-                 usage_5h_anchor_success_cost = (SELECT COALESCE(SUM(cost), 0) FROM forward_logs WHERE account_id = ?1 AND cost_state IN ('priced', 'legacy_estimate')),
-                 updated_at = ?3
-             WHERE id = ?1"
+/// 计算固定窗口的当前用量与清零时刻。`started_at_str` 为 `None` 表示账号从未使用过该窗口；
+/// 窗口已过期时从 `forward_logs` lazy 重建新起点。
+fn compute_fixed_window(
+    conn: &Connection,
+    account_id: &str,
+    started_at_str: Option<&str>,
+    offset: f64,
+    window_len: Duration,
+    limit: f64,
+    now: DateTime<Utc>,
+    started_col: &str,
+    offset_col: &str,
+) -> Result<(f64, Option<DateTime<Utc>>)> {
+    let mut started_at = match started_at_str {
+        None => {
+            // ponytail: lazy 初始化——查 forward_logs 第一条计费请求作为窗口起点。
+            // 计费行 = cost_state IN ('priced', 'legacy_estimate')，
+            // 与下方 SUM(cost) 的过滤保持一致，确保迁移后的 legacy error 也能触发窗口。
+            let first: Option<String> = conn
+                .query_row(
+                    "SELECT MIN(timestamp) FROM forward_logs
+                     WHERE account_id = ?1
+                       AND cost_state IN ('priced', 'legacy_estimate')",
+                    [account_id],
+                    |row| row.get(0),
+                )
+                .optional()?
+                .flatten();
+            match first {
+                None => return Ok((0.0, None)), // 真的没用过
+                Some(s) => {
+                    conn.execute(
+                        &format!(
+                            "UPDATE accounts SET {started_col} = ?2, {offset_col} = 0
+                             WHERE id = ?1"
+                        ),
+                        params![account_id, &s],
+                    )?;
+                    parse_rfc3339(&s)?
+                }
+            }
         }
-        UsageWindowKind::Week => {
-            "UPDATE accounts
-             SET usage_week_baseline_percent = ?2,
-                 usage_week_anchor_success_cost = (SELECT COALESCE(SUM(cost), 0) FROM forward_logs WHERE account_id = ?1 AND cost_state IN ('priced', 'legacy_estimate')),
-                 updated_at = ?3
-             WHERE id = ?1"
+        Some(s) => parse_rfc3339(s)?,
+    };
+    // 第一次进入循环时使用调用方传入的 offset（来自手动校准）；任何一次前进后，
+    // offset 都被清零（`offset_col = 0` 已写入 DB），用 effective_offset 跟踪。
+    let mut effective_offset = offset;
+
+    loop {
+        let ends_at = started_at + window_len;
+        if now < ends_at {
+            // 窗口仍有效：用量 = effective_offset + SUM(cost WHERE ts >= started_at)
+            let cost: f64 = conn.query_row(
+                "SELECT COALESCE(SUM(cost), 0) FROM forward_logs
+                 WHERE account_id = ?1
+                   AND cost_state IN ('priced', 'legacy_estimate')
+                   AND timestamp >= ?2",
+                params![account_id, started_at.to_rfc3339()],
+                |row| row.get(0),
+            )?;
+            return Ok(((effective_offset + cost).min(limit), Some(ends_at)));
         }
-        UsageWindowKind::Month => {
-            "UPDATE accounts
-             SET usage_month_baseline_percent = ?2,
-                 usage_month_anchor_success_cost = (SELECT COALESCE(SUM(cost), 0) FROM forward_logs WHERE account_id = ?1 AND cost_state IN ('priced', 'legacy_estimate')),
-                 updated_at = ?3
-             WHERE id = ?1"
+
+        // 窗口已过期：找 forward_logs 中第一条 timestamp > ends_at 的计费请求作为新起点。
+        // 关键修复：旧实现只前进一次就 return，遇到多条稀疏日志（间隔 > 5h）时每次刷新
+        // 只前进一个窗口，造成前端可见的"用量从 60 → 30 → 13 → 5.8 → 0"递减幻觉；
+        // 当 next=None 清空后下次刷新又 lazy-init 回最旧日志，循环重启。
+        // 用 loop 在一次调用内连过所有过期窗口，直到落在有效窗口或彻底无新请求。
+        let next: Option<String> = conn
+            .query_row(
+                "SELECT MIN(timestamp) FROM forward_logs
+                 WHERE account_id = ?1
+                   AND cost_state IN ('priced', 'legacy_estimate')
+                   AND timestamp > ?2",
+                params![account_id, ends_at.to_rfc3339()],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten();
+        match next {
+            None => {
+                // 过期后无新请求：清空窗口，等待下次请求触发新窗口。
+                conn.execute(
+                    &format!(
+                        "UPDATE accounts SET {started_col} = NULL, {offset_col} = 0
+                         WHERE id = ?1"
+                    ),
+                    [account_id],
+                )?;
+                return Ok((0.0, None));
+            }
+            Some(s) => {
+                started_at = parse_rfc3339(&s)?;
+                effective_offset = 0.0;
+                conn.execute(
+                    &format!(
+                        "UPDATE accounts SET {started_col} = ?2, {offset_col} = 0
+                         WHERE id = ?1"
+                    ),
+                    params![account_id, &s],
+                )?;
+                // 继续循环：新起点对应的窗口可能也已过期，需要再判一次。
+            }
         }
     }
 }
 
+/// 月窗口：从 `purchase_date 00:00 本地时区` 累计到 `purchase_expires_on(purchase_date) 00:00 本地时区`，不重置。
+/// `offset` = 手动校准时写入的 `usage_month_window_cost_offset`，与 `compute_fixed_window` 对齐：
+/// 返回值 = `(offset + cost).min(limit)`，让月窗口支持手动校准。
+fn compute_month_window(
+    conn: &Connection,
+    account_id: &str,
+    purchase_date: &str,
+    offset: f64,
+    limit: f64,
+) -> Result<(f64, Option<DateTime<Utc>>)> {
+    if purchase_date.trim().is_empty() {
+        return Ok((0.0, None));
+    }
+    let start = month_window_start_utc(purchase_date)?;
+    let expires = purchase_expires_on(purchase_date)?;
+    let end_naive = NaiveDate::parse_from_str(&expires, "%Y-%m-%d")?
+        .and_hms_opt(0, 0, 0)
+        .unwrap();
+    let end: DateTime<Utc> = Local
+        .from_local_datetime(&end_naive)
+        .single()
+        .ok_or_else(|| anyhow::anyhow!("ambiguous local datetime for expires_on"))?
+        .with_timezone(&Utc);
+    let cost: f64 = conn.query_row(
+        "SELECT COALESCE(SUM(cost), 0) FROM forward_logs
+         WHERE account_id = ?1
+           AND cost_state IN ('priced', 'legacy_estimate')
+           AND timestamp >= ?2",
+        params![account_id, start.to_rfc3339()],
+        |row| row.get(0),
+    )?;
+    // ponytail: 月窗口已过期也照常返回终点，前端按"已到期"显示。
+    Ok(((offset + cost).min(limit), Some(end)))
+}
+
+/// 把 `purchase_date`（YYYY-MM-DD）解释为本时区 00:00，转 UTC。
+/// purchase_date 是 local_today() 写入的本地日期；转 UTC 时必须经过 Local 时区，
+/// 否则本地早上的请求会被 UTC 午夜 cutoff 漏算。
+fn month_window_start_utc(purchase_date: &str) -> Result<DateTime<Utc>> {
+    let normalized = normalize_purchase_date(purchase_date)?;
+    let start_naive = NaiveDate::parse_from_str(&normalized, "%Y-%m-%d")?
+        .and_hms_opt(0, 0, 0)
+        .unwrap();
+    Ok(Local
+        .from_local_datetime(&start_naive)
+        .single()
+        .ok_or_else(|| anyhow::anyhow!("ambiguous local datetime for purchase_date"))?
+        .with_timezone(&Utc))
+}
+
+fn parse_rfc3339(s: &str) -> Result<DateTime<Utc>> {
+    Ok(DateTime::parse_from_rfc3339(s)
+        .map(|dt| dt.with_timezone(&Utc))
+        .map_err(|e| anyhow::anyhow!("invalid RFC3339 timestamp: {e}"))?)
+}
+
+#[allow(dead_code)]
 fn effective_usage(
     local_window_cost: f64,
     baseline: Option<(f64, f64)>,
@@ -1302,6 +1700,35 @@ mod tests {
         }
     }
 
+    fn forward_log_at(
+        account_id: &str,
+        status: &str,
+        cost: f64,
+        timestamp: DateTime<Utc>,
+    ) -> ForwardLog {
+        let mut log = forward_log(account_id, status, cost);
+        log.timestamp = timestamp;
+        log
+    }
+
+    fn finalize_success(db: &Database, account_id: &str, cost: f64, timestamp: DateTime<Utc>) {
+        let id = db
+            .log_forward(&forward_log_at(account_id, "streaming", 0.0, timestamp))
+            .expect("log should insert");
+        db.update_forward_log(
+            id,
+            "success",
+            None,
+            ForwardMetrics {
+                cost,
+                cost_state: "priced",
+                ..ForwardMetrics::default()
+            },
+            None,
+        )
+        .expect("stream should finalize");
+    }
+
     fn assert_cost(actual: f64, expected: f64) {
         assert!(
             (actual - expected).abs() < 1e-9,
@@ -1418,7 +1845,7 @@ mod tests {
                     row.get(0)
                 })
                 .expect("schema version should load");
-            assert_eq!(version, 10, "{label}");
+            assert_eq!(version, 12, "{label}");
             let account = db
                 .get_account("old")
                 .expect("account query should work")
@@ -1496,7 +1923,7 @@ mod tests {
             })
             .expect("schema version should be readable");
         let usage = db.account_usage("old").expect("usage should load");
-        assert_eq!(version, 10);
+        assert_eq!(version, 12);
         assert_eq!(
             db.get_account("old")
                 .expect("account should load")
@@ -1645,7 +2072,7 @@ mod tests {
                 row.get(0)
             })
             .expect("schema version should load");
-        assert_eq!(version, 10);
+        assert_eq!(version, 12);
         assert_eq!(
             db.get_account("valid")
                 .expect("valid account query should work")
@@ -1782,14 +2209,14 @@ mod tests {
         }
         drop(conn);
 
-        let db = Database::open(dir.clone()).expect("v9 database should migrate through v10");
+        let db = Database::open(dir.clone()).expect("v9 database should migrate through v11");
         let version: i32 = db
             .conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |row| {
                 row.get(0)
             })
             .expect("schema version should load");
-        assert_eq!(version, 10);
+        assert_eq!(version, 12);
         let states = db
             .conn
             .prepare("SELECT cost, cost_state FROM forward_logs ORDER BY id")
@@ -1838,7 +2265,7 @@ mod tests {
                 row.get(0)
             })
             .expect("schema version should load");
-        assert_eq!(version, 10);
+        assert_eq!(version, 12);
 
         let created_at = DateTime::parse_from_rfc3339("2026-01-02T01:30:00+02:00")
             .expect("fixed timestamp should parse")
@@ -1851,12 +2278,8 @@ mod tests {
             db.create_account(&legacy)
                 .expect("account should be created before corruption");
         }
-        db.conn
-            .execute(
-                "UPDATE accounts SET recharge_date = NULL WHERE id = 'null'",
-                [],
-            )
-            .expect("purchase date should be corrupted to NULL");
+        // v12 重建 accounts 表后 recharge_date 是 NOT NULL（恢复 v1 原始约束），
+        // 无法再被 UPDATE 成 NULL；只测试 invalid-text 这一支。
         db.conn
             .execute(
                 "UPDATE accounts SET recharge_date = 'not-a-date' WHERE id = 'invalid'",
@@ -1868,29 +2291,31 @@ mod tests {
             .list_accounts()
             .expect("one corrupt row must not break the account list");
         assert_eq!(accounts.len(), 2);
-        assert!(
-            accounts
-                .iter()
-                .all(|account| account.purchase_date == "2026-01-01")
+        // 仅 invalid 被破坏；null 仍持有原始 2025-12-31。
+        let invalid_account = accounts
+            .iter()
+            .find(|a| a.id == "invalid")
+            .expect("invalid account should be present");
+        assert_eq!(
+            invalid_account.purchase_date, "2026-01-01",
+            "list_accounts should fall back to default date for corrupted rows"
         );
-        for id in ["null", "invalid"] {
-            let account = db
-                .get_account(id)
-                .expect("corrupt account query should work")
-                .expect("corrupt account should exist");
-            assert_eq!(account.purchase_date, "2026-01-01", "{id}");
-            assert_eq!(account.expires_on, "2026-02-01", "{id}");
-        }
-        let remains_null: bool = db
+        let invalid = db
+            .get_account("invalid")
+            .expect("corrupt account query should work")
+            .expect("corrupt account should exist");
+        assert_eq!(invalid.purchase_date, "2026-01-01");
+        assert_eq!(invalid.expires_on, "2026-02-01");
+        let remains_invalid: bool = db
             .conn
             .query_row(
-                "SELECT recharge_date IS NULL FROM accounts WHERE id = 'null'",
+                "SELECT recharge_date = 'not-a-date' FROM accounts WHERE id = 'invalid'",
                 [],
                 |row| row.get(0),
             )
             .expect("raw purchase date should remain queryable");
         assert!(
-            remains_null,
+            remains_invalid,
             "read fallback must not hide a migration rerun"
         );
 
@@ -2095,126 +2520,6 @@ mod tests {
     }
 
     #[test]
-    fn manual_baselines_add_only_later_success_cost_per_window() {
-        let dir = temp_data_dir("manual-baseline");
-        let db = Database::open(dir.clone()).expect("db should open");
-        db.create_account(&account("manual"))
-            .expect("account should be created");
-        db.log_forward(&forward_log("manual", "success", 2.0))
-            .expect("initial cost should be logged");
-        let streaming_id = db
-            .log_forward(&forward_log("manual", "streaming", 0.0))
-            .expect("stream should be logged");
-
-        assert!(
-            db.set_account_usage_baseline("manual", UsageWindowKind::FiveHours, 50.0)
-                .expect("5h baseline should save")
-        );
-        assert!(
-            db.set_account_usage_baseline("manual", UsageWindowKind::Week, 25.0)
-                .expect("week baseline should save")
-        );
-        db.update_forward_log(
-            streaming_id,
-            "success",
-            None,
-            ForwardMetrics {
-                cost: 1.0,
-                cost_state: "priced",
-                ..ForwardMetrics::default()
-            },
-            None,
-        )
-        .expect("stream should finalize");
-
-        let usage = db.account_usage("manual").expect("usage should load");
-        assert_cost(usage.window_5h, 7.0);
-        assert_cost(usage.window_week, 8.5);
-        assert_cost(usage.window_month, 3.0);
-
-        db.set_account_usage_baseline("manual", UsageWindowKind::FiveHours, 100.0)
-            .expect("5h baseline should update");
-        db.log_forward(&forward_log("manual", "success", 5.0))
-            .expect("later cost should be logged");
-        let usage = db.account_usage("manual").expect("usage should reload");
-        assert_cost(usage.window_5h, 12.0);
-        assert_cost(usage.window_week, 13.5);
-        assert_cost(usage.window_month, 8.0);
-        assert!(
-            !db.set_account_usage_baseline("missing", UsageWindowKind::Month, 50.0)
-                .expect("missing account should not be an SQL error")
-        );
-
-        drop(db);
-        fs::remove_dir_all(dir).expect("test data dir should be removed");
-    }
-
-    #[test]
-    fn known_rate_limit_resets_only_its_window() {
-        let dir = temp_data_dir("rate-limit-window");
-        let db = Database::open(dir.clone()).expect("db should open");
-        db.create_account(&account("limited"))
-            .expect("account should be created");
-        db.set_account_usage_baseline("limited", UsageWindowKind::FiveHours, 40.0)
-            .expect("5h baseline should save");
-        db.set_account_usage_baseline("limited", UsageWindowKind::Week, 70.0)
-            .expect("week baseline should save");
-
-        let week_reset = Utc::now() + Duration::hours(1);
-        db.set_account_rate_limit(
-            "limited",
-            week_reset,
-            "weekly quota",
-            Some(UsageWindowKind::Week),
-        )
-        .expect("known rate limit should save");
-        let usage = db.account_usage("limited").expect("usage should load");
-        assert_cost(usage.window_5h, 4.8);
-        assert_cost(usage.window_week, 0.0);
-        let account = db
-            .get_account("limited")
-            .expect("account should load")
-            .expect("account should exist");
-        assert!(account.cooldown_week_until.is_some());
-        assert!(account.cooldown_5h_until.is_none());
-        assert!(
-            account
-                .cooldown_until
-                .is_some_and(|until| (until - week_reset).num_seconds().abs() < 2)
-        );
-
-        db.set_account_usage_baseline("limited", UsageWindowKind::Month, 50.0)
-            .expect("month baseline should save");
-        let before = db.account_usage("limited").expect("usage should load");
-        db.set_account_rate_limit(
-            "limited",
-            Utc::now() + Duration::minutes(5),
-            "unknown rate limit",
-            None,
-        )
-        .expect("unknown rate limit should still save cooldown");
-        let after = db.account_usage("limited").expect("usage should reload");
-        assert_cost(after.window_5h, before.window_5h);
-        assert_cost(after.window_week, before.window_week);
-        assert_cost(after.window_month, before.window_month);
-        let account = db
-            .get_account("limited")
-            .expect("account should load")
-            .expect("account should exist");
-        assert!(account.cooldown_generic_until.is_some());
-        assert!(account.cooldown_week_until.is_some());
-        assert!(
-            account
-                .cooldown_until
-                .zip(account.cooldown_week_until)
-                .is_some_and(|(summary, week)| (summary - week).num_seconds().abs() < 2)
-        );
-
-        drop(db);
-        fs::remove_dir_all(dir).expect("test data dir should be removed");
-    }
-
-    #[test]
     fn account_stays_cooling_until_all_windows_expire() {
         let dir = temp_data_dir("multi-window-cooldown");
         let db = Database::open(dir.clone()).expect("db should open");
@@ -2249,6 +2554,322 @@ mod tests {
             account
                 .cooldown_until
                 .is_some_and(|until| (until - future_week).num_seconds().abs() < 2)
+        );
+
+        drop(db);
+        fs::remove_dir_all(dir).expect("test data dir should be removed");
+    }
+
+    #[test]
+    fn fixed_window_5h_starts_at_first_success_and_expires_after_5h() {
+        let dir = temp_data_dir("fixed-5h");
+        let db = Database::open(dir.clone()).expect("db should open");
+        db.create_account(&account("fixed"))
+            .expect("account should be created");
+
+        // 第一条成功请求落在 4h 前：固定窗口起点 = 4h 前，倒计时 ≈ 1h
+        let ts1 = Utc::now() - Duration::hours(4);
+        finalize_success(&db, "fixed", 1.0, ts1);
+        // 窗口内的第二条请求：累加
+        let ts2 = ts1 + Duration::hours(1);
+        finalize_success(&db, "fixed", 2.0, ts2);
+
+        let usage = db.account_usage("fixed").expect("usage should load");
+        assert_cost(usage.window_5h, 3.0);
+        let reset = usage
+            .resets_in_5h
+            .expect("5h window reset should be set while window is active");
+        let remaining_min = (reset - Utc::now()).num_minutes();
+        assert!(
+            (55..=65).contains(&remaining_min),
+            "expected ~60min remaining, got {remaining_min}"
+        );
+
+        drop(db);
+        fs::remove_dir_all(dir).expect("test data dir should be removed");
+    }
+
+    #[test]
+    fn fixed_window_5h_rebuilds_after_expiry_when_new_request_arrives() {
+        let dir = temp_data_dir("fixed-5h-rebuild");
+        let db = Database::open(dir.clone()).expect("db should open");
+        db.create_account(&account("rebuild"))
+            .expect("account should be created");
+
+        // 6h 前的第一条请求：窗口已过期
+        let ts1 = Utc::now() - Duration::hours(6);
+        finalize_success(&db, "rebuild", 10.0, ts1);
+        // 1h 前的第二条请求：触发新窗口
+        let ts2 = Utc::now() - Duration::hours(1);
+        finalize_success(&db, "rebuild", 5.0, ts2);
+
+        let usage = db.account_usage("rebuild").expect("usage should load");
+        // 新窗口只包含 ts2 之后：10 已被丢弃，只剩 5
+        assert_cost(usage.window_5h, 5.0);
+        let reset = usage
+            .resets_in_5h
+            .expect("5h window reset should be set after rebuild");
+        let remaining_min = (reset - Utc::now()).num_minutes();
+        assert!(
+            (235..=245).contains(&remaining_min),
+            "expected ~240min remaining, got {remaining_min}"
+        );
+
+        drop(db);
+        fs::remove_dir_all(dir).expect("test data dir should be removed");
+    }
+
+    #[test]
+    fn fixed_window_5h_advances_through_multiple_expired_windows_in_one_call() {
+        // 复现用户报告的"刷新递减"循环 bug：
+        //   4 条间隔 6h 的计费日志（全部已过期）。
+        // 旧实现每次刷新只前进一个窗口，前端可见 60→30→13→5.8→0→60+ 循环；
+        // 修复后一次调用内连过 4 个过期窗口，next=None 时清空并返回 0，
+        // 第二次刷新仍为 0，不再回到最旧日志。
+        let dir = temp_data_dir("fixed-5h-multi-expired");
+        let db = Database::open(dir.clone()).expect("db should open");
+        db.create_account(&account("cycle"))
+            .expect("account should be created");
+
+        // ts1 = -24h, ts2 = -18h, ts3 = -12h, ts4 = -6h：每条间隔 6h（> 5h 窗口长度）。
+        let ts1 = Utc::now() - Duration::hours(24);
+        let ts2 = ts1 + Duration::hours(6);
+        let ts3 = ts2 + Duration::hours(6);
+        let ts4 = ts3 + Duration::hours(6);
+        finalize_success(&db, "cycle", 10.0, ts1);
+        finalize_success(&db, "cycle", 5.0, ts2);
+        finalize_success(&db, "cycle", 3.0, ts3);
+        finalize_success(&db, "cycle", 2.0, ts4);
+
+        // 第一次刷新：应直接走完所有过期窗口，返回 0（无新请求）。
+        let usage = db.account_usage("cycle").expect("usage should load");
+        assert_cost(usage.window_5h, 0.0);
+        assert!(
+            usage.resets_in_5h.is_none(),
+            "no active window after all expired; resets_in_5h should be None"
+        );
+
+        // 第二次刷新：不应回到最旧日志循环重放，仍稳定为 0。
+        let usage2 = db.account_usage("cycle").expect("usage should load again");
+        assert_cost(usage2.window_5h, 0.0);
+        assert!(usage2.resets_in_5h.is_none());
+
+        drop(db);
+        fs::remove_dir_all(dir).expect("test data dir should be removed");
+    }
+
+    #[test]
+    fn fixed_window_5h_finds_active_window_after_multiple_expired() {
+        // 多条已过期日志后跟一条近期日志：修复后第一次刷新就应落在有效窗口上，
+        // 而不是停在某个过期窗口里返回错误的中间值。
+        let dir = temp_data_dir("fixed-5h-active-after-expired");
+        let db = Database::open(dir.clone()).expect("db should open");
+        db.create_account(&account("active"))
+            .expect("account should be created");
+
+        // 三条过期日志间隔 6h，再加一条 1h 前的近期日志。
+        let ts1 = Utc::now() - Duration::hours(19);
+        let ts2 = ts1 + Duration::hours(6); // -13h
+        let ts3 = ts2 + Duration::hours(6); // -7h，仍过期
+        let ts4 = Utc::now() - Duration::hours(1); // 近期，落在有效窗口内
+        finalize_success(&db, "active", 10.0, ts1);
+        finalize_success(&db, "active", 5.0, ts2);
+        finalize_success(&db, "active", 3.0, ts3);
+        finalize_success(&db, "active", 2.0, ts4);
+
+        // 第一次刷新：连过 3 个过期窗口，落在 ts4 上，只算 ts4 之后的 cost = 2.0。
+        let usage = db.account_usage("active").expect("usage should load");
+        assert_cost(usage.window_5h, 2.0);
+        let reset = usage
+            .resets_in_5h
+            .expect("5h window reset should be anchored at ts4");
+        let remaining_min = (reset - Utc::now()).num_minutes();
+        assert!(
+            (235..=245).contains(&remaining_min),
+            "expected ~240min remaining (anchored at ts4 = now - 1h), got {remaining_min}"
+        );
+
+        drop(db);
+        fs::remove_dir_all(dir).expect("test data dir should be removed");
+    }
+
+    #[test]
+    fn fixed_window_5h_with_no_usage_returns_zero_and_full_window_remaining() {
+        let dir = temp_data_dir("fixed-5h-empty");
+        let db = Database::open(dir.clone()).expect("db should open");
+        db.create_account(&account("empty"))
+            .expect("account should be created");
+
+        let usage = db.account_usage("empty").expect("usage should load");
+        assert_cost(usage.window_5h, 0.0);
+        // 没用过：倒计时为 None（前端显示"5h0min"由默认值决定）
+        assert!(usage.resets_in_5h.is_none());
+
+        drop(db);
+        fs::remove_dir_all(dir).expect("test data dir should be removed");
+    }
+
+    #[test]
+    fn month_window_accumulates_from_purchase_date_to_expires_on() {
+        let dir = temp_data_dir("month-window");
+        let db = Database::open(dir.clone()).expect("db should open");
+        let mut acct = account("monthly");
+        acct.purchase_date = "2026-07-01".into();
+        db.create_account(&acct).expect("account should be created");
+
+        // 模拟一条历史成功请求（任何时间都算，月窗口从 purchase_date 累计）
+        finalize_success(&db, "monthly", 5.0, Utc::now());
+
+        let usage = db.account_usage("monthly").expect("usage should load");
+        assert_cost(usage.window_month, 5.0);
+        let reset = usage
+            .resets_in_month
+            .expect("month window reset should be purchase_date + 1 month");
+        // 2026-07-01 + 1 自然月 = 2026-08-01 00:00
+        let expected = DateTime::parse_from_rfc3339("2026-08-01T00:00:00+00:00")
+            .unwrap()
+            .with_timezone(&Utc);
+        assert!(
+            (reset - expected).num_seconds().abs() < 86400,
+            "expected ~2026-08-01, got {reset}"
+        );
+
+        drop(db);
+        fs::remove_dir_all(dir).expect("test data dir should be removed");
+    }
+
+    #[test]
+    fn manual_calibrate_5h_window_sets_started_at_and_cost_offset() {
+        let dir = temp_data_dir("calibrate-5h");
+        let db = Database::open(dir.clone()).expect("db should open");
+        db.create_account(&account("calib"))
+            .expect("account should be created");
+
+        // 用户在别处已用 50%，距上游重置还剩 3 小时
+        db.calibrate_account_usage("calib", UsageWindowKind::FiveHours, 50.0, Some(180), 12.0)
+            .expect("calibrate should save");
+
+        let usage = db.account_usage("calib").expect("usage should load");
+        // 5h 限额 12.0，50% = 6.0
+        assert_cost(usage.window_5h, 6.0);
+        let reset = usage
+            .resets_in_5h
+            .expect("5h window reset should be set after manual calibrate");
+        let remaining_min = (reset - Utc::now()).num_minutes();
+        assert!(
+            (175..=185).contains(&remaining_min),
+            "expected ~180min remaining, got {remaining_min}"
+        );
+
+        // 后续网关内的请求累加到偏移之上
+        finalize_success(&db, "calib", 1.0, Utc::now());
+        let usage = db.account_usage("calib").expect("usage should reload");
+        assert_cost(usage.window_5h, 7.0);
+
+        drop(db);
+        fs::remove_dir_all(dir).expect("test data dir should be removed");
+    }
+
+    #[test]
+    fn calibrate_subtracts_existing_window_usage_from_offset() {
+        // 回归测试：活跃账号（窗口内已有 forward_logs）校准时，
+        // offset 必须 = target_cost - actual_cost，否则 compute_fixed_window
+        // 返回 offset + actual_cost，显示百分比会高于用户输入。
+        let dir = temp_data_dir("calibrate-with-usage");
+        let db = Database::open(dir.clone()).expect("db should open");
+        db.create_account(&account("active"))
+            .expect("account should be created");
+
+        // 1 小时前已用 $3（落在 5h 窗口内）
+        let ts = Utc::now() - Duration::hours(1);
+        finalize_success(&db, "active", 3.0, ts);
+
+        // 用户说"我在别处用到了 50%"（5h 限额 12.0 → target_cost = 6.0）
+        // 期望：offset = 6.0 - 3.0 = 3.0，compute_fixed_window 返回 3.0 + 3.0 = 6.0 = 50%
+        // 修复前 bug：offset = 6.0，compute_fixed_window 返回 6.0 + 3.0 = 9.0 = 75%
+        // 用 resets_in_minutes=180 让新窗口的 started_at = now + 3h - 5h = now - 2h，
+        // 把 1 小时前的 log 稳稳包含进窗口（避开 finalize 与 calibrate 之间的微秒级时序差）。
+        db.calibrate_account_usage("active", UsageWindowKind::FiveHours, 50.0, Some(180), 12.0)
+            .expect("calibrate should save with existing usage");
+        let usage = db.account_usage("active").expect("usage should load");
+        assert_cost(usage.window_5h, 6.0);
+
+        // 后续请求继续累加：offset=3.0 + actual=3.0 + new=2.0 = 8.0
+        finalize_success(&db, "active", 2.0, Utc::now());
+        let usage = db.account_usage("active").expect("usage should reload");
+        assert_cost(usage.window_5h, 8.0);
+
+        drop(db);
+        fs::remove_dir_all(dir).expect("test data dir should be removed");
+    }
+
+    #[test]
+    fn calibrate_below_actual_usage_allows_negative_offset() {
+        // 回归测试（Bug 1.5）：用户校准的百分比低于窗口内实际 cost 时，offset 允许为负数，
+        // 让 compute_fixed_window 返回 offset + actual = target_cost，与用户输入一致。
+        // 之前 max(0, target - actual) 钳制 + schema CHECK (offset >= 0) 约束让向左拉
+        // 滑块时被锁死在实际 cost 对应的百分比（9.0 / 12.0 * 100 = 75%，对应用户看到的 40.2%）。
+        let dir = temp_data_dir("calibrate-below-usage");
+        let db = Database::open(dir.clone()).expect("db should open");
+        db.create_account(&account("clamp"))
+            .expect("account should be created");
+
+        // 已用 $9
+        let ts = Utc::now() - Duration::hours(1);
+        finalize_success(&db, "clamp", 9.0, ts);
+
+        // 用户校准到 20%（target_cost = 2.4，但实际已用 9.0）
+        // offset = 2.4 - 9.0 = -6.6；compute_fixed_window 返回 -6.6 + 9.0 = 2.4 = 20%。
+        // 用 resets_in_minutes=180 让新窗口的 started_at = now - 2h，把 1 小时前的
+        // $9 log 稳稳包含进窗口（避开 finalize 与 calibrate 之间的微秒级时序差）。
+        db.calibrate_account_usage("clamp", UsageWindowKind::FiveHours, 20.0, Some(180), 12.0)
+            .expect("calibrate below actual usage should allow negative offset");
+        let usage = db.account_usage("clamp").expect("usage should load");
+        // 显示的 cost = offset(-6.6) + actual(9.0) = 2.4（用户输入的 20%）
+        assert_cost(usage.window_5h, 2.4);
+
+        drop(db);
+        fs::remove_dir_all(dir).expect("test data dir should be removed");
+    }
+
+    #[test]
+    fn calibrate_month_window_writes_offset_without_started_at() {
+        // 回归测试（Bug 2）：月窗口必须支持手动校准。
+        // 月窗口不写 started_at 列（起点固定为 purchase_date），只更新 cost_offset。
+        // resets_in_minutes 被忽略——窗口由 purchase_date/expires_on 决定。
+        let dir = temp_data_dir("calibrate-month");
+        let db = Database::open(dir.clone()).expect("db should open");
+        let mut acct = account("monthly-calib");
+        acct.purchase_date = "2026-07-01".into();
+        db.create_account(&acct).expect("account should be created");
+
+        // 已用 $5（落在月窗口内：purchase_date 00:00 起）
+        finalize_success(&db, "monthly-calib", 5.0, Utc::now());
+
+        // 用户校准到 50%（月限额 100.0 → target_cost = 50.0）
+        // 期望：offset = 50.0 - 5.0 = 45.0；compute_month_window 返回 45.0 + 5.0 = 50.0 = 50%。
+        db.calibrate_account_usage(
+            "monthly-calib",
+            UsageWindowKind::Month,
+            50.0,
+            None,
+            100.0,
+        )
+        .expect("month window calibrate should save");
+        let usage = db
+            .account_usage("monthly-calib")
+            .expect("usage should load");
+        assert_cost(usage.window_month, 50.0);
+        // resets_in_month 仍是 purchase_date + 1 自然月（不受 resets_in_minutes 影响）
+        let reset = usage
+            .resets_in_month
+            .expect("month window reset should be purchase_date + 1 month");
+        let expected = DateTime::parse_from_rfc3339("2026-08-01T00:00:00+00:00")
+            .unwrap()
+            .with_timezone(&Utc);
+        assert!(
+            (reset - expected).num_seconds().abs() < 86400,
+            "expected ~2026-08-01, got {reset}"
         );
 
         drop(db);

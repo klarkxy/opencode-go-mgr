@@ -189,7 +189,7 @@ function archiveCli(platform, output) {
         "-ExecutionPolicy",
         "Bypass",
         "-Command",
-        "Compress-Archive -Path (Join-Path $env:OCG_CLI_PACKAGE '*') -DestinationPath $env:OCG_CLI_ARCHIVE -CompressionLevel Optimal -Force",
+        "$ProgressPreference = 'SilentlyContinue'; Compress-Archive -Path (Join-Path $env:OCG_CLI_PACKAGE '*') -DestinationPath $env:OCG_CLI_ARCHIVE -CompressionLevel Optimal -Force",
       ],
       {
         env: {

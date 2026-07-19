@@ -983,6 +983,10 @@ async fn account_usage(
 struct AccountUsageUpdate {
     window: String,
     percent: f64,
+    /// 距上游重置还剩多少分钟。None 表示从 now 起算满窗口时长（5h/7d）。
+    /// 月窗口忽略此字段（固定到 purchase_expires_on）。
+    #[serde(default)]
+    resets_in_minutes: Option<i64>,
 }
 
 async fn update_account_usage(
@@ -1002,11 +1006,23 @@ async fn update_account_usage(
         ));
     }
     let percent = (update.percent * 10.0).round() / 10.0;
+    if let Some(mins) = update.resets_in_minutes {
+        if mins < 0 {
+            return Err(ApiError::bad_request(
+                "resets_in_minutes must be >= 0",
+            ));
+        }
+    }
 
     let limits = state.pricing_snapshot().limits.clone();
+    let limit = match window {
+        UsageWindowKind::FiveHours => limits.window_5h,
+        UsageWindowKind::Week => limits.window_week,
+        UsageWindowKind::Month => limits.window_month,
+    };
     let db = state.db.lock();
     if !db
-        .set_account_usage_baseline(&id, window, percent)
+        .calibrate_account_usage(&id, window, percent, update.resets_in_minutes, limit)
         .map_err(ApiError::internal)?
     {
         return Err(ApiError::not_found("account not found"));
@@ -2252,6 +2268,7 @@ mod tests {
             Json(AccountUsageUpdate {
                 window: "invalid".into(),
                 percent: 50.0,
+                resets_in_minutes: None,
             }),
         )
         .await
@@ -2264,6 +2281,7 @@ mod tests {
             Json(AccountUsageUpdate {
                 window: "window_5h".into(),
                 percent: -0.1,
+                resets_in_minutes: None,
             }),
         )
         .await
@@ -2276,6 +2294,7 @@ mod tests {
             Json(AccountUsageUpdate {
                 window: "window_5h".into(),
                 percent: 50.0,
+                resets_in_minutes: None,
             }),
         )
         .await
@@ -2288,23 +2307,50 @@ mod tests {
             Json(AccountUsageUpdate {
                 window: "window_5h".into(),
                 percent: 50.04,
+                resets_in_minutes: Some(180),
             }),
         )
         .await
-        .expect("valid baseline should save")
+        .expect("valid calibrate should save")
         .0;
+        // 5h 限额 12.0，50% = 6.0
         assert!((usage.window_5h - 6.0).abs() < 1e-9);
+        // 倒计时 ≈ 180min
+        let reset = usage
+            .resets_in_5h
+            .expect("5h reset should be set after calibrate");
+        let remaining_min = (reset - Utc::now()).num_minutes();
+        assert!(
+            (175..=185).contains(&remaining_min),
+            "expected ~180min remaining, got {remaining_min}"
+        );
 
-        let _ = update_account_usage(
+        // Bug 2 修复：月窗口现在支持手动校准（之前会返回 BAD_REQUEST 拒绝）。
+        // 月窗口的 resets_in_minutes 被忽略——窗口由 purchase_date/expires_on 决定。
+        let usage = update_account_usage(
             State(state.clone()),
             AxumPath("acct-usage".into()),
             Json(AccountUsageUpdate {
                 window: "window_month".into(),
                 percent: 100.0,
+                resets_in_minutes: None,
             }),
         )
         .await
-        .expect("100 percent baseline should save");
+        .expect("month window calibrate should save")
+        .0;
+        // 月限额 60.0，100% = 60.0
+        assert!((usage.window_month - 60.0).abs() < 1e-9);
+        // resets_in_month 仍是 purchase_date + 1 自然月（2026-01-31 → 2026-02-28）
+        // UTC 日期可能比 Local 日期早一天（China UTC+8: 02-28 00:00 CST = 02-27 16:00 UTC），
+        // 用 Local 比对避免时区 flake。
+        let reset = usage
+            .resets_in_month
+            .expect("month reset should be set after calibrate");
+        assert_eq!(
+            reset.with_timezone(&chrono::Local).format("%Y-%m-%d").to_string(),
+            "2026-02-28"
+        );
         let summary = dashboard_summary(State(state))
             .await
             .expect("summary should load")
