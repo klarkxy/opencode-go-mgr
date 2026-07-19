@@ -405,6 +405,9 @@ The **Settings** view exposes the persistent gateway configuration:
 - **Auto-start on login** — only the installed Windows desktop build exposes
   this switch. Development builds, the CLI, Docker, macOS, and Linux
   dashboards hide it.
+- **Dock icon** — only the macOS desktop build exposes this switch. Turning
+  it off keeps the menu-bar icon available. Windows, Linux, CLI, and Docker
+  dashboards hide it.
 - **Connect / non-stream / stream-idle timeouts** — default to 30, 900, and
   300 seconds. The non-stream value is a whole-request deadline; the stream
   idle value is enforced between response chunks. Existing installations are
@@ -893,6 +896,9 @@ intentionally want to delete all stored accounts, credentials, and keys.
   not expose that dashboard `auto_start` switch. Docker Compose separately
   uses `restart: unless-stopped`, so its service can restart with the Docker
   daemon.
+- The macOS desktop dashboard can hide the Dock icon while retaining the
+  menu-bar icon. Windows, Linux, CLI, and Docker do not expose the
+  `show_dock_icon` switch.
 - Windows / Linux ARM64 and 32-bit x86 builds are not published. RPM, Snap,
   app-store packages, Windows Authenticode signing, and Apple notarization
   are not implemented. Updater-enabled installed desktop builds can install

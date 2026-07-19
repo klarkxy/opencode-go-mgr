@@ -24,6 +24,8 @@ pub struct GatewayHandle {
 
 pub type AutoStartSync = fn(bool) -> crate::Result<()>;
 
+pub type DockVisibilitySync = Arc<dyn Fn(bool) -> crate::Result<()> + Send + Sync + 'static>;
+
 pub type DesktopUpdateStarter = Arc<dyn Fn(String) -> crate::Result<()> + Send + Sync + 'static>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -105,6 +107,7 @@ pub struct CoreStateInner {
     pub dashboard_session_token: String,
     dashboard_local_mode: AtomicBool,
     auto_start_sync: OnceLock<AutoStartSync>,
+    dock_visibility_sync: OnceLock<DockVisibilitySync>,
     desktop_update_starter: OnceLock<DesktopUpdateStarter>,
     desktop_update_status: Mutex<DesktopUpdateStatus>,
     pub dashboard_dir: Mutex<Option<PathBuf>>,
@@ -171,6 +174,7 @@ impl CoreStateInner {
             dashboard_session_token: uuid::Uuid::new_v4().simple().to_string(),
             dashboard_local_mode: AtomicBool::new(false),
             auto_start_sync: OnceLock::new(),
+            dock_visibility_sync: OnceLock::new(),
             desktop_update_starter: OnceLock::new(),
             desktop_update_status: Mutex::new(DesktopUpdateStatus::new()),
             dashboard_dir: Mutex::new(None),
@@ -276,6 +280,25 @@ impl CoreStateInner {
             .get()
             .ok_or_else(|| anyhow::anyhow!("auto-start is unavailable in this runtime"))?;
         sync(enabled)
+    }
+
+    pub fn set_dock_visibility_sync(&self, sync: DockVisibilitySync) {
+        assert!(
+            self.dock_visibility_sync.set(sync).is_ok(),
+            "dock visibility sync is already configured"
+        );
+    }
+
+    pub fn dock_visibility_supported(&self) -> bool {
+        self.dock_visibility_sync.get().is_some()
+    }
+
+    pub fn sync_dock_visibility(&self, visible: bool) -> crate::Result<()> {
+        let sync = self
+            .dock_visibility_sync
+            .get()
+            .ok_or_else(|| anyhow::anyhow!("dock visibility is unavailable in this runtime"))?;
+        sync(visible)
     }
 
     pub fn set_desktop_update_starter(&self, starter: DesktopUpdateStarter) {
@@ -708,18 +731,21 @@ mod tests {
     }
 
     #[test]
-    fn legacy_config_gets_persisted_claude_desktop_defaults() {
-        let dir = temp_data_dir("claude-desktop-migration");
+    fn legacy_config_gets_persisted_desktop_defaults() {
+        let dir = temp_data_dir("desktop-config-migration");
         let db = Database::open(dir.clone()).expect("test database should open");
         let mut legacy = serde_json::to_value(AppConfig {
             gateway_key: "test-gateway-key".to_string(),
             ..AppConfig::default()
         })
         .expect("test config should serialize");
-        legacy
-            .as_object_mut()
-            .expect("test config should be an object")
-            .remove("claude_desktop_models");
+        {
+            let legacy_object = legacy
+                .as_object_mut()
+                .expect("test config should be an object");
+            legacy_object.remove("claude_desktop_models");
+            legacy_object.remove("show_dock_icon");
+        }
         db.set_setting("config", &legacy.to_string())
             .expect("legacy config should persist");
         let cipher: Arc<dyn KeyCipher + Send + Sync> = Arc::new(StaticKeyCipher::new("state-test"));
@@ -729,6 +755,7 @@ mod tests {
             state.config().claude_desktop_models.resolved(),
             AppConfig::default().claude_desktop_models.resolved()
         );
+        assert!(state.config().show_dock_icon);
         let stored = state
             .db
             .lock()
@@ -736,6 +763,7 @@ mod tests {
             .expect("stored config should be readable")
             .expect("stored config should exist");
         assert!(stored.contains("claude_desktop_models"));
+        assert!(stored.contains("show_dock_icon"));
 
         drop(state);
         fs::remove_dir_all(dir).expect("test data directory should be removed");

@@ -738,6 +738,8 @@ test("settings expose supported Windows auto-start safely", async () => {
   const api = await readFile(new URL("../api/tauri.ts", import.meta.url), "utf8");
 
   assert.match(settings, /v-if="config\.auto_start_supported"/);
+  assert.match(settings, /v-if="config\.dock_visibility_supported"/);
+  assert.match(settings, /@update:value="handleDockVisibilityToggle"/);
   assert.match(settings, /:value="config\.auto_start"/);
   assert.match(settings, /@update:value="handleAutoStartToggle"/);
   assert.match(settings, /:aria-label="t\('随 Windows 登录自动启动 OCG Manager'\)"/);
@@ -773,5 +775,6 @@ test("settings expose supported Windows auto-start safely", async () => {
     /updateSettings/,
   );
   assert.match(api, /auto_start_supported: boolean/);
+  assert.match(api, /dock_visibility_supported: boolean/);
   assert.match(api, /expected_revision: revision/);
 });
