@@ -42,10 +42,12 @@ export function resetsInMinutesForSave(
   if (edit.resets_dirty) return edit.resets_in_minutes_draft;
   if (!edit.resets_at_saved) return full;
   const remainingMs = Date.parse(edit.resets_at_saved) - now;
+  if (!Number.isFinite(remainingMs) || remainingMs <= 0) return full;
   // The backend starts a fresh integer-minute deadline when it receives the
-  // calibration. Floor prevents a percent-only save from extending the old
-  // absolute deadline by the fractional minute already elapsed in this page.
-  return Math.max(0, Math.floor(remainingMs / 60000));
+  // calibration. Keep a positive remainder at one minute so a percent-only
+  // save in the final seconds is not immediately discarded as an expired
+  // window; an already-expired deadline starts a fresh full window above.
+  return Math.max(1, Math.floor(remainingMs / 60000));
 }
 
 const cooldownFields: Record<UsageKey, keyof Pick<Account, "cooldown_5h_until" | "cooldown_week_until" | "cooldown_month_until">> = {
@@ -67,6 +69,13 @@ export function isWindowCooling(
 ): boolean {
   const until = account[cooldownFields[key]];
   return until !== null && Date.parse(until) > now;
+}
+
+export function resetTimeForWindow(
+  account: Pick<Account, "cooldown_5h_until" | "cooldown_week_until" | "cooldown_month_until">,
+  key: UsageKey,
+): string | null {
+  return account[cooldownFields[key]];
 }
 
 /// 固定窗口的清零时刻（来自后端 `resets_in_*`）；`null` 表示窗口尚未开始（无成功请求）或月窗口无购买日期。

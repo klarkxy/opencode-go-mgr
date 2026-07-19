@@ -1007,8 +1007,16 @@ async fn update_account_usage(
     }
     let percent = (update.percent * 10.0).round() / 10.0;
     if let Some(mins) = update.resets_in_minutes {
-        if mins < 0 {
-            return Err(ApiError::bad_request("resets_in_minutes must be >= 0"));
+        let max = match window {
+            UsageWindowKind::FiveHours => Some(5 * 60),
+            UsageWindowKind::Week => Some(7 * 24 * 60),
+            UsageWindowKind::Month => None,
+        };
+        if mins < 0 || max.is_some_and(|max| mins > max) {
+            return Err(ApiError::bad_request(match max {
+                Some(max) => format!("resets_in_minutes must be between 0 and {max}"),
+                None => "resets_in_minutes must be >= 0".to_string(),
+            }));
         }
     }
 
@@ -2313,6 +2321,25 @@ mod tests {
         .await
         .expect_err("invalid percent should fail");
         assert_eq!(invalid.status, StatusCode::BAD_REQUEST);
+
+        for (window, minutes) in [
+            ("window_5h", 301),
+            ("window_week", 10_081),
+            ("window_5h", i64::MAX),
+        ] {
+            let invalid = update_account_usage(
+                State(state.clone()),
+                AxumPath("acct-usage".into()),
+                Json(AccountUsageUpdate {
+                    window: window.into(),
+                    percent: 50.0,
+                    resets_in_minutes: Some(minutes),
+                }),
+            )
+            .await
+            .expect_err("reset outside the selected window should fail");
+            assert_eq!(invalid.status, StatusCode::BAD_REQUEST);
+        }
 
         let missing = update_account_usage(
             State(state.clone()),

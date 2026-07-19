@@ -14,6 +14,9 @@ import {
 
 const digest = (character) => `sha256:${character.repeat(64)}`;
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
+const packageVersion = JSON.parse(
+  readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+).version;
 
 test("stable release channels advance monotonically", () => {
   assert.equal(shouldAdvanceChannel("v1.5.0", "v1.4.9"), true);
@@ -142,5 +145,9 @@ test("release preflight rejects a tag that does not match repository versions", 
     },
   );
   assert.notEqual(result.status, 0);
-  assert.match(`${result.stdout}\n${result.stderr}`, /Release tag v9\.9\.9 does not match version 1\.5\.0/);
+  const output = `${result.stdout}\n${result.stderr}`;
+  assert.ok(
+    output.includes(`Release tag v9.9.9 does not match version ${packageVersion}`),
+    output,
+  );
 });

@@ -1385,9 +1385,6 @@ struct StreamState {
     error: bool,
     outcome_unknown: bool,
     error_message: Option<String>,
-    /// Model name carried from the request plan. Used as a fallback when the
-    /// upstream SSE frame omits the model field (e.g. MiniMax via OpenCode Go).
-    model: Option<String>,
 }
 
 const MAX_SSE_BUF: usize = 64 * 1024;
@@ -1486,22 +1483,12 @@ fn process_chunk_for_usage(
                             .to_string(),
                     );
                 }
-                // Capture the model from message_start so later message_delta frames
-                // (which usually omit it) can still be sanitized correctly.
-                if format == ApiFormat::Messages
-                    && v.get("type").and_then(Value::as_str) == Some("message_start")
-                {
-                    if let Some(model) = v
-                        .pointer("/message/model")
-                        .and_then(Value::as_str)
-                        .map(|s| s.to_string())
-                    {
-                        st.model = Some(model);
-                    }
-                }
-                let model = st.model.as_deref().or(model_hint);
                 if has_usage(format, &v) {
-                    merge_stream_usage(format, &v, &mut st.usage, model);
+                    // Always retain the request model as the hint. Some compatible
+                    // upstreams rewrite the response model to a generic alias, and
+                    // extract_usage already combines that response model with this
+                    // original hint when applying model-specific normalization.
+                    merge_stream_usage(format, &v, &mut st.usage, model_hint);
                     st.has_usage = true;
                 }
                 let event_type = v.get("type").and_then(Value::as_str);
@@ -1661,6 +1648,18 @@ mod stream_usage_tests {
         assert_eq!(p, 40500, "bogus cache read should be moved back to input");
         assert_eq!(c, 5);
         assert_eq!(cached, 0);
+    }
+
+    #[test]
+    fn messages_stream_keeps_minimax_request_hint_when_upstream_rewrites_model() {
+        let mut st = StreamState::default();
+        let start = Bytes::from_static(
+            b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"model\":\"ocg-generic\",\"usage\":{\"input_tokens\":0,\"output_tokens\":5,\"cache_read_input_tokens\":40500}}}\n\n",
+        );
+        process_chunk_for_usage(&mut st, ApiFormat::Messages, &start, Some("minimax-m3"));
+        assert!(st.has_usage);
+        let (input, output, cached, _) = token_counts(st.usage);
+        assert_eq!((input, output, cached), (40500, 5, 0));
     }
 
     #[test]

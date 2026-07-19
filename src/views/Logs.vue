@@ -89,7 +89,7 @@
               @update:show="showTimePanel = $event"
             >
               <template #trigger>
-                <n-button class="time-range-trigger" :focusable="false">
+                <n-button class="time-range-trigger">
                   <template #icon>
                     <n-icon :component="CalendarOutlined" />
                   </template>

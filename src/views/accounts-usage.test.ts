@@ -6,6 +6,7 @@ import {
   isUsageLimitReached,
   mergeUsageEdit,
   normalizeUsagePercent,
+  resetTimeForWindow,
   resetsInMinutesForSave,
   usagePercentFromCost,
   usageProgressPercentage,
@@ -104,14 +105,26 @@ test("shows local estimated saturation as a warning, not a real breaker", () => 
   assert.equal(usageProgressPercentage(realWeeklyBreaker, "window_week", 0), 100);
 });
 
-test("reserves a reset-countdown row below every quota progress bar", async () => {
+test("shows a live reset countdown below a quota progress bar during cooldown", async () => {
   const source = await readFile(new URL("./Accounts.vue", import.meta.url), "utf8");
   const progress = source.indexOf(":percentage=\"usageProgressPercentage(");
   const countdown = source.indexOf("<span class=\"usage-reset-countdown\">");
 
   assert.ok(progress >= 0);
   assert.ok(countdown > progress);
-  assert.match(source, /\.usage-reset-countdown \{\s+min-height: 1\.4em;/);
+  assert.match(source, /accountUsageLimitReached\(account, limit\.key\)[\s\S]*formatWindowRemaining\(account, limit\.key\)/);
+  assert.match(source, /\.usage-reset-countdown \{[\s\S]*color: var\(--ocg-error\);/);
+});
+
+test("maps each usage window to its cooldown reset deadline", () => {
+  const account = {
+    cooldown_5h_until: "2026-07-20T01:00:00Z",
+    cooldown_week_until: "2026-07-21T01:00:00Z",
+    cooldown_month_until: null,
+  };
+  assert.equal(resetTimeForWindow(account, "window_5h"), account.cooldown_5h_until);
+  assert.equal(resetTimeForWindow(account, "window_week"), account.cooldown_week_until);
+  assert.equal(resetTimeForWindow(account, "window_month"), null);
 });
 
 test("keeps account cards compact with metadata tags and top-level usage calibration", async () => {
@@ -209,7 +222,34 @@ test("percent-only usage saves keep counting down from the backend deadline", ()
     resetsInMinutesForSave({ ...clean, resets_in_minutes_draft: 240, resets_dirty: true }, "window_5h"),
     240,
   );
+  assert.equal(
+    resetsInMinutesForSave(clean, "window_5h", Date.parse("2026-07-19T12:05:00Z")),
+    1,
+  );
+  assert.equal(
+    resetsInMinutesForSave(clean, "window_5h", Date.parse("2026-07-19T12:06:00Z")),
+    300,
+  );
+  assert.equal(
+    resetsInMinutesForSave({ ...clean, resets_at_saved: "invalid" }, "window_5h"),
+    300,
+  );
   assert.equal(resetsInMinutesForSave(clean, "window_month"), null);
+});
+
+test("reset editor derives untouched fields from the live absolute deadline", async () => {
+  const source = await readFile(new URL("./Accounts.vue", import.meta.url), "utf8");
+  const fields = source.slice(source.indexOf("function resetsFirstField"), source.indexOf("function fieldsToMinutes"));
+
+  assert.equal(fields.match(/resetsInMinutesForSave\(edit, key, now\.value\)/g)?.length, 2);
+});
+
+test("calibration shortcut is disabled when every usage window is cooling", async () => {
+  const source = await readFile(new URL("./Accounts.vue", import.meta.url), "utf8");
+
+  assert.match(source, /:disabled="!hasAvailableUsageEditor\(account\)"/);
+  assert.match(source, /usageLoading\.value\[account\.id\] \|\| usageLoadErrors\.value\[account\.id\]/);
+  assert.match(source, /usageLimits\.value\.some\(\(\{ key \}\) => !accountUsageLimitReached\(account, key\)\)/);
 });
 
 test("usage refresh initializes windows missing after an earlier quota load failure", async () => {
@@ -243,6 +283,16 @@ test("accounts render before per-account usage and expose failed loads for retry
 
   const ping = source.slice(source.indexOf("async function pingAccount"), source.indexOf("async function toggleAccount"));
   assert.match(ping, /try \{\s+await refreshAccountState\(id\);\s+\} catch \(e\) \{/);
+});
+
+test("editing an account refreshes usage after purchase-date window changes", async () => {
+  const source = await readFile(new URL("./Accounts.vue", import.meta.url), "utf8");
+  const save = source.slice(source.indexOf("async function onFormSave"), source.indexOf("async function pingAccount"));
+
+  const update = save.indexOf("const saved = await tauriApi.updateAccount");
+  const replace = save.indexOf("replaceAccount(saved);");
+  const refresh = save.indexOf("await loadAccountUsage(saved.id);");
+  assert.ok(update >= 0 && replace > update && refresh > replace);
 });
 
 test("manual editor writes on commit events instead of each value update", async () => {

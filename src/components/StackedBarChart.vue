@@ -111,30 +111,33 @@
       </g>
     </svg>
 
-    <!-- tooltip -->
-    <div
-      v-if="tooltip.show"
-      class="chart-tooltip"
-      role="tooltip"
-      :style="{ left: tooltip.x + 'px', top: tooltip.y + 'px' }"
-    >
-      <div class="tooltip-title">{{ tooltip.title }}</div>
-      <div class="tooltip-total">{{ t("合计 {total}", { total: formatCost(tooltip.total) }) }}</div>
+    <!-- Teleport 避开 dashboard card 的 overflow 裁剪；fixed 坐标按 viewport 计算。 -->
+    <Teleport to="body">
       <div
-        v-for="row in tooltip.rows"
-        :key="row.model"
-        class="tooltip-row"
+        v-if="tooltip.show"
+        ref="tooltipRef"
+        class="chart-tooltip"
+        role="tooltip"
+        :style="{ left: tooltip.x + 'px', top: tooltip.y + 'px' }"
       >
-        <span class="dot" :style="{ background: row.color }" />
-        <span class="model">{{ row.model }}</span>
-        <span class="cost">{{ formatCost(row.cost) }}</span>
+        <div class="tooltip-title">{{ tooltip.title }}</div>
+        <div class="tooltip-total">{{ t("合计 {total}", { total: formatCost(tooltip.total) }) }}</div>
+        <div
+          v-for="row in tooltip.rows"
+          :key="row.model"
+          class="tooltip-row"
+        >
+          <span class="dot" :style="{ background: row.color }" />
+          <span class="model">{{ row.model }}</span>
+          <span class="cost">{{ formatCost(row.cost) }}</span>
+        </div>
       </div>
-    </div>
+    </Teleport>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, useId } from "vue";
+import { ref, computed, nextTick, onMounted, onBeforeUnmount, useId } from "vue";
 import type { DailyModelCost } from "../api/tauri";
 import { CHART_PALETTE } from "../theme";
 import { locale, t } from "../i18n/index.ts";
@@ -157,6 +160,7 @@ const height = 280;
 const gid = useId(); // 渐变 id 唯一化,避免多实例冲突
 
 const rootRef = ref<HTMLElement | null>(null);
+const tooltipRef = ref<HTMLElement | null>(null);
 
 function measureWidth() {
   if (!rootRef.value) return;
@@ -365,17 +369,23 @@ function barAriaLabel(bi: number): string {
 function showTooltip(bi: number, x: number, y: number) {
   const d = dates.value[bi];
   if (!d) return;
-  const rect = rootRef.value?.getBoundingClientRect();
-  // 200 与 .chart-tooltip max-width 对齐,+4 留出右边距,避免 tooltip 触发父容器 overflow
-  const maxX = rect ? rect.width - 200 - 4 : x;
   tooltip.value = {
     show: true,
     title: formatChartDate(d.date),
     total: d.total,
     rows: tooltipRows(bi),
-    x: Math.min(x, Math.max(0, maxX)),
+    x,
     y,
   };
+  void nextTick(() => {
+    const tip = tooltipRef.value;
+    if (!tip || !tooltip.value.show) return;
+    const gap = 4;
+    const maxMeasuredX = Math.max(gap, document.documentElement.clientWidth - tip.offsetWidth - gap);
+    const maxMeasuredY = Math.max(gap, document.documentElement.clientHeight - tip.offsetHeight - gap);
+    tooltip.value.x = Math.min(Math.max(gap, tooltip.value.x), maxMeasuredX);
+    tooltip.value.y = Math.min(Math.max(gap, tooltip.value.y), maxMeasuredY);
+  });
 }
 
 function onFocus(bi: number) {
@@ -388,17 +398,13 @@ function onFocus(bi: number) {
     : padT + chartH;
   showTooltip(
     bi,
-    (bar.x + barWidth.value / 2) * scale + 14,
-    top * scale + 14,
+    rect.left + (bar.x + barWidth.value / 2) * scale + 14,
+    rect.top + top * scale + 14,
   );
 }
 
 function updateTooltip(bi: number, e: PointerEvent) {
-  const rect = rootRef.value?.getBoundingClientRect();
-  // 用视口坐标相对容器定位，避免 SVG <g transform> 下 offset 语义不一致
-  const x = rect ? e.clientX - rect.left + 14 : e.offsetX + 14;
-  const y = rect ? e.clientY - rect.top + 14 : e.offsetY + 14;
-  showTooltip(bi, x, y);
+  showTooltip(bi, e.clientX + 14, e.clientY + 14);
 }
 
 </script>
@@ -438,7 +444,8 @@ function updateTooltip(bi: number, e: PointerEvent) {
   vector-effect: non-scaling-stroke;
 }
 .chart-tooltip {
-  position: absolute;
+  position: fixed;
+  box-sizing: border-box;
   pointer-events: none;
   z-index: 5;
   min-width: 168px;
