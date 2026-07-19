@@ -152,6 +152,23 @@
             <template #unchecked>{{ t("关闭") }}</template>
           </n-switch>
         </section>
+        <section
+          v-if="config.dock_visibility_supported"
+          class="settings-subsection"
+          aria-labelledby="dock-icon-title"
+        >
+          <h3 id="dock-icon-title">{{ t("Dock 图标") }}</h3>
+          <n-switch
+            :value="config.show_dock_icon"
+            @update:value="handleDockVisibilityToggle"
+            :aria-label="t('在 Dock 中显示 OCG Manager')"
+            :disabled="!loaded || saving || regenerating"
+            :loading="saving"
+          >
+            <template #checked>{{ t("开启") }}</template>
+            <template #unchecked>{{ t("关闭") }}</template>
+          </n-switch>
+        </section>
         <section class="settings-subsection" aria-labelledby="request-timeout-title">
           <h3 id="request-timeout-title">{{ t("请求超时") }}</h3>
           <n-form-item :label="t('连接超时')">
@@ -448,6 +465,8 @@ const config = ref<AppConfig>({
   client_root_url_from_env: false,
   auto_start: false,
   auto_start_supported: false,
+  show_dock_icon: true,
+  dock_visibility_supported: false,
   connect_timeout_secs: 30,
   non_stream_timeout_secs: 900,
   stream_idle_timeout_secs: 300,
@@ -625,6 +644,27 @@ async function handleAutoStartToggle(newValue: boolean) {
     if (!(await reloadSettingsAfterConflict(e))) {
       config.value.auto_start = savedConfig.value.auto_start;
       message.error(t("自动启动设置失败: {error}", { error: String(e) }));
+    }
+  } finally {
+    saving.value = false;
+  }
+}
+
+async function handleDockVisibilityToggle(newValue: boolean) {
+  if (!loaded.value || !savedConfig.value) return;
+  const next = { ...savedConfig.value, show_dock_icon: newValue };
+  saving.value = true;
+  try {
+    const result = await tauriApi.updateSettings(next);
+    next.revision = result.revision;
+    savedConfig.value = { ...next };
+    config.value.show_dock_icon = newValue;
+    config.value.revision = result.revision;
+    message.success(t("设置已保存"));
+  } catch (e) {
+    if (!(await reloadSettingsAfterConflict(e))) {
+      config.value.show_dock_icon = savedConfig.value.show_dock_icon;
+      message.error(t("Dock 图标设置失败: {error}", { error: String(e) }));
     }
   } finally {
     saving.value = false;

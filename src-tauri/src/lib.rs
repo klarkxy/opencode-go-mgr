@@ -104,6 +104,24 @@ pub fn run() {
             if let Ok(resource_dir) = app.path().resource_dir() {
                 setup_core_state.set_dashboard_dir(Some(resource_dir.join("dist")));
             }
+            #[cfg(target_os = "macos")]
+            {
+                let app_handle = app.handle().clone();
+                setup_core_state.set_dock_visibility_sync(Arc::new(move |visible| {
+                    app_handle
+                        .set_dock_visibility(visible)
+                        .map_err(anyhow::Error::from)
+                }));
+                if let Err(error) =
+                    setup_core_state.sync_dock_visibility(setup_core_state.config().show_dock_icon)
+                {
+                    let _ = setup_core_state.db.lock().log_gateway(
+                        "warn",
+                        "startup",
+                        &format!("failed to synchronize Dock visibility: {error}"),
+                    );
+                }
+            }
             updater::configure(app.handle(), setup_core_state.clone())?;
             tray::setup_tray(app)?;
             if !autostart::is_startup_launch() {

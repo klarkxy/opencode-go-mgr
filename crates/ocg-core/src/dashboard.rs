@@ -1053,6 +1053,7 @@ struct SettingsResponse {
     config: AppConfig,
     revision: u64,
     auto_start_supported: bool,
+    dock_visibility_supported: bool,
     client_root_url_from_env: bool,
 }
 
@@ -1063,6 +1064,7 @@ async fn get_settings(State(state): State<CoreState>) -> Json<SettingsResponse> 
         config: state.settings_config(),
         revision: state.settings_revision(),
         auto_start_supported,
+        dock_visibility_supported: state.dock_visibility_supported(),
         client_root_url_from_env: state.client_root_url_from_env(),
     })
 }
@@ -1277,26 +1279,52 @@ async fn update_settings(
     config.client_root_url =
         normalize_client_root_url(&config.client_root_url).map_err(ApiError::bad_request)?;
     let next_auto_start = config.auto_start;
+    let next_show_dock_icon = config.show_dock_icon;
     let auto_start_supported = state.auto_start_supported();
+    let dock_visibility_supported = state.dock_visibility_supported();
     if !auto_start_supported && next_auto_start != previous_config.auto_start {
         return Err(ApiError::bad_request(
             "auto-start is unavailable in this runtime",
         ));
     }
+    if !dock_visibility_supported && next_show_dock_icon != previous_config.show_dock_icon {
+        return Err(ApiError::bad_request(
+            "Dock visibility is unavailable in this runtime",
+        ));
+    }
     state.set_config(config).map_err(ApiError::internal)?;
-    if auto_start_supported {
-        if let Err(sync_error) = state.sync_auto_start(next_auto_start) {
-            let config_rollback_error = state.set_config(previous_config.clone()).err();
-            let auto_start_rollback_error = state.sync_auto_start(previous_config.auto_start).err();
-            let mut message = format!("failed to synchronize auto-start: {sync_error}");
-            if let Some(error) = config_rollback_error {
-                message.push_str(&format!("; failed to restore settings: {error}"));
-            }
-            if let Some(error) = auto_start_rollback_error {
-                message.push_str(&format!("; failed to restore auto-start state: {error}"));
-            }
-            return Err(ApiError::internal(message));
+    let runtime_sync = (|| -> anyhow::Result<()> {
+        if auto_start_supported {
+            state.sync_auto_start(next_auto_start)?;
         }
+        if dock_visibility_supported {
+            state.sync_dock_visibility(next_show_dock_icon)?;
+        }
+        Ok(())
+    })();
+    if let Err(sync_error) = runtime_sync {
+        let config_rollback_error = state.set_config(previous_config.clone()).err();
+        let auto_start_rollback_error = auto_start_supported
+            .then(|| state.sync_auto_start(previous_config.auto_start).err())
+            .flatten();
+        let dock_rollback_error = dock_visibility_supported
+            .then(|| {
+                state
+                    .sync_dock_visibility(previous_config.show_dock_icon)
+                    .err()
+            })
+            .flatten();
+        let mut message = format!("failed to synchronize desktop settings: {sync_error}");
+        if let Some(error) = config_rollback_error {
+            message.push_str(&format!("; failed to restore settings: {error}"));
+        }
+        if let Some(error) = auto_start_rollback_error {
+            message.push_str(&format!("; failed to restore auto-start state: {error}"));
+        }
+        if let Some(error) = dock_rollback_error {
+            message.push_str(&format!("; failed to restore Dock visibility: {error}"));
+        }
+        return Err(ApiError::internal(message));
     }
     Ok(Json(SettingsRevisionResponse {
         revision: state.settings_revision(),
@@ -1589,7 +1617,7 @@ mod tests {
     use chrono::Utc;
     use std::fs;
     use std::path::{Path, PathBuf};
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex as StdMutex};
 
     fn temp_data_dir(label: &str) -> PathBuf {
         let mut dir = std::env::temp_dir();
@@ -2391,6 +2419,54 @@ mod tests {
         .expect("regular settings should save");
 
         assert_eq!(state.config().claude_desktop_models, configured);
+        drop(state);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn dock_visibility_setting_is_runtime_gated_and_applied() {
+        let dir = temp_data_dir("dock-visibility");
+        let cipher: Arc<dyn KeyCipher + Send + Sync> = Arc::new(StaticKeyCipher::new("test"));
+        let db = Database::open(dir.clone()).unwrap();
+        let state = Arc::new(CoreStateInner::new(db, dir.clone(), cipher).unwrap());
+
+        let mut unsupported = state.config();
+        unsupported.show_dock_icon = false;
+        let error = match update_settings(
+            State(state.clone()),
+            Json(SettingsUpdateRequest {
+                config: unsupported,
+                expected_revision: Some(state.settings_revision()),
+            }),
+        )
+        .await
+        {
+            Err(error) => error,
+            Ok(_) => panic!("non-desktop runtimes must reject Dock changes"),
+        };
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert!(state.config().show_dock_icon);
+
+        let applied = Arc::new(StdMutex::new(Vec::new()));
+        let captured = applied.clone();
+        state.set_dock_visibility_sync(Arc::new(move |visible| {
+            captured.lock().unwrap().push(visible);
+            Ok(())
+        }));
+        let mut supported = state.config();
+        supported.show_dock_icon = false;
+        let _ = update_settings(
+            State(state.clone()),
+            Json(SettingsUpdateRequest {
+                config: supported,
+                expected_revision: Some(state.settings_revision()),
+            }),
+        )
+        .await
+        .expect("desktop runtime should apply Dock changes");
+        assert!(!state.config().show_dock_icon);
+        assert_eq!(*applied.lock().unwrap(), [false]);
+
         drop(state);
         fs::remove_dir_all(dir).unwrap();
     }

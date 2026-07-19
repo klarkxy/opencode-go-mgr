@@ -45,6 +45,8 @@ export interface AppConfig {
   client_root_url_from_env: boolean;
   auto_start: boolean;
   auto_start_supported: boolean;
+  show_dock_icon: boolean;
+  dock_visibility_supported: boolean;
   connect_timeout_secs: number;
   non_stream_timeout_secs: number;
   stream_idle_timeout_secs: number;

@@ -119,6 +119,8 @@ test("settings API maps the loaded revision to conditional writes and returns ne
     client_root_url_from_env: false,
     auto_start: false,
     auto_start_supported: false,
+    show_dock_icon: true,
+    dock_visibility_supported: false,
     connect_timeout_secs: 30,
     non_stream_timeout_secs: 900,
     stream_idle_timeout_secs: 300,
