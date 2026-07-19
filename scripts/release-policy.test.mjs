@@ -108,6 +108,7 @@ test("the exact draft Release identity flows through verification and publicatio
   assert.match(draftJob, /- name: Create or update draft release\s+id: release/);
   assert.match(draftJob, /gh release view "\$GITHUB_REF_NAME" --json databaseId,isDraft,tagName/);
   assert.match(verifyJob, /release_id: \$\{\{ steps\.asset_metadata\.outputs\.release_id \}\}/);
+  assert.match(verifyJob, /permissions:\s+contents: write/);
   assert.match(verifyJob, /RELEASE_ID: \$\{\{ needs\.draft-release\.outputs\.release_id \}\}/);
   assert.match(verifyJob, /if gh api "repos\/\$GITHUB_REPOSITORY\/releases\/\$RELEASE_ID"/);
   assert.match(verifyJob, /\.id == \$release_id and \.tag_name == \$tag and \.draft == true/);
