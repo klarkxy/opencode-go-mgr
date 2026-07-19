@@ -1012,6 +1012,10 @@ async function onFormSave(payload: { name: string; username: string; key?: strin
     try {
       const saved = await tauriApi.updateAccount(editingAccount.value.id, update);
       replaceAccount(saved);
+      // purchase_date defines the monthly usage window and changing it clears
+      // the persisted calibration offset, so the local usage snapshot must be
+      // refreshed before the edited account is shown again.
+      await loadAccountUsage(saved.id);
       message.success(t("账号已更新"));
       showModal.value = false;
     } catch (e) {

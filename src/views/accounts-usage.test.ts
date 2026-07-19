@@ -285,6 +285,16 @@ test("accounts render before per-account usage and expose failed loads for retry
   assert.match(ping, /try \{\s+await refreshAccountState\(id\);\s+\} catch \(e\) \{/);
 });
 
+test("editing an account refreshes usage after purchase-date window changes", async () => {
+  const source = await readFile(new URL("./Accounts.vue", import.meta.url), "utf8");
+  const save = source.slice(source.indexOf("async function onFormSave"), source.indexOf("async function pingAccount"));
+
+  const update = save.indexOf("const saved = await tauriApi.updateAccount");
+  const replace = save.indexOf("replaceAccount(saved);");
+  const refresh = save.indexOf("await loadAccountUsage(saved.id);");
+  assert.ok(update >= 0 && replace > update && refresh > replace);
+});
+
 test("manual editor writes on commit events instead of each value update", async () => {
   const source = await readFile(new URL("./Accounts.vue", import.meta.url), "utf8");
 
