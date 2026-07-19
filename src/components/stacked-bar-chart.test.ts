@@ -2,11 +2,19 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-test("chart tooltip has bounded max-width to prevent container overflow", async () => {
+test("chart tooltip is teleported out of the clipped card and keeps a bounded width", async () => {
   const source = await readFile(new URL("./StackedBarChart.vue", import.meta.url), "utf8");
   assert.match(source, /\.chart-tooltip\s*\{[^}]*max-width:\s*200px/);
-  // tooltip clamp 必须与 max-width 对齐,避免 tooltip 超出容器触发滚动条
-  assert.match(source, /rect\.width\s*-\s*200\s*-\s*4/);
+  assert.match(source, /<Teleport to="body">/);
+  assert.match(source, /\.chart-tooltip\s*\{[^}]*position:\s*fixed/);
+});
+
+test("chart tooltip clamps both axes to the viewport using rendered dimensions", async () => {
+  const source = await readFile(new URL("./StackedBarChart.vue", import.meta.url), "utf8");
+  assert.match(source, /ref="tooltipRef"/);
+  assert.match(source, /document\.documentElement\.clientWidth\s*-\s*tip\.offsetWidth/);
+  assert.match(source, /document\.documentElement\.clientHeight\s*-\s*tip\.offsetHeight/);
+  assert.match(source, /tooltip\.value\.y\s*=\s*Math\.min/);
 });
 
 test("x-axis labels always include the last day so today gets a label", async () => {

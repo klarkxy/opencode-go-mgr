@@ -648,7 +648,14 @@ pub fn transform_response(plan: &RequestPlan, body: &Value) -> Result<Value, Pro
     // sanitizers (e.g. the MiniMax bogus all-cache workaround) can still identify the model.
     let mut body = body.clone();
     if plan.upstream == ApiFormat::Messages {
-        body["model"] = json!(&plan.model);
+        let response_model = body.get("model").and_then(Value::as_str).map(str::to_owned);
+        let object = body
+            .as_object_mut()
+            .ok_or_else(|| ProtocolError::new("Messages response must be a JSON object"))?;
+        if let Some(usage) = object.get_mut("usage") {
+            sanitize_minimax_anthropic_usage(response_model.as_deref(), Some(&plan.model), usage);
+        }
+        object.insert("model".to_string(), json!(&plan.model));
     }
     let mut transformed = transform_between_with_tools(
         plan.upstream,
@@ -4072,6 +4079,62 @@ mod tests {
             converted["usage"]["prompt_tokens_details"]["cached_tokens"],
             0
         );
+    }
+
+    #[test]
+    fn transform_response_rejects_non_object_messages_without_panicking() {
+        let plan = plan_with_model(ApiFormat::Messages, ApiFormat::Messages, "minimax-m3");
+        for body in [json!([]), json!("not an object"), json!(42), json!(true)] {
+            let error = transform_response(&plan, &body)
+                .expect_err("non-object Messages response should be rejected");
+            assert_eq!(error.status, StatusCode::BAD_REQUEST);
+            assert!(error.message.contains("JSON object"));
+        }
+    }
+
+    #[test]
+    fn transform_response_sanitizes_minimax_messages_for_every_client_format() {
+        let response = json!({
+            "id": "msg_1",
+            "type": "message",
+            "role": "assistant",
+            "model": "ocg-generic",
+            "content": [{"type": "text", "text": "hello"}],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "usage": {
+                "input_tokens": 0,
+                "output_tokens": 5,
+                "cache_read_input_tokens": 40500
+            }
+        });
+
+        let messages = transform_response(
+            &plan_with_model(ApiFormat::Messages, ApiFormat::Messages, "minimax-m3"),
+            &response,
+        )
+        .expect("Messages passthrough should sanitize");
+        assert_eq!(messages["usage"]["input_tokens"], 40500);
+        assert_eq!(messages["usage"]["cache_read_input_tokens"], 0);
+
+        let responses = transform_response(
+            &plan_with_model(ApiFormat::Responses, ApiFormat::Messages, "minimax-m3"),
+            &response,
+        )
+        .expect("Messages to Responses should sanitize");
+        assert_eq!(responses["usage"]["input_tokens"], 40500);
+        assert_eq!(
+            responses["usage"]["input_tokens_details"]["cached_tokens"],
+            0
+        );
+
+        let gemini = transform_response(
+            &plan_with_model(ApiFormat::Gemini, ApiFormat::Messages, "minimax-m3"),
+            &response,
+        )
+        .expect("Messages to Gemini should sanitize");
+        assert_eq!(gemini["usageMetadata"]["promptTokenCount"], 40500);
+        assert_eq!(gemini["usageMetadata"]["cachedContentTokenCount"], 0);
     }
 
     #[test]

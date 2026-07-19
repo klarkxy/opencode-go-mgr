@@ -1180,6 +1180,37 @@ async fn stream_can_outlive_non_stream_timeout() {
 }
 
 #[tokio::test]
+async fn non_stream_uses_non_stream_timeout_not_stream_idle_timeout() {
+    let (base_url, calls, stop_mock) = start_delayed_messages_upstream(
+        "application/json",
+        vec![(StdDuration::from_millis(1_200), MESSAGES_SUCCESS_BODY)],
+    )
+    .await;
+    let (state, dir) = build_state(base_url, &["key-1"]);
+    let mut config = state.config();
+    config.non_stream_timeout_secs = 3;
+    config.stream_idle_timeout_secs = 1;
+    state.set_config(config).unwrap();
+    let (port, gateway_handle) = start_gateway(state.clone()).await;
+
+    let (status, body) = tokio::time::timeout(
+        StdDuration::from_secs(5),
+        protocol_call(port, "/v1/messages", "minimax-m2.7"),
+    )
+    .await
+    .expect("non-stream response should finish before the test watchdog");
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["content"][0]["text"], serde_json::json!("ok"));
+    assert_eq!(calls.load(Ordering::Relaxed), 1);
+    let log = state.db.lock().list_forward_logs(1).unwrap().remove(0);
+    assert_eq!(log.status, "success");
+
+    gateway::stop_gateway(gateway_handle);
+    let _ = stop_mock.send(());
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
 async fn streamed_request_with_non_sse_success_body_timeout_is_not_replayed() {
     let (base_url, calls, stop_mock) = start_delayed_upstream(
         StatusCode::OK,

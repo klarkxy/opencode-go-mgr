@@ -235,6 +235,8 @@ test("logs time range selector renders presets and custom picker in a popover", 
   const template = source.slice(source.indexOf("<template>"), source.indexOf("<script setup"));
 
   assert.match(template, /<n-popover[^>]*trigger="click"/);
+  assert.match(template, /<n-button class="time-range-trigger">/);
+  assert.doesNotMatch(template, /class="time-range-trigger"[^>]*:focusable="false"/);
   assert.match(template, /class="time-range-panel"/);
   assert.match(template, /class="preset-list"/);
   assert.match(template, /applyTimePreset\(item\.value\)/);

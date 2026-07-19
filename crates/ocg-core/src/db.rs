@@ -768,6 +768,7 @@ impl Database {
             Some(value) => normalize_purchase_date(value)?,
             None => existing.purchase_date.clone(),
         };
+        let purchase_date_changed = purchase_date != existing.purchase_date;
         let key = key_cipher.unwrap_or(&existing.key_cipher);
         let password = match password_cipher {
             Some("") => None,
@@ -776,8 +777,9 @@ impl Database {
         };
 
         self.conn.execute(
-            "UPDATE accounts SET name = ?1, username = ?2, password_cipher = ?3, key_cipher = ?4, enabled = ?5, referral_code = ?6, recharge_date = ?7, updated_at = ?8
-             WHERE id = ?9",
+            "UPDATE accounts SET name = ?1, username = ?2, password_cipher = ?3, key_cipher = ?4, enabled = ?5, referral_code = ?6, recharge_date = ?7,
+             usage_month_window_cost_offset = CASE WHEN ?8 THEN 0 ELSE usage_month_window_cost_offset END,
+             updated_at = ?9 WHERE id = ?10",
             params![
                 name,
                 username,
@@ -786,6 +788,7 @@ impl Database {
                 enabled as i32,
                 referral_code,
                 purchase_date,
+                purchase_date_changed,
                 Utc::now().to_rfc3339(),
                 id,
             ],
@@ -1236,11 +1239,8 @@ impl Database {
             match window {
                 UsageWindowKind::FiveHours => {
                     let window_len = Duration::hours(5);
-                    let ends_at = now
-                        + Duration::minutes(
-                            resets_in_minutes.unwrap_or_else(|| window_len.num_minutes()),
-                        );
-                    let started_at = ends_at - window_len;
+                    let started_at =
+                        calibrated_window_start(now, window_len, resets_in_minutes, "5-hour")?;
                     (
                         Some(started_at),
                         "usage_5h_window_started_at",
@@ -1249,11 +1249,8 @@ impl Database {
                 }
                 UsageWindowKind::Week => {
                     let window_len = Duration::days(7);
-                    let ends_at = now
-                        + Duration::minutes(
-                            resets_in_minutes.unwrap_or_else(|| window_len.num_minutes()),
-                        );
-                    let started_at = ends_at - window_len;
+                    let started_at =
+                        calibrated_window_start(now, window_len, resets_in_minutes, "weekly")?;
                     (
                         Some(started_at),
                         "usage_week_window_started_at",
@@ -1633,6 +1630,29 @@ fn compute_month_window(
     )?;
     // ponytail: 月窗口已过期也照常返回终点，前端按"已到期"显示。
     Ok(((offset + cost).min(limit), Some(end)))
+}
+
+fn calibrated_window_start(
+    now: DateTime<Utc>,
+    window_len: Duration,
+    resets_in_minutes: Option<i64>,
+    window_name: &str,
+) -> Result<DateTime<Utc>> {
+    let max_minutes = window_len.num_minutes();
+    let remaining_minutes = resets_in_minutes.unwrap_or(max_minutes);
+    if !(0..=max_minutes).contains(&remaining_minutes) {
+        return Err(anyhow::anyhow!(
+            "{window_name} resets_in_minutes must be between 0 and {max_minutes}"
+        ));
+    }
+    let remaining = Duration::try_minutes(remaining_minutes)
+        .ok_or_else(|| anyhow::anyhow!("resets_in_minutes is out of range"))?;
+    let ends_at = now
+        .checked_add_signed(remaining)
+        .ok_or_else(|| anyhow::anyhow!("usage window end is out of range"))?;
+    ends_at
+        .checked_sub_signed(window_len)
+        .ok_or_else(|| anyhow::anyhow!("usage window start is out of range"))
 }
 
 /// 把 `purchase_date`（YYYY-MM-DD）解释为本时区 00:00，转 UTC。
@@ -3114,6 +3134,95 @@ mod tests {
             (reset - expected).num_seconds().abs() < 86400,
             "expected ~2026-08-01, got {reset}"
         );
+
+        drop(db);
+        fs::remove_dir_all(dir).expect("test data dir should be removed");
+    }
+
+    #[test]
+    fn changing_purchase_date_resets_month_calibration_offset() {
+        let dir = temp_data_dir("month-renewal-reset");
+        let db = Database::open(dir.clone()).expect("db should open");
+        let new_purchase_date = local_today();
+        let old_purchase_date = (Local::now().date_naive() - Duration::days(10))
+            .format("%Y-%m-%d")
+            .to_string();
+        let mut acct = account("monthly-renewal");
+        acct.purchase_date = old_purchase_date;
+        db.create_account(&acct).expect("account should be created");
+
+        finalize_success(&db, "monthly-renewal", 5.0, Utc::now() - Duration::days(2));
+        db.calibrate_account_usage("monthly-renewal", UsageWindowKind::Month, 0.0, None, 100.0)
+            .expect("month calibration should save a negative offset");
+        assert_cost(
+            db.account_usage("monthly-renewal")
+                .expect("usage should load")
+                .window_month,
+            0.0,
+        );
+
+        db.update_account(
+            "monthly-renewal",
+            &AccountUpdate {
+                name: None,
+                username: None,
+                password: None,
+                key: None,
+                enabled: None,
+                referral_code: None,
+                purchase_date: Some(new_purchase_date),
+            },
+            None,
+            None,
+        )
+        .expect("purchase date should update");
+        let offset: f64 = db
+            .conn
+            .query_row(
+                "SELECT usage_month_window_cost_offset FROM accounts WHERE id = ?1",
+                ["monthly-renewal"],
+                |row| row.get(0),
+            )
+            .expect("month offset should load");
+        assert_cost(offset, 0.0);
+        assert_cost(
+            db.account_usage("monthly-renewal")
+                .expect("renewed usage should load")
+                .window_month,
+            0.0,
+        );
+
+        finalize_success(&db, "monthly-renewal", 2.0, Utc::now());
+        assert_cost(
+            db.account_usage("monthly-renewal")
+                .expect("new cycle usage should load")
+                .window_month,
+            2.0,
+        );
+
+        drop(db);
+        fs::remove_dir_all(dir).expect("test data dir should be removed");
+    }
+
+    #[test]
+    fn calibrate_rejects_reset_outside_fixed_window_without_panicking() {
+        let dir = temp_data_dir("calibrate-reset-bounds");
+        let db = Database::open(dir.clone()).expect("db should open");
+        db.create_account(&account("reset-bounds"))
+            .expect("account should be created");
+
+        for (window, minutes) in [
+            (UsageWindowKind::FiveHours, -1),
+            (UsageWindowKind::FiveHours, 301),
+            (UsageWindowKind::Week, 10_081),
+            (UsageWindowKind::FiveHours, i64::MAX),
+        ] {
+            assert!(
+                db.calibrate_account_usage("reset-bounds", window, 50.0, Some(minutes), 100.0,)
+                    .is_err(),
+                "{window:?} should reject {minutes} minutes"
+            );
+        }
 
         drop(db);
         fs::remove_dir_all(dir).expect("test data dir should be removed");

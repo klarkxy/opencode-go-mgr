@@ -120,6 +120,7 @@
                     quaternary
                     size="small"
                     :aria-label="t('校准用量')"
+                    :disabled="!hasAvailableUsageEditor(account)"
                     @click="focusUsageEditor(account.id)"
                   >
                     <template #icon><n-icon :component="EditOutlined" /></template>
@@ -314,7 +315,11 @@
                 processing
                 :show-indicator="false"
               />
-              <span class="usage-reset-countdown"></span>
+              <span class="usage-reset-countdown">
+                <template v-if="accountUsageLimitReached(account, limit.key)">
+                  {{ t("{time}后重置", { time: formatWindowRemaining(account, limit.key) }) }}
+                </template>
+              </span>
             </div>
             </div>
             </div>
@@ -373,6 +378,7 @@ import {
   isWindowCooling,
   mergeUsageEdit,
   normalizeUsagePercent,
+  resetTimeForWindow,
   resetsInMinutesForSave,
   usagePercentFromCost,
   usageProgressPercentage,
@@ -478,6 +484,26 @@ function accountUsageLimitReached(account: Account, key: UsageKey): boolean {
   return isUsageLimitReached(account, key, now.value);
 }
 
+function hasAvailableUsageEditor(account: Account): boolean {
+  if (usageLoading.value[account.id] || usageLoadErrors.value[account.id]) return false;
+  return usageLimits.value.some(({ key }) => !accountUsageLimitReached(account, key));
+}
+
+function formatWindowRemaining(account: Account, key: UsageKey): string {
+  const until = resetTimeForWindow(account, key);
+  if (!until) return "";
+  const ms = Date.parse(until) - now.value;
+  if (ms <= 0) return "";
+  const seconds = Math.ceil(ms / 1000);
+  if (seconds < 60) return t("{seconds}秒", { seconds });
+  const minutes = Math.floor(ms / 60000);
+  if (minutes < 60) return t("{minutes}分钟", { minutes });
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return t("{hours}小时{minutes}分钟", { hours, minutes: minutes % 60 });
+  const days = Math.floor(hours / 24);
+  return t("{days}天{hours}小时", { days, hours: hours % 24 });
+}
+
 function usageEditsFromWindow(usage: UsageWindow): AccountUsageEdits {
   return Object.fromEntries(usageLimits.value.map(({ key, limit }) => {
     const percent = usagePercentFromCost(usage[key], limit);
@@ -563,8 +589,9 @@ function resetsSecondMax(key: UsageKey): number {
 
 function resetsFirstField(accountId: string, key: UsageKey): number {
   const edit = usageEdits.value[accountId]?.[key];
-  if (!edit || edit.resets_in_minutes_draft === null) return 0;
-  const m = edit.resets_in_minutes_draft;
+  if (!edit) return 0;
+  const m = resetsInMinutesForSave(edit, key, now.value);
+  if (m === null) return 0;
   if (key === "window_5h") return Math.floor(m / 60);
   if (key === "window_week") return Math.floor(m / (24 * 60));
   return 0;
@@ -572,8 +599,9 @@ function resetsFirstField(accountId: string, key: UsageKey): number {
 
 function resetsSecondField(accountId: string, key: UsageKey): number {
   const edit = usageEdits.value[accountId]?.[key];
-  if (!edit || edit.resets_in_minutes_draft === null) return 0;
-  const m = edit.resets_in_minutes_draft;
+  if (!edit) return 0;
+  const m = resetsInMinutesForSave(edit, key, now.value);
+  if (m === null) return 0;
   if (key === "window_5h") return m % 60;
   if (key === "window_week") return Math.floor((m % (24 * 60)) / 60);
   return 0;
@@ -1216,6 +1244,9 @@ onUnmounted(() => {
 
 .usage-reset-countdown {
   min-height: 1.4em;
+  color: var(--ocg-error);
+  font-size: var(--ocg-font-xs);
+  line-height: 1.4;
 }
 
 .usage-resets-row {

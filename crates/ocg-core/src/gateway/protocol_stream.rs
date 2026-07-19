@@ -171,17 +171,11 @@ impl StreamConverter {
             self.pending.extend_from_slice(&chunk);
             let frames = drain_frames(&mut self.pending);
             let mut output = Vec::new();
-            let sanitize_passthrough = self.source == ApiFormat::ChatCompletions
-                && self.target == ApiFormat::ChatCompletions;
             for frame in frames {
                 if self.input.terminal {
                     break;
                 }
-                let passthrough = if sanitize_passthrough {
-                    sanitize_chat_completion_sse_frame(&frame, &self.model)
-                } else {
-                    frame.clone()
-                };
+                let passthrough = sanitize_passthrough_sse_frame(self.source, &frame, &self.model);
                 let _ = self.convert_frames(vec![frame])?;
                 output.push(passthrough);
             }
@@ -207,7 +201,7 @@ impl StreamConverter {
                 if self.input.terminal {
                     break;
                 }
-                let passthrough = frame.clone();
+                let passthrough = sanitize_passthrough_sse_frame(self.source, &frame, &self.model);
                 let _ = self.convert_frames(vec![frame])?;
                 output.push(passthrough);
             }
@@ -1690,44 +1684,99 @@ fn done_frame() -> Bytes {
     Bytes::from_static(b"data: [DONE]\n\n")
 }
 
-/// Sanitize bogus all-cache usage in a Chat Completions SSE frame when the model is MiniMax.
-/// Other frames are returned unchanged. This only runs in the passthrough path where the
-/// upstream and client formats are both Chat Completions.
-fn sanitize_chat_completion_sse_frame(frame: &[u8], model_hint: &str) -> Bytes {
-    let text = match std::str::from_utf8(frame) {
-        Ok(text) => text,
-        Err(_) => return Bytes::copy_from_slice(frame),
-    };
-    let mut event = None;
-    let mut data_lines = Vec::new();
-    for line in text.lines() {
-        if let Some(name) = line.strip_prefix("event: ") {
-            event = Some(name.to_string());
-        } else if let Some(data) = line.strip_prefix("data: ") {
-            data_lines.push(data.to_string());
-        }
-    }
-    if data_lines.is_empty() {
+/// Sanitize model-specific bogus usage without weakening same-protocol SSE passthrough.
+/// Frames that do not need a correction are returned byte-for-byte unchanged. When a
+/// correction is needed, only the data field is replaced; event IDs, retry hints,
+/// comments, and the original line-ending style remain intact.
+fn sanitize_passthrough_sse_frame(format: ApiFormat, frame: &[u8], model_hint: &str) -> Bytes {
+    if !matches!(format, ApiFormat::ChatCompletions | ApiFormat::Messages) {
         return Bytes::copy_from_slice(frame);
     }
-    let data = data_lines.join("\n");
+    let (_, data) = match parse_sse_frame(frame) {
+        Ok(Some(parsed)) => parsed,
+        _ => return Bytes::copy_from_slice(frame),
+    };
     let mut value: Value = match serde_json::from_str(&data) {
         Ok(value) => value,
         Err(_) => return Bytes::copy_from_slice(frame),
     };
-    let model = value
-        .get("model")
-        .and_then(Value::as_str)
-        .map(str::to_owned);
-    if let Some(usage) = value.get_mut("usage") {
-        sanitize_minimax_chat_usage(model.as_deref(), Some(model_hint), usage);
+    let original = value.clone();
+    match format {
+        ApiFormat::ChatCompletions => {
+            let model = value
+                .get("model")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            if let Some(usage) = value.get_mut("usage") {
+                sanitize_minimax_chat_usage(model.as_deref(), Some(model_hint), usage);
+            }
+        }
+        ApiFormat::Messages => {
+            let model = value
+                .pointer("/message/model")
+                .or_else(|| value.get("model"))
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            let has_top_level_usage = value.get("usage").is_some();
+            let usage = if has_top_level_usage {
+                value.get_mut("usage")
+            } else {
+                value.pointer_mut("/message/usage")
+            };
+            if let Some(usage) = usage {
+                sanitize_minimax_anthropic_usage(model.as_deref(), Some(model_hint), usage);
+            }
+        }
+        ApiFormat::Responses | ApiFormat::Gemini => unreachable!(),
     }
-    let mut output = String::new();
-    if let Some(name) = event {
-        output.push_str(&format!("event: {name}\n"));
+    if value == original {
+        return Bytes::copy_from_slice(frame);
     }
-    output.push_str(&format!("data: {value}\n\n"));
-    Bytes::from(output)
+    rewrite_sse_data(frame, &value)
+}
+
+fn rewrite_sse_data(frame: &[u8], value: &Value) -> Bytes {
+    let Ok(text) = std::str::from_utf8(frame) else {
+        return Bytes::copy_from_slice(frame);
+    };
+    let replacement = value.to_string();
+    let mut output = String::with_capacity(text.len());
+    let mut replaced = false;
+    for raw_line in text.split_inclusive('\n') {
+        let (line, ending) = if let Some(line) = raw_line.strip_suffix("\r\n") {
+            (line, "\r\n")
+        } else if let Some(line) = raw_line.strip_suffix('\n') {
+            (line, "\n")
+        } else {
+            (raw_line, "")
+        };
+        let data_prefix = if line == "data" {
+            Some("data: ")
+        } else if let Some(payload) = line.strip_prefix("data:") {
+            Some(if payload.starts_with(' ') {
+                "data: "
+            } else {
+                "data:"
+            })
+        } else {
+            None
+        };
+        if let Some(prefix) = data_prefix {
+            if !replaced {
+                output.push_str(prefix);
+                output.push_str(&replacement);
+                output.push_str(ending);
+                replaced = true;
+            }
+        } else {
+            output.push_str(raw_line);
+        }
+    }
+    if replaced {
+        Bytes::from(output)
+    } else {
+        Bytes::copy_from_slice(frame)
+    }
 }
 
 fn append_json_string(value: Option<&mut Value>, key: &str, suffix: &str) {
@@ -1992,6 +2041,69 @@ mod tests {
             chunk.as_ref()
         );
         assert!(converter.finish().unwrap().is_empty());
+    }
+
+    #[test]
+    fn chat_passthrough_keeps_non_minimax_frames_byte_identical() {
+        let mut qwen_plan = plan(ApiFormat::ChatCompletions, ApiFormat::ChatCompletions);
+        qwen_plan.model = "qwen3.7-max".into();
+        let mut converter = StreamConverter::new(&qwen_plan);
+        let frame = Bytes::from_static(
+            b": keepalive\r\nid: 7\r\nretry: 1000\r\nevent: chunk\r\ndata: { \"model\": \"qwen3.7-max\", \"choices\": [], \"usage\": {\"prompt_tokens\":10,\"completion_tokens\":1,\"prompt_tokens_details\":{\"cached_tokens\":10}} }\r\n\r\n",
+        );
+        assert_eq!(
+            converter.process_chunk(frame.clone()).unwrap().concat(),
+            frame.as_ref()
+        );
+    }
+
+    #[test]
+    fn chat_passthrough_keeps_unchanged_minimax_frames_byte_identical() {
+        let mut minimax_plan = plan(ApiFormat::ChatCompletions, ApiFormat::ChatCompletions);
+        minimax_plan.model = "minimax-m3".into();
+        let mut converter = StreamConverter::new(&minimax_plan);
+        let frame = Bytes::from_static(
+            b"id: 8\nevent: chunk\ndata: { \"model\": \"ocg-generic\", \"choices\": [{\"delta\":{\"content\":\"hi\"}}] }\n\n",
+        );
+        assert_eq!(
+            converter.process_chunk(frame.clone()).unwrap().concat(),
+            frame.as_ref()
+        );
+    }
+
+    #[test]
+    fn chat_passthrough_changes_only_minimax_usage_data() {
+        let mut minimax_plan = plan(ApiFormat::ChatCompletions, ApiFormat::ChatCompletions);
+        minimax_plan.model = "minimax-m3".into();
+        let mut converter = StreamConverter::new(&minimax_plan);
+        let frame = Bytes::from_static(
+            b": keepalive\r\nid: 9\r\nretry: 1500\r\nevent: chunk\r\ndata: {\"model\":\"ocg-generic\",\"choices\":[],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":1,\"prompt_tokens_details\":{\"cached_tokens\":10}}}\r\n\r\n",
+        );
+        let output = converter.process_chunk(frame).unwrap().concat();
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.starts_with(": keepalive\r\nid: 9\r\nretry: 1500\r\nevent: chunk\r\n"));
+        assert!(output.ends_with("\r\n\r\n"));
+        assert!(output.contains("\"cached_tokens\":0"), "{output}");
+        assert!(!output.contains("\"cached_tokens\":10"), "{output}");
+    }
+
+    #[test]
+    fn messages_passthrough_sanitizes_minimax_and_preserves_sse_fields() {
+        let mut minimax_plan = plan(ApiFormat::Messages, ApiFormat::Messages);
+        minimax_plan.model = "minimax-m3".into();
+        let mut converter = StreamConverter::new(&minimax_plan);
+        let frame = Bytes::from_static(
+            b": keepalive\r\nid: msg-9\r\nretry: 1500\r\nevent: message_start\r\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"model\":\"ocg-generic\",\"usage\":{\"input_tokens\":0,\"output_tokens\":5,\"cache_read_input_tokens\":40500}}}\r\n\r\n",
+        );
+        let output = converter.process_chunk(frame).unwrap().concat();
+        let output = String::from_utf8(output).unwrap();
+        assert!(
+            output
+                .starts_with(": keepalive\r\nid: msg-9\r\nretry: 1500\r\nevent: message_start\r\n")
+        );
+        assert!(output.ends_with("\r\n\r\n"));
+        assert!(output.contains("\"input_tokens\":40500"), "{output}");
+        assert!(output.contains("\"cache_read_input_tokens\":0"), "{output}");
     }
 
     #[test]
