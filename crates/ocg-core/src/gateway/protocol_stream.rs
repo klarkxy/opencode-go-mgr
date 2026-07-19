@@ -1,6 +1,7 @@
 use super::protocol::{
-    ApiFormat, NamespaceToolMapping, ProtocolError, RequestPlan, encode_anthropic_thinking_block,
-    encode_chat_reasoning, responses_id, unix_seconds,
+    ApiFormat, NamespaceToolMapping, ProtocolError, RequestPlan,
+    encode_anthropic_thinking_block, encode_chat_reasoning, responses_id,
+    sanitize_minimax_anthropic_usage, sanitize_minimax_chat_usage, unix_seconds,
 };
 use bytes::{Bytes, BytesMut};
 use serde_json::{Map, Value, json};
@@ -170,11 +171,17 @@ impl StreamConverter {
             self.pending.extend_from_slice(&chunk);
             let frames = drain_frames(&mut self.pending);
             let mut output = Vec::new();
+            let sanitize_passthrough =
+                self.source == ApiFormat::ChatCompletions && self.target == ApiFormat::ChatCompletions;
             for frame in frames {
                 if self.input.terminal {
                     break;
                 }
-                let passthrough = frame.clone();
+                let passthrough = if sanitize_passthrough {
+                    sanitize_chat_completion_sse_frame(&frame, &self.model)
+                } else {
+                    frame.clone()
+                };
                 let _ = self.convert_frames(vec![frame])?;
                 output.push(passthrough);
             }
@@ -433,11 +440,19 @@ impl StreamConverter {
         events
     }
 
-    fn decode_messages(&mut self, value: Value) -> Vec<PivotEvent> {
+    fn decode_messages(&mut self, mut value: Value) -> Vec<PivotEvent> {
         let event_type = value.get("type").and_then(Value::as_str).unwrap_or("");
         match event_type {
             "message_start" => {
                 self.input.started = true;
+                let model = value
+                    .pointer("/message/model")
+                    .and_then(Value::as_str)
+                    .unwrap_or(&self.model)
+                    .to_string();
+                if let Some(usage) = value.pointer_mut("/message/usage") {
+                    sanitize_minimax_anthropic_usage(Some(&model), Some(&self.model), usage);
+                }
                 self.input
                     .usage
                     .merge(anthropic_usage(value.pointer("/message/usage")));
@@ -510,6 +525,9 @@ impl StreamConverter {
             }
             "message_delta" => {
                 self.input.message_delta_seen = true;
+                if let Some(usage) = value.get_mut("usage") {
+                    sanitize_minimax_anthropic_usage(Some(&self.model), Some(&self.model), usage);
+                }
                 let usage = anthropic_usage(value.get("usage"));
                 self.input.usage.merge(usage);
                 let stop_reason = string_at(
@@ -1672,6 +1690,46 @@ fn done_frame() -> Bytes {
     Bytes::from_static(b"data: [DONE]\n\n")
 }
 
+/// Sanitize bogus all-cache usage in a Chat Completions SSE frame when the model is MiniMax.
+/// Other frames are returned unchanged. This only runs in the passthrough path where the
+/// upstream and client formats are both Chat Completions.
+fn sanitize_chat_completion_sse_frame(frame: &[u8], model_hint: &str) -> Bytes {
+    let text = match std::str::from_utf8(frame) {
+        Ok(text) => text,
+        Err(_) => return Bytes::copy_from_slice(frame),
+    };
+    let mut event = None;
+    let mut data_lines = Vec::new();
+    for line in text.lines() {
+        if let Some(name) = line.strip_prefix("event: ") {
+            event = Some(name.to_string());
+        } else if let Some(data) = line.strip_prefix("data: ") {
+            data_lines.push(data.to_string());
+        }
+    }
+    if data_lines.is_empty() {
+        return Bytes::copy_from_slice(frame);
+    }
+    let data = data_lines.join("\n");
+    let mut value: Value = match serde_json::from_str(&data) {
+        Ok(value) => value,
+        Err(_) => return Bytes::copy_from_slice(frame),
+    };
+    let model = value
+        .get("model")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    if let Some(usage) = value.get_mut("usage") {
+        sanitize_minimax_chat_usage(model.as_deref(), Some(model_hint), usage);
+    }
+    let mut output = String::new();
+    if let Some(name) = event {
+        output.push_str(&format!("event: {name}\n"));
+    }
+    output.push_str(&format!("data: {value}\n\n"));
+    Bytes::from(output)
+}
+
 fn append_json_string(value: Option<&mut Value>, key: &str, suffix: &str) {
     let Some(object) = value.and_then(Value::as_object_mut) else {
         return;
@@ -2241,6 +2299,97 @@ mod tests {
         let anthropic = convert(ApiFormat::Messages, ApiFormat::ChatCompletions, chat_source);
         assert!(anthropic.contains("\"input_tokens\":8"));
         assert!(anthropic.contains("\"cache_read_input_tokens\":4"));
+    }
+
+    #[test]
+    fn streaming_messages_to_chat_sanitizes_minimax_bogus_all_cache() {
+        let source = concat!(
+            "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"model\":\"minimax-m3\",\"usage\":{\"input_tokens\":0,\"cache_read_input_tokens\":40500}}}\n\n",
+            "event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":5}}\n\n",
+            "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+        );
+        let plan = RequestPlan {
+            client: ApiFormat::ChatCompletions,
+            upstream: ApiFormat::Messages,
+            model: "minimax-m3".into(),
+            stream: true,
+            body: Bytes::new(),
+            service_tier: None,
+            custom_tools: Vec::new(),
+            namespace_tools: Vec::new(),
+            response_parallel_tool_calls: true,
+            response_tool_choice: json!("auto"),
+            response_tools: Vec::new(),
+        };
+        let mut converter = StreamConverter::new(&plan);
+        let bytes = source.as_bytes();
+        let mut output = converter.process_chunk(Bytes::copy_from_slice(bytes)).unwrap();
+        output.extend(converter.finish().unwrap());
+        let output = String::from_utf8(output.concat()).unwrap();
+        assert!(output.contains("\"prompt_tokens\":40500"));
+        assert!(output.contains("\"cached_tokens\":0"));
+    }
+
+    #[test]
+    fn streaming_messages_to_chat_sanitizes_minimax_without_upstream_model() {
+        // OpenCode Go may omit the model field in message_start. The converter must
+        // fall back to the request plan's model to sanitize the bogus cache read.
+        let source = concat!(
+            "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"usage\":{\"input_tokens\":0,\"cache_read_input_tokens\":40500}}}\n\n",
+            "event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":5}}\n\n",
+            "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+        );
+        let plan = RequestPlan {
+            client: ApiFormat::ChatCompletions,
+            upstream: ApiFormat::Messages,
+            model: "minimax-m3".into(),
+            stream: true,
+            body: Bytes::new(),
+            service_tier: None,
+            custom_tools: Vec::new(),
+            namespace_tools: Vec::new(),
+            response_parallel_tool_calls: true,
+            response_tool_choice: json!("auto"),
+            response_tools: Vec::new(),
+        };
+        let mut converter = StreamConverter::new(&plan);
+        let bytes = source.as_bytes();
+        let mut output = converter.process_chunk(Bytes::copy_from_slice(bytes)).unwrap();
+        output.extend(converter.finish().unwrap());
+        let output = String::from_utf8(output.concat()).unwrap();
+        assert!(output.contains("\"prompt_tokens\":40500"));
+        assert!(output.contains("\"cached_tokens\":0"));
+    }
+
+    #[test]
+    fn streaming_messages_to_chat_sanitizes_mixed_case_minimax() {
+        // OpenCode Go / Qwen Cloud expose MiniMax IDs as "MiniMax-M3". The stream
+        // converter must still sanitize the bogus all-cache usage.
+        let source = concat!(
+            "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"usage\":{\"input_tokens\":0,\"cache_read_input_tokens\":40500}}}\n\n",
+            "event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":5}}\n\n",
+            "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+        );
+        let plan = RequestPlan {
+            client: ApiFormat::ChatCompletions,
+            upstream: ApiFormat::Messages,
+            model: "MiniMax-M3".into(),
+            stream: true,
+            body: Bytes::new(),
+            service_tier: None,
+            custom_tools: Vec::new(),
+            namespace_tools: Vec::new(),
+            response_parallel_tool_calls: true,
+            response_tool_choice: json!("auto"),
+            response_tools: Vec::new(),
+        };
+        let mut converter = StreamConverter::new(&plan);
+        let bytes = source.as_bytes();
+        let mut output = converter.process_chunk(Bytes::copy_from_slice(bytes)).unwrap();
+        output.extend(converter.finish().unwrap());
+        let output = String::from_utf8(output.concat()).unwrap();
+        assert!(output.contains("\"prompt_tokens\":40500"));
+        assert!(output.contains("\"cached_tokens\":0"));
     }
 
     #[test]

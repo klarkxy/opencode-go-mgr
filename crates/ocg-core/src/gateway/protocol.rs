@@ -4,6 +4,7 @@ use base64::{
     engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD},
 };
 use bytes::Bytes;
+use crate::pricing::normalize_model_name;
 use serde_json::{Map, Value, json};
 use std::fmt;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -642,17 +643,37 @@ fn contains_input_image_file_id(value: &Value) -> bool {
 }
 
 pub fn transform_response(plan: &RequestPlan, body: &Value) -> Result<Value, ProtocolError> {
+    // Some Anthropic-compatible upstreams (notably MiniMax via OpenCode Go) omit or rewrite
+    // the model field in the response body. Carry the request model over so downstream
+    // sanitizers (e.g. the MiniMax bogus all-cache workaround) can still identify the model.
+    let mut body = body.clone();
+    if plan.upstream == ApiFormat::Messages {
+        body["model"] = json!(&plan.model);
+    }
     let mut transformed = transform_between_with_tools(
         plan.upstream,
         plan.client,
-        body,
+        &body,
         &plan.custom_tools,
         &plan.namespace_tools,
+        Some(&plan.model),
     )?;
     if plan.client == ApiFormat::Responses && plan.upstream != ApiFormat::Responses {
         transformed["parallel_tool_calls"] = json!(plan.response_parallel_tool_calls);
         transformed["tool_choice"] = plan.response_tool_choice.clone();
         transformed["tools"] = Value::Array(plan.response_tools.clone());
+    }
+    // If the upstream was already Chat Completions and the client also expects Chat
+    // Completions, the body is passed through unchanged. MiniMax's Chat Completions
+    // endpoint can still report the bogus all-cache signature, so sanitize here too.
+    if plan.client == ApiFormat::ChatCompletions && plan.upstream == ApiFormat::ChatCompletions {
+        let model = transformed
+            .get("model")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        if let Some(usage) = transformed.get_mut("usage") {
+            sanitize_minimax_chat_usage(model.as_deref(), Some(&plan.model), usage);
+        }
     }
     Ok(transformed)
 }
@@ -662,7 +683,7 @@ pub fn transform_between(
     client: ApiFormat,
     body: &Value,
 ) -> Result<Value, ProtocolError> {
-    transform_between_with_tools(upstream, client, body, &[], &[])
+    transform_between_with_tools(upstream, client, body, &[], &[], None)
 }
 
 fn transform_between_with_tools(
@@ -671,10 +692,13 @@ fn transform_between_with_tools(
     body: &Value,
     custom_tools: &[String],
     namespace_tools: &[NamespaceToolMapping],
+    model_hint: Option<&str>,
 ) -> Result<Value, ProtocolError> {
     match (upstream, client) {
         (a, b) if a == b => Ok(body.clone()),
-        (ApiFormat::Messages, ApiFormat::ChatCompletions) => messages_response_to_chat(body),
+        (ApiFormat::Messages, ApiFormat::ChatCompletions) => {
+            messages_response_to_chat(body, model_hint)
+        }
         (ApiFormat::ChatCompletions, ApiFormat::Messages) => chat_response_to_messages(body),
         (ApiFormat::Messages, ApiFormat::Responses) => {
             messages_response_to_responses(body, custom_tools, namespace_tools)
@@ -686,7 +710,7 @@ fn transform_between_with_tools(
             namespace_tools,
         ),
         (ApiFormat::Responses, ApiFormat::ChatCompletions) => {
-            messages_response_to_chat(&responses_response_to_messages(body)?)
+            messages_response_to_chat(&responses_response_to_messages(body)?, model_hint)
         }
         (ApiFormat::Messages, ApiFormat::Gemini) => messages_response_to_gemini(body),
         (ApiFormat::ChatCompletions, ApiFormat::Gemini) => {
@@ -776,6 +800,81 @@ fn gemini_status_for_kind(kind: &str) -> &'static str {
     }
 }
 
+/// Work around MiniMax's Anthropic-compatible endpoint returning the entire prompt as
+/// `cache_read_input_tokens` with `input_tokens: 0` on the first turn. When that happens,
+/// move the tokens back to `input_tokens` so the gateway doesn't report a 100% cache hit.
+///
+/// `model` is the model name reported by the upstream response; `model_hint` is the model
+/// from the original request plan. OpenCode Go sometimes returns a generic or internal model
+/// identifier in the response, so we trust the hint when either name identifies MiniMax.
+fn is_minimax_family(model: Option<&str>) -> bool {
+    model
+        .map(|m| normalize_model_name(m).starts_with("minimax"))
+        .unwrap_or(false)
+}
+
+pub(crate) fn sanitize_minimax_anthropic_usage(
+    model: Option<&str>,
+    model_hint: Option<&str>,
+    usage: &mut Value,
+) {
+    let is_minimax = is_minimax_family(model) || is_minimax_family(model_hint);
+    if !is_minimax {
+        return;
+    }
+    let Some(obj) = usage.as_object_mut() else {
+        return;
+    };
+    let input = obj.get("input_tokens").and_then(Value::as_u64).unwrap_or(0);
+    let cached = obj
+        .get("cache_read_input_tokens")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let creation = obj
+        .get("cache_creation_input_tokens")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let total = input.saturating_add(cached).saturating_add(creation);
+    // Bogus all-cache signature: every input token is reported as a cache read and
+    // no new/cache-creation tokens exist. This is impossible on a first turn.
+    if total > 0 && input == 0 && creation == 0 && cached == total {
+        obj.insert("input_tokens".into(), json!(total));
+        obj.insert("cache_read_input_tokens".into(), json!(0));
+    }
+}
+
+/// Same normalization as `sanitize_minimax_anthropic_usage`, but for the OpenAI Chat
+/// Completions wire format where cache hits live in `prompt_tokens_details.cached_tokens`.
+/// If the entire prompt is reported as a cache hit (and no cache-creation tokens are
+/// present), zero out the cached count so it is billed as regular input.
+pub(crate) fn sanitize_minimax_chat_usage(
+    model: Option<&str>,
+    model_hint: Option<&str>,
+    usage: &mut Value,
+) {
+    let is_minimax = is_minimax_family(model) || is_minimax_family(model_hint);
+    if !is_minimax {
+        return;
+    }
+    let Some(obj) = usage.as_object_mut() else {
+        return;
+    };
+    let prompt = obj.get("prompt_tokens").and_then(Value::as_u64).unwrap_or(0);
+    let cached = obj
+        .get("prompt_tokens_details")
+        .and_then(|v| v.get("cached_tokens"))
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    if prompt > 0 && cached == prompt {
+        if let Some(details) = obj
+            .get_mut("prompt_tokens_details")
+            .and_then(Value::as_object_mut)
+        {
+            details.insert("cached_tokens".into(), json!(0));
+        }
+    }
+}
+
 fn usage_payload(format: ApiFormat, payload: &Value) -> Option<&Value> {
     match format {
         ApiFormat::ChatCompletions => payload.get("usage"),
@@ -806,29 +905,44 @@ pub fn has_complete_usage(format: ApiFormat, payload: &Value) -> bool {
     }
 }
 
-pub fn extract_usage(format: ApiFormat, payload: &Value) -> UsageCounts {
+pub fn extract_usage(
+    format: ApiFormat,
+    payload: &Value,
+    model_hint: Option<&str>,
+) -> UsageCounts {
     let usage = usage_payload(format, payload);
     let Some(usage) = usage else {
         return UsageCounts::default();
     };
     match format {
-        ApiFormat::ChatCompletions => UsageCounts {
-            input_tokens: uint(usage, "prompt_tokens"),
-            output_tokens: uint(usage, "completion_tokens"),
-            cached_tokens: usage
-                .pointer("/prompt_tokens_details/cached_tokens")
-                .and_then(Value::as_u64)
-                .unwrap_or(0),
-            cache_creation_tokens: 0,
-        },
-        ApiFormat::Messages => {
-            let cached = uint(usage, "cache_read_input_tokens");
-            let created = uint(usage, "cache_creation_input_tokens");
+        ApiFormat::ChatCompletions => {
+            let mut usage = usage.clone();
+            let model = payload.get("model").and_then(Value::as_str);
+            sanitize_minimax_chat_usage(model, model_hint, &mut usage);
             UsageCounts {
-                input_tokens: uint(usage, "input_tokens")
+                input_tokens: uint(&usage, "prompt_tokens"),
+                output_tokens: uint(&usage, "completion_tokens"),
+                cached_tokens: usage
+                    .pointer("/prompt_tokens_details/cached_tokens")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0),
+                cache_creation_tokens: 0,
+            }
+        }
+        ApiFormat::Messages => {
+            let mut usage = usage.clone();
+            let model = payload
+                .get("model")
+                .or_else(|| payload.pointer("/message/model"))
+                .and_then(Value::as_str);
+            sanitize_minimax_anthropic_usage(model, model_hint, &mut usage);
+            let cached = uint(&usage, "cache_read_input_tokens");
+            let created = uint(&usage, "cache_creation_input_tokens");
+            UsageCounts {
+                input_tokens: uint(&usage, "input_tokens")
                     .saturating_add(cached)
                     .saturating_add(created),
-                output_tokens: uint(usage, "output_tokens"),
+                output_tokens: uint(&usage, "output_tokens"),
                 cached_tokens: cached,
                 cache_creation_tokens: created,
             }
@@ -851,8 +965,13 @@ pub fn extract_usage(format: ApiFormat, payload: &Value) -> UsageCounts {
     }
 }
 
-pub fn merge_stream_usage(format: ApiFormat, payload: &Value, counts: &mut UsageCounts) {
-    let next = extract_usage(format, payload);
+pub fn merge_stream_usage(
+    format: ApiFormat,
+    payload: &Value,
+    counts: &mut UsageCounts,
+    model_hint: Option<&str>,
+) {
+    let next = extract_usage(format, payload, model_hint);
     counts.input_tokens = counts.input_tokens.max(next.input_tokens);
     counts.output_tokens = counts.output_tokens.max(next.output_tokens);
     counts.cached_tokens = counts.cached_tokens.max(next.cached_tokens);
@@ -860,10 +979,10 @@ pub fn merge_stream_usage(format: ApiFormat, payload: &Value, counts: &mut Usage
 }
 
 fn native_format(model: &str) -> Option<ApiFormat> {
-    let model = model.trim().to_ascii_lowercase();
-    if CHAT_MODELS.contains(&model.as_str()) {
+    let normalized = normalize_model_name(model);
+    if CHAT_MODELS.contains(&normalized.as_str()) {
         Some(ApiFormat::ChatCompletions)
-    } else if MESSAGE_MODELS.contains(&model.as_str()) {
+    } else if MESSAGE_MODELS.contains(&normalized.as_str()) {
         Some(ApiFormat::Messages)
     } else {
         None
@@ -1927,7 +2046,10 @@ fn messages_response_to_gemini(body: &Value) -> Result<Value, ProtocolError> {
     Ok(response)
 }
 
-fn messages_response_to_chat(body: &Value) -> Result<Value, ProtocolError> {
+fn messages_response_to_chat(
+    body: &Value,
+    model_hint: Option<&str>,
+) -> Result<Value, ProtocolError> {
     let blocks = body
         .get("content")
         .and_then(Value::as_array)
@@ -1968,6 +2090,12 @@ fn messages_response_to_chat(body: &Value) -> Result<Value, ProtocolError> {
             message["content"] = Value::Null;
         }
     }
+    let mut usage = body.get("usage").cloned().unwrap_or(Value::Null);
+    sanitize_minimax_anthropic_usage(
+        body.get("model").and_then(Value::as_str),
+        model_hint,
+        &mut usage,
+    );
     Ok(json!({
         "id": body.get("id").cloned().unwrap_or_else(|| json!("")),
         "object": "chat.completion",
@@ -1978,7 +2106,7 @@ fn messages_response_to_chat(body: &Value) -> Result<Value, ProtocolError> {
             "message": message,
             "finish_reason": anthropic_stop_to_chat(body.get("stop_reason"))
         }],
-        "usage": anthropic_usage_to_chat(body.get("usage"))
+        "usage": anthropic_usage_to_chat(Some(&usage))
     }))
 }
 
@@ -2981,10 +3109,14 @@ mod tests {
     }
 
     fn plan(client: ApiFormat, upstream: ApiFormat) -> RequestPlan {
+        plan_with_model(client, upstream, "test")
+    }
+
+    fn plan_with_model(client: ApiFormat, upstream: ApiFormat, model: &str) -> RequestPlan {
         RequestPlan {
             client,
             upstream,
-            model: "test".into(),
+            model: model.into(),
             stream: false,
             body: Bytes::new(),
             service_tier: None,
@@ -3328,6 +3460,7 @@ mod tests {
             extract_usage(
                 ApiFormat::Gemini,
                 &json!({"usageMetadata":{"promptTokenCount":9,"candidatesTokenCount":3,"cachedContentTokenCount":2}}),
+                None,
             ),
             UsageCounts {
                 input_tokens: 9,
@@ -3767,6 +3900,219 @@ mod tests {
     }
 
     #[test]
+    fn minimax_bogus_all_cache_usage_is_sanitized() {
+        let mut usage =
+            json!({"input_tokens":0,"output_tokens":5,"cache_read_input_tokens":40500});
+        sanitize_minimax_anthropic_usage(Some("minimax-m3"), None, &mut usage);
+        assert_eq!(usage["input_tokens"], 40500);
+        assert_eq!(usage["cache_read_input_tokens"], 0);
+
+        // Normal MiniMax usage (new input + cache read) is left untouched.
+        let mut usage =
+            json!({"input_tokens":108,"output_tokens":91,"cache_read_input_tokens":14813});
+        sanitize_minimax_anthropic_usage(Some("minimax-m3"), None, &mut usage);
+        assert_eq!(usage["input_tokens"], 108);
+        assert_eq!(usage["cache_read_input_tokens"], 14813);
+
+        // The heuristic only applies to MiniMax models.
+        let mut usage =
+            json!({"input_tokens":0,"output_tokens":5,"cache_read_input_tokens":40500});
+        sanitize_minimax_anthropic_usage(Some("qwen3.7-max"), None, &mut usage);
+        assert_eq!(usage["cache_read_input_tokens"], 40500);
+
+        // OpenCode Go may return a non-MiniMax model identifier while the request plan still
+        // points to MiniMax. The hint must still trigger sanitization.
+        let mut usage =
+            json!({"input_tokens":0,"output_tokens":5,"cache_read_input_tokens":40500});
+        sanitize_minimax_anthropic_usage(Some("ocg-generic"), Some("minimax-m3"), &mut usage);
+        assert_eq!(usage["input_tokens"], 40500);
+        assert_eq!(usage["cache_read_input_tokens"], 0);
+    }
+
+    #[test]
+    fn messages_response_to_chat_sanitizes_minimax_bogus_all_cache() {
+        let response = json!({
+            "id":"m1","model":"minimax-m3",
+            "content":[{"type":"text","text":"hi"}],
+            "stop_reason":"end_turn",
+            "usage":{"input_tokens":0,"output_tokens":5,"cache_read_input_tokens":40500}
+        });
+        let chat = transform_response(
+            &plan_with_model(ApiFormat::ChatCompletions, ApiFormat::Messages, "minimax-m3"),
+            &response,
+        )
+        .expect("Messages to Chat");
+        assert_eq!(chat["usage"]["prompt_tokens"], 40500);
+        assert_eq!(chat["usage"]["prompt_tokens_details"]["cached_tokens"], 0);
+    }
+
+    #[test]
+    fn messages_response_to_chat_sanitizes_minimax_when_model_is_missing() {
+        // OpenCode Go's Anthropic-compatible endpoint sometimes omits the model field
+        // from the response body. The request plan's model must still trigger sanitization.
+        let response = json!({
+            "id":"m1",
+            "content":[{"type":"text","text":"hi"}],
+            "stop_reason":"end_turn",
+            "usage":{"input_tokens":0,"output_tokens":5,"cache_read_input_tokens":40500}
+        });
+        let chat = transform_response(
+            &plan_with_model(ApiFormat::ChatCompletions, ApiFormat::Messages, "minimax-m3"),
+            &response,
+        )
+        .expect("Messages to Chat");
+        assert_eq!(chat["usage"]["prompt_tokens"], 40500);
+        assert_eq!(chat["usage"]["prompt_tokens_details"]["cached_tokens"], 0);
+    }
+
+    #[test]
+    fn chat_to_messages_minimax_end_to_end_sanitizes_bogus_all_cache() {
+        // Simulates the user-reported scenario: an OpenAI Chat Completions client calls
+        // MiniMax-M3, the gateway routes it to the Anthropic Messages upstream, and
+        // OpenCode Go returns a bogus all-cache signature with the response model rewritten
+        // to an internal identifier. Both the client-facing response and the internal
+        // usage accounting must show the tokens as ordinary input, not cache hits.
+        let plan = prepare_request(
+            ApiFormat::ChatCompletions,
+            bytes(json!({
+                "model": "MiniMax-M3",
+                "messages": [{"role": "user", "content": "hi"}],
+                "max_tokens": 8
+            })),
+        )
+        .expect("MiniMax-M3 should route to Messages");
+        assert_eq!(plan.upstream, ApiFormat::Messages);
+
+        let upstream_response = json!({
+            "id": "msg_1",
+            "type": "message",
+            "model": "ocg-generic",
+            "content": [{"type": "text", "text": "hello"}],
+            "stop_reason": "end_turn",
+            "usage": {"input_tokens": 0, "output_tokens": 5, "cache_read_input_tokens": 40669}
+        });
+
+        let chat = transform_response(&plan, &upstream_response).expect("Messages to Chat");
+        assert_eq!(chat["usage"]["prompt_tokens"], 40669);
+        assert_eq!(chat["usage"]["prompt_tokens_details"]["cached_tokens"], 0);
+
+        let counts = extract_usage(plan.upstream, &upstream_response, Some(&plan.model));
+        assert_eq!(counts.input_tokens, 40669);
+        assert_eq!(counts.cached_tokens, 0);
+    }
+
+    #[test]
+    fn extract_usage_sanitizes_minimax_with_model_hint() {
+        let usage = json!({
+            "type":"message_start",
+            "message":{"usage":{"input_tokens":0,"output_tokens":5,"cache_read_input_tokens":40500}}
+        });
+        let counts = extract_usage(ApiFormat::Messages, &usage, Some("minimax-m3"));
+        assert_eq!(counts.input_tokens, 40500);
+        assert_eq!(counts.cached_tokens, 0);
+
+        // When the upstream response contains a non-MiniMax model identifier but the request
+        // plan is MiniMax, the hint must still trigger sanitization.
+        let usage = json!({
+            "type":"message_start",
+            "message":{"model":"qwen3.7-max","usage":{"input_tokens":0,"output_tokens":5,"cache_read_input_tokens":40500}}
+        });
+        let counts = extract_usage(ApiFormat::Messages, &usage, Some("minimax-m3"));
+        assert_eq!(counts.input_tokens, 40500);
+        assert_eq!(counts.cached_tokens, 0);
+    }
+
+    #[test]
+    fn extract_usage_sanitizes_minimax_chat_completion_usage() {
+        // When a MiniMax model is routed/answered over the OpenAI Chat Completions wire
+        // format, the bogus all-cache signature appears as prompt_tokens == cached_tokens.
+        let usage = json!({
+            "model": "minimax-m3",
+            "usage": {
+                "prompt_tokens": 40669,
+                "completion_tokens": 5,
+                "prompt_tokens_details": {"cached_tokens": 40669}
+            }
+        });
+        let counts = extract_usage(ApiFormat::ChatCompletions, &usage, Some("minimax-m3"));
+        assert_eq!(counts.input_tokens, 40669);
+        assert_eq!(counts.cached_tokens, 0);
+    }
+
+    #[test]
+    fn transform_response_sanitizes_minimax_chat_completion_passthrough() {
+        // If a MiniMax model name does not route to the Anthropic Messages upstream,
+        // the response is passed through in Chat Completions format and still needs
+        // the bogus all-cache signature removed.
+        let response = json!({
+            "id": "chatcmpl-1",
+            "model": "minimax-m3",
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": "hi"}, "finish_reason": "stop"}],
+            "usage": {
+                "prompt_tokens": 40669,
+                "completion_tokens": 5,
+                "prompt_tokens_details": {"cached_tokens": 40669}
+            }
+        });
+        let converted = transform_response(
+            &plan_with_model(ApiFormat::ChatCompletions, ApiFormat::ChatCompletions, "minimax-m3"),
+            &response,
+        )
+        .expect("Chat Completions passthrough should sanitize");
+        assert_eq!(converted["usage"]["prompt_tokens"], 40669);
+        assert_eq!(converted["usage"]["prompt_tokens_details"]["cached_tokens"], 0);
+    }
+
+    #[test]
+    fn minimax_model_detection_is_case_and_separator_insensitive() {
+        // OpenCode Go / Qwen Cloud docs expose MiniMax IDs with capital letters (MiniMax-M3).
+        // The sanitizer must still recognize them.
+        let mut usage =
+            json!({"input_tokens":0,"output_tokens":5,"cache_read_input_tokens":40500});
+        sanitize_minimax_anthropic_usage(Some("MiniMax-M3"), None, &mut usage);
+        assert_eq!(usage["input_tokens"], 40500);
+        assert_eq!(usage["cache_read_input_tokens"], 0);
+
+        let mut usage =
+            json!({"input_tokens":0,"output_tokens":5,"cache_read_input_tokens":40500});
+        sanitize_minimax_anthropic_usage(Some("ocg-generic"), Some("MiniMax_M3"), &mut usage);
+        assert_eq!(usage["input_tokens"], 40500);
+        assert_eq!(usage["cache_read_input_tokens"], 0);
+
+        // Qwen is unaffected.
+        let mut usage =
+            json!({"input_tokens":0,"output_tokens":5,"cache_read_input_tokens":40500});
+        sanitize_minimax_anthropic_usage(Some("Qwen3.7-Max"), None, &mut usage);
+        assert_eq!(usage["cache_read_input_tokens"], 40500);
+    }
+
+    #[test]
+    fn mixed_case_minimax_routes_to_messages_native_protocol() {
+        let plan = prepare_request(
+            ApiFormat::ChatCompletions,
+            bytes(json!({
+                "model": "MiniMax-M3",
+                "messages": [{"role": "user", "content": "hi"}],
+                "max_tokens": 8
+            })),
+        )
+        .expect("MiniMax-M3 should be routable");
+        assert_eq!(plan.upstream, ApiFormat::Messages);
+        assert_eq!(plan.model, "MiniMax-M3");
+
+        let plan = prepare_request(
+            ApiFormat::ChatCompletions,
+            bytes(json!({
+                "model": "MiniMax_M2.7",
+                "messages": [{"role": "user", "content": "hi"}],
+                "max_tokens": 8
+            })),
+        )
+        .expect("MiniMax_M2.7 should be routable");
+        assert_eq!(plan.upstream, ApiFormat::Messages);
+    }
+
+    #[test]
     fn signed_anthropic_thinking_round_trips_and_foreign_reasoning_is_dropped() {
         let response = json!({
             "id":"m1","model":"minimax-m2.7","stop_reason":"tool_use",
@@ -4170,11 +4516,13 @@ mod tests {
             ApiFormat::Messages,
             &json!({"type":"message_start","message":{"usage":{"input_tokens":6,"cache_read_input_tokens":4,"cache_creation_input_tokens":2}}}),
             &mut counts,
+            None,
         );
         merge_stream_usage(
             ApiFormat::Messages,
             &json!({"type":"message_delta","usage":{"output_tokens":7}}),
             &mut counts,
+            None,
         );
         assert_eq!(
             counts,
@@ -4190,6 +4538,7 @@ mod tests {
             extract_usage(
                 ApiFormat::Responses,
                 &json!({"response":{"usage":{"input_tokens":9,"output_tokens":3,"input_tokens_details":{"cached_tokens":2}}}}),
+                None,
             ),
             UsageCounts {
                 input_tokens: 9,

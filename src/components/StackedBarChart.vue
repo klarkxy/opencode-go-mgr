@@ -300,16 +300,23 @@ const bars = computed(() => {
 });
 
 // X 轴标签:太密时跳着显示,大约每 5~7 天一个标签
+// 始终包含最后一天 (today),否则当日用量在 X 轴上看不到日期
 const xLabels = computed(() => {
   const n = dates.value.length;
   if (n === 0) return [];
   // 目标最多 ~6 个标签
   const step = Math.max(1, Math.round(n / 6));
   const out: { x: number; text: string }[] = [];
+  const lastIndex = n - 1;
   for (let i = 0; i < n; i += step) {
     const ds = dates.value[i].date;
     const text = formatChartDate(ds, true);
     out.push({ x: padL + barWidth.value * (i + 0.5), text });
+  }
+  // 确保最后一天 (today) 始终有标签,即使 step 没对齐到末尾
+  if (out.length > 0 && lastIndex % step !== 0) {
+    const ds = dates.value[lastIndex].date;
+    out.push({ x: padL + barWidth.value * (lastIndex + 0.5), text: formatChartDate(ds, true) });
   }
   return out;
 });
@@ -359,7 +366,8 @@ function showTooltip(bi: number, x: number, y: number) {
   const d = dates.value[bi];
   if (!d) return;
   const rect = rootRef.value?.getBoundingClientRect();
-  const maxX = rect ? rect.width - 184 : x;
+  // 200 与 .chart-tooltip max-width 对齐,+4 留出右边距,避免 tooltip 触发父容器 overflow
+  const maxX = rect ? rect.width - 200 - 4 : x;
   tooltip.value = {
     show: true,
     title: formatChartDate(d.date),
@@ -434,6 +442,7 @@ function updateTooltip(bi: number, e: PointerEvent) {
   pointer-events: none;
   z-index: 5;
   min-width: 168px;
+  max-width: 200px;
   padding: 8px 10px;
   border: 1px solid var(--ocg-border);
   border-radius: 8px;

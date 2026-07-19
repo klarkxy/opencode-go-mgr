@@ -49,6 +49,71 @@ pnpm run build
 
 `pnpm run build` 只用于当前原生平台的最终 release 构建，并在成功后原子替换 `release/`；只验证前端时用 `pnpm run build:web`。Windows 仅发布 x64 NSIS 安装包，macOS 发布 Universal DMG，Linux x64 发布 AppImage 和 deb；CLI 压缩包必须包含同级 `dist/` 与 `LICENSE`。
 
+## Release 打包流程
+
+### 环境准备（Windows）
+
+1. 确保 `pnpm` 可用。本项目使用 `packageManager: pnpm@10.29.2`，可通过 `corepack` 启用；若当前环境没有 `corepack` 管理员权限或 PATH 未包含 pnpm，可在用户目录创建 shim：
+
+   ```powershell
+   # 示例路径，请按实际 node/corepack 版本调整
+   $shimDir = "$env:LOCALAPPDATA\pnpm-shim"
+   $nodeExe = "C:\Program Files\nodejs\node.exe"
+   $pnpmCjs = "$env:LOCALAPPDATA\node\corepack\v1\pnpm\10.29.2\bin\pnpm.cjs"
+   New-Item -ItemType Directory -Force -Path $shimDir
+   "@echo off`n`"$nodeExe`" `"$pnpmCjs`" %*" | Out-File -Encoding ASCII "$shimDir\pnpm.cmd"
+   $env:Path = "$shimDir;$env:Path"
+   ```
+
+2. 退出已安装的 release 版本，释放单实例锁和 `9042` 端口。可用以下命令查找并关闭：
+
+   ```powershell
+   Get-NetTCPConnection -LocalPort 9042 -ErrorAction SilentlyContinue |
+     Select-Object OwningProcess | Get-Process | Stop-Process -Force
+   ```
+
+3. 确认版本一致：`package.json`、`src-tauri/tauri.conf.json`、`Cargo.toml` workspace 和 `src-tauri/Cargo.toml` 的 `version` 必须相同。
+
+### 执行构建
+
+```powershell
+# 如果 pnpm 不在 PATH，先加 shim
+$env:Path = "C:\Users\<用户名>\AppData\Local\pnpm-shim;$env:Path"
+pnpm run build
+```
+
+`pnpm run build` 会调用 `scripts/release.mjs`，其流程如下：
+
+1. 校验版本一致性（`validateVersion`）。
+2. 解析 updater 签名配置（`scripts/generate-updater-manifest.mjs`）。**没有 `TAURI_SIGNING_PRIVATE_KEY_PATH` 时只产出普通本地包，不能用于应用内升级，仅做本地 smoke test。**
+3. 清理并创建临时目录 `.release-tmp-<pid>/release` 和 `.release-tmp-<pid>/cli`。
+4. 调用 `tauri build --ci --bundles nsis`（Windows）/`appimage,deb`（Linux）/`dmg[,app.tar.gz]`（macOS）。
+5. 把 Tauri 产物复制到临时 release 目录。
+6. 重新编译 CLI：`cargo build --release --bin ocg-manager-cli`。
+7. 准备 CLI 包：把 CLI 二进制、`dist/` 目录、`LICENSE` 放进临时 `cli/` 目录。
+8. 打包 CLI zip（Windows 用 `Compress-Archive`）或 tar.gz（Linux/macOS）。
+9. 生成 `SHA256SUMS`。
+10. 原子替换 `release/` 目录：先把旧的 `release/` 重命名为 `.release-backup-<pid>`，再把临时 release 目录重命名为 `release/`，成功后删除备份。
+11. 清理 `.release-tmp-<pid>`。
+
+### 构建后处理
+
+Tauri 在 Windows 上会重写 `src-tauri/Cargo.toml` 和 `src-tauri/gen/schemas/*.json` 的行尾为 CRLF。由于 `core.autocrlf=true`，`git diff` 可能为空但 `git status` 仍显示 modified。构建完成后需把这些文件还原：
+
+```powershell
+git checkout -- src-tauri/Cargo.toml src-tauri/gen/schemas/desktop-schema.json src-tauri/gen/schemas/windows-schema.json
+```
+
+### 产物位置
+
+构建成功后 `release/` 目录包含（以 Windows x64 为例）：
+
+- `ocg-manager_<version>_windows-x64-setup.exe`
+- `ocg-manager-cli_<version>_windows-x64.zip`
+- `SHA256SUMS`
+
+macOS 产物为 `_macos-universal.dmg` 和 `_macos-universal.app.tar.gz`（启用 updater 时）；Linux 产物为 `_linux-x64.AppImage`、`_linux-x64.deb` 和 `_linux-x64.tar.gz`。
+
 ## 开发约束
 
 - 工作区可能是脏树。先看 `git status --short`，不要回退不是你改的内容。

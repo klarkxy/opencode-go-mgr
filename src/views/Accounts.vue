@@ -113,86 +113,20 @@
 
           <template #header-extra>
             <n-space align="center" :size="8">
-              <n-popover
-                v-if="usageEdits[account.id]"
-                trigger="click"
-                width="trigger"
-                :show-arrow="false"
-              >
+              <n-tooltip v-if="usageEdits[account.id]" trigger="hover">
                 <template #trigger>
-                  <n-tooltip trigger="hover">
-                    <template #trigger>
-                      <n-button
-                        circle
-                        quaternary
-                        size="small"
-                        :aria-label="t('校准用量')"
-                      >
-                        <template #icon><n-icon :component="EditOutlined" /></template>
-                      </n-button>
-                    </template>
-                    {{ t("校准用量") }}
-                  </n-tooltip>
+                  <n-button
+                    circle
+                    quaternary
+                    size="small"
+                    :aria-label="t('校准用量')"
+                    @click="focusUsageEditor(account.id)"
+                  >
+                    <template #icon><n-icon :component="EditOutlined" /></template>
+                  </n-button>
                 </template>
-                <div class="usage-editor-popover">
-                  <p class="usage-editor-caption">
-                    {{ t("手动上报用量百分比，仅用于校准额度显示") }}
-                  </p>
-                  <div v-for="limit in usageLimits" :key="limit.key" class="usage-editor-row">
-                    <div class="usage-editor-label">
-                      <span>{{ limit.label }}</span>
-                      <span class="usage-editor-value">
-                        {{ usageEdits[account.id][limit.key].draft }}%
-                      </span>
-                    </div>
-                    <div class="usage-editor">
-                      <n-input-number
-                        :value="usageEdits[account.id][limit.key].draft"
-                        :min="0"
-                        :max="100"
-                        :step="0.1"
-                        :precision="1"
-                        size="tiny"
-                        :show-button="false"
-                        :disabled="usageLoading[account.id] || usageEdits[account.id][limit.key].saving"
-                        :status="usageEdits[account.id][limit.key].error ? 'error' : undefined"
-                        :input-props="{
-                          'aria-label': t('{name} {period} 当前用量百分比', {
-                            name: account.name,
-                            period: limit.label,
-                          }),
-                        }"
-                        @update:value="updateUsageDraft(account.id, limit.key, $event)"
-                        @blur="saveUsage(account.id, limit.key)"
-                        @keydown.enter.prevent="saveUsage(account.id, limit.key)"
-                      >
-                        <template #suffix>%</template>
-                      </n-input-number>
-                      <n-slider
-                        v-usage-slider-label="t('{name} {period} 当前用量百分比', {
-                          name: account.name,
-                          period: limit.label,
-                        })"
-                        :value="usageEdits[account.id][limit.key].draft"
-                        :min="0"
-                        :max="100"
-                        :step="0.1"
-                        :disabled="usageLoading[account.id] || usageEdits[account.id][limit.key].saving"
-                        @update:value="updateUsageDraft(account.id, limit.key, $event)"
-                        @dragend="saveUsage(account.id, limit.key)"
-                        @focusout="saveUsage(account.id, limit.key)"
-                      />
-                    </div>
-                    <span
-                      v-if="usageEdits[account.id][limit.key].error"
-                      class="usage-save-error"
-                      role="alert"
-                    >
-                      {{ t("用量保存失败: {error}", { error: usageEdits[account.id][limit.key].error || "" }) }}
-                    </span>
-                  </div>
-                </div>
-              </n-popover>
+                {{ t("校准用量") }}
+              </n-tooltip>
 
               <n-tooltip trigger="hover">
                 <template #trigger>
@@ -244,57 +178,145 @@
             </n-space>
           </template>
 
-          <div v-if="!quotaLimitsError && (quotaLimitsLoading || !quotaLimits)" class="usage-strip">
-            <div class="usage-strip-body">
-              <div class="usage-segment">
-                <n-progress type="line" :height="8" :percentage="0" processing :show-indicator="false" />
-              </div>
+          <div v-if="!quotaLimitsError">
+            <div v-if="usageLoadErrors[account.id]" class="usage-load-error" role="alert">
+              <span>{{ t("用量加载失败") }}</span>
+              <n-button
+                text
+                size="tiny"
+                type="primary"
+                :loading="usageLoading[account.id]"
+                @click="loadAccountUsage(account.id)"
+              >
+                {{ t("重试") }}
+              </n-button>
             </div>
-          </div>
-
-          <div v-else-if="!quotaLimitsError && usageLoadErrors[account.id]" class="usage-load-error" role="alert">
-            <span>{{ t("用量加载失败") }}</span>
-            <n-button
-              text
-              size="tiny"
-              type="primary"
-              :loading="usageLoading[account.id]"
-              @click="loadAccountUsage(account.id)"
-            >
-              {{ t("重试") }}
-            </n-button>
-          </div>
-
-          <div v-else-if="!quotaLimitsError" class="usage-strip">
-            <div class="usage-strip-body" role="group" :aria-label="t('用量')">
+            <div v-else class="usage-strip">
+              <div class="usage-strip-body" role="group" :aria-label="t('用量')">
               <div v-for="limit in usageLimits" :key="limit.key" class="usage-segment">
-                <div class="usage-meta">
-                  <span>{{ limit.label }}</span>
-                  <strong>{{ formatCost(usageCost(account.id, limit.key)) }} / {{ formatCost(limit.limit) }}</strong>
-                </div>
-                <n-progress
-                  type="line"
-                  :height="8"
-                  :percentage="usageProgressPercentage(
-                    account,
-                    limit.key,
-                    usagePercent(account.id, limit.key),
-                    now,
-                  )"
-                  :status="usageProgressStatus(
-                    account,
-                    limit.key,
-                    usagePercent(account.id, limit.key),
-                    now,
-                  )"
-                  :show-indicator="false"
-                />
-                <span class="usage-reset-countdown">
-                  <template v-if="isWindowCooling(account, limit.key, now)">
-                    {{ t("重置于 {time}", { time: formatWindowRemaining(account, limit.key) }) }}
-                  </template>
-                </span>
+              <div class="usage-meta">
+                <span>{{ limit.label }}</span>
+                <strong v-if="usageEdits[account.id]">
+                  {{ formatCost(usageCost(account.id, limit.key)) }} / {{ formatCost(limit.limit) }}
+                </strong>
               </div>
+              <n-progress
+                v-if="accountUsageLimitReached(account, limit.key)"
+                type="line"
+                :height="8"
+                :percentage="usageProgressPercentage(account, limit.key, 100)"
+                :status="usageProgressStatus(account, limit.key, 100)"
+                :show-indicator="false"
+              />
+              <template v-else-if="usageEdits[account.id]">
+                <div class="usage-editor">
+                  <n-input-number
+                    :value="usageEdits[account.id][limit.key].draft"
+                    :min="0"
+                    :max="100"
+                    :step="0.1"
+                    :precision="1"
+                    size="tiny"
+                    :show-button="false"
+                    :disabled="usageLoading[account.id] || usageEdits[account.id][limit.key].saving"
+                    :status="usageEdits[account.id][limit.key].error ? 'error' : undefined"
+                    :input-props="{
+                      'aria-label': t('{name} {period} 当前用量百分比', {
+                        name: account.name,
+                        period: limit.label,
+                      }),
+                    }"
+                    @update:value="updateUsageDraft(account.id, limit.key, $event)"
+                    @blur="saveUsage(account.id, limit.key)"
+                    @keydown.enter.prevent="saveUsage(account.id, limit.key)"
+                  >
+                    <template #suffix>%</template>
+                  </n-input-number>
+                  <n-slider
+                    v-usage-slider-label="t('{name} {period} 当前用量百分比', {
+                      name: account.name,
+                      period: limit.label,
+                    })"
+                    :value="usageEdits[account.id][limit.key].draft"
+                    :min="0"
+                    :max="100"
+                    :step="0.1"
+                    :disabled="usageLoading[account.id] || usageEdits[account.id][limit.key].saving"
+                    @update:value="updateUsageDraft(account.id, limit.key, $event)"
+                    @dragend="saveUsage(account.id, limit.key)"
+                    @focusout="saveUsage(account.id, limit.key)"
+                  />
+                </div>
+                <div class="usage-resets-row">
+                  <template v-if="WINDOW_FULL_MINUTES[limit.key] !== null">
+                    <span class="usage-resets-hint">{{ t("距上游重置还剩") }}</span>
+                    <n-input-number
+                      :value="resetsFirstField(account.id, limit.key)"
+                      :min="0"
+                      :max="resetsFirstMax(limit.key)"
+                      :step="1"
+                      size="tiny"
+                      :show-button="false"
+                      :disabled="usageLoading[account.id] || usageEdits[account.id][limit.key].saving"
+                      :input-props="{
+                        'aria-label': t('{name} {period} 距上游重置还剩{unit}', {
+                          name: account.name,
+                          period: limit.label,
+                          unit: resetsFirstLabel(limit.key),
+                        }),
+                      }"
+                      @update:value="updateResetsFirstField(account.id, limit.key, $event)"
+                      @blur="saveUsage(account.id, limit.key)"
+                      @keydown.enter.prevent="saveUsage(account.id, limit.key)"
+                    >
+                      <template #suffix>{{ resetsFirstLabel(limit.key) }}</template>
+                    </n-input-number>
+                    <n-input-number
+                      :value="resetsSecondField(account.id, limit.key)"
+                      :min="0"
+                      :max="resetsSecondMax(limit.key)"
+                      :step="1"
+                      size="tiny"
+                      :show-button="false"
+                      :disabled="usageLoading[account.id] || usageEdits[account.id][limit.key].saving"
+                      :input-props="{
+                        'aria-label': t('{name} {period} 距上游重置还剩{unit}', {
+                          name: account.name,
+                          period: limit.label,
+                          unit: resetsSecondLabel(limit.key),
+                        }),
+                      }"
+                      @update:value="updateResetsSecondField(account.id, limit.key, $event)"
+                      @blur="saveUsage(account.id, limit.key)"
+                      @keydown.enter.prevent="saveUsage(account.id, limit.key)"
+                    >
+                      <template #suffix>{{ resetsSecondLabel(limit.key) }}</template>
+                    </n-input-number>
+                  </template>
+                  <span v-else class="usage-resets-hint">{{ t("到期于 {date}", { date: account.expires_on }) }}</span>
+                </div>
+                <span
+                  v-if="usageEdits[account.id][limit.key].error"
+                  class="usage-save-error"
+                  role="alert"
+                >
+                  {{ t("用量保存失败: {error}", {
+                    error: usageEdits[account.id][limit.key].error || "",
+                  }) }}
+                </span>
+              </template>
+              <n-progress
+                v-else
+                type="line"
+                :height="8"
+                :percentage="usageProgressPercentage(account, limit.key, 0)"
+                :status="usageProgressStatus(account, limit.key, 0)"
+                processing
+                :show-indicator="false"
+              />
+              <span class="usage-reset-countdown"></span>
+            </div>
+            </div>
             </div>
           </div>
         </n-card>
@@ -325,7 +347,6 @@ import {
   NH3,
   NIcon,
   NInputNumber,
-  NPopover,
   NProgress,
   NSpin,
   NSlider,
@@ -346,15 +367,16 @@ import {
 import { DashboardRequestError, tauriApi } from "../api/tauri";
 import type { Account, AccountInput, AccountUpdate, PricingLimits, UsageWindow } from "../api/tauri";
 import {
+  defaultResetsInMinutes,
   isCooling,
   isUsageLimitReached,
   isWindowCooling,
   mergeUsageEdit,
   normalizeUsagePercent,
-  resetTimeForWindow,
   usagePercentFromCost,
   usageProgressPercentage,
   usageProgressStatus,
+  WINDOW_FULL_MINUTES,
 } from "./accounts-usage";
 import type { UsageEditState, UsageKey } from "./accounts-usage";
 import { daysUntilDate, expiryTagType, moveItem } from "./account-lifecycle";
@@ -432,6 +454,9 @@ function blankUsage(accountId: string): UsageWindow {
     window_5h: 0,
     window_week: 0,
     window_month: 0,
+    resets_in_5h: null,
+    resets_in_week: null,
+    resets_in_month: null,
   };
 }
 
@@ -447,14 +472,22 @@ function usageLimit(key: UsageKey): number {
   return usageLimits.value.find((limit) => limit.key === key)?.limit ?? 0;
 }
 
-function usagePercent(accountId: string, key: UsageKey): number {
-  return usagePercentFromCost(usageCost(accountId, key), usageLimit(key));
+function accountUsageLimitReached(account: Account, key: UsageKey): boolean {
+  return isUsageLimitReached(account, key, now.value);
 }
 
 function usageEditsFromWindow(usage: UsageWindow): AccountUsageEdits {
   return Object.fromEntries(usageLimits.value.map(({ key, limit }) => {
     const percent = usagePercentFromCost(usage[key], limit);
-    return [key, { draft: percent, saved: percent, saving: false, error: null }];
+    const resetsInMin = defaultResetsInMinutes(usage, key, now.value);
+    return [key, {
+      draft: percent,
+      saved: percent,
+      saving: false,
+      error: null,
+      resets_in_minutes_draft: resetsInMin,
+      resets_in_minutes_saved: resetsInMin,
+    }];
   })) as AccountUsageEdits;
 }
 
@@ -474,6 +507,12 @@ function syncUsageEdits(accountId: string, usage: UsageWindow) {
       continue;
     }
     Object.assign(edit, mergeUsageEdit(edit, saved, Boolean(wasActuallyReset)));
+    // 同步 resets_in_minutes_saved；draft 未被用户改动时跟着 saved 走。
+    const resetsInMin = defaultResetsInMinutes(usage, key, now.value);
+    edit.resets_in_minutes_saved = resetsInMin;
+    if (edit.resets_in_minutes_draft === null || !edit.saving && edit.resets_in_minutes_draft === edit.resets_in_minutes_saved) {
+      edit.resets_in_minutes_draft = resetsInMin;
+    }
   }
 }
 
@@ -483,23 +522,117 @@ function updateUsageDraft(accountId: string, key: UsageKey, value: number | null
   edit.draft = normalizeUsagePercent(value);
 }
 
+// 校准按钮入口：滚动到该账号卡片第一个用量输入框并聚焦。
+// HEAD 的 inline editor 已经在卡片 body 中，这里只是 anchor 跳转。
+function focusUsageEditor(accountId: string) {
+  const card = document.querySelector<HTMLElement>(
+    `.account-card[data-account-id="${accountId}"] .usage-editor .n-input-number input`,
+  );
+  if (card) {
+    card.scrollIntoView({ behavior: "smooth", block: "center" });
+    card.focus();
+  }
+}
+
+// ponytail: 用户要求直接编辑"天+小时"或"小时+分钟"，而不是分钟总数。
+// 5h 窗口（<1天）显示 [小时][分钟]；周窗口（≥1天）显示 [天][小时]。
+function resetsFirstLabel(key: UsageKey): string {
+  return key === "window_5h" ? t("小时") : t("天");
+}
+
+function resetsSecondLabel(key: UsageKey): string {
+  return key === "window_5h" ? t("分钟") : t("小时");
+}
+
+function resetsFirstMax(key: UsageKey): number {
+  if (key === "window_5h") return 5;
+  if (key === "window_week") return 7;
+  return 0;
+}
+
+function resetsSecondMax(key: UsageKey): number {
+  if (key === "window_5h") return 59;
+  if (key === "window_week") return 23;
+  return 0;
+}
+
+function resetsFirstField(accountId: string, key: UsageKey): number {
+  const edit = usageEdits.value[accountId]?.[key];
+  if (!edit || edit.resets_in_minutes_draft === null) return 0;
+  const m = edit.resets_in_minutes_draft;
+  if (key === "window_5h") return Math.floor(m / 60);
+  if (key === "window_week") return Math.floor(m / (24 * 60));
+  return 0;
+}
+
+function resetsSecondField(accountId: string, key: UsageKey): number {
+  const edit = usageEdits.value[accountId]?.[key];
+  if (!edit || edit.resets_in_minutes_draft === null) return 0;
+  const m = edit.resets_in_minutes_draft;
+  if (key === "window_5h") return m % 60;
+  if (key === "window_week") return Math.floor((m % (24 * 60)) / 60);
+  return 0;
+}
+
+function fieldsToMinutes(first: number, second: number, key: UsageKey): number {
+  if (key === "window_5h") return first * 60 + second;
+  if (key === "window_week") return first * 24 * 60 + second * 60;
+  return 0;
+}
+
+function updateResetsFirstField(accountId: string, key: UsageKey, value: number | null) {
+  const edit = usageEdits.value[accountId]?.[key];
+  if (!edit || edit.saving) return;
+  if (WINDOW_FULL_MINUTES[key] === null) return;
+  const v = value === null ? 0 : Math.max(0, Math.round(value));
+  const second = resetsSecondField(accountId, key);
+  const max = WINDOW_FULL_MINUTES[key] ?? 10080;
+  edit.resets_in_minutes_draft = Math.min(max, fieldsToMinutes(v, second, key));
+}
+
+function updateResetsSecondField(accountId: string, key: UsageKey, value: number | null) {
+  const edit = usageEdits.value[accountId]?.[key];
+  if (!edit || edit.saving) return;
+  if (WINDOW_FULL_MINUTES[key] === null) return;
+  const v = value === null ? 0 : Math.max(0, Math.round(value));
+  const first = resetsFirstField(accountId, key);
+  const max = WINDOW_FULL_MINUTES[key] ?? 10080;
+  edit.resets_in_minutes_draft = Math.min(max, fieldsToMinutes(first, v, key));
+}
+
 async function saveUsage(accountId: string, key: UsageKey) {
   const edit = usageEdits.value[accountId]?.[key];
   if (!edit || edit.saving) return;
   const percent = normalizeUsagePercent(edit.draft);
   edit.draft = percent;
-  if (percent === edit.saved && !edit.error) return;
+  const resetsChanged = edit.resets_in_minutes_draft !== edit.resets_in_minutes_saved;
+  if (percent === edit.saved && !resetsChanged && !edit.error) return;
   edit.saving = true;
   edit.error = null;
+  // ponytail: Bug 3 — 之前用 defaultResetsInMinutes(usage, key, now.value) 重算剩余分钟，
+  // 由于 now.value（每秒刷新的 Vue ref）始终 ≤ backend 处理请求时的 Utc::now()，
+  // Math.ceil((ends_at - now)/60000) 会向上取整多出 1 分钟，每次保存累加。
+  // 直接回写用户输入的值，这就是发给后端的值，无需重算。
+  const userResetsInMin = edit.resets_in_minutes_draft;
   try {
-    const usage = await tauriApi.updateAccountUsage(accountId, key, percent);
+    const usage = await tauriApi.updateAccountUsage(
+      accountId,
+      key,
+      percent,
+      WINDOW_FULL_MINUTES[key] === null ? null : userResetsInMin,
+    );
     usageMap.value[accountId] = {
       ...getUsage(accountId),
       [key]: usage[key],
+      ...(key === "window_5h" ? { resets_in_5h: usage.resets_in_5h } : {}),
+      ...(key === "window_week" ? { resets_in_week: usage.resets_in_week } : {}),
+      ...(key === "window_month" ? { resets_in_month: usage.resets_in_month } : {}),
     };
     const saved = usagePercentFromCost(usage[key], usageLimit(key));
     edit.draft = saved;
     edit.saved = saved;
+    edit.resets_in_minutes_draft = userResetsInMin;
+    edit.resets_in_minutes_saved = userResetsInMin;
   } catch (error) {
     edit.error = errorDetail(error);
   } finally {
@@ -536,21 +669,6 @@ function cooldownDetails(account: Account): string {
     active.unshift(t("冷却中"));
   }
   return active.length > 0 ? active.join(" · ") : t("冷却中");
-}
-
-function formatWindowRemaining(account: Account, key: UsageKey): string {
-  const until = resetTimeForWindow(account, key);
-  if (!until) return "";
-  const ms = new Date(until).getTime() - now.value;
-  if (ms <= 0) return "";
-  const seconds = Math.ceil(ms / 1000);
-  if (seconds < 60) return t("{seconds}秒", { seconds });
-  const min = Math.floor(ms / 60000);
-  if (min < 60) return t("{minutes}分钟", { minutes: min });
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return t("{hours}小时{minutes}分钟", { hours: hr, minutes: min % 60 });
-  const day = Math.floor(hr / 24);
-  return t("{days}天{hours}小时", { days: day, hours: hr % 24 });
 }
 
 function accountExpiryDays(account: Account): number {
@@ -1056,9 +1174,6 @@ onUnmounted(() => {
 
 .usage-strip {
   min-width: 0;
-}
-
-.usage-strip-body {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
@@ -1084,45 +1199,6 @@ onUnmounted(() => {
   font-weight: 600;
 }
 
-.usage-reset-countdown {
-  min-height: 1.4em;
-  color: var(--ocg-error);
-  font-size: var(--ocg-font-xs);
-  line-height: 1.4;
-  white-space: nowrap;
-}
-
-.usage-editor-popover {
-  display: grid;
-  gap: 10px;
-  min-width: 220px;
-}
-
-.usage-editor-caption {
-  margin: 0;
-  color: var(--ocg-muted);
-  font-size: var(--ocg-font-xs);
-  line-height: 1.5;
-}
-
-.usage-editor-row {
-  display: grid;
-  gap: 4px;
-}
-
-.usage-editor-label {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  font-size: var(--ocg-font-sm);
-  color: var(--ocg-muted);
-}
-
-.usage-editor-value {
-  color: var(--ocg-ink);
-  font-family: "Cascadia Mono", Consolas, monospace;
-}
-
 .usage-editor {
   display: grid;
   grid-template-columns: 78px minmax(0, 1fr);
@@ -1134,13 +1210,33 @@ onUnmounted(() => {
   width: 78px;
 }
 
+.usage-reset-countdown {
+  min-height: 1.4em;
+}
+
+.usage-resets-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--ocg-font-xs);
+  color: var(--ocg-muted);
+}
+
+.usage-resets-row :deep(.n-input-number) {
+  width: 72px;
+}
+
+.usage-resets-hint {
+  white-space: nowrap;
+}
+
 .usage-save-error {
   color: var(--ocg-error);
   font-size: var(--ocg-font-xs);
 }
 
 @media (max-width: 900px) {
-  .usage-strip-body {
+  .usage-strip {
     grid-template-columns: 1fr;
   }
 

@@ -499,6 +499,7 @@ async fn forward_request_impl(
 
         let st_map = st.clone();
         let converter_map = converter.clone();
+        let model_for_stream = model.clone();
         let pricing_map = pricing_snapshot.clone();
         let service_tier_map = plan.service_tier.clone();
 
@@ -513,7 +514,12 @@ async fn forward_request_impl(
                         if stopped {
                             (Vec::new(), true)
                         } else {
-                            process_chunk_for_usage(&mut st_map.lock(), upstream_format, &chunk);
+                            process_chunk_for_usage(
+                                &mut st_map.lock(),
+                                upstream_format,
+                                &chunk,
+                                Some(&model_for_stream),
+                            );
                             let converted = converter_map.lock().process_chunk(chunk);
                             match converted {
                                 Ok(chunks) => (chunks, false),
@@ -826,7 +832,7 @@ async fn forward_request_impl(
         };
 
         let metrics = if has_complete_usage(plan.upstream, &upstream_json) {
-            let usage = extract_usage(plan.upstream, &upstream_json);
+            let usage = extract_usage(plan.upstream, &upstream_json, Some(&model));
             let (prompt_tokens, completion_tokens, cached_tokens, cache_creation_tokens) =
                 token_counts(usage);
             pricing_metrics(
@@ -1379,6 +1385,9 @@ struct StreamState {
     error: bool,
     outcome_unknown: bool,
     error_message: Option<String>,
+    /// Model name carried from the request plan. Used as a fallback when the
+    /// upstream SSE frame omits the model field (e.g. MiniMax via OpenCode Go).
+    model: Option<String>,
 }
 
 const MAX_SSE_BUF: usize = 64 * 1024;
@@ -1430,7 +1439,12 @@ fn extract_data_payload(event: &[u8]) -> Option<String> {
 // ponytail: bounded buffer — if the upstream never sends a complete event
 // (malformed stream, CRLF-only chunks, dropped keep-alive framing), drop the
 // garbage so memory can't grow unbounded.
-fn process_chunk_for_usage(st: &mut StreamState, format: ApiFormat, chunk: &bytes::Bytes) {
+fn process_chunk_for_usage(
+    st: &mut StreamState,
+    format: ApiFormat,
+    chunk: &bytes::Bytes,
+    model_hint: Option<&str>,
+) {
     if st.terminal {
         return;
     }
@@ -1472,8 +1486,22 @@ fn process_chunk_for_usage(st: &mut StreamState, format: ApiFormat, chunk: &byte
                             .to_string(),
                     );
                 }
+                // Capture the model from message_start so later message_delta frames
+                // (which usually omit it) can still be sanitized correctly.
+                if format == ApiFormat::Messages
+                    && v.get("type").and_then(Value::as_str) == Some("message_start")
+                {
+                    if let Some(model) = v
+                        .pointer("/message/model")
+                        .and_then(Value::as_str)
+                        .map(|s| s.to_string())
+                    {
+                        st.model = Some(model);
+                    }
+                }
+                let model = st.model.as_deref().or(model_hint);
                 if has_usage(format, &v) {
-                    merge_stream_usage(format, &v, &mut st.usage);
+                    merge_stream_usage(format, &v, &mut st.usage, model);
                     st.has_usage = true;
                 }
                 let event_type = v.get("type").and_then(Value::as_str);
@@ -1520,7 +1548,7 @@ mod stream_usage_tests {
     fn single_chunk_extracts_usage() {
         let mut st = StreamState::default();
         let chunk = Bytes::from(usage_event());
-        process_chunk_for_usage(&mut st, ApiFormat::ChatCompletions, &chunk);
+        process_chunk_for_usage(&mut st, ApiFormat::ChatCompletions, &chunk, None);
         assert!(st.has_usage, "usage should be set");
         let (p, c, cached, cache_creation) = token_counts(st.usage);
         assert_eq!(p, 10);
@@ -1542,16 +1570,19 @@ mod stream_usage_tests {
             &mut st,
             ApiFormat::ChatCompletions,
             &Bytes::copy_from_slice(a),
+            None,
         );
         process_chunk_for_usage(
             &mut st,
             ApiFormat::ChatCompletions,
             &Bytes::copy_from_slice(b),
+            None,
         );
         process_chunk_for_usage(
             &mut st,
             ApiFormat::ChatCompletions,
             &Bytes::copy_from_slice(c),
+            None,
         );
 
         assert!(st.has_usage, "usage should be set after boundary");
@@ -1565,7 +1596,7 @@ mod stream_usage_tests {
         let mut st = StreamState::default();
         let payload =
             b"data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\ndata: [DONE]\n\n".to_vec();
-        process_chunk_for_usage(&mut st, ApiFormat::ChatCompletions, &Bytes::from(payload));
+        process_chunk_for_usage(&mut st, ApiFormat::ChatCompletions, &Bytes::from(payload), None);
         assert!(!st.has_usage, "no usage field means no usage");
         assert!(st.buf.is_empty());
     }
@@ -1575,8 +1606,8 @@ mod stream_usage_tests {
         let mut st = StreamState::default();
         let first = b"data: {\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":2}}\n\n".to_vec();
         let second = b"data: {\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":200,\"prompt_tokens_details\":{\"cached_tokens\":50}}}\n\n".to_vec();
-        process_chunk_for_usage(&mut st, ApiFormat::ChatCompletions, &Bytes::from(first));
-        process_chunk_for_usage(&mut st, ApiFormat::ChatCompletions, &Bytes::from(second));
+        process_chunk_for_usage(&mut st, ApiFormat::ChatCompletions, &Bytes::from(first), None);
+        process_chunk_for_usage(&mut st, ApiFormat::ChatCompletions, &Bytes::from(second), None);
         assert!(st.has_usage, "usage set");
         let (p, c, cached, cache_creation) = token_counts(st.usage);
         assert_eq!((p, c, cached, cache_creation), (100, 200, 50, 0));
@@ -1591,10 +1622,45 @@ mod stream_usage_tests {
         let delta = Bytes::from_static(
             b"event: message_delta\ndata: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":7}}\n\n",
         );
-        process_chunk_for_usage(&mut st, ApiFormat::Messages, &start);
-        process_chunk_for_usage(&mut st, ApiFormat::Messages, &delta);
+        process_chunk_for_usage(&mut st, ApiFormat::Messages, &start, None);
+        process_chunk_for_usage(&mut st, ApiFormat::Messages, &delta, None);
         assert!(st.has_usage);
         assert_eq!(token_counts(st.usage), (12, 7, 4, 2));
+    }
+
+    #[test]
+    fn messages_stream_sanitizes_minimax_with_model_hint() {
+        // Upstream may omit the model field in message_start; the request plan's
+        // model must still be used to sanitize bogus all-cache usage.
+        let mut st = StreamState::default();
+        let start = Bytes::from_static(
+            b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":0,\"output_tokens\":5,\"cache_read_input_tokens\":40500}}}\n\n",
+        );
+        let delta = Bytes::from_static(
+            b"event: message_delta\ndata: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":5}}\n\n",
+        );
+        process_chunk_for_usage(&mut st, ApiFormat::Messages, &start, Some("minimax-m3"));
+        process_chunk_for_usage(&mut st, ApiFormat::Messages, &delta, Some("minimax-m3"));
+        assert!(st.has_usage);
+        let (p, c, cached, _) = token_counts(st.usage);
+        assert_eq!(p, 40500, "bogus cache read should be moved back to input");
+        assert_eq!(c, 5);
+        assert_eq!(cached, 0);
+    }
+
+    #[test]
+    fn messages_stream_sanitizes_minimax_with_mixed_case_model_hint() {
+        // OpenCode Go / Qwen Cloud expose MiniMax IDs as "MiniMax-M3". The stream
+        // sanitizer must recognize the family regardless of capitalization.
+        let mut st = StreamState::default();
+        let start = Bytes::from_static(
+            b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":0,\"output_tokens\":5,\"cache_read_input_tokens\":40500}}}\n\n",
+        );
+        process_chunk_for_usage(&mut st, ApiFormat::Messages, &start, Some("MiniMax-M3"));
+        assert!(st.has_usage);
+        let (p, _, cached, _) = token_counts(st.usage);
+        assert_eq!(p, 40500, "bogus cache read should be moved back to input");
+        assert_eq!(cached, 0);
     }
 
     #[test]
@@ -1603,7 +1669,7 @@ mod stream_usage_tests {
         let event = Bytes::from_static(
             b"event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"api_error\",\"message\":\"boom\"}}\n\n",
         );
-        process_chunk_for_usage(&mut st, ApiFormat::Messages, &event);
+        process_chunk_for_usage(&mut st, ApiFormat::Messages, &event, None);
         assert!(st.error);
         assert_eq!(st.error_message.as_deref(), Some("boom"));
 
@@ -1611,7 +1677,7 @@ mod stream_usage_tests {
         let event = Bytes::from_static(
             b"event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"server_error\",\"message\":\"codex boom\"}}}\n\n",
         );
-        process_chunk_for_usage(&mut responses, ApiFormat::Responses, &event);
+        process_chunk_for_usage(&mut responses, ApiFormat::Responses, &event, None);
         assert!(responses.error);
         assert_eq!(responses.error_message.as_deref(), Some("codex boom"));
     }
@@ -1622,7 +1688,7 @@ mod stream_usage_tests {
         let chunk = Bytes::from_static(
             b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":7,\"output_tokens\":2}}}\n\nevent: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"error\":{\"message\":\"late\"}}}\n\n",
         );
-        process_chunk_for_usage(&mut st, ApiFormat::Responses, &chunk);
+        process_chunk_for_usage(&mut st, ApiFormat::Responses, &chunk, None);
         assert!(st.terminal);
         assert!(!st.error);
         assert_eq!(token_counts(st.usage), (7, 2, 0, 0));
@@ -1630,7 +1696,7 @@ mod stream_usage_tests {
         let later = Bytes::from_static(
             b"event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"error\":{\"message\":\"later\"}}}\n\n",
         );
-        process_chunk_for_usage(&mut st, ApiFormat::Responses, &later);
+        process_chunk_for_usage(&mut st, ApiFormat::Responses, &later, None);
         assert!(!st.error);
         assert_eq!(token_counts(st.usage), (7, 2, 0, 0));
     }
@@ -1641,7 +1707,7 @@ mod stream_usage_tests {
         let mut st = StreamState::default();
         let payload =
             b"data: {\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":11}}\r\n\r\n".to_vec();
-        process_chunk_for_usage(&mut st, ApiFormat::ChatCompletions, &Bytes::from(payload));
+        process_chunk_for_usage(&mut st, ApiFormat::ChatCompletions, &Bytes::from(payload), None);
         assert!(st.has_usage, "CRLF usage should be parsed");
         let (p, c, _, _) = token_counts(st.usage);
         assert_eq!((p, c), (7, 11));
@@ -1653,7 +1719,7 @@ mod stream_usage_tests {
         let mut st = StreamState::default();
         // Single chunk larger than MAX_SSE_BUF — must be dropped, not allocated.
         let big = vec![b'x'; MAX_SSE_BUF + 1];
-        process_chunk_for_usage(&mut st, ApiFormat::ChatCompletions, &Bytes::from(big));
+        process_chunk_for_usage(&mut st, ApiFormat::ChatCompletions, &Bytes::from(big), None);
         assert!(st.buf.is_empty(), "oversize chunks are dropped");
         assert!(!st.has_usage);
     }

@@ -10,7 +10,7 @@ import {
   usageProgressPercentage,
   usageProgressStatus,
 } from "./accounts-usage.ts";
-import type { UsageKey } from "./accounts-usage.ts";
+import type { UsageEditState, UsageKey } from "./accounts-usage.ts";
 import { mapWithConcurrency } from "../utils/async.ts";
 
 test("fills every active 5-hour, weekly, or monthly limit", () => {
@@ -145,25 +145,38 @@ test("normalizes manually entered percentages to the supported range and precisi
 });
 
 test("usage refresh preserves dirty drafts unless a real 429 reset that window", () => {
-  const dirty = { draft: 75, saved: 20, saving: false, error: "save failed" };
+  const dirty: UsageEditState = {
+    draft: 75,
+    saved: 20,
+    saving: false,
+    error: "save failed",
+    resets_in_minutes_draft: 240,
+    resets_in_minutes_saved: 200,
+  };
 
   assert.deepEqual(mergeUsageEdit(dirty, 35, false), {
     draft: 75,
     saved: 35,
     saving: false,
     error: "save failed",
+    resets_in_minutes_draft: 240,
+    resets_in_minutes_saved: 200,
   });
   assert.deepEqual(mergeUsageEdit(dirty, 0, true), {
     draft: 0,
     saved: 0,
     saving: false,
     error: null,
+    resets_in_minutes_draft: 240,
+    resets_in_minutes_saved: 200,
   });
   assert.deepEqual(mergeUsageEdit(undefined, 35, false), {
     draft: 35,
     saved: 35,
     saving: false,
     error: null,
+    resets_in_minutes_draft: null,
+    resets_in_minutes_saved: null,
   });
 });
 
@@ -225,5 +238,5 @@ test("usage API sends the selected window and percent with PATCH", async () => {
   const update = source.slice(source.indexOf("updateAccountUsage"), source.indexOf("resetAccountCooldown"));
 
   assert.match(update, /method: "PATCH"/);
-  assert.match(update, /jsonBody\(\{ window, percent \}\)/);
+  assert.match(update, /jsonBody\(\{ window, percent, resets_in_minutes/);
 });

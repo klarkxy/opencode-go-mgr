@@ -740,7 +740,7 @@ onUnmounted(() => {
 }
 .chart-card :deep(.n-spin-content) {
   padding: 4px 12px 0;
-  overflow-x: auto;
+  overflow: hidden;
 }
 
 .accounts-card {

@@ -458,6 +458,12 @@ fn save_config(db: &Database, config: &AppConfig) -> crate::Result<()> {
 fn build_http_client(config: &AppConfig) -> crate::Result<reqwest::Client> {
     Ok(reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(config.connect_timeout_secs))
+        .read_timeout(Duration::from_secs(config.stream_idle_timeout_secs))
+        // Drop idle pooled connections earlier than the default so a stale connection
+        // closed by the upstream/CDN isn't reused. Keep-alive probes further reduce
+        // silent drops for long-lived gateways.
+        .pool_idle_timeout(Duration::from_secs(30))
+        .tcp_keepalive(Duration::from_secs(30))
         .build()?)
 }
 

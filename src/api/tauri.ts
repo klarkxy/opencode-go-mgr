@@ -151,6 +151,12 @@ export interface UsageWindow {
   window_5h: number;
   window_week: number;
   window_month: number;
+  /** 5h 固定窗口的清零时刻（RFC3339）；null 表示窗口尚未开始（无成功请求）。 */
+  resets_in_5h: string | null;
+  /** 周固定窗口的清零时刻；null 表示窗口尚未开始。 */
+  resets_in_week: string | null;
+  /** 月窗口的到期时刻（purchase_date + 1 自然月）；null 表示账号无购买日期。 */
+  resets_in_month: string | null;
 }
 
 export interface PricingLimits {
@@ -344,9 +350,10 @@ export const tauriApi = {
     id: string,
     window: "window_5h" | "window_week" | "window_month",
     percent: number,
+    resets_in_minutes?: number | null,
   ) => request<UsageWindow>(`/accounts/${id}/usage`, {
     method: "PATCH",
-    body: jsonBody({ window, percent }),
+    body: jsonBody({ window, percent, resets_in_minutes: resets_in_minutes ?? null }),
   }),
   resetAccountCooldown: (id: string) =>
     request<Account>(`/accounts/${id}/reset-cooldown`, { method: "POST" }),

@@ -410,6 +410,15 @@ pub struct UsageWindow {
     pub window_5h: f64,
     pub window_week: f64,
     pub window_month: f64,
+    /// 当 5h 固定窗口仍有效时，表示该窗口的清零时刻；`None` 表示窗口尚未开始（无成功请求）。
+    #[serde(default)]
+    pub resets_in_5h: Option<DateTime<Utc>>,
+    /// 当周固定窗口的清零时刻；`None` 表示窗口尚未开始。
+    #[serde(default)]
+    pub resets_in_week: Option<DateTime<Utc>>,
+    /// 月窗口的到期时刻，固定为 `purchase_expires_on(purchase_date) 00:00`；`None` 表示账号无购买日期。
+    #[serde(default)]
+    pub resets_in_month: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
