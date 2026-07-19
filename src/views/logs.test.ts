@@ -1,4 +1,4 @@
-import assert from "node:assert/strict";
+﻿import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { DashboardRequestError, tauriApi } from "../api/tauri.ts";
@@ -198,7 +198,7 @@ test("logs view shows top stats, extra filters, sorting, and a useful empty stat
   assert.match(template, /class="filter-bar"/);
   assert.match(template, /\bremote\b/);
   assert.match(template, /v-model:value="modelFilter"/);
-  assert.match(template, /v-model:value="timeRange"/);
+  assert.match(template, /v-model:value="customTimeRange"/);
   assert.match(template, /v-model:value="sortBy"/);
   assert.match(template, /:aria-label="t\('刷新运行日志'\)"/);
   assert.match(template, /:aria-label="t\('刷新请求日志'\)"/);
@@ -225,4 +225,35 @@ test("logs view shows top stats, extra filters, sorting, and a useful empty stat
   assert.match(template, /额度消耗（估算）/);
   const clearFilters = source.slice(source.indexOf("function clearFilters"), source.indexOf("function toggleSortOrder"));
   assert.doesNotMatch(clearFilters, /sortBy\.value|sortOrder\.value/);
+});
+
+test("logs time range selector renders presets and custom picker in a popover", async () => {
+  const source = await readFile(new URL("./Logs.vue", import.meta.url), "utf8");
+  const template = source.slice(source.indexOf("<template>"), source.indexOf("<script setup"));
+
+  assert.match(template, /<n-popover[^>]*trigger="click"/);
+  assert.match(template, /class="time-range-panel"/);
+  assert.match(template, /class="preset-list"/);
+  assert.match(template, /applyTimePreset\(item\.value\)/);
+  assert.match(template, /class="custom-range-wrapper"/);
+  assert.match(template, /:class="\{ 'is-visible': activePreset === 'custom' \}"/);
+  assert.match(template, /type="daterange"/);
+  assert.match(template, /:panel="true"/);
+  assert.match(template, /:actions="null"/);
+  assert.match(template, /v-model:value="customTimeRange"/);
+  assert.match(template, /applyCustomTimeRange/);
+});
+
+test("logs time range helpers cover all presets", async () => {
+  const source = await readFile(new URL("./Logs.vue", import.meta.url), "utf8");
+  const script = source.slice(source.indexOf("<script setup"), source.indexOf("</script>"));
+
+  assert.match(script, /function computeTimeRange\(preset: TimePreset\)/);
+  assert.match(script, /case "last24h":/);
+  assert.match(script, /case "last7d":/);
+  assert.match(script, /case "last30d":/);
+  assert.match(script, /case "thisMonth":/);
+  assert.match(script, /case "lastMonth":/);
+  assert.match(script, /function startOfLocalMonth/);
+  assert.match(script, /function endOfLocalMonth/);
 });

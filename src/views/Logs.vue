@@ -62,7 +62,6 @@
               v-model:value="statusFilter"
               :options="statusOptions"
               :placeholder="t('状态')"
-              clearable
             />
           </div>
           <div class="filter-field">
@@ -71,7 +70,6 @@
               v-model:value="accountFilter"
               :options="accountOptions"
               :placeholder="t('账号')"
-              clearable
             />
           </div>
           <div class="filter-field">
@@ -80,17 +78,53 @@
               v-model:value="modelFilter"
               :options="modelOptions"
               :placeholder="t('模型')"
-              clearable
             />
           </div>
           <div class="filter-field time-range-field">
             <span class="filter-label">{{ t("时间范围") }}</span>
-            <n-date-picker
-              v-model:value="timeRange"
-              type="datetimerange"
-              clearable
-              class="time-range-picker"
-            />
+            <n-popover
+              trigger="click"
+              placement="bottom-start"
+              :show="showTimePanel"
+              @update:show="showTimePanel = $event"
+            >
+              <template #trigger>
+                <n-button class="time-range-trigger" :focusable="false">
+                  <template #icon>
+                    <n-icon :component="CalendarOutlined" />
+                  </template>
+                  {{ timeRangeLabel }}
+                </n-button>
+              </template>
+              <div class="time-range-panel">
+                <div class="preset-list">
+                  <n-button
+                    v-for="item in timePresetOptions"
+                    :key="item.value"
+                    quaternary
+                    :type="activePreset === item.value ? 'primary' : 'default'"
+                    class="preset-item"
+                    @click="applyTimePreset(item.value)"
+                  >
+                    {{ item.label }}
+                  </n-button>
+                </div>
+                <div
+                  class="custom-range-wrapper"
+                  :class="{ 'is-visible': activePreset === 'custom' }"
+                >
+                  <span class="custom-range-title">{{ t("自定义范围") }}</span>
+                  <n-date-picker
+                    v-model:value="customTimeRange"
+                    type="daterange"
+                    :panel="true"
+                    :actions="null"
+                    class="custom-time-picker"
+                    @update:value="applyCustomTimeRange"
+                  />
+                </div>
+              </div>
+            </n-popover>
           </div>
           <div class="filter-field">
             <span class="filter-label">{{ t("排序") }}</span>
@@ -170,6 +204,7 @@ import {
   NDatePicker,
   NEmpty,
   NIcon,
+  NPopover,
   NSelect,
   NTabPane,
   NTabs,
@@ -177,7 +212,7 @@ import {
   NTooltip,
   useMessage,
 } from "naive-ui";
-import { ArrowDownOutlined, ArrowUpOutlined, CheckOutlined, ClearOutlined, CopyOutlined, ReloadOutlined } from "@vicons/antd";
+import { ArrowDownOutlined, ArrowUpOutlined, CalendarOutlined, CheckOutlined, ClearOutlined, CopyOutlined, ReloadOutlined } from "@vicons/antd";
 import { tauriApi } from "../api/tauri";
 import type { Account, ForwardLog, ForwardLogSummary, GatewayLog } from "../api/tauri";
 import { t } from "../i18n/index.ts";
@@ -187,6 +222,7 @@ import { formatCost, formatNumber, useClipboard } from "../utils/format.ts";
 type LogTab = "gateway" | "forward";
 type SortBy = "timestamp" | "prompt_tokens" | "completion_tokens" | "cached_tokens" | "cost";
 type SortOrder = "asc" | "desc";
+type TimePreset = "all" | "last24h" | "last7d" | "last30d" | "thisMonth" | "lastMonth" | "custom";
 
 const sortValues = new Set<SortBy>([
   "timestamp",
@@ -207,16 +243,16 @@ const models = ref<string[]>([]);
 const gatewayLoading = ref(false);
 const gatewayError = ref("");
 const forwardLoading = ref(false);
-const statusFilter = ref<string | null>(query.get("status"));
-const accountFilter = ref<string | null>(query.get("account"));
-const modelFilter = ref<string | null>(query.get("model"));
+const statusFilter = ref<string>(query.get("status") ?? "");
+const accountFilter = ref<string>(query.get("account") ?? "");
+const modelFilter = ref<string>(query.get("model") ?? "");
 const querySort = query.get("sort");
 const queryOrder = query.get("order");
 const sortBy = ref<SortBy>(
   querySort !== null && sortValues.has(querySort as SortBy) ? querySort as SortBy : "timestamp",
 );
 const sortOrder = ref<SortOrder>(queryOrder === "asc" || queryOrder === "desc" ? queryOrder : "desc");
-const timeRange = ref<[number, number] | null>((() => {
+function parseQueryTimeRange(): [number, number] | null {
   const start = query.get("start");
   const end = query.get("end");
   if (!start || !end) return null;
@@ -224,7 +260,15 @@ const timeRange = ref<[number, number] | null>((() => {
   const endMs = Date.parse(end);
   if (Number.isNaN(startMs) || Number.isNaN(endMs) || startMs > endMs) return null;
   return [startMs, endMs];
-})());
+}
+
+const initialTimeRange = parseQueryTimeRange();
+const initialPreset: TimePreset = initialTimeRange ? "custom" : "last24h";
+const initialRange = initialTimeRange ?? computeTimeRange("last24h");
+const timeRange = ref<[number, number] | null>(initialRange);
+const activePreset = ref<TimePreset>(initialPreset);
+const customTimeRange = ref<[number, number] | null>(initialRange);
+const showTimePanel = ref(false);
 const forwardPage = ref(1);
 const gatewayPage = ref(1);
 const pageSize = 20;
@@ -254,6 +298,27 @@ const dateFormatter = computed(() => new Intl.DateTimeFormat(locale.value, {
   minute: "2-digit",
   second: "2-digit",
 }));
+const dateOnlyFormatter = computed(() => new Intl.DateTimeFormat(locale.value, {
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+}));
+const timePresetOptions = computed(() => [
+  { label: t("24 小时内"), value: "last24h" as TimePreset },
+  { label: t("最近 7 天"), value: "last7d" as TimePreset },
+  { label: t("最近 30 天"), value: "last30d" as TimePreset },
+  { label: t("本月"), value: "thisMonth" as TimePreset },
+  { label: t("上月"), value: "lastMonth" as TimePreset },
+  { label: t("全部"), value: "all" as TimePreset },
+  { label: t("自定义"), value: "custom" as TimePreset },
+]);
+const timeRangeLabel = computed(() => {
+  if (!timeRange.value || activePreset.value === "all") return t("全部");
+  const preset = timePresetOptions.value.find((item) => item.value === activePreset.value);
+  if (preset && activePreset.value !== "custom") return preset.label;
+  const [start, end] = timeRange.value;
+  return `${dateOnlyFormatter.value.format(new Date(start))} ~ ${dateOnlyFormatter.value.format(new Date(end))}`;
+});
 const statusMeta = computed<Record<string, { label: string; type: "success" | "warning" | "error" | "default" }>>(() => ({
   success: { label: t("成功"), type: "success" },
   success_no_usage: { label: t("成功·无用量"), type: "success" },
@@ -263,9 +328,10 @@ const statusMeta = computed<Record<string, { label: string; type: "success" | "w
   client_error: { label: t("客户端错误"), type: "error" },
   error: { label: t("错误"), type: "error" },
 }));
-const statusOptions = computed(() => Object.entries(statusMeta.value).map(([value, meta]) => ({ label: meta.label, value })));
-const accountOptions = computed(() => accounts.value.map((account) => ({ label: account.name, value: account.id })));
-const modelOptions = computed(() => models.value.map((model) => ({ label: model, value: model })));
+const allOption = { label: t("全部"), value: "" };
+const statusOptions = computed(() => [allOption, ...Object.entries(statusMeta.value).map(([value, meta]) => ({ label: meta.label, value }))]);
+const accountOptions = computed(() => [allOption, ...accounts.value.map((account) => ({ label: account.name, value: account.id }))]);
+const modelOptions = computed(() => [allOption, ...models.value.map((model) => ({ label: model, value: model }))]);
 const sortOptions = computed(() => [
   { label: t("时间"), value: "timestamp" },
   { label: t("输入"), value: "prompt_tokens" },
@@ -287,6 +353,72 @@ function formatDate(value: string): string {
 
 function toIsoString(ms: number): string {
   return new Date(ms).toISOString();
+}
+
+function startOfLocalMonth(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), 1, 0, 0, 0, 0);
+}
+
+function endOfLocalMonth(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth() + 1, 0, 23, 59, 59, 999);
+}
+
+function computeTimeRange(preset: TimePreset): [number, number] | null {
+  const now = new Date();
+  const end = now.getTime();
+  switch (preset) {
+    case "last24h":
+      return [end - 24 * 60 * 60 * 1000, end];
+    case "last7d":
+      return [end - 7 * 24 * 60 * 60 * 1000, end];
+    case "last30d":
+      return [end - 30 * 24 * 60 * 60 * 1000, end];
+    case "thisMonth":
+      return [startOfLocalMonth(now).getTime(), end];
+    case "lastMonth": {
+      const firstDayThisMonth = startOfLocalMonth(now);
+      const lastDayPrevMonth = new Date(firstDayThisMonth.getTime() - 1);
+      return [startOfLocalMonth(lastDayPrevMonth).getTime(), endOfLocalMonth(lastDayPrevMonth).getTime()];
+    }
+    default:
+      return null;
+  }
+}
+
+function applyTimePreset(preset: TimePreset) {
+  if (preset === "custom") {
+    activePreset.value = "custom";
+    customTimeRange.value = timeRange.value;
+    showTimePanel.value = true;
+    return;
+  }
+  if (preset === "all") {
+    activePreset.value = "all";
+    timeRange.value = null;
+    customTimeRange.value = null;
+    showTimePanel.value = false;
+    return;
+  }
+  const range = computeTimeRange(preset);
+  if (range) {
+    activePreset.value = preset;
+    timeRange.value = range;
+    customTimeRange.value = range;
+    showTimePanel.value = false;
+  }
+}
+
+function applyCustomTimeRange(value: [number, number] | null) {
+  if (!value) return;
+  const start = new Date(value[0]);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(value[1]);
+  end.setHours(23, 59, 59, 999);
+  const range: [number, number] = [start.getTime(), end.getTime()];
+  activePreset.value = "custom";
+  timeRange.value = range;
+  customTimeRange.value = range;
+  showTimePanel.value = false;
 }
 
 function formatQuotaCost(row: ForwardLog): string {
@@ -356,10 +488,14 @@ const forwardColumns = computed(() => [
 ]);
 
 function clearFilters() {
-  statusFilter.value = null;
-  accountFilter.value = null;
-  modelFilter.value = null;
-  timeRange.value = null;
+  statusFilter.value = "";
+  accountFilter.value = "";
+  modelFilter.value = "";
+  activePreset.value = "last24h";
+  const range = computeTimeRange("last24h");
+  timeRange.value = range;
+  customTimeRange.value = range;
+  showTimePanel.value = false;
 }
 
 function toggleSortOrder() {
@@ -529,7 +665,7 @@ onUnmounted(cleanup);
 }
 .filter-bar {
   display: grid;
-  grid-template-columns: 140px 180px 180px 320px 120px auto 1fr;
+  grid-template-columns: 140px 180px 180px auto 120px auto 1fr;
   align-items: end;
   gap: 8px;
   margin-bottom: 12px;
@@ -545,8 +681,67 @@ onUnmounted(cleanup);
   color: var(--ocg-subtle);
   line-height: 1.2;
 }
-.time-range-picker {
+.time-range-trigger {
+  min-width: 120px;
+  max-width: 240px;
+  justify-content: flex-start;
+}
+.time-range-trigger :deep(.n-button__content) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.time-range-panel {
+  display: inline-flex;
+  flex-direction: row;
+  gap: 8px;
+  max-width: calc(100vw - 48px);
+}
+.preset-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 100px;
+}
+.preset-item {
+  justify-content: flex-start;
+}
+.preset-item :deep(.n-button__content) {
+  white-space: nowrap;
+}
+.custom-range-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: auto;
+  max-width: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition: max-width 0.2s ease, opacity 0.2s ease;
+  border-left: 1px solid transparent;
+}
+.custom-range-wrapper.is-visible {
+  max-width: 600px;
+  opacity: 1;
+  padding-left: 8px;
+  border-left-color: var(--ocg-border);
+}
+.custom-range-title {
+  font-size: var(--ocg-font-sm);
+  color: var(--ocg-text-secondary);
+  white-space: nowrap;
+}
+.custom-time-picker {
   min-width: 0;
+}
+.custom-time-picker :deep(.n-date-panel) {
+  box-shadow: none;
+  background: transparent;
+}
+.custom-time-picker :deep(.n-date-panel-header),
+.custom-time-picker :deep(.n-date-panel-calendar__picker-col),
+.custom-time-picker :deep(.n-date-panel-actions) {
+  background: transparent;
 }
 .sort-select {
   min-width: 110px;
@@ -591,6 +786,23 @@ onUnmounted(cleanup);
   }
   .time-range-field {
     grid-column: span 2;
+  }
+}
+
+@media (max-width: 860px) {
+  .time-range-panel {
+    flex-direction: column;
+  }
+  .custom-range-wrapper.is-visible {
+    width: auto;
+    max-width: 100%;
+    border-left: none;
+    border-top: 1px solid var(--ocg-border);
+    padding-left: 0;
+    padding-top: 8px;
+  }
+  .custom-time-picker {
+    overflow-x: auto;
   }
 }
 
