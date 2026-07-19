@@ -9,7 +9,9 @@ export type UsageEditState = {
   error: string | null;
   /// 手动校准的"距上游重置还剩多少分钟"。仅 5h/周窗口使用；月窗口始终为 null。
   resets_in_minutes_draft: number | null;
-  resets_in_minutes_saved: number | null;
+  /// 最近一次从后端读到的绝对重置时刻。未手动改时间时，保存前由它重新计算剩余分钟。
+  resets_at_saved: string | null;
+  resets_dirty: boolean;
 };
 
 /// 5h/周窗口的满窗分钟数。月窗口无法手动校准时间。
@@ -28,6 +30,22 @@ export function defaultResetsInMinutes(usage: Pick<UsageWindow, "resets_in_5h" |
   if (!until) return full;
   const remainingMs = Date.parse(until) - now;
   return Math.max(0, Math.ceil(remainingMs / 60000));
+}
+
+export function resetsInMinutesForSave(
+  edit: Pick<UsageEditState, "resets_in_minutes_draft" | "resets_at_saved" | "resets_dirty">,
+  key: UsageKey,
+  now = Date.now(),
+): number | null {
+  const full = WINDOW_FULL_MINUTES[key];
+  if (full === null) return null;
+  if (edit.resets_dirty) return edit.resets_in_minutes_draft;
+  if (!edit.resets_at_saved) return full;
+  const remainingMs = Date.parse(edit.resets_at_saved) - now;
+  // The backend starts a fresh integer-minute deadline when it receives the
+  // calibration. Floor prevents a percent-only save from extending the old
+  // absolute deadline by the fractional minute already elapsed in this page.
+  return Math.max(0, Math.floor(remainingMs / 60000));
 }
 
 const cooldownFields: Record<UsageKey, keyof Pick<Account, "cooldown_5h_until" | "cooldown_week_until" | "cooldown_month_until">> = {
@@ -99,7 +117,8 @@ export function mergeUsageEdit(
       saving: false,
       error: null,
       resets_in_minutes_draft: null,
-      resets_in_minutes_saved: null,
+      resets_at_saved: null,
+      resets_dirty: false,
     };
   }
   if (!force && (edit.saving || edit.draft !== edit.saved)) {

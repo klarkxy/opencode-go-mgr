@@ -373,10 +373,12 @@ import {
   isWindowCooling,
   mergeUsageEdit,
   normalizeUsagePercent,
+  resetsInMinutesForSave,
   usagePercentFromCost,
   usageProgressPercentage,
   usageProgressStatus,
   WINDOW_FULL_MINUTES,
+  windowResetsAt,
 } from "./accounts-usage";
 import type { UsageEditState, UsageKey } from "./accounts-usage";
 import { daysUntilDate, expiryTagType, moveItem } from "./account-lifecycle";
@@ -486,7 +488,8 @@ function usageEditsFromWindow(usage: UsageWindow): AccountUsageEdits {
       saving: false,
       error: null,
       resets_in_minutes_draft: resetsInMin,
-      resets_in_minutes_saved: resetsInMin,
+      resets_at_saved: windowResetsAt(usage, key),
+      resets_dirty: false,
     }];
   })) as AccountUsageEdits;
 }
@@ -503,15 +506,17 @@ function syncUsageEdits(accountId: string, usage: UsageWindow) {
     const edit = existing[key];
     const wasActuallyReset = account && isUsageLimitReached(account, key, now.value);
     if (!edit) {
-      existing[key] = mergeUsageEdit(undefined, saved, Boolean(wasActuallyReset));
+      const created = mergeUsageEdit(undefined, saved, Boolean(wasActuallyReset));
+      created.resets_in_minutes_draft = defaultResetsInMinutes(usage, key, now.value);
+      created.resets_at_saved = windowResetsAt(usage, key);
+      existing[key] = created;
       continue;
     }
     Object.assign(edit, mergeUsageEdit(edit, saved, Boolean(wasActuallyReset)));
-    // 同步 resets_in_minutes_saved；draft 未被用户改动时跟着 saved 走。
-    const resetsInMin = defaultResetsInMinutes(usage, key, now.value);
-    edit.resets_in_minutes_saved = resetsInMin;
-    if (edit.resets_in_minutes_draft === null || !edit.saving && edit.resets_in_minutes_draft === edit.resets_in_minutes_saved) {
-      edit.resets_in_minutes_draft = resetsInMin;
+    edit.resets_at_saved = windowResetsAt(usage, key);
+    if (wasActuallyReset || (!edit.saving && !edit.resets_dirty)) {
+      edit.resets_in_minutes_draft = defaultResetsInMinutes(usage, key, now.value);
+      edit.resets_dirty = false;
     }
   }
 }
@@ -588,6 +593,7 @@ function updateResetsFirstField(accountId: string, key: UsageKey, value: number 
   const second = resetsSecondField(accountId, key);
   const max = WINDOW_FULL_MINUTES[key] ?? 10080;
   edit.resets_in_minutes_draft = Math.min(max, fieldsToMinutes(v, second, key));
+  edit.resets_dirty = true;
 }
 
 function updateResetsSecondField(accountId: string, key: UsageKey, value: number | null) {
@@ -598,6 +604,7 @@ function updateResetsSecondField(accountId: string, key: UsageKey, value: number
   const first = resetsFirstField(accountId, key);
   const max = WINDOW_FULL_MINUTES[key] ?? 10080;
   edit.resets_in_minutes_draft = Math.min(max, fieldsToMinutes(first, v, key));
+  edit.resets_dirty = true;
 }
 
 async function saveUsage(accountId: string, key: UsageKey) {
@@ -605,21 +612,17 @@ async function saveUsage(accountId: string, key: UsageKey) {
   if (!edit || edit.saving) return;
   const percent = normalizeUsagePercent(edit.draft);
   edit.draft = percent;
-  const resetsChanged = edit.resets_in_minutes_draft !== edit.resets_in_minutes_saved;
+  const resetsChanged = edit.resets_dirty;
   if (percent === edit.saved && !resetsChanged && !edit.error) return;
   edit.saving = true;
   edit.error = null;
-  // ponytail: Bug 3 — 之前用 defaultResetsInMinutes(usage, key, now.value) 重算剩余分钟，
-  // 由于 now.value（每秒刷新的 Vue ref）始终 ≤ backend 处理请求时的 Utc::now()，
-  // Math.ceil((ends_at - now)/60000) 会向上取整多出 1 分钟，每次保存累加。
-  // 直接回写用户输入的值，这就是发给后端的值，无需重算。
-  const userResetsInMin = edit.resets_in_minutes_draft;
+  const resetsInMin = resetsInMinutesForSave(edit, key);
   try {
     const usage = await tauriApi.updateAccountUsage(
       accountId,
       key,
       percent,
-      WINDOW_FULL_MINUTES[key] === null ? null : userResetsInMin,
+      resetsInMin,
     );
     usageMap.value[accountId] = {
       ...getUsage(accountId),
@@ -631,8 +634,9 @@ async function saveUsage(accountId: string, key: UsageKey) {
     const saved = usagePercentFromCost(usage[key], usageLimit(key));
     edit.draft = saved;
     edit.saved = saved;
-    edit.resets_in_minutes_draft = userResetsInMin;
-    edit.resets_in_minutes_saved = userResetsInMin;
+    edit.resets_at_saved = windowResetsAt(usage, key);
+    edit.resets_in_minutes_draft = defaultResetsInMinutes(usage, key);
+    edit.resets_dirty = false;
   } catch (error) {
     edit.error = errorDetail(error);
   } finally {

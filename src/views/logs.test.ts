@@ -2,6 +2,7 @@
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { DashboardRequestError, tauriApi } from "../api/tauri.ts";
+import { computeTimeRange, resolveTimeRange } from "./log-time-range.ts";
 
 test("forward log API sends remote paging and filter parameters", async () => {
   let requested = "";
@@ -245,15 +246,47 @@ test("logs time range selector renders presets and custom picker in a popover", 
 });
 
 test("logs time range helpers cover all presets", async () => {
-  const source = await readFile(new URL("./Logs.vue", import.meta.url), "utf8");
-  const script = source.slice(source.indexOf("<script setup"), source.indexOf("</script>"));
+  const now = new Date(2026, 6, 19, 12, 0, 0, 0);
+  assert.deepEqual(computeTimeRange("last24h", now), [
+    now.getTime() - 24 * 60 * 60 * 1000,
+    now.getTime(),
+  ]);
+  assert.deepEqual(computeTimeRange("last7d", now), [
+    now.getTime() - 7 * 24 * 60 * 60 * 1000,
+    now.getTime(),
+  ]);
+  assert.deepEqual(computeTimeRange("last30d", now), [
+    now.getTime() - 30 * 24 * 60 * 60 * 1000,
+    now.getTime(),
+  ]);
+  assert.deepEqual(computeTimeRange("thisMonth", now), [
+    new Date(2026, 6, 1).getTime(),
+    now.getTime(),
+  ]);
+  assert.deepEqual(computeTimeRange("lastMonth", now), [
+    new Date(2026, 5, 1).getTime(),
+    new Date(2026, 5, 30, 23, 59, 59, 999).getTime(),
+  ]);
+});
 
-  assert.match(script, /function computeTimeRange\(preset: TimePreset\)/);
-  assert.match(script, /case "last24h":/);
-  assert.match(script, /case "last7d":/);
-  assert.match(script, /case "last30d":/);
-  assert.match(script, /case "thisMonth":/);
-  assert.match(script, /case "lastMonth":/);
-  assert.match(script, /function startOfLocalMonth/);
-  assert.match(script, /function endOfLocalMonth/);
+test("rolling log presets resolve against the current refresh time", async () => {
+  const first = new Date("2026-07-19T00:00:00Z");
+  const later = new Date("2026-07-19T03:00:00Z");
+  const staleSelection = computeTimeRange("last24h", first);
+
+  assert.deepEqual(resolveTimeRange("last24h", staleSelection, later), computeTimeRange("last24h", later));
+  assert.deepEqual(resolveTimeRange("custom", staleSelection, later), staleSelection);
+  assert.equal(resolveTimeRange("all", staleSelection, later), null);
+
+  const source = await readFile(new URL("./Logs.vue", import.meta.url), "utf8");
+  const forwardLoad = source.slice(
+    source.indexOf("async function loadForwardLogs"),
+    source.indexOf("async function loadAccounts"),
+  );
+  assert.match(forwardLoad, /resolveTimeRange\(activePreset\.value, timeRange\.value\)/);
+  assert.match(source, /url\.searchParams\.set\("range", activePreset\.value\)/);
+
+  const clearFilters = source.slice(source.indexOf("function clearFilters"), source.indexOf("function toggleSortOrder"));
+  assert.match(clearFilters, /activePreset\.value = "all"/);
+  assert.match(clearFilters, /timeRange\.value = null/);
 });

@@ -1008,9 +1008,7 @@ async fn update_account_usage(
     let percent = (update.percent * 10.0).round() / 10.0;
     if let Some(mins) = update.resets_in_minutes {
         if mins < 0 {
-            return Err(ApiError::bad_request(
-                "resets_in_minutes must be >= 0",
-            ));
+            return Err(ApiError::bad_request("resets_in_minutes must be >= 0"));
         }
     }
 
@@ -2348,7 +2346,10 @@ mod tests {
             .resets_in_month
             .expect("month reset should be set after calibrate");
         assert_eq!(
-            reset.with_timezone(&chrono::Local).format("%Y-%m-%d").to_string(),
+            reset
+                .with_timezone(&chrono::Local)
+                .format("%Y-%m-%d")
+                .to_string(),
             "2026-02-28"
         );
         let summary = dashboard_summary(State(state))

@@ -6,6 +6,7 @@ import {
   isUsageLimitReached,
   mergeUsageEdit,
   normalizeUsagePercent,
+  resetsInMinutesForSave,
   usagePercentFromCost,
   usageProgressPercentage,
   usageProgressStatus,
@@ -151,7 +152,8 @@ test("usage refresh preserves dirty drafts unless a real 429 reset that window",
     saving: false,
     error: "save failed",
     resets_in_minutes_draft: 240,
-    resets_in_minutes_saved: 200,
+    resets_at_saved: "2099-01-01T00:00:00Z",
+    resets_dirty: true,
   };
 
   assert.deepEqual(mergeUsageEdit(dirty, 35, false), {
@@ -160,7 +162,8 @@ test("usage refresh preserves dirty drafts unless a real 429 reset that window",
     saving: false,
     error: "save failed",
     resets_in_minutes_draft: 240,
-    resets_in_minutes_saved: 200,
+    resets_at_saved: "2099-01-01T00:00:00Z",
+    resets_dirty: true,
   });
   assert.deepEqual(mergeUsageEdit(dirty, 0, true), {
     draft: 0,
@@ -168,7 +171,8 @@ test("usage refresh preserves dirty drafts unless a real 429 reset that window",
     saving: false,
     error: null,
     resets_in_minutes_draft: 240,
-    resets_in_minutes_saved: 200,
+    resets_at_saved: "2099-01-01T00:00:00Z",
+    resets_dirty: true,
   });
   assert.deepEqual(mergeUsageEdit(undefined, 35, false), {
     draft: 35,
@@ -176,8 +180,36 @@ test("usage refresh preserves dirty drafts unless a real 429 reset that window",
     saving: false,
     error: null,
     resets_in_minutes_draft: null,
-    resets_in_minutes_saved: null,
+    resets_at_saved: null,
+    resets_dirty: false,
   });
+});
+
+test("percent-only usage saves keep counting down from the backend deadline", () => {
+  const resetAt = "2026-07-19T12:05:30Z";
+  const clean: UsageEditState = {
+    draft: 50,
+    saved: 40,
+    saving: false,
+    error: null,
+    resets_in_minutes_draft: 6,
+    resets_at_saved: resetAt,
+    resets_dirty: false,
+  };
+
+  assert.equal(
+    resetsInMinutesForSave(clean, "window_5h", Date.parse("2026-07-19T12:00:00Z")),
+    5,
+  );
+  assert.equal(
+    resetsInMinutesForSave(clean, "window_5h", Date.parse("2026-07-19T12:02:00Z")),
+    3,
+  );
+  assert.equal(
+    resetsInMinutesForSave({ ...clean, resets_in_minutes_draft: 240, resets_dirty: true }, "window_5h"),
+    240,
+  );
+  assert.equal(resetsInMinutesForSave(clean, "window_month"), null);
 });
 
 test("usage refresh initializes windows missing after an earlier quota load failure", async () => {
@@ -186,7 +218,7 @@ test("usage refresh initializes windows missing after an earlier quota load fail
 
   assert.match(
     sync,
-    /if \(!edit\) \{\s+existing\[key\] = mergeUsageEdit\(undefined, saved, Boolean\(wasActuallyReset\)\);\s+continue;/,
+    /if \(!edit\) \{\s+const created = mergeUsageEdit\(undefined, saved, Boolean\(wasActuallyReset\)\);/,
   );
   assert.ok(sync.indexOf("if (!edit)") < sync.indexOf("Object.assign(edit"));
 });
@@ -221,6 +253,8 @@ test("manual editor writes on commit events instead of each value update", async
   assert.match(source, /@blur="saveUsage\(account\.id, limit\.key\)"/);
   assert.match(source, /@keydown\.enter\.prevent="saveUsage\(account\.id, limit\.key\)"/);
   assert.match(source, /if \(!edit \|\| edit\.saving\) return;/);
+  assert.equal(source.match(/edit\.resets_dirty = true;/g)?.length, 2);
+  assert.match(source, /const resetsInMin = resetsInMinutesForSave\(edit, key\)/);
 });
 
 test("account drag keeps receiving touch pointers after keyed cards move", async () => {
