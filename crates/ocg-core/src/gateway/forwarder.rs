@@ -1596,7 +1596,12 @@ mod stream_usage_tests {
         let mut st = StreamState::default();
         let payload =
             b"data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\ndata: [DONE]\n\n".to_vec();
-        process_chunk_for_usage(&mut st, ApiFormat::ChatCompletions, &Bytes::from(payload), None);
+        process_chunk_for_usage(
+            &mut st,
+            ApiFormat::ChatCompletions,
+            &Bytes::from(payload),
+            None,
+        );
         assert!(!st.has_usage, "no usage field means no usage");
         assert!(st.buf.is_empty());
     }
@@ -1606,8 +1611,18 @@ mod stream_usage_tests {
         let mut st = StreamState::default();
         let first = b"data: {\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":2}}\n\n".to_vec();
         let second = b"data: {\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":200,\"prompt_tokens_details\":{\"cached_tokens\":50}}}\n\n".to_vec();
-        process_chunk_for_usage(&mut st, ApiFormat::ChatCompletions, &Bytes::from(first), None);
-        process_chunk_for_usage(&mut st, ApiFormat::ChatCompletions, &Bytes::from(second), None);
+        process_chunk_for_usage(
+            &mut st,
+            ApiFormat::ChatCompletions,
+            &Bytes::from(first),
+            None,
+        );
+        process_chunk_for_usage(
+            &mut st,
+            ApiFormat::ChatCompletions,
+            &Bytes::from(second),
+            None,
+        );
         assert!(st.has_usage, "usage set");
         let (p, c, cached, cache_creation) = token_counts(st.usage);
         assert_eq!((p, c, cached, cache_creation), (100, 200, 50, 0));
@@ -1707,7 +1722,12 @@ mod stream_usage_tests {
         let mut st = StreamState::default();
         let payload =
             b"data: {\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":11}}\r\n\r\n".to_vec();
-        process_chunk_for_usage(&mut st, ApiFormat::ChatCompletions, &Bytes::from(payload), None);
+        process_chunk_for_usage(
+            &mut st,
+            ApiFormat::ChatCompletions,
+            &Bytes::from(payload),
+            None,
+        );
         assert!(st.has_usage, "CRLF usage should be parsed");
         let (p, c, _, _) = token_counts(st.usage);
         assert_eq!((p, c), (7, 11));

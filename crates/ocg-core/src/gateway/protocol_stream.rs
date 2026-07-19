@@ -1,7 +1,7 @@
 use super::protocol::{
-    ApiFormat, NamespaceToolMapping, ProtocolError, RequestPlan,
-    encode_anthropic_thinking_block, encode_chat_reasoning, responses_id,
-    sanitize_minimax_anthropic_usage, sanitize_minimax_chat_usage, unix_seconds,
+    ApiFormat, NamespaceToolMapping, ProtocolError, RequestPlan, encode_anthropic_thinking_block,
+    encode_chat_reasoning, responses_id, sanitize_minimax_anthropic_usage,
+    sanitize_minimax_chat_usage, unix_seconds,
 };
 use bytes::{Bytes, BytesMut};
 use serde_json::{Map, Value, json};
@@ -171,8 +171,8 @@ impl StreamConverter {
             self.pending.extend_from_slice(&chunk);
             let frames = drain_frames(&mut self.pending);
             let mut output = Vec::new();
-            let sanitize_passthrough =
-                self.source == ApiFormat::ChatCompletions && self.target == ApiFormat::ChatCompletions;
+            let sanitize_passthrough = self.source == ApiFormat::ChatCompletions
+                && self.target == ApiFormat::ChatCompletions;
             for frame in frames {
                 if self.input.terminal {
                     break;
@@ -2323,7 +2323,9 @@ mod tests {
         };
         let mut converter = StreamConverter::new(&plan);
         let bytes = source.as_bytes();
-        let mut output = converter.process_chunk(Bytes::copy_from_slice(bytes)).unwrap();
+        let mut output = converter
+            .process_chunk(Bytes::copy_from_slice(bytes))
+            .unwrap();
         output.extend(converter.finish().unwrap());
         let output = String::from_utf8(output.concat()).unwrap();
         assert!(output.contains("\"prompt_tokens\":40500"));
@@ -2354,7 +2356,9 @@ mod tests {
         };
         let mut converter = StreamConverter::new(&plan);
         let bytes = source.as_bytes();
-        let mut output = converter.process_chunk(Bytes::copy_from_slice(bytes)).unwrap();
+        let mut output = converter
+            .process_chunk(Bytes::copy_from_slice(bytes))
+            .unwrap();
         output.extend(converter.finish().unwrap());
         let output = String::from_utf8(output.concat()).unwrap();
         assert!(output.contains("\"prompt_tokens\":40500"));
@@ -2385,7 +2389,9 @@ mod tests {
         };
         let mut converter = StreamConverter::new(&plan);
         let bytes = source.as_bytes();
-        let mut output = converter.process_chunk(Bytes::copy_from_slice(bytes)).unwrap();
+        let mut output = converter
+            .process_chunk(Bytes::copy_from_slice(bytes))
+            .unwrap();
         output.extend(converter.finish().unwrap());
         let output = String::from_utf8(output.concat()).unwrap();
         assert!(output.contains("\"prompt_tokens\":40500"));

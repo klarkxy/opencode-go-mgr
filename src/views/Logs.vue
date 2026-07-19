@@ -218,12 +218,12 @@ import type { Account, ForwardLog, ForwardLogSummary, GatewayLog } from "../api/
 import { t } from "../i18n/index.ts";
 import { locale } from "../i18n/index.ts";
 import { formatCost, formatNumber, useClipboard } from "../utils/format.ts";
+import { computeTimeRange, resolveTimeRange, timePresetValues } from "./log-time-range.ts";
+import type { TimePreset } from "./log-time-range.ts";
 
 type LogTab = "gateway" | "forward";
 type SortBy = "timestamp" | "prompt_tokens" | "completion_tokens" | "cached_tokens" | "cost";
 type SortOrder = "asc" | "desc";
-type TimePreset = "all" | "last24h" | "last7d" | "last30d" | "thisMonth" | "lastMonth" | "custom";
-
 const sortValues = new Set<SortBy>([
   "timestamp",
   "prompt_tokens",
@@ -263,8 +263,15 @@ function parseQueryTimeRange(): [number, number] | null {
 }
 
 const initialTimeRange = parseQueryTimeRange();
-const initialPreset: TimePreset = initialTimeRange ? "custom" : "last24h";
-const initialRange = initialTimeRange ?? computeTimeRange("last24h");
+const queryPreset = query.get("range");
+const initialPreset: TimePreset = initialTimeRange
+  ? "custom"
+  : queryPreset !== null
+      && queryPreset !== "custom"
+      && timePresetValues.has(queryPreset as TimePreset)
+    ? queryPreset as TimePreset
+    : "last24h";
+const initialRange = initialTimeRange ?? resolveTimeRange(initialPreset, null);
 const timeRange = ref<[number, number] | null>(initialRange);
 const activePreset = ref<TimePreset>(initialPreset);
 const customTimeRange = ref<[number, number] | null>(initialRange);
@@ -328,10 +335,10 @@ const statusMeta = computed<Record<string, { label: string; type: "success" | "w
   client_error: { label: t("客户端错误"), type: "error" },
   error: { label: t("错误"), type: "error" },
 }));
-const allOption = { label: t("全部"), value: "" };
-const statusOptions = computed(() => [allOption, ...Object.entries(statusMeta.value).map(([value, meta]) => ({ label: meta.label, value }))]);
-const accountOptions = computed(() => [allOption, ...accounts.value.map((account) => ({ label: account.name, value: account.id }))]);
-const modelOptions = computed(() => [allOption, ...models.value.map((model) => ({ label: model, value: model }))]);
+const allOption = computed(() => ({ label: t("全部"), value: "" }));
+const statusOptions = computed(() => [allOption.value, ...Object.entries(statusMeta.value).map(([value, meta]) => ({ label: meta.label, value }))]);
+const accountOptions = computed(() => [allOption.value, ...accounts.value.map((account) => ({ label: account.name, value: account.id }))]);
+const modelOptions = computed(() => [allOption.value, ...models.value.map((model) => ({ label: model, value: model }))]);
 const sortOptions = computed(() => [
   { label: t("时间"), value: "timestamp" },
   { label: t("输入"), value: "prompt_tokens" },
@@ -355,40 +362,12 @@ function toIsoString(ms: number): string {
   return new Date(ms).toISOString();
 }
 
-function startOfLocalMonth(date: Date): Date {
-  return new Date(date.getFullYear(), date.getMonth(), 1, 0, 0, 0, 0);
-}
-
-function endOfLocalMonth(date: Date): Date {
-  return new Date(date.getFullYear(), date.getMonth() + 1, 0, 23, 59, 59, 999);
-}
-
-function computeTimeRange(preset: TimePreset): [number, number] | null {
-  const now = new Date();
-  const end = now.getTime();
-  switch (preset) {
-    case "last24h":
-      return [end - 24 * 60 * 60 * 1000, end];
-    case "last7d":
-      return [end - 7 * 24 * 60 * 60 * 1000, end];
-    case "last30d":
-      return [end - 30 * 24 * 60 * 60 * 1000, end];
-    case "thisMonth":
-      return [startOfLocalMonth(now).getTime(), end];
-    case "lastMonth": {
-      const firstDayThisMonth = startOfLocalMonth(now);
-      const lastDayPrevMonth = new Date(firstDayThisMonth.getTime() - 1);
-      return [startOfLocalMonth(lastDayPrevMonth).getTime(), endOfLocalMonth(lastDayPrevMonth).getTime()];
-    }
-    default:
-      return null;
-  }
-}
-
 function applyTimePreset(preset: TimePreset) {
   if (preset === "custom") {
+    const currentRange = resolveTimeRange(activePreset.value, timeRange.value);
     activePreset.value = "custom";
-    customTimeRange.value = timeRange.value;
+    timeRange.value = currentRange;
+    customTimeRange.value = currentRange;
     showTimePanel.value = true;
     return;
   }
@@ -400,12 +379,10 @@ function applyTimePreset(preset: TimePreset) {
     return;
   }
   const range = computeTimeRange(preset);
-  if (range) {
-    activePreset.value = preset;
-    timeRange.value = range;
-    customTimeRange.value = range;
-    showTimePanel.value = false;
-  }
+  activePreset.value = preset;
+  timeRange.value = range;
+  customTimeRange.value = range;
+  showTimePanel.value = false;
 }
 
 function applyCustomTimeRange(value: [number, number] | null) {
@@ -491,10 +468,9 @@ function clearFilters() {
   statusFilter.value = "";
   accountFilter.value = "";
   modelFilter.value = "";
-  activePreset.value = "last24h";
-  const range = computeTimeRange("last24h");
-  timeRange.value = range;
-  customTimeRange.value = range;
+  activePreset.value = "all";
+  timeRange.value = null;
+  customTimeRange.value = null;
   showTimePanel.value = false;
 }
 
@@ -511,12 +487,14 @@ function syncQueryState() {
   else url.searchParams.delete("account");
   if (modelFilter.value) url.searchParams.set("model", modelFilter.value);
   else url.searchParams.delete("model");
-  if (timeRange.value) {
+  if (activePreset.value === "custom" && timeRange.value) {
     url.searchParams.set("start", toIsoString(timeRange.value[0]));
     url.searchParams.set("end", toIsoString(timeRange.value[1]));
+    url.searchParams.delete("range");
   } else {
     url.searchParams.delete("start");
     url.searchParams.delete("end");
+    url.searchParams.set("range", activePreset.value);
   }
   if (sortBy.value) url.searchParams.set("sort", sortBy.value);
   else url.searchParams.delete("sort");
@@ -547,14 +525,15 @@ async function loadForwardLogs() {
   forwardLogs.value = [];
   forwardTotals.value = emptySummary();
   try {
+    const requestRange = resolveTimeRange(activePreset.value, timeRange.value);
     const result = await tauriApi.getForwardLogs({
       limit: pageSize,
       offset: (forwardPage.value - 1) * pageSize,
       status: statusFilter.value,
       account_id: accountFilter.value,
       model: modelFilter.value,
-      start_time: timeRange.value ? toIsoString(timeRange.value[0]) : null,
-      end_time: timeRange.value ? toIsoString(timeRange.value[1]) : null,
+      start_time: requestRange ? toIsoString(requestRange[0]) : null,
+      end_time: requestRange ? toIsoString(requestRange[1]) : null,
       sort_by: sortBy.value,
       sort_order: sortOrder.value,
     });
@@ -603,7 +582,7 @@ function changeGatewayPage(page: number) {
 
 watch(activeTab, syncQueryState);
 watch(
-  [statusFilter, accountFilter, modelFilter, timeRange, sortBy, sortOrder],
+  [statusFilter, accountFilter, modelFilter, timeRange, activePreset, sortBy, sortOrder],
   () => {
     forwardPage.value = 1;
     syncQueryState();

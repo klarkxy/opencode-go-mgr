@@ -1,10 +1,10 @@
+use crate::pricing::normalize_model_name;
 use axum::http::StatusCode;
 use base64::{
     Engine as _,
     engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD},
 };
 use bytes::Bytes;
-use crate::pricing::normalize_model_name;
 use serde_json::{Map, Value, json};
 use std::fmt;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -859,7 +859,10 @@ pub(crate) fn sanitize_minimax_chat_usage(
     let Some(obj) = usage.as_object_mut() else {
         return;
     };
-    let prompt = obj.get("prompt_tokens").and_then(Value::as_u64).unwrap_or(0);
+    let prompt = obj
+        .get("prompt_tokens")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
     let cached = obj
         .get("prompt_tokens_details")
         .and_then(|v| v.get("cached_tokens"))
@@ -905,11 +908,7 @@ pub fn has_complete_usage(format: ApiFormat, payload: &Value) -> bool {
     }
 }
 
-pub fn extract_usage(
-    format: ApiFormat,
-    payload: &Value,
-    model_hint: Option<&str>,
-) -> UsageCounts {
+pub fn extract_usage(format: ApiFormat, payload: &Value, model_hint: Option<&str>) -> UsageCounts {
     let usage = usage_payload(format, payload);
     let Some(usage) = usage else {
         return UsageCounts::default();
@@ -3901,8 +3900,7 @@ mod tests {
 
     #[test]
     fn minimax_bogus_all_cache_usage_is_sanitized() {
-        let mut usage =
-            json!({"input_tokens":0,"output_tokens":5,"cache_read_input_tokens":40500});
+        let mut usage = json!({"input_tokens":0,"output_tokens":5,"cache_read_input_tokens":40500});
         sanitize_minimax_anthropic_usage(Some("minimax-m3"), None, &mut usage);
         assert_eq!(usage["input_tokens"], 40500);
         assert_eq!(usage["cache_read_input_tokens"], 0);
@@ -3915,15 +3913,13 @@ mod tests {
         assert_eq!(usage["cache_read_input_tokens"], 14813);
 
         // The heuristic only applies to MiniMax models.
-        let mut usage =
-            json!({"input_tokens":0,"output_tokens":5,"cache_read_input_tokens":40500});
+        let mut usage = json!({"input_tokens":0,"output_tokens":5,"cache_read_input_tokens":40500});
         sanitize_minimax_anthropic_usage(Some("qwen3.7-max"), None, &mut usage);
         assert_eq!(usage["cache_read_input_tokens"], 40500);
 
         // OpenCode Go may return a non-MiniMax model identifier while the request plan still
         // points to MiniMax. The hint must still trigger sanitization.
-        let mut usage =
-            json!({"input_tokens":0,"output_tokens":5,"cache_read_input_tokens":40500});
+        let mut usage = json!({"input_tokens":0,"output_tokens":5,"cache_read_input_tokens":40500});
         sanitize_minimax_anthropic_usage(Some("ocg-generic"), Some("minimax-m3"), &mut usage);
         assert_eq!(usage["input_tokens"], 40500);
         assert_eq!(usage["cache_read_input_tokens"], 0);
@@ -3938,7 +3934,11 @@ mod tests {
             "usage":{"input_tokens":0,"output_tokens":5,"cache_read_input_tokens":40500}
         });
         let chat = transform_response(
-            &plan_with_model(ApiFormat::ChatCompletions, ApiFormat::Messages, "minimax-m3"),
+            &plan_with_model(
+                ApiFormat::ChatCompletions,
+                ApiFormat::Messages,
+                "minimax-m3",
+            ),
             &response,
         )
         .expect("Messages to Chat");
@@ -3957,7 +3957,11 @@ mod tests {
             "usage":{"input_tokens":0,"output_tokens":5,"cache_read_input_tokens":40500}
         });
         let chat = transform_response(
-            &plan_with_model(ApiFormat::ChatCompletions, ApiFormat::Messages, "minimax-m3"),
+            &plan_with_model(
+                ApiFormat::ChatCompletions,
+                ApiFormat::Messages,
+                "minimax-m3",
+            ),
             &response,
         )
         .expect("Messages to Chat");
@@ -4055,33 +4059,37 @@ mod tests {
             }
         });
         let converted = transform_response(
-            &plan_with_model(ApiFormat::ChatCompletions, ApiFormat::ChatCompletions, "minimax-m3"),
+            &plan_with_model(
+                ApiFormat::ChatCompletions,
+                ApiFormat::ChatCompletions,
+                "minimax-m3",
+            ),
             &response,
         )
         .expect("Chat Completions passthrough should sanitize");
         assert_eq!(converted["usage"]["prompt_tokens"], 40669);
-        assert_eq!(converted["usage"]["prompt_tokens_details"]["cached_tokens"], 0);
+        assert_eq!(
+            converted["usage"]["prompt_tokens_details"]["cached_tokens"],
+            0
+        );
     }
 
     #[test]
     fn minimax_model_detection_is_case_and_separator_insensitive() {
         // OpenCode Go / Qwen Cloud docs expose MiniMax IDs with capital letters (MiniMax-M3).
         // The sanitizer must still recognize them.
-        let mut usage =
-            json!({"input_tokens":0,"output_tokens":5,"cache_read_input_tokens":40500});
+        let mut usage = json!({"input_tokens":0,"output_tokens":5,"cache_read_input_tokens":40500});
         sanitize_minimax_anthropic_usage(Some("MiniMax-M3"), None, &mut usage);
         assert_eq!(usage["input_tokens"], 40500);
         assert_eq!(usage["cache_read_input_tokens"], 0);
 
-        let mut usage =
-            json!({"input_tokens":0,"output_tokens":5,"cache_read_input_tokens":40500});
+        let mut usage = json!({"input_tokens":0,"output_tokens":5,"cache_read_input_tokens":40500});
         sanitize_minimax_anthropic_usage(Some("ocg-generic"), Some("MiniMax_M3"), &mut usage);
         assert_eq!(usage["input_tokens"], 40500);
         assert_eq!(usage["cache_read_input_tokens"], 0);
 
         // Qwen is unaffected.
-        let mut usage =
-            json!({"input_tokens":0,"output_tokens":5,"cache_read_input_tokens":40500});
+        let mut usage = json!({"input_tokens":0,"output_tokens":5,"cache_read_input_tokens":40500});
         sanitize_minimax_anthropic_usage(Some("Qwen3.7-Max"), None, &mut usage);
         assert_eq!(usage["cache_read_input_tokens"], 40500);
     }
