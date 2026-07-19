@@ -85,10 +85,10 @@ curl http://127.0.0.1:9042/v1/chat/completions \
 `compose.yaml`，并按需在同目录创建 `.env`。也可以在仓库检出中直接运行：
 
 ```bash
-git clone --branch v1.5.0 --depth 1 https://github.com/klarkxy/opencode-go-mgr.git
+git clone --branch v1.5.1 --depth 1 https://github.com/klarkxy/opencode-go-mgr.git
 cd opencode-go-mgr
 cp .env.example .env
-# 编辑 .env：选择首次管理员创建方式，并把 OCG_IMAGE 固定到 1.5.0。
+# 编辑 .env：选择首次管理员创建方式，并把 OCG_IMAGE 固定到 1.5.1。
 docker compose pull
 docker compose up -d --no-build
 docker compose ps
