@@ -246,6 +246,7 @@
                   <h1 :id="`${activeGuide.id}-title`">{{ activeGuide.name }}</h1>
                   <n-tag type="info" :bordered="false">{{ activeGuide.protocol }}</n-tag>
                   <n-tag v-if="activeGuide.badge" :bordered="false">{{ activeGuide.badge }}</n-tag>
+                  <n-tag v-if="activeGuide.popular" type="success" :bordered="false">{{ t("常用") }}</n-tag>
                 </div>
                 <p>{{ t(activeGuide.summary) }}</p>
               </div>
@@ -445,6 +446,9 @@ function groupGuidesByCategory(guides: readonly ApplicationGuide[]) {
   }
   return [...groups.entries()];
 }
+function guideOptionLabel(guide: ApplicationGuide): string {
+  return guide.popular ? `${guide.name} · ${t("常用")}` : guide.name;
+}
 const applicationMenuOptions = computed<MenuOption[]>(() => {
   const groups = groupGuidesByCategory(applicationGuides);
   return groups.map(([category, guides]) => ({
@@ -453,7 +457,7 @@ const applicationMenuOptions = computed<MenuOption[]>(() => {
     key: `group:${category}`,
     children: guides.map((guide) => ({
       key: guide.id,
-      label: guide.name,
+      label: guideOptionLabel(guide),
     })),
   }));
 });
@@ -465,7 +469,7 @@ const applicationSelectOptions = computed<(SelectOption | SelectGroupOption)[]>(
     key: `group:${category}`,
     children: guides.map((guide) => ({
       value: guide.id,
-      label: guide.name,
+      label: guideOptionLabel(guide),
     })),
   }));
 });

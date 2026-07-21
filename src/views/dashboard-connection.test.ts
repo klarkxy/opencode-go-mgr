@@ -177,10 +177,31 @@ test("model refresh preserves valid selections and falls back only when needed",
   );
 });
 
-test("application catalog has fifteen verified clients and never displays a complete key", () => {
-  assert.equal(APPLICATION_GUIDES.length, 15);
-  assert.equal(new Set(APPLICATION_GUIDES.map((guide) => guide.id)).size, 15);
+test("application catalog has sixteen verified clients and never displays a complete key", () => {
+  assert.equal(APPLICATION_GUIDES.length, 16);
+  assert.equal(new Set(APPLICATION_GUIDES.map((guide) => guide.id)).size, 16);
   assert.ok(APPLICATION_GUIDES.every((guide) => String(guide.id) !== "trae"));
+  const officialUrls = new Map([
+    ["claude-code", "https://code.claude.com/docs/en/llm-gateway-connect"],
+    ["claude-desktop", "https://claude.com/docs/third-party/claude-desktop/gateway"],
+    ["codex", "https://learn.chatgpt.com/docs/config-file/config-reference#configtoml"],
+    ["gemini-cli", "https://github.com/google-gemini/gemini-cli/blob/main/docs/reference/configuration.md"],
+    ["pi", "https://pi.dev/docs/latest/models"],
+    ["kimi-code", "https://www.kimi.com/code/docs/en/kimi-code-cli/configuration/env-vars.html"],
+    ["opencode", "https://opencode.ai/docs/providers/"],
+    ["workbuddy", "https://www.workbuddy.cn/docs/workbuddy/From-Beginner-to-Expert-Guide/Function-Description/Model"],
+    ["openclaw", "https://docs.openclaw.ai/start/wizard-cli-automation"],
+    ["hermes", "https://hermes-agent.nousresearch.com/docs/integrations/providers"],
+    ["cherry-studio", "https://docs.cherry-ai.com/docs/en-us/pre-basic/settings/providers"],
+    ["vscode-copilot", "https://code.visualstudio.com/docs/agent-customization/language-models"],
+    ["cline", "https://docs.cline.bot/provider-config/openai-compatible"],
+    ["roo-code", "https://roocodeinc.github.io/Roo-Code/features/settings-management/"],
+    ["continue", "https://docs.continue.dev/customize/model-providers/top-level/openai"],
+    ["chatbox", "https://docs.chatboxai.app/en/guides/providers/import-config"],
+  ]);
+  for (const guide of APPLICATION_GUIDES) {
+    assert.equal(guide.officialUrl, officialUrls.get(guide.id), `${guide.id} official docs`);
+  }
   for (const appId of [
     "claude-code",
     "claude-desktop",
@@ -189,6 +210,7 @@ test("application catalog has fifteen verified clients and never displays a comp
     "pi",
     "kimi-code",
     "opencode",
+    "workbuddy",
     "openclaw",
     "hermes",
   ]) {
@@ -233,6 +255,7 @@ test("application catalog has fifteen verified clients and never displays a comp
     ["pi", urls.apiBaseUrl],
     ["kimi-code", urls.apiBaseUrl],
     ["opencode", urls.apiBaseUrl],
+    ["workbuddy", urls.chatCompletionsUrl],
     ["openclaw", urls.apiBaseUrl],
     ["hermes", urls.apiBaseUrl],
     ["cherry-studio", urls.rootUrl],
@@ -260,7 +283,7 @@ test("application catalog has fifteen verified clients and never displays a comp
   const claudeGuide = APPLICATION_GUIDES.find((guide) => guide.id === "claude-code");
   assert.ok(claudeGuide);
   const claudeSettings = JSON.parse(claudeGuide.snippets(context)[0].copy);
-  assert.equal(claudeSettings.env.CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY, "1");
+  assert.ok(!("CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY" in claudeSettings.env));
   for (const variable of [
     "ANTHROPIC_MODEL",
     "ANTHROPIC_DEFAULT_FABLE_MODEL",
@@ -276,16 +299,20 @@ test("application catalog has fifteen verified clients and never displays a comp
   const codex = APPLICATION_GUIDES.find((guide) => guide.id === "codex");
   assert.ok(codex);
   assert.deepEqual(codex.modelFields, ["model", "review_model"]);
-  const codexConfig = codex.snippets(context)[0].copy;
+  const codexSnippets = codex.snippets(context);
+  assert.equal(codexSnippets[0].label, "~/.codex/ocg.config.toml");
+  const codexConfig = codexSnippets[0].copy;
   assert.match(codexConfig, /model = "kimi-k3"/);
   assert.match(codexConfig, /review_model = "glm-5.1"/);
+  assert.ok(codexSnippets.some((snippet) => snippet.copy.includes("codex --profile ocg")));
 
   const claudeDesktop = APPLICATION_GUIDES.find((guide) => guide.id === "claude-desktop");
   assert.ok(claudeDesktop);
   assert.deepEqual(claudeDesktop.modelFields, ["sonnet", "opus", "haiku"]);
-  const desktopProfile = JSON.parse(claudeDesktop.snippets(context)[0].copy);
-  assert.equal(desktopProfile.inferenceGatewayBaseUrl, `${urls.rootUrl}/claude-desktop`);
-  assert.equal(desktopProfile.inferenceGatewayApiKey, actualKey);
+  const desktopForm = claudeDesktop.snippets(context)[0].copy;
+  assert.match(desktopForm, /Inference provider: Gateway/);
+  assert.match(desktopForm, new RegExp(`Gateway base URL: ${urls.rootUrl}/claude-desktop`));
+  assert.match(desktopForm, new RegExp(`Gateway API key: ${actualKey}`));
 
   const gemini = APPLICATION_GUIDES.find((guide) => guide.id === "gemini-cli");
   assert.ok(gemini);
@@ -334,6 +361,22 @@ test("application catalog has fifteen verified clients and never displays a comp
     });
   }
   assert.doesNotMatch(openCode.snippets(context)[0].copy, new RegExp(actualKey));
+  assert.equal(openCode.snippets(context)[0].label, "~/.config/opencode/ocg.json");
+  assert.ok(openCode.snippets(context).some((snippet) => snippet.copy.includes("OPENCODE_CONFIG")));
+  assert.ok(openCode.snippets(context).some((snippet) => snippet.copy.includes("\nopencode")));
+
+  const workBuddy = APPLICATION_GUIDES.find((guide) => guide.id === "workbuddy");
+  assert.ok(workBuddy);
+  assert.ok(!("multipleModels" in workBuddy));
+  const workBuddyForm = workBuddy.snippets(context)[0].copy;
+  assert.match(workBuddyForm, /Provider: Custom/);
+  assert.match(workBuddyForm, new RegExp(`URL: ${urls.chatCompletionsUrl}`));
+  assert.match(workBuddyForm, new RegExp(`API Key: ${actualKey}`));
+  assert.match(workBuddyForm, /Model: kimi-k3/);
+  assert.match(workBuddyForm, /Custom Protocol: Off/);
+  assert.match(workBuddyForm, /Tool Calling: On/);
+  assert.match(workBuddyForm, /Image Input: On/);
+  assert.match(workBuddyForm, /Reasoning Mode: On/);
 
   const pi = APPLICATION_GUIDES.find((guide) => guide.id === "pi");
   assert.ok(pi);
@@ -383,7 +426,17 @@ test("application catalog has fifteen verified clients and never displays a comp
 
   const kimiCode = APPLICATION_GUIDES.find((guide) => guide.id === "kimi-code");
   assert.ok(kimiCode);
-  const kimiConfig = kimiCode.snippets(context)[0].copy;
+  const kimiSnippets = kimiCode.snippets(context);
+  const kimiPowerShell = kimiSnippets.find((snippet) => snippet.language === "powershell")!.copy;
+  const kimiBash = kimiSnippets.find((snippet) => snippet.language === "bash")!.copy;
+  const kimiConfig = kimiSnippets.find((snippet) => snippet.language === "toml")!.copy;
+  for (const command of [kimiPowerShell, kimiBash]) {
+    assert.match(command, /KIMI_MODEL_NAME/);
+    assert.match(command, /KIMI_MODEL_PROVIDER_TYPE/);
+    assert.match(command, /KIMI_MODEL_BASE_URL/);
+    assert.match(command, /KIMI_MODEL_MAX_CONTEXT_SIZE/);
+    assert.match(command, /KIMI_MODEL_CAPABILITIES/);
+  }
   assert.match(kimiConfig, /\[providers\.ocg\]\ntype = "openai"/);
   assert.match(kimiConfig, new RegExp(`base_url = ${JSON.stringify(urls.apiBaseUrl)}`));
   assert.match(kimiConfig, new RegExp(`api_key = ${JSON.stringify(actualKey)}`));
@@ -399,10 +452,42 @@ test("application catalog has fifteen verified clients and never displays a comp
   const openClaw = APPLICATION_GUIDES.find((guide) => guide.id === "openclaw");
   assert.ok(openClaw);
   const openClawSnippets = openClaw.snippets(context);
-  const openClawConfig = JSON.parse(openClawSnippets[0].copy);
-  assert.equal(openClawConfig.models.providers.ocg.apiKey, "${OCG_API_KEY}");
-  assert.doesNotMatch(openClawSnippets[0].copy, new RegExp(actualKey));
-  assert.equal(openClawSnippets[1].copy, `OCG_API_KEY=${JSON.stringify(actualKey)}`);
+  const openClawConfigSnippet = openClawSnippets.find((snippet) => snippet.language === "json5")!;
+  const openClawEnv = openClawSnippets.find((snippet) => snippet.label === "~/.openclaw/.env")!;
+  const openClawOnboarding = openClawSnippets.find((snippet) => snippet.language === "powershell")!.copy;
+  const openClawConfig = JSON.parse(openClawConfigSnippet.copy);
+  assert.equal(openClawConfig.models.providers.ocg.apiKey, "${CUSTOM_API_KEY}");
+  assert.deepEqual(openClawConfig.models.providers.ocg.models[0], {
+    id: "kimi-k3",
+    name: "kimi-k3",
+    reasoning: true,
+    input: ["text", "image"],
+    contextWindow: 1_048_576,
+    maxTokens: 131_072,
+  });
+  assert.doesNotMatch(openClawConfigSnippet.copy, new RegExp(actualKey));
+  assert.equal(openClawEnv.copy, `CUSTOM_API_KEY=${JSON.stringify(actualKey)}`);
+  assert.match(openClawOnboarding, /openclaw onboard --non-interactive --accept-risk/);
+  assert.match(openClawOnboarding, /--secret-input-mode ref/);
+  assert.match(openClawOnboarding, /--custom-compatibility openai/);
+  assert.match(openClawOnboarding, /--custom-image-input/);
+  assert.doesNotMatch(openClawOnboarding, /--custom-api-key/);
+
+  const hermes = APPLICATION_GUIDES.find((guide) => guide.id === "hermes")!;
+  const hermesConfig = hermes.snippets(context)[0].copy;
+  assert.match(hermesConfig, /"kimi-k3":\n\s+context_length: 1048576\n\s+supports_vision: true/);
+  assert.match(hermesConfig, /"glm-5\.1":\n\s+context_length: 202752\n\s+supports_vision: false/);
+
+  assert.deepEqual(
+    APPLICATION_GUIDES.filter((guide) => "popular" in guide && guide.popular).map((guide) => guide.id),
+    ["openclaw", "hermes"],
+  );
+
+  const rooCode = APPLICATION_GUIDES.find((guide) => guide.id === "roo-code")!;
+  const rooAutoImport = JSON.parse(
+    rooCode.snippets(context).find((snippet) => snippet.label.startsWith("VS Code settings.json"))!.copy,
+  );
+  assert.equal(rooAutoImport["roo-cline.autoImportSettingsPath"], "~/roo-code-settings.json");
 
   for (const appId of [
     "opencode",
@@ -544,7 +629,7 @@ test("Pi and Kimi Code configs use verified per-model limits and capabilities wi
   }
 
   const kimiCode = APPLICATION_GUIDES.find((guide) => guide.id === "kimi-code")!;
-  const kimiConfig = kimiCode.snippets(context)[0].copy;
+  const kimiConfig = kimiCode.snippets(context).find((snippet) => snippet.language === "toml")!.copy;
   assert.doesNotMatch(kimiConfig, /max_context_size = 128000(?:\r?\n|$)/);
   assert.doesNotMatch(kimiConfig, /max_output_size/);
   const kimiTables = new Map<string, string>();
@@ -607,8 +692,8 @@ test("dotenv snippets quote keys containing comments and replacement tokens", ()
     ...urls,
     displayKey: maskConnectionKey(actualKey),
     actualKey,
-    modelId: "selected-model",
-    modelIds: ["selected-model"],
+    modelId: "kimi-k3",
+    modelIds: ["kimi-k3"],
     modelValues: {},
     iconUrl: "https://edge.example.com/dashboard/ocg.png",
   };
@@ -690,12 +775,14 @@ test("generated VS Code and Continue configs use their current complete shapes",
   assert.equal(vscodeConfig[0].models[0].vision, false);
   assert.deepEqual(vscodeConfig[0].models.map((model: { id: string }) => model.id), vscodeContext.modelIds);
   for (const model of vscodeConfig[0].models) {
+    const metadata = APPLICATION_MODEL_METADATA[model.id];
     assert.equal(
       model.maxInputTokens + model.maxOutputTokens,
       vscodeWindows.get(model.id),
       model.id,
     );
     assert.equal(model.maxOutputTokens, model.id === "glm-5.1" ? 32_768 : 65_536, model.id);
+    assert.equal(model.vision, (metadata.ocgInput ?? metadata.input).includes("image"), model.id);
   }
 
   const continueGuide = APPLICATION_GUIDES.find((guide) => guide.id === "continue")!;
@@ -703,8 +790,14 @@ test("generated VS Code and Continue configs use their current complete shapes",
   assert.match(yaml, /^name: OCG Manager\nversion: 1\.0\.0\nschema: v1\nmodels:/);
   assert.match(yaml, /model: "selected-model"/);
   assert.match(yaml, /model: "second-model"/);
+  assert.match(yaml, /apiKey: \$\{\{ secrets\.OCG_API_KEY \}\}/);
+  assert.doesNotMatch(yaml, new RegExp(context.actualKey));
   assert.match(yaml, /useResponsesApi: false/);
   assert.match(yaml, /capabilities:\n\s+- tool_use/);
+  assert.equal(
+    continueGuide.snippets(context).find((snippet) => snippet.language === "dotenv")!.copy,
+    `OCG_API_KEY=${JSON.stringify(context.actualKey)}`,
+  );
 });
 
 test("dashboard keeps the connection center first and protects key regeneration", async () => {
@@ -794,6 +887,8 @@ test("applications view uses deep-linked subpages and a responsive second naviga
   assert.doesNotMatch(applications, /<n-layout/);
   assert.match(applications, /<n-menu/);
   assert.match(applications, /<n-select/);
+  assert.match(applications, /v-if="activeGuide\.popular"[\s\S]*?t\("常用"\)/);
+  assert.match(applications, /function guideOptionLabel[\s\S]*?guide\.popular[\s\S]*?t\("常用"\)/);
   assert.match(applications, /tauriApi\.getApplicationModels\(\)/);
   assert.match(applications, /tauriApi\.getClaudeDesktopModels\(\)/);
   assert.match(applications, /Promise\.allSettled/);
