@@ -149,22 +149,304 @@ export function recommendClaudeCodeModel(field: string, availableModels: readonl
     ?? "";
 }
 
-const VSCODE_MODEL_CONTEXT_WINDOWS: Readonly<Record<string, number>> = {
-  "glm-5.2": 1_000_000,
-  "glm-5.1": 202_752,
-  "kimi-k2.7-code": 262_144,
-  "kimi-k2.6": 262_144,
-  "deepseek-v4-pro": 1_000_000,
-  "deepseek-v4-flash": 1_000_000,
-  "mimo-v2.5": 1_000_000,
-  "mimo-v2.5-pro": 1_048_576,
-  "minimax-m3": 1_000_000,
-  "minimax-m2.7": 204_800,
-  "minimax-m2.5": 204_800,
-  "qwen3.7-max": 1_000_000,
-  "qwen3.7-plus": 1_000_000,
-  "qwen3.6-plus": 1_000_000,
+type ApplicationModelInput = "text" | "image" | "audio" | "video";
+type ReasoningEffort = "low" | "medium" | "high" | "max";
+type PiThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+type PiCompatValue = string | boolean;
+
+// A visible high state keeps Pi's reasoning UI honest without sending an unsupported effort value.
+const PI_HIGH_ONLY = {
+  off: null,
+  minimal: null,
+  low: null,
+  medium: null,
+  xhigh: null,
+  max: null,
+} as const;
+
+const PI_NO_REASONING_EFFORT = { supportsReasoningEffort: false } as const;
+// OCG's Chat -> Messages bridge understands low/medium/high; map Pi's extra minimal level explicitly.
+const PI_MINIMAL_TO_LOW = { minimal: "low" } as const;
+
+export interface ApplicationModelMetadata {
+  contextWindow: number;
+  maxOutputTokens: number;
+  input: readonly ApplicationModelInput[];
+  /** A narrower client-facing set when OCG's protocol conversion cannot carry every native modality. */
+  ocgInput?: readonly ApplicationModelInput[];
+  reasoning: boolean;
+  alwaysThinking?: boolean;
+  toolUse: boolean;
+  efforts?: readonly ReasoningEffort[];
+  defaultEffort?: ReasoningEffort;
+  piThinkingLevelMap?: Readonly<Partial<Record<PiThinkingLevel, string | null>>>;
+  piCompat?: Readonly<Record<string, PiCompatValue>>;
+}
+
+// Effective OpenCode Go limits and capabilities, verified 2026-07-21; not generic vendor defaults.
+// Source of truth: https://github.com/anomalyco/models.dev/tree/dev/providers/opencode-go/models
+// Keep this exhaustive for every model that application_models can return. Unknown IDs must fail
+// visibly instead of inheriting Pi/Kimi Code's misleading 128K defaults.
+export const APPLICATION_MODEL_METADATA: Readonly<Record<string, ApplicationModelMetadata>> = {
+  "grok-4.5": {
+    contextWindow: 500_000,
+    maxOutputTokens: 500_000,
+    input: ["text", "image"],
+    reasoning: true,
+    alwaysThinking: true,
+    toolUse: true,
+    efforts: ["low", "medium", "high"],
+    defaultEffort: "high",
+  },
+  "glm-5.2": {
+    contextWindow: 1_000_000,
+    maxOutputTokens: 131_072,
+    input: ["text"],
+    reasoning: true,
+    toolUse: true,
+    efforts: ["high", "max"],
+    defaultEffort: "max",
+    piThinkingLevelMap: {
+      off: null,
+      minimal: null,
+      low: null,
+      medium: null,
+      high: "high",
+      xhigh: null,
+      max: "max",
+    },
+  },
+  "glm-5.1": {
+    contextWindow: 202_752,
+    maxOutputTokens: 32_768,
+    input: ["text"],
+    reasoning: true,
+    toolUse: true,
+    piThinkingLevelMap: PI_HIGH_ONLY,
+    piCompat: PI_NO_REASONING_EFFORT,
+  },
+  "kimi-k3": {
+    contextWindow: 1_048_576,
+    maxOutputTokens: 131_072,
+    input: ["text", "image", "video"],
+    reasoning: true,
+    alwaysThinking: true,
+    toolUse: true,
+    efforts: ["max"],
+    defaultEffort: "max",
+  },
+  "kimi-k2.7-code": {
+    contextWindow: 262_144,
+    maxOutputTokens: 262_144,
+    input: ["text", "image", "video"],
+    reasoning: true,
+    alwaysThinking: true,
+    toolUse: true,
+    piThinkingLevelMap: PI_HIGH_ONLY,
+    piCompat: PI_NO_REASONING_EFFORT,
+  },
+  "kimi-k2.6": {
+    contextWindow: 262_144,
+    maxOutputTokens: 65_536,
+    input: ["text", "image", "video"],
+    reasoning: true,
+    toolUse: true,
+    piThinkingLevelMap: {
+      minimal: null,
+      low: null,
+      medium: null,
+    },
+    piCompat: {
+      thinkingFormat: "deepseek",
+      supportsReasoningEffort: false,
+      supportsLongCacheRetention: false,
+    },
+  },
+  "mimo-v2.5": {
+    contextWindow: 1_000_000,
+    maxOutputTokens: 128_000,
+    input: ["text", "image", "audio", "video"],
+    reasoning: true,
+    toolUse: true,
+  },
+  "mimo-v2.5-pro": {
+    contextWindow: 1_048_576,
+    maxOutputTokens: 128_000,
+    input: ["text"],
+    reasoning: true,
+    toolUse: true,
+  },
+  "minimax-m3": {
+    contextWindow: 1_000_000,
+    maxOutputTokens: 131_072,
+    input: ["text", "image", "video"],
+    ocgInput: ["text", "image"],
+    reasoning: true,
+    toolUse: true,
+    piThinkingLevelMap: PI_MINIMAL_TO_LOW,
+  },
+  "minimax-m2.7": {
+    contextWindow: 204_800,
+    maxOutputTokens: 131_072,
+    input: ["text"],
+    reasoning: true,
+    alwaysThinking: true,
+    toolUse: true,
+    piThinkingLevelMap: PI_HIGH_ONLY,
+    piCompat: PI_NO_REASONING_EFFORT,
+  },
+  "minimax-m2.7-highspeed": {
+    // OCG-supported faster alias; MiniMax documents capability parity with minimax-m2.7.
+    contextWindow: 204_800,
+    maxOutputTokens: 131_072,
+    input: ["text"],
+    reasoning: true,
+    alwaysThinking: true,
+    toolUse: true,
+    piThinkingLevelMap: PI_HIGH_ONLY,
+    piCompat: PI_NO_REASONING_EFFORT,
+  },
+  "minimax-m2.5": {
+    contextWindow: 204_800,
+    maxOutputTokens: 65_536,
+    input: ["text"],
+    reasoning: true,
+    alwaysThinking: true,
+    toolUse: true,
+    piThinkingLevelMap: PI_HIGH_ONLY,
+    piCompat: PI_NO_REASONING_EFFORT,
+  },
+  "minimax-m2.5-highspeed": {
+    // OCG-supported faster alias; MiniMax documents capability parity with minimax-m2.5.
+    contextWindow: 204_800,
+    maxOutputTokens: 65_536,
+    input: ["text"],
+    reasoning: true,
+    alwaysThinking: true,
+    toolUse: true,
+    piThinkingLevelMap: PI_HIGH_ONLY,
+    piCompat: PI_NO_REASONING_EFFORT,
+  },
+  "qwen3.7-max": {
+    contextWindow: 1_000_000,
+    maxOutputTokens: 65_536,
+    input: ["text"],
+    reasoning: true,
+    toolUse: true,
+    piThinkingLevelMap: PI_MINIMAL_TO_LOW,
+  },
+  "qwen3.7-plus": {
+    contextWindow: 1_000_000,
+    maxOutputTokens: 65_536,
+    input: ["text", "image", "video"],
+    ocgInput: ["text", "image"],
+    reasoning: true,
+    toolUse: true,
+    piThinkingLevelMap: PI_MINIMAL_TO_LOW,
+  },
+  "qwen3.6-plus": {
+    contextWindow: 1_000_000,
+    maxOutputTokens: 65_536,
+    input: ["text", "image", "video"],
+    ocgInput: ["text", "image"],
+    reasoning: true,
+    toolUse: true,
+    piThinkingLevelMap: PI_MINIMAL_TO_LOW,
+  },
+  "deepseek-v4-pro": {
+    contextWindow: 1_000_000,
+    maxOutputTokens: 384_000,
+    input: ["text"],
+    reasoning: true,
+    toolUse: true,
+    efforts: ["high", "max"],
+    defaultEffort: "high",
+    piCompat: {
+      requiresReasoningContentOnAssistantMessages: true,
+      thinkingFormat: "deepseek",
+    },
+  },
+  "deepseek-v4-flash": {
+    contextWindow: 1_000_000,
+    maxOutputTokens: 384_000,
+    input: ["text"],
+    reasoning: true,
+    toolUse: true,
+    efforts: ["high", "max"],
+    defaultEffort: "high",
+    piCompat: {
+      requiresReasoningContentOnAssistantMessages: true,
+      thinkingFormat: "deepseek",
+    },
+  },
 };
+
+function applicationModelMetadata(modelId: string): ApplicationModelMetadata {
+  const metadata = APPLICATION_MODEL_METADATA[modelId];
+  if (!metadata) {
+    throw new Error(`Missing verified application model metadata for ${JSON.stringify(modelId)}`);
+  }
+  return metadata;
+}
+
+function piThinkingLevelMap(metadata: ApplicationModelMetadata): Readonly<Record<string, string | null>> | undefined {
+  if (metadata.piThinkingLevelMap) return metadata.piThinkingLevelMap;
+  const mapping: Record<string, string | null> = {};
+  if (metadata.alwaysThinking) mapping.off = null;
+  if (metadata.efforts) {
+    for (const level of ["minimal", "low", "medium", "high", "xhigh", "max"] as const) {
+      mapping[level] = metadata.efforts.includes(level as ReasoningEffort) ? level : null;
+    }
+  }
+  return Object.keys(mapping).length ? mapping : undefined;
+}
+
+function piModelConfig(modelId: string) {
+  const metadata = applicationModelMetadata(modelId);
+  const effectiveInput = metadata.ocgInput ?? metadata.input;
+  const thinkingLevelMap = piThinkingLevelMap(metadata);
+  return {
+    id: modelId,
+    reasoning: metadata.reasoning,
+    input: effectiveInput.includes("image") ? ["text", "image"] : ["text"],
+    contextWindow: metadata.contextWindow,
+    maxTokens: metadata.maxOutputTokens,
+    ...(thinkingLevelMap ? { thinkingLevelMap } : {}),
+    ...(metadata.piCompat ? { compat: metadata.piCompat } : {}),
+  };
+}
+
+const PI_PROVIDER_COMPAT = {
+  supportsStore: false,
+  supportsDeveloperRole: false,
+  maxTokensField: "max_tokens",
+} as const;
+
+function kimiCodeCapabilities(metadata: ApplicationModelMetadata): string[] {
+  const effectiveInput = metadata.ocgInput ?? metadata.input;
+  return [
+    ...(metadata.reasoning ? ["thinking"] : []),
+    ...(metadata.alwaysThinking ? ["always_thinking"] : []),
+    ...(effectiveInput.includes("image") ? ["image_in"] : []),
+    ...(effectiveInput.includes("video") ? ["video_in"] : []),
+    ...(effectiveInput.includes("audio") ? ["audio_in"] : []),
+    ...(metadata.toolUse ? ["tool_use"] : []),
+  ];
+}
+
+function kimiCodeModelTable(modelId: string): string {
+  const metadata = applicationModelMetadata(modelId);
+  const alias = `ocg/${modelId}`;
+  const effortLines = metadata.efforts
+    ? `\nsupport_efforts = ${JSON.stringify(metadata.efforts)}`
+      + (metadata.defaultEffort ? `\ndefault_effort = ${JSON.stringify(metadata.defaultEffort)}` : "")
+    : "";
+  return `[models.${JSON.stringify(alias)}]\nprovider = "ocg"\nmodel = ${JSON.stringify(modelId)}\nmax_context_size = ${metadata.contextWindow}\ncapabilities = ${JSON.stringify(kimiCodeCapabilities(metadata))}\ndisplay_name = ${JSON.stringify(`${modelId} (OCG Manager)`)}${effortLines}`;
+}
+
+const VSCODE_MODEL_CONTEXT_WINDOWS = Object.fromEntries(
+  Object.entries(APPLICATION_MODEL_METADATA).map(([modelId, metadata]) => [modelId, metadata.contextWindow]),
+) as Readonly<Record<string, number>>;
 
 function vscodeTokenLimits(modelId: string) {
   const contextWindow = VSCODE_MODEL_CONTEXT_WINDOWS[modelId];
@@ -372,6 +654,92 @@ export const APPLICATION_GUIDES = [
         ),
       },
     ],
+  },
+  {
+    id: "pi",
+    name: "Pi",
+    category: "OpenAI 兼容",
+    protocol: "OpenAI Chat Completions",
+    endpointKind: "chat",
+    officialUrl: "https://pi.dev/docs/latest/models",
+    summary: "在 models.json 中注册 OCG Manager，通过 Chat Completions 使用 Pi Agent。",
+    steps: [
+      "把下面的 provider 配置合并到用户级 ~/.pi/agent/models.json。",
+      "在启动 Pi 的同一终端设置 OCG_API_KEY 环境变量。",
+      "启动 Pi 并发送一条测试任务，再到 OCG Manager 的请求日志确认成功记录。",
+    ],
+    notes: [
+      "baseURL 必须使用带 /v1 的 API Base URL。",
+      "模型能力由实际上游决定；Agent 工具调用需要所选模型正确支持 tools。",
+    ],
+    snippets: (context) => [
+      {
+        label: "~/.pi/agent/models.json",
+        language: "json",
+        display: JSON.stringify({
+          providers: {
+            ocg: {
+              baseUrl: context.apiBaseUrl,
+              api: "openai-completions",
+              apiKey: "$OCG_API_KEY",
+              compat: PI_PROVIDER_COMPAT,
+              models: models(context).filter(Boolean).map(piModelConfig),
+            },
+          },
+        }, null, 2),
+        copy: JSON.stringify({
+          providers: {
+            ocg: {
+              baseUrl: context.apiBaseUrl,
+              api: "openai-completions",
+              apiKey: "$OCG_API_KEY",
+              compat: PI_PROVIDER_COMPAT,
+              models: models(context).filter(Boolean).map(piModelConfig),
+            },
+          },
+        }, null, 2),
+      },
+      keyedSnippet(
+        context,
+        t("当前 PowerShell 会话"),
+        "powershell",
+        (key) => `$env:OCG_API_KEY = ${JSON.stringify(key)}`,
+      ),
+      keyedSnippet(
+        context,
+        "macOS / Linux shell",
+        "bash",
+        (key) => `export OCG_API_KEY=${JSON.stringify(key)}`,
+      ),
+    ],
+    multipleModels: true,
+  },
+  {
+    id: "kimi-code",
+    name: "Kimi Code CLI",
+    category: "OpenAI 兼容",
+    protocol: "OpenAI Chat Completions",
+    endpointKind: "chat",
+    officialUrl: "https://www.kimi.com/code/docs/en/kimi-code-cli/configuration/config-files",
+    summary: "选择 OpenAI Compatible provider，将对话请求转发到 OCG Manager。",
+    steps: [
+      "把下面的 provider 与 model 配置合并到用户级 ~/.kimi-code/config.toml。",
+      "启动 Kimi Code CLI 并发送一条测试任务，再到 OCG Manager 的请求日志确认成功记录。",
+    ],
+    notes: [
+      "Kimi CLI 已迁移到 Kimi Code CLI；新接入使用 ~/.kimi-code 而不是旧版 ~/.kimi。",
+      "Kimi Code CLI 会把 api_key 明文保存在 config.toml；请限制配置目录权限。",
+      "模型能力由实际上游决定；Agent 工具调用需要所选模型正确支持 tools。",
+    ],
+    snippets: (context) => [
+      keyedSnippet(context, "~/.kimi-code/config.toml", "toml", (key) => {
+        const modelIds = models(context).filter(Boolean);
+        const defaultModel = modelIds[0] ? `default_model = ${JSON.stringify(`ocg/${modelIds[0]}`)}\n` : "";
+        const modelTables = modelIds.map(kimiCodeModelTable).join("\n\n");
+        return `${defaultModel}default_permission_mode = "manual"\n\n[providers.ocg]\ntype = "openai"\nbase_url = ${JSON.stringify(context.apiBaseUrl)}\napi_key = ${JSON.stringify(key)}${modelTables ? `\n\n${modelTables}` : ""}`;
+      }),
+    ],
+    multipleModels: true,
   },
   {
     id: "opencode",

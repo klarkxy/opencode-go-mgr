@@ -27,8 +27,8 @@ Desktop 协议；Gateway 会把请求转换到模型的 OpenCode-Go 原生协议
   提醒不会自动禁用账号。
 - **OpenCode Go 额度估算**：5 小时、本周、本月用量条按官方文档美元快照估算，
   可在设置页手动刷新。
-- **13 个应用配置教程**：为 Claude Code、Claude Desktop、Codex、Gemini CLI 等
-  13 个客户端生成可直接复制的配置片段。
+- **15 个应用配置教程**：为 Claude Code、Claude Desktop、Codex、Gemini CLI、
+  Pi、Kimi Code CLI 等 15 个客户端生成可直接复制的配置片段。
 - **托盘应用与无头 CLI**：Tauri v2 托盘应用覆盖 Windows、macOS、Linux；
   `ocg-manager-cli` 适合服务器与 Docker。
 - **签名桌面升级**：已安装的桌面版可在设置页检查、验签并原位安装更新。

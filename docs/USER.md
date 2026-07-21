@@ -94,7 +94,7 @@ browser.
 2. In the dashboard's **Connection Center**, copy the **Gateway Key** and the
    **API Base URL** (`http://127.0.0.1:9042/v1`).
 3. Point your client at the base URL with the Gateway Key. The
-   **Applications** view has a per-client guide for 13 common tools.
+   **Applications** view has a per-client guide for 15 common tools.
 4. Verify the setup with a real request.
 
 The Gateway Key is the only credential a client needs, and it works in three
@@ -294,14 +294,14 @@ contents to the network.
 
 ### Application Guides
 
-The **Applications** view ships with per-client configuration snippets for 13
-tools: Claude Code, Claude Desktop, Codex, Gemini CLI, OpenCode, OpenClaw,
-Hermes, Cherry Studio, VS Code Copilot Chat, Cline, Roo Code, Continue, and
-Chatbox. Each guide shows the protocol the tool speaks, the official
-documentation URL, step-by-step instructions, model selectors, and one or
-more editable code blocks with a **Copy** button. The displayed block masks
-the Gateway Key; copying restores the real key, so screenshots remain
-shareable without producing an unusable configuration.
+The **Applications** view ships with per-client configuration snippets for 15
+tools: Claude Code, Claude Desktop, Codex, Gemini CLI, Pi, Kimi Code CLI,
+OpenCode, OpenClaw, Hermes, Cherry Studio, VS Code Copilot Chat, Cline, Roo
+Code, Continue, and Chatbox. Each guide shows the protocol the tool speaks,
+the official documentation URL, step-by-step instructions, model selectors,
+and one or more editable code blocks with a **Copy** button. The displayed
+block masks the Gateway Key; copying restores the real key, so screenshots
+remain shareable without producing an unusable configuration.
 
 Base URL conventions per client:
 
@@ -312,8 +312,8 @@ Base URL conventions per client:
   remote Base URL must use HTTPS; only `localhost`, `127.0.0.1`, and `[::1]`
   may use HTTP. The Applications view disables Gemini configuration copying
   when the resolved root violates this client-side rule.
-- OpenCode, OpenClaw, Hermes, Cline, Roo Code, and Continue use the API Base
-  URL ending in `/v1`.
+- Pi, Kimi Code CLI, OpenCode, OpenClaw, Hermes, Cline, Roo Code, and Continue
+  use the API Base URL ending in `/v1`.
 - VS Code Copilot Chat needs the full `/v1/chat/completions` URL. Codex needs
   `/v1` plus `wire_api = "responses"`.
 

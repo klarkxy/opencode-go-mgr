@@ -28,8 +28,8 @@ native OpenCode-Go protocol and converts the response back.
   expiry with remaining days in the dashboard; expiry never blocks an account.
 - **OpenCode Go quota estimates** — 5-hour, weekly, and monthly usage bars
   from a USD pricing snapshot you can refresh in Settings.
-- **13 client guides** — copy-ready configuration snippets for Claude Code,
-  Claude Desktop, Codex, Gemini CLI, and nine other tools.
+- **15 client guides** — copy-ready configuration snippets for Claude Code,
+  Claude Desktop, Codex, Gemini CLI, Pi, Kimi Code CLI, and nine other tools.
 - **Tray app and headless CLI** — a Tauri v2 tray app for Windows, macOS, and
   Linux, plus `ocg-manager-cli` for servers and Docker.
 - **Signed desktop updates** — installed desktop builds check, verify, and
