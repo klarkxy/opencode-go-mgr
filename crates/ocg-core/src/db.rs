@@ -18,10 +18,18 @@ pub struct ForwardLogQueryOptions<'a> {
     pub status: Option<&'a str>,
     pub account_id: Option<&'a str>,
     pub model: Option<&'a str>,
+    pub request_id: Option<&'a str>,
     pub start_time: Option<&'a str>,
     pub end_time: Option<&'a str>,
     pub sort_by: Option<&'a str>,
     pub sort_order: Option<&'a str>,
+}
+
+pub struct ForwardLogDiagnosticUpdate<'a> {
+    pub error_source: &'a str,
+    pub error_stage: &'a str,
+    pub duration_ms: i64,
+    pub diagnostic_json: &'a str,
 }
 
 #[derive(Debug)]
@@ -673,6 +681,71 @@ impl Database {
             )?;
         }
 
+        if version < 14 {
+            // Some early development databases (and their migration fixtures) did not
+            // yet contain the optional runtime log table. Recreate its stable base shape
+            // before adding diagnostic columns so upgrades remain repairable.
+            tx.execute_batch(
+                "CREATE TABLE IF NOT EXISTS gateway_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    level TEXT NOT NULL,
+                    category TEXT NOT NULL,
+                    message TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );",
+            )?;
+            for (table, columns) in [
+                (
+                    "forward_logs",
+                    [
+                        ("request_id", "TEXT"),
+                        ("attempt", "INTEGER"),
+                        ("error_source", "TEXT"),
+                        ("error_stage", "TEXT"),
+                        ("duration_ms", "INTEGER"),
+                        ("diagnostic_json", "TEXT"),
+                    ],
+                ),
+                (
+                    "gateway_logs",
+                    [
+                        ("request_id", "TEXT"),
+                        ("attempt", "INTEGER"),
+                        ("error_source", "TEXT"),
+                        ("error_stage", "TEXT"),
+                        ("duration_ms", "INTEGER"),
+                        ("diagnostic_json", "TEXT"),
+                    ],
+                ),
+            ] {
+                for (column, definition) in columns {
+                    ensure_column(&tx, table, column, definition)?;
+                }
+            }
+            tx.execute_batch(
+                "CREATE INDEX IF NOT EXISTS idx_forward_logs_request_id
+                    ON forward_logs(request_id);
+                 CREATE INDEX IF NOT EXISTS idx_gateway_logs_request_id
+                    ON gateway_logs(request_id);
+                 INSERT OR REPLACE INTO schema_version (version) VALUES (14);",
+            )?;
+        }
+
+        // Detailed diagnostics are intentionally short-lived. Keep the base log row,
+        // stable request id, source, stage, and original compact error indefinitely.
+        tx.execute(
+            "UPDATE forward_logs SET diagnostic_json = NULL
+             WHERE diagnostic_json IS NOT NULL
+               AND julianday(timestamp) < julianday('now', '-30 days')",
+            [],
+        )?;
+        tx.execute(
+            "UPDATE gateway_logs SET diagnostic_json = NULL
+             WHERE diagnostic_json IS NOT NULL
+               AND julianday(created_at) < julianday('now', '-30 days')",
+            [],
+        )?;
+
         tx.commit()?;
         Ok(())
     }
@@ -875,22 +948,59 @@ impl Database {
 
     // Logging
     pub fn log_gateway(&self, level: &str, category: &str, message: &str) -> Result<()> {
+        self.log_gateway_diagnostic(level, category, message, None, None, None, None, None, None)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn log_gateway_diagnostic(
+        &self,
+        level: &str,
+        category: &str,
+        message: &str,
+        request_id: Option<&str>,
+        attempt: Option<i64>,
+        error_source: Option<&str>,
+        error_stage: Option<&str>,
+        duration_ms: Option<i64>,
+        diagnostic_json: Option<&str>,
+    ) -> Result<()> {
         self.conn.execute(
-            "INSERT INTO gateway_logs (level, category, message, created_at) VALUES (?1, ?2, ?3, ?4)",
-            params![level, category, message, Utc::now().to_rfc3339()],
+            "INSERT INTO gateway_logs
+             (level, category, message, created_at, request_id, attempt,
+              error_source, error_stage, duration_ms, diagnostic_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![
+                level,
+                category,
+                message,
+                Utc::now().to_rfc3339(),
+                request_id,
+                attempt,
+                error_source,
+                error_stage,
+                duration_ms,
+                diagnostic_json,
+            ],
         )?;
         Ok(())
     }
 
     /// Insert a forward_logs row. Returns the auto-assigned row id.
     pub fn log_forward(&self, log: &ForwardLog) -> Result<i64> {
+        let diagnostic_json = log
+            .diagnostic
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()?;
         self.conn.execute(
             "INSERT INTO forward_logs
              (timestamp, model, account_id, account_name, status, http_status,
               prompt_tokens, completion_tokens, cached_tokens, cache_creation_tokens, cost,
               pricing_revision_id, quota_multiplier, local_adjustment_multiplier,
-              service_tier, cost_state, error_message)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+              service_tier, cost_state, error_message, request_id, attempt,
+              error_source, error_stage, duration_ms, diagnostic_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
+                     ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)",
             params![
                 log.timestamp.to_rfc3339(),
                 log.model,
@@ -909,6 +1019,12 @@ impl Database {
                 log.service_tier,
                 log.cost_state,
                 log.error_message,
+                log.request_id,
+                log.attempt,
+                log.error_source,
+                log.error_stage,
+                log.duration_ms,
+                diagnostic_json,
             ],
         )?;
         Ok(self.conn.last_insert_rowid())
@@ -924,6 +1040,7 @@ impl Database {
         http_status: Option<i32>,
         metrics: ForwardMetrics,
         error_message: Option<&str>,
+        diagnostic: Option<&ForwardLogDiagnosticUpdate<'_>>,
     ) -> Result<()> {
         let cost_state = match (metrics.cost_state, status) {
             ("not_applicable", "outcome_unknown") => "outcome_unknown",
@@ -950,7 +1067,11 @@ impl Database {
                  local_adjustment_multiplier = ?11,
                  service_tier = ?12,
                  cost_state = ?13,
-                 error_message = COALESCE(?14, error_message)
+                 error_message = COALESCE(?14, error_message),
+                 error_source = COALESCE(?15, error_source),
+                 error_stage = COALESCE(?16, error_stage),
+                 duration_ms = COALESCE(?17, duration_ms),
+                 diagnostic_json = COALESCE(?18, diagnostic_json)
              WHERE id = ?1",
             params![
                 id,
@@ -966,25 +1087,57 @@ impl Database {
                 metrics.local_adjustment_multiplier,
                 metrics.service_tier,
                 cost_state,
-                error_message
+                error_message,
+                diagnostic.map(|diagnostic| diagnostic.error_source),
+                diagnostic.map(|diagnostic| diagnostic.error_stage),
+                diagnostic.map(|diagnostic| diagnostic.duration_ms),
+                diagnostic.map(|diagnostic| diagnostic.diagnostic_json),
             ],
         )?;
         Ok(())
     }
 
     pub fn list_gateway_logs(&self, limit: i64) -> Result<Vec<GatewayLog>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT id, level, category, message, created_at FROM gateway_logs ORDER BY id DESC LIMIT ?1")?;
-        let rows = stmt.query_map([limit], |row| {
+        self.query_gateway_logs(limit, None)
+    }
+
+    pub fn query_gateway_logs(
+        &self,
+        limit: i64,
+        request_id: Option<&str>,
+    ) -> Result<Vec<GatewayLog>> {
+        let sql = if request_id.is_some() {
+            "SELECT id, level, category, message, created_at, request_id, attempt,
+                    error_source, error_stage, duration_ms, diagnostic_json
+             FROM gateway_logs WHERE request_id = ?1 ORDER BY id DESC LIMIT ?2"
+        } else {
+            "SELECT id, level, category, message, created_at, request_id, attempt,
+                    error_source, error_stage, duration_ms, diagnostic_json
+             FROM gateway_logs ORDER BY id DESC LIMIT ?1"
+        };
+        let mut stmt = self.conn.prepare(sql)?;
+        let map = |row: &rusqlite::Row<'_>| {
             Ok(GatewayLog {
                 id: row.get(0)?,
                 level: row.get(1)?,
                 category: row.get(2)?,
                 message: row.get(3)?,
                 created_at: parse_datetime(row.get::<_, String>(4)?),
+                request_id: row.get(5)?,
+                attempt: row.get(6)?,
+                error_source: row.get(7)?,
+                error_stage: row.get(8)?,
+                duration_ms: row.get(9)?,
+                diagnostic: row
+                    .get::<_, Option<String>>(10)?
+                    .and_then(|json| serde_json::from_str(&json).ok()),
             })
-        })?;
+        };
+        let rows = if let Some(request_id) = request_id {
+            stmt.query_map(params![request_id, limit], map)?
+        } else {
+            stmt.query_map(params![limit], map)?
+        };
         rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.into())
     }
 
@@ -1019,7 +1172,8 @@ impl Database {
             "SELECT id, timestamp, model, account_id, account_name, status, http_status,
                     prompt_tokens, completion_tokens, cached_tokens, cache_creation_tokens, cost,
                     pricing_revision_id, quota_multiplier, local_adjustment_multiplier,
-                    service_tier, cost_state, error_message
+                    service_tier, cost_state, error_message, request_id, attempt,
+                    error_source, error_stage, duration_ms, diagnostic_json
              FROM forward_logs ORDER BY id DESC LIMIT ?1",
         )?;
         let rows = stmt.query_map([limit], forward_log_from_row)?;
@@ -1036,6 +1190,7 @@ impl Database {
             options.status,
             options.account_id,
             options.model,
+            options.request_id,
             options.start_time,
             options.end_time,
         );
@@ -1066,7 +1221,8 @@ impl Database {
             "SELECT id, timestamp, model, account_id, account_name, status, http_status,
                     prompt_tokens, completion_tokens, cached_tokens, cache_creation_tokens, cost,
                     pricing_revision_id, quota_multiplier, local_adjustment_multiplier,
-                    service_tier, cost_state, error_message
+                    service_tier, cost_state, error_message, request_id, attempt,
+                    error_source, error_stage, duration_ms, diagnostic_json
              FROM forward_logs{filter}
              {order_clause}
              LIMIT ? OFFSET ?"
@@ -1691,6 +1847,7 @@ fn forward_log_filter(
     status: Option<&str>,
     account_id: Option<&str>,
     model: Option<&str>,
+    request_id: Option<&str>,
     start_time: Option<&str>,
     end_time: Option<&str>,
 ) -> (String, Vec<Value>) {
@@ -1700,6 +1857,7 @@ fn forward_log_filter(
         ("status = ?", status),
         ("account_id = ?", account_id),
         ("model = ?", model),
+        ("request_id = ?", request_id),
         ("julianday(timestamp) >= julianday(?)", start_time),
         ("julianday(timestamp) <= julianday(?)", end_time),
     ] {
@@ -1758,6 +1916,14 @@ fn forward_log_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ForwardLog>
         service_tier: row.get(15)?,
         cost_state,
         error_message: row.get(17)?,
+        request_id: row.get(18)?,
+        attempt: row.get(19)?,
+        error_source: row.get(20)?,
+        error_stage: row.get(21)?,
+        duration_ms: row.get(22)?,
+        diagnostic: row
+            .get::<_, Option<String>>(23)?
+            .and_then(|json| serde_json::from_str(&json).ok()),
     })
 }
 
@@ -1877,6 +2043,12 @@ mod tests {
             service_tier: None,
             cost_state: "legacy_estimate".into(),
             error_message: None,
+            request_id: None,
+            attempt: None,
+            error_source: None,
+            error_stage: None,
+            duration_ms: None,
+            diagnostic: None,
         }
     }
 
@@ -1904,6 +2076,7 @@ mod tests {
                 cost_state: "priced",
                 ..ForwardMetrics::default()
             },
+            None,
             None,
         )
         .expect("stream should finalize");
@@ -2025,7 +2198,7 @@ mod tests {
                     row.get(0)
                 })
                 .expect("schema version should load");
-            assert_eq!(version, 13, "{label}");
+            assert_eq!(version, 14, "{label}");
             let account = db
                 .get_account("old")
                 .expect("account query should work")
@@ -2103,7 +2276,7 @@ mod tests {
             })
             .expect("schema version should be readable");
         let usage = db.account_usage("old").expect("usage should load");
-        assert_eq!(version, 13);
+        assert_eq!(version, 14);
         assert_eq!(
             db.get_account("old")
                 .expect("account should load")
@@ -2252,7 +2425,7 @@ mod tests {
                 row.get(0)
             })
             .expect("schema version should load");
-        assert_eq!(version, 13);
+        assert_eq!(version, 14);
         assert_eq!(
             db.get_account("valid")
                 .expect("valid account query should work")
@@ -2396,7 +2569,7 @@ mod tests {
                 row.get(0)
             })
             .expect("schema version should load");
-        assert_eq!(version, 13);
+        assert_eq!(version, 14);
         let states = db
             .conn
             .prepare("SELECT cost, cost_state FROM forward_logs ORDER BY id")
@@ -2445,7 +2618,7 @@ mod tests {
                 row.get(0)
             })
             .expect("schema version should load");
-        assert_eq!(version, 13);
+        assert_eq!(version, 14);
 
         let created_at = DateTime::parse_from_rfc3339("2026-01-02T01:30:00+02:00")
             .expect("fixed timestamp should parse")
@@ -2794,7 +2967,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .expect("migration state should load");
-        assert_eq!(version, 13);
+        assert_eq!(version, 14);
         assert_eq!(remaining_baselines, 0);
 
         finalize_success(&db, "legacy-calibration", 2.0, Utc::now());
@@ -2804,6 +2977,156 @@ mod tests {
         assert_cost(usage.window_5h, 9.0);
         assert_cost(usage.window_week, 15.0);
         assert_cost(usage.window_month, 18.0);
+
+        drop(db);
+        fs::remove_dir_all(dir).expect("test data dir should be removed");
+    }
+
+    #[test]
+    fn v14_migrates_v13_logs_and_adds_request_id_indexes() {
+        let dir = temp_data_dir("v14-log-diagnostics");
+        let db = Database::open(dir.clone()).expect("db should open");
+        db.conn
+            .execute_batch(
+                "DROP INDEX idx_forward_logs_request_id;
+                 DROP INDEX idx_gateway_logs_request_id;
+                 ALTER TABLE forward_logs DROP COLUMN request_id;
+                 ALTER TABLE forward_logs DROP COLUMN attempt;
+                 ALTER TABLE forward_logs DROP COLUMN error_source;
+                 ALTER TABLE forward_logs DROP COLUMN error_stage;
+                 ALTER TABLE forward_logs DROP COLUMN duration_ms;
+                 ALTER TABLE forward_logs DROP COLUMN diagnostic_json;
+                 ALTER TABLE gateway_logs DROP COLUMN request_id;
+                 ALTER TABLE gateway_logs DROP COLUMN attempt;
+                 ALTER TABLE gateway_logs DROP COLUMN error_source;
+                 ALTER TABLE gateway_logs DROP COLUMN error_stage;
+                 ALTER TABLE gateway_logs DROP COLUMN duration_ms;
+                 ALTER TABLE gateway_logs DROP COLUMN diagnostic_json;
+                 INSERT INTO forward_logs
+                    (timestamp, model, account_id, account_name, status, error_message)
+                 VALUES ('2026-07-01T00:00:00Z', 'legacy-model', 'legacy', 'Legacy',
+                         'client_error', 'legacy error');
+                 INSERT INTO gateway_logs (level, category, message, created_at)
+                 VALUES ('warn', 'legacy', 'legacy gateway error', '2026-07-01T00:00:00Z');
+                 DELETE FROM schema_version;
+                 INSERT INTO schema_version (version) VALUES (13);",
+            )
+            .expect("v13 schema should be prepared");
+        drop(db);
+
+        let db = Database::open(dir.clone()).expect("v13 database should migrate");
+        let version: i32 = db
+            .conn
+            .query_row("SELECT MAX(version) FROM schema_version", [], |row| {
+                row.get(0)
+            })
+            .expect("schema version should load");
+        assert_eq!(version, 14);
+        for index in ["idx_forward_logs_request_id", "idx_gateway_logs_request_id"] {
+            let exists: bool = db
+                .conn
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='index' AND name=?1)",
+                    [index],
+                    |row| row.get(0),
+                )
+                .expect("index state should load");
+            assert!(exists, "{index} should exist");
+        }
+        let forward = db
+            .query_forward_logs(ForwardLogQueryOptions {
+                limit: 10,
+                offset: 0,
+                status: None,
+                account_id: None,
+                model: None,
+                request_id: None,
+                start_time: None,
+                end_time: None,
+                sort_by: None,
+                sort_order: None,
+            })
+            .expect("legacy forward log should load")
+            .items
+            .pop()
+            .expect("legacy forward log should remain");
+        assert_eq!(forward.error_message.as_deref(), Some("legacy error"));
+        assert!(forward.request_id.is_none());
+        assert!(forward.diagnostic.is_none());
+        let gateway = db
+            .list_gateway_logs(10)
+            .expect("legacy gateway log should load")
+            .pop()
+            .expect("legacy gateway log should remain");
+        assert_eq!(gateway.message, "legacy gateway error");
+        assert!(gateway.request_id.is_none());
+        assert!(gateway.diagnostic.is_none());
+
+        drop(db);
+        fs::remove_dir_all(dir).expect("test data dir should be removed");
+    }
+
+    #[test]
+    fn diagnostic_retention_removes_only_old_json() {
+        let dir = temp_data_dir("diagnostic-retention");
+        let db = Database::open(dir.clone()).expect("db should open");
+        db.conn
+            .execute_batch(
+                "INSERT INTO forward_logs
+                    (timestamp, model, account_id, account_name, status, error_message,
+                     request_id, attempt, error_source, error_stage, duration_ms, diagnostic_json)
+                 VALUES
+                    (datetime('now', '-31 days'), 'old', 'a', 'A', 'client_error', 'keep me',
+                     'ocg-old', 1, 'upstream', 'upstream_http', 12, '{\"old\":true}'),
+                    (datetime('now', '-29 days'), 'new', 'a', 'A', 'client_error', 'keep new',
+                     'ocg-new', 1, 'upstream', 'upstream_http', 13, '{\"new\":true}');
+                 INSERT INTO gateway_logs
+                    (level, category, message, created_at, request_id, error_source,
+                     error_stage, duration_ms, diagnostic_json)
+                 VALUES
+                    ('warn', 'gateway', 'old gateway', datetime('now', '-31 days'),
+                     'ocg-gateway-old', 'client', 'parse', 5, '{\"old\":true}'),
+                    ('warn', 'gateway', 'new gateway', datetime('now', '-29 days'),
+                     'ocg-gateway-new', 'client', 'parse', 6, '{\"new\":true}');",
+            )
+            .expect("diagnostic rows should insert");
+        drop(db);
+
+        let db = Database::open(dir.clone()).expect("db reopen should apply retention");
+        let (old_detail, old_id, old_error, old_source): (Option<String>, String, String, String) =
+            db.conn
+                .query_row(
+                    "SELECT diagnostic_json, request_id, error_message, error_source
+                 FROM forward_logs WHERE request_id='ocg-old'",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                )
+                .expect("old row should remain");
+        assert!(old_detail.is_none());
+        assert_eq!(old_id, "ocg-old");
+        assert_eq!(old_error, "keep me");
+        assert_eq!(old_source, "upstream");
+        let new_detail: Option<String> = db
+            .conn
+            .query_row(
+                "SELECT diagnostic_json FROM forward_logs WHERE request_id='ocg-new'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("new detail should load");
+        assert!(new_detail.is_some());
+        let gateway_details: (Option<String>, Option<String>) = db
+            .conn
+            .query_row(
+                "SELECT
+                    (SELECT diagnostic_json FROM gateway_logs WHERE request_id='ocg-gateway-old'),
+                    (SELECT diagnostic_json FROM gateway_logs WHERE request_id='ocg-gateway-new')",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("gateway details should load");
+        assert!(gateway_details.0.is_none());
+        assert!(gateway_details.1.is_some());
 
         drop(db);
         fs::remove_dir_all(dir).expect("test data dir should be removed");
@@ -3296,6 +3619,7 @@ mod tests {
                 status: None,
                 account_id: None,
                 model: None,
+                request_id: None,
                 start_time: Some("2026-07-17T12:00:00+08:00"),
                 end_time: Some("2026-07-17T12:30:00+08:00"),
                 sort_by: Some("cost"),

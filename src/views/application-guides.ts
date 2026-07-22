@@ -37,6 +37,7 @@ export interface ApplicationGuide {
   endpointKind: "messages" | "responses" | "chat" | "gemini";
   officialUrl: string;
   badge?: string;
+  popular?: boolean;
   summary: MessageKey;
   steps: readonly MessageKey[];
   notes: readonly MessageKey[];
@@ -87,6 +88,10 @@ function models(context: GuideContext): readonly string[] {
   return context.modelIds.length ? context.modelIds : [context.modelId];
 }
 
+function modelCapabilities(modelId: string): ApplicationModelMetadata | undefined {
+  return APPLICATION_MODEL_METADATA[modelId];
+}
+
 function keyedSnippet(
   context: GuideContext,
   label: string,
@@ -122,7 +127,13 @@ export function buildChatboxConfig(context: GuideContext) {
         modelId,
         nickname: modelId,
         type: "chat" as const,
-        capabilities: ["tool_use"] as const,
+        capabilities: [
+          ...(modelCapabilities(modelId)?.reasoning ? ["reasoning" as const] : []),
+          ...((modelCapabilities(modelId)?.ocgInput ?? modelCapabilities(modelId)?.input)?.includes("image")
+            ? ["vision" as const]
+            : []),
+          ...(modelCapabilities(modelId)?.toolUse === false ? [] : ["tool_use" as const]),
+        ],
       })),
     },
   };
@@ -149,22 +160,373 @@ export function recommendClaudeCodeModel(field: string, availableModels: readonl
     ?? "";
 }
 
-const VSCODE_MODEL_CONTEXT_WINDOWS: Readonly<Record<string, number>> = {
-  "glm-5.2": 1_000_000,
-  "glm-5.1": 202_752,
-  "kimi-k2.7-code": 262_144,
-  "kimi-k2.6": 262_144,
-  "deepseek-v4-pro": 1_000_000,
-  "deepseek-v4-flash": 1_000_000,
-  "mimo-v2.5": 1_000_000,
-  "mimo-v2.5-pro": 1_048_576,
-  "minimax-m3": 1_000_000,
-  "minimax-m2.7": 204_800,
-  "minimax-m2.5": 204_800,
-  "qwen3.7-max": 1_000_000,
-  "qwen3.7-plus": 1_000_000,
-  "qwen3.6-plus": 1_000_000,
+type ApplicationModelInput = "text" | "image" | "audio" | "video";
+type ReasoningEffort = "low" | "medium" | "high" | "max";
+type PiThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+type PiCompatValue = string | boolean;
+
+// A visible high state keeps Pi's reasoning UI honest without sending an unsupported effort value.
+const PI_HIGH_ONLY = {
+  off: null,
+  minimal: null,
+  low: null,
+  medium: null,
+  xhigh: null,
+  max: null,
+} as const;
+
+const PI_NO_REASONING_EFFORT = { supportsReasoningEffort: false } as const;
+// OCG's Chat -> Messages bridge understands low/medium/high; map Pi's extra minimal level explicitly.
+const PI_MINIMAL_TO_LOW = { minimal: "low" } as const;
+
+export interface ApplicationModelMetadata {
+  contextWindow: number;
+  maxOutputTokens: number;
+  input: readonly ApplicationModelInput[];
+  /** A narrower client-facing set when OCG's protocol conversion cannot carry every native modality. */
+  ocgInput?: readonly ApplicationModelInput[];
+  reasoning: boolean;
+  alwaysThinking?: boolean;
+  toolUse: boolean;
+  efforts?: readonly ReasoningEffort[];
+  defaultEffort?: ReasoningEffort;
+  piThinkingLevelMap?: Readonly<Partial<Record<PiThinkingLevel, string | null>>>;
+  piCompat?: Readonly<Record<string, PiCompatValue>>;
+}
+
+function powerShellLiteral(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`;
+}
+
+function posixShellLiteral(value: string): string {
+  return `'${value.replaceAll("'", `'"'"'`)}'`;
+}
+
+// Effective OpenCode Go limits and capabilities, verified 2026-07-21; not generic vendor defaults.
+// Source of truth: https://github.com/anomalyco/models.dev/tree/dev/providers/opencode-go/models
+// Keep this exhaustive for every model that application_models can return. Unknown IDs must fail
+// visibly instead of inheriting Pi/Kimi Code's misleading 128K defaults.
+export const APPLICATION_MODEL_METADATA: Readonly<Record<string, ApplicationModelMetadata>> = {
+  "grok-4.5": {
+    contextWindow: 500_000,
+    maxOutputTokens: 500_000,
+    input: ["text", "image"],
+    reasoning: true,
+    alwaysThinking: true,
+    toolUse: true,
+    efforts: ["low", "medium", "high"],
+    defaultEffort: "high",
+  },
+  "glm-5.2": {
+    contextWindow: 1_000_000,
+    maxOutputTokens: 131_072,
+    input: ["text"],
+    reasoning: true,
+    toolUse: true,
+    efforts: ["high", "max"],
+    defaultEffort: "max",
+    piThinkingLevelMap: {
+      off: null,
+      minimal: null,
+      low: null,
+      medium: null,
+      high: "high",
+      xhigh: null,
+      max: "max",
+    },
+  },
+  "glm-5.1": {
+    contextWindow: 202_752,
+    maxOutputTokens: 32_768,
+    input: ["text"],
+    reasoning: true,
+    toolUse: true,
+    piThinkingLevelMap: PI_HIGH_ONLY,
+    piCompat: PI_NO_REASONING_EFFORT,
+  },
+  "kimi-k3": {
+    contextWindow: 1_048_576,
+    maxOutputTokens: 131_072,
+    input: ["text", "image", "video"],
+    reasoning: true,
+    alwaysThinking: true,
+    toolUse: true,
+    efforts: ["max"],
+    defaultEffort: "max",
+  },
+  "kimi-k2.7-code": {
+    contextWindow: 262_144,
+    maxOutputTokens: 262_144,
+    input: ["text", "image", "video"],
+    reasoning: true,
+    alwaysThinking: true,
+    toolUse: true,
+    piThinkingLevelMap: PI_HIGH_ONLY,
+    piCompat: PI_NO_REASONING_EFFORT,
+  },
+  "kimi-k2.6": {
+    contextWindow: 262_144,
+    maxOutputTokens: 65_536,
+    input: ["text", "image", "video"],
+    reasoning: true,
+    toolUse: true,
+    piThinkingLevelMap: {
+      minimal: null,
+      low: null,
+      medium: null,
+    },
+    piCompat: {
+      thinkingFormat: "deepseek",
+      supportsReasoningEffort: false,
+      supportsLongCacheRetention: false,
+    },
+  },
+  "mimo-v2.5": {
+    contextWindow: 1_000_000,
+    maxOutputTokens: 128_000,
+    input: ["text", "image", "audio", "video"],
+    reasoning: true,
+    toolUse: true,
+  },
+  "mimo-v2.5-pro": {
+    contextWindow: 1_048_576,
+    maxOutputTokens: 128_000,
+    input: ["text"],
+    reasoning: true,
+    toolUse: true,
+  },
+  "minimax-m3": {
+    contextWindow: 1_000_000,
+    maxOutputTokens: 131_072,
+    input: ["text", "image", "video"],
+    ocgInput: ["text", "image"],
+    reasoning: true,
+    toolUse: true,
+    piThinkingLevelMap: PI_MINIMAL_TO_LOW,
+  },
+  "minimax-m2.7": {
+    contextWindow: 204_800,
+    maxOutputTokens: 131_072,
+    input: ["text"],
+    reasoning: true,
+    alwaysThinking: true,
+    toolUse: true,
+    piThinkingLevelMap: PI_HIGH_ONLY,
+    piCompat: PI_NO_REASONING_EFFORT,
+  },
+  "minimax-m2.7-highspeed": {
+    // OCG-supported faster alias; MiniMax documents capability parity with minimax-m2.7.
+    contextWindow: 204_800,
+    maxOutputTokens: 131_072,
+    input: ["text"],
+    reasoning: true,
+    alwaysThinking: true,
+    toolUse: true,
+    piThinkingLevelMap: PI_HIGH_ONLY,
+    piCompat: PI_NO_REASONING_EFFORT,
+  },
+  "minimax-m2.5": {
+    contextWindow: 204_800,
+    maxOutputTokens: 65_536,
+    input: ["text"],
+    reasoning: true,
+    alwaysThinking: true,
+    toolUse: true,
+    piThinkingLevelMap: PI_HIGH_ONLY,
+    piCompat: PI_NO_REASONING_EFFORT,
+  },
+  "minimax-m2.5-highspeed": {
+    // OCG-supported faster alias; MiniMax documents capability parity with minimax-m2.5.
+    contextWindow: 204_800,
+    maxOutputTokens: 65_536,
+    input: ["text"],
+    reasoning: true,
+    alwaysThinking: true,
+    toolUse: true,
+    piThinkingLevelMap: PI_HIGH_ONLY,
+    piCompat: PI_NO_REASONING_EFFORT,
+  },
+  "qwen3.7-max": {
+    contextWindow: 1_000_000,
+    maxOutputTokens: 65_536,
+    input: ["text"],
+    reasoning: true,
+    toolUse: true,
+    piThinkingLevelMap: PI_MINIMAL_TO_LOW,
+  },
+  "qwen3.7-plus": {
+    contextWindow: 1_000_000,
+    maxOutputTokens: 65_536,
+    input: ["text", "image", "video"],
+    ocgInput: ["text", "image"],
+    reasoning: true,
+    toolUse: true,
+    piThinkingLevelMap: PI_MINIMAL_TO_LOW,
+  },
+  "qwen3.6-plus": {
+    contextWindow: 1_000_000,
+    maxOutputTokens: 65_536,
+    input: ["text", "image", "video"],
+    ocgInput: ["text", "image"],
+    reasoning: true,
+    toolUse: true,
+    piThinkingLevelMap: PI_MINIMAL_TO_LOW,
+  },
+  "deepseek-v4-pro": {
+    contextWindow: 1_000_000,
+    maxOutputTokens: 384_000,
+    input: ["text"],
+    reasoning: true,
+    toolUse: true,
+    efforts: ["high", "max"],
+    defaultEffort: "high",
+    piCompat: {
+      requiresReasoningContentOnAssistantMessages: true,
+      thinkingFormat: "deepseek",
+    },
+  },
+  "deepseek-v4-flash": {
+    contextWindow: 1_000_000,
+    maxOutputTokens: 384_000,
+    input: ["text"],
+    reasoning: true,
+    toolUse: true,
+    efforts: ["high", "max"],
+    defaultEffort: "high",
+    piCompat: {
+      requiresReasoningContentOnAssistantMessages: true,
+      thinkingFormat: "deepseek",
+    },
+  },
 };
+
+function applicationModelMetadata(modelId: string): ApplicationModelMetadata {
+  const metadata = APPLICATION_MODEL_METADATA[modelId];
+  if (!metadata) {
+    throw new Error(`Missing verified application model metadata for ${JSON.stringify(modelId)}`);
+  }
+  return metadata;
+}
+
+function piThinkingLevelMap(metadata: ApplicationModelMetadata): Readonly<Record<string, string | null>> | undefined {
+  if (metadata.piThinkingLevelMap) return metadata.piThinkingLevelMap;
+  const mapping: Record<string, string | null> = {};
+  if (metadata.alwaysThinking) mapping.off = null;
+  if (metadata.efforts) {
+    for (const level of ["minimal", "low", "medium", "high", "xhigh", "max"] as const) {
+      mapping[level] = metadata.efforts.includes(level as ReasoningEffort) ? level : null;
+    }
+  }
+  return Object.keys(mapping).length ? mapping : undefined;
+}
+
+function piModelConfig(modelId: string) {
+  const metadata = applicationModelMetadata(modelId);
+  const effectiveInput = metadata.ocgInput ?? metadata.input;
+  const thinkingLevelMap = piThinkingLevelMap(metadata);
+  return {
+    id: modelId,
+    reasoning: metadata.reasoning,
+    input: effectiveInput.includes("image") ? ["text", "image"] : ["text"],
+    contextWindow: metadata.contextWindow,
+    maxTokens: metadata.maxOutputTokens,
+    ...(thinkingLevelMap ? { thinkingLevelMap } : {}),
+    ...(metadata.piCompat ? { compat: metadata.piCompat } : {}),
+  };
+}
+
+const PI_PROVIDER_COMPAT = {
+  supportsStore: false,
+  supportsDeveloperRole: false,
+  maxTokensField: "max_tokens",
+} as const;
+
+function kimiCodeCapabilities(metadata: ApplicationModelMetadata): string[] {
+  const effectiveInput = metadata.ocgInput ?? metadata.input;
+  return [
+    ...(metadata.reasoning ? ["thinking"] : []),
+    ...(metadata.alwaysThinking ? ["always_thinking"] : []),
+    ...(effectiveInput.includes("image") ? ["image_in"] : []),
+    ...(effectiveInput.includes("video") ? ["video_in"] : []),
+    ...(effectiveInput.includes("audio") ? ["audio_in"] : []),
+    ...(metadata.toolUse ? ["tool_use"] : []),
+  ];
+}
+
+function kimiCodeModelTable(modelId: string): string {
+  const metadata = applicationModelMetadata(modelId);
+  const alias = `ocg/${modelId}`;
+  const effortLines = metadata.efforts
+    ? `\nsupport_efforts = ${JSON.stringify(metadata.efforts)}`
+      + (metadata.defaultEffort ? `\ndefault_effort = ${JSON.stringify(metadata.defaultEffort)}` : "")
+    : "";
+  return `[models.${JSON.stringify(alias)}]\nprovider = "ocg"\nmodel = ${JSON.stringify(modelId)}\nmax_context_size = ${metadata.contextWindow}\ncapabilities = ${JSON.stringify(kimiCodeCapabilities(metadata))}\ndisplay_name = ${JSON.stringify(`${modelId} (OCG Manager)`)}${effortLines}`;
+}
+
+function kimiTemporaryLaunch(context: GuideContext, key: string, shell: "powershell" | "bash"): string {
+  const metadata = applicationModelMetadata(context.modelId);
+  const values = {
+    KIMI_MODEL_NAME: context.modelId,
+    KIMI_MODEL_API_KEY: key,
+    KIMI_MODEL_PROVIDER_TYPE: "openai",
+    KIMI_MODEL_BASE_URL: context.apiBaseUrl,
+    KIMI_MODEL_MAX_CONTEXT_SIZE: String(metadata.contextWindow),
+    KIMI_MODEL_CAPABILITIES: kimiCodeCapabilities(metadata).join(","),
+  };
+  if (shell === "powershell") {
+    return `${Object.entries(values)
+      .map(([name, value]) => `$env:${name} = ${powerShellLiteral(value)}`)
+      .join("\n")}\nkimi`;
+  }
+  return `${Object.entries(values)
+    .map(([name, value]) => `export ${name}=${posixShellLiteral(value)}`)
+    .join("\n")}\nkimi`;
+}
+
+function openClawOnboardingCommand(
+  context: GuideContext,
+  key: string,
+  shell: "powershell" | "bash",
+): string {
+  const metadata = applicationModelMetadata(context.modelId);
+  const inputFlag = (metadata.ocgInput ?? metadata.input).includes("image")
+    ? "--custom-image-input"
+    : "--custom-text-input";
+  if (shell === "powershell") {
+    return `$env:CUSTOM_API_KEY = ${powerShellLiteral(key)}\nopenclaw onboard --non-interactive --accept-risk \`\n  --mode local \`\n  --auth-choice custom-api-key \`\n  --custom-base-url ${powerShellLiteral(context.apiBaseUrl)} \`\n  --custom-model-id ${powerShellLiteral(context.modelId)} \`\n  --secret-input-mode ref \`\n  --custom-provider-id ocg \`\n  --custom-compatibility openai \`\n  ${inputFlag} \`\n  --gateway-bind loopback`;
+  }
+  return `export CUSTOM_API_KEY=${posixShellLiteral(key)}\nopenclaw onboard --non-interactive --accept-risk \\\n  --mode local \\\n  --auth-choice custom-api-key \\\n  --custom-base-url ${posixShellLiteral(context.apiBaseUrl)} \\\n  --custom-model-id ${posixShellLiteral(context.modelId)} \\\n  --secret-input-mode ref \\\n  --custom-provider-id ocg \\\n  --custom-compatibility openai \\\n  ${inputFlag} \\\n  --gateway-bind loopback`;
+}
+
+function workBuddyForm(context: GuideContext, key: string): string {
+  const metadata = applicationModelMetadata(context.modelId);
+  const effectiveInput = metadata.ocgInput ?? metadata.input;
+  const state = (enabled: boolean) => enabled ? "On" : "Off";
+  return `Provider: Custom\nURL: ${context.chatCompletionsUrl}\nAPI Key: ${key}\nModel: ${context.modelId}\nCustom Protocol: Off\nTool Calling: ${state(Boolean(metadata.toolUse))}\nImage Input: ${state(effectiveInput.includes("image"))}\nReasoning Mode: ${state(Boolean(metadata.reasoning))}`;
+}
+
+function openClawModelConfig(modelId: string) {
+  const metadata = applicationModelMetadata(modelId);
+  const effectiveInput = metadata.ocgInput ?? metadata.input;
+  return {
+    id: modelId,
+    name: modelId,
+    reasoning: Boolean(metadata.reasoning),
+    input: ["text", ...(effectiveInput.includes("image") ? ["image"] : [])],
+    contextWindow: metadata.contextWindow,
+    maxTokens: metadata.maxOutputTokens,
+  };
+}
+
+function hermesModelEntry(modelId: string): string {
+  const metadata = applicationModelMetadata(modelId);
+  const effectiveInput = metadata.ocgInput ?? metadata.input;
+  return `      ${JSON.stringify(modelId)}:\n        context_length: ${metadata.contextWindow}\n        supports_vision: ${effectiveInput.includes("image")}`;
+}
+
+const VSCODE_MODEL_CONTEXT_WINDOWS = Object.fromEntries(
+  Object.entries(APPLICATION_MODEL_METADATA).map(([modelId, metadata]) => [modelId, metadata.contextWindow]),
+) as Readonly<Record<string, number>>;
 
 function vscodeTokenLimits(modelId: string) {
   const contextWindow = VSCODE_MODEL_CONTEXT_WINDOWS[modelId];
@@ -190,6 +552,7 @@ export const APPLICATION_GUIDES = [
     ],
     notes: [
       "Claude Code 使用 Anthropic Messages 协议，因此不要给 ANTHROPIC_BASE_URL 追加 /v1。",
+      "团队管理员可通过 Managed Settings、设备管理或 apiKeyHelper 下发 Claude Code；个人用户合并下方配置。",
       "模型能力由实际上游决定；Agent 工具调用需要所选模型正确支持 tools。",
     ],
     modelFields: [
@@ -208,7 +571,6 @@ export const APPLICATION_GUIDES = [
             env: {
               ANTHROPIC_BASE_URL: context.rootUrl,
               ANTHROPIC_AUTH_TOKEN: key,
-              CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: "1",
               ANTHROPIC_MODEL: context.modelValues.ANTHROPIC_MODEL || context.modelId,
               ANTHROPIC_DEFAULT_FABLE_MODEL: context.modelValues.ANTHROPIC_DEFAULT_FABLE_MODEL || context.modelId,
               ANTHROPIC_DEFAULT_HAIKU_MODEL: context.modelValues.ANTHROPIC_DEFAULT_HAIKU_MODEL || context.modelId,
@@ -231,28 +593,24 @@ export const APPLICATION_GUIDES = [
     category: "Claude 兼容",
     protocol: "Anthropic Messages",
     endpointKind: "messages",
-    officialUrl: "https://github.com/farion1231/cc-switch/blob/main/docs/user-manual/en/2-providers/2.6-claude-desktop.md",
+    officialUrl: "https://claude.com/docs/third-party/claude-desktop/gateway",
     summary: "通过 Anthropic 兼容入口连接 OCG Manager，地址使用不带 /v1 的根地址。",
     steps: [
+      "打开 Claude Desktop 的 Developer → Configure Third-Party Inference，选择 Gateway。",
       "填写下方 Base URL、Key 和模型 ID。",
       "发送一条测试任务，再到 OCG Manager 的请求日志确认成功记录。",
     ],
     notes: [
+      "Claude Desktop 可从配置窗口导出 .reg 或 .mobileconfig 供团队部署；个人用户直接使用该窗口。",
       "模型能力由实际上游决定；Agent 工具调用需要所选模型正确支持 tools。",
     ],
     modelFields: ["sonnet", "opus", "haiku"],
     snippets: (context) => [
-      keyedSnippet(context, "Claude Desktop 3P profile", "json", (key) =>
-        JSON.stringify(
-          {
-            inferenceProvider: "gateway",
-            inferenceGatewayBaseUrl: `${context.rootUrl}/claude-desktop`,
-            inferenceGatewayAuthScheme: "bearer",
-            inferenceGatewayApiKey: key,
-          },
-          null,
-          2,
-        ),
+      keyedSnippet(
+        context,
+        "Developer → Configure Third-Party Inference",
+        "text",
+        (key) => `Inference provider: Gateway\nGateway base URL: ${context.rootUrl}/claude-desktop\nCredential kind: Static API key\nGateway API key: ${key}\nGateway auth scheme: Bearer`,
       ),
     ],
   },
@@ -262,12 +620,12 @@ export const APPLICATION_GUIDES = [
     category: "OpenAI 兼容",
     protocol: "OpenAI Responses",
     endpointKind: "responses",
-    officialUrl: "https://developers.openai.com/codex/config-reference/",
+    officialUrl: "https://learn.chatgpt.com/docs/config-file/config-reference#configtoml",
     badge: "Responses",
     summary: "注册 OCG Manager 为 Codex 自定义模型提供商，通过 Responses 接口调用。",
     steps: [
-      "把模型与 provider 配置写入用户级 ~/.codex/config.toml。",
-      "在启动 Codex 的同一终端设置 OCG_API_KEY 环境变量。",
+      "把模型与 provider 配置保存为 ~/.codex/ocg.config.toml，避免改动默认配置。",
+      "设置 OCG_API_KEY 后运行 codex --profile ocg。",
       "启动 Codex 并发送一条测试消息，再到 OCG Manager 的请求日志确认成功记录。",
     ],
     notes: [
@@ -277,7 +635,7 @@ export const APPLICATION_GUIDES = [
     modelFields: ["model", "review_model"],
     snippets: (context) => [
       {
-        label: "~/.codex/config.toml",
+        label: "~/.codex/ocg.config.toml",
         language: "toml",
         display: `model = ${JSON.stringify(context.modelValues.model || context.modelId)}\nreview_model = ${JSON.stringify(context.modelValues.review_model || context.modelId)}\nmodel_provider = "ocg"\n\n[model_providers.ocg]\nname = "OCG Manager"\nbase_url = "${context.apiBaseUrl}"\nenv_key = "OCG_API_KEY"\nwire_api = "responses"`,
         copy: `model = ${JSON.stringify(context.modelValues.model || context.modelId)}\nreview_model = ${JSON.stringify(context.modelValues.review_model || context.modelId)}\nmodel_provider = "ocg"\n\n[model_providers.ocg]\nname = "OCG Manager"\nbase_url = "${context.apiBaseUrl}"\nenv_key = "OCG_API_KEY"\nwire_api = "responses"`,
@@ -286,13 +644,13 @@ export const APPLICATION_GUIDES = [
         context,
         t("当前 PowerShell 会话"),
         "powershell",
-        (key) => `$env:OCG_API_KEY = ${JSON.stringify(key)}`,
+        (key) => `$env:OCG_API_KEY = ${powerShellLiteral(key)}\ncodex --profile ocg`,
       ),
       keyedSnippet(
         context,
         "macOS / Linux shell",
         "bash",
-        (key) => `export OCG_API_KEY=${JSON.stringify(key)}`,
+        (key) => `export OCG_API_KEY=${posixShellLiteral(key)}\ncodex --profile ocg`,
       ),
     ],
   },
@@ -374,6 +732,106 @@ export const APPLICATION_GUIDES = [
     ],
   },
   {
+    id: "pi",
+    name: "Pi",
+    category: "OpenAI 兼容",
+    protocol: "OpenAI Chat Completions",
+    endpointKind: "chat",
+    officialUrl: "https://pi.dev/docs/latest/models",
+    summary: "在 models.json 中注册 OCG Manager，通过 Chat Completions 使用 Pi Agent。",
+    steps: [
+      "把下面的 provider 配置合并到用户级 ~/.pi/agent/models.json。",
+      "在启动 Pi 的同一终端设置 OCG_API_KEY 环境变量。",
+      "启动 Pi 并发送一条测试任务，再到 OCG Manager 的请求日志确认成功记录。",
+    ],
+    notes: [
+      "baseURL 必须使用带 /v1 的 API Base URL。",
+      "打开 /model 即会重新读取 models.json，无需重启 Pi。",
+      "模型能力由实际上游决定；Agent 工具调用需要所选模型正确支持 tools。",
+    ],
+    snippets: (context) => [
+      {
+        label: "~/.pi/agent/models.json",
+        language: "json",
+        display: JSON.stringify({
+          providers: {
+            ocg: {
+              baseUrl: context.apiBaseUrl,
+              api: "openai-completions",
+              apiKey: "$OCG_API_KEY",
+              compat: PI_PROVIDER_COMPAT,
+              models: models(context).filter(Boolean).map(piModelConfig),
+            },
+          },
+        }, null, 2),
+        copy: JSON.stringify({
+          providers: {
+            ocg: {
+              baseUrl: context.apiBaseUrl,
+              api: "openai-completions",
+              apiKey: "$OCG_API_KEY",
+              compat: PI_PROVIDER_COMPAT,
+              models: models(context).filter(Boolean).map(piModelConfig),
+            },
+          },
+        }, null, 2),
+      },
+      keyedSnippet(
+        context,
+        t("当前 PowerShell 会话"),
+        "powershell",
+        (key) => `$env:OCG_API_KEY = ${powerShellLiteral(key)}`,
+      ),
+      keyedSnippet(
+        context,
+        "macOS / Linux shell",
+        "bash",
+        (key) => `export OCG_API_KEY=${posixShellLiteral(key)}`,
+      ),
+    ],
+    multipleModels: true,
+  },
+  {
+    id: "kimi-code",
+    name: "Kimi Code CLI",
+    category: "OpenAI 兼容",
+    protocol: "OpenAI Chat Completions",
+    endpointKind: "chat",
+    officialUrl: "https://www.kimi.com/code/docs/en/kimi-code-cli/configuration/env-vars.html",
+    summary: "优先用 KIMI_MODEL_* 临时启动，不修改 config.toml；需要多模型或长期使用时再写入持久配置。",
+    steps: [
+      "复制并运行当前平台的临时启动命令；Kimi Code CLI 会在内存中创建 OCG Provider。",
+      "把下面的 provider 与 model 配置合并到用户级 ~/.kimi-code/config.toml。",
+      "启动 Kimi Code CLI 并发送一条测试任务，再到 OCG Manager 的请求日志确认成功记录。",
+    ],
+    notes: [
+      "Kimi CLI 已迁移到 Kimi Code CLI；新接入使用 ~/.kimi-code 而不是旧版 ~/.kimi。",
+      "Kimi Code CLI 会把 api_key 明文保存在 config.toml；请限制配置目录权限。",
+      "模型能力由实际上游决定；Agent 工具调用需要所选模型正确支持 tools。",
+    ],
+    snippets: (context) => [
+      keyedSnippet(
+        context,
+        "临时启动（PowerShell）",
+        "powershell",
+        (key) => kimiTemporaryLaunch(context, key, "powershell"),
+      ),
+      keyedSnippet(
+        context,
+        "临时启动（macOS / Linux）",
+        "bash",
+        (key) => kimiTemporaryLaunch(context, key, "bash"),
+      ),
+      keyedSnippet(context, "~/.kimi-code/config.toml（持久配置）", "toml", (key) => {
+        const modelIds = models(context).filter(Boolean);
+        const defaultModel = modelIds[0] ? `default_model = ${JSON.stringify(`ocg/${modelIds[0]}`)}\n` : "";
+        const modelTables = modelIds.map(kimiCodeModelTable).join("\n\n");
+        return `${defaultModel}default_permission_mode = "manual"\n\n[providers.ocg]\ntype = "openai"\nbase_url = ${JSON.stringify(context.apiBaseUrl)}\napi_key = ${JSON.stringify(key)}${modelTables ? `\n\n${modelTables}` : ""}`;
+      }),
+    ],
+    multipleModels: true,
+  },
+  {
     id: "opencode",
     name: "OpenCode",
     category: "OpenAI 兼容",
@@ -382,16 +840,17 @@ export const APPLICATION_GUIDES = [
     officialUrl: "https://opencode.ai/docs/providers/",
     summary: "使用 OpenAI Compatible AI SDK provider，将 OCG Manager 注册为自定义服务商。",
     steps: [
-      "把下面的 provider 配置合并到项目或用户级 opencode.json。",
-      "在启动 OpenCode 的同一终端设置 OCG_API_KEY 环境变量。",
+      "把下面的 provider 配置保存为 ~/.config/opencode/ocg.json。",
+      "设置 OCG_API_KEY 和 OPENCODE_CONFIG 后启动 OpenCode。",
       "在 OpenCode 中发送一条测试消息，再到 OCG Manager 的请求日志确认成功记录。",
     ],
     notes: [
       "baseURL 必须使用带 /v1 的 API Base URL。",
+      "用 OPENCODE_CONFIG 指向独立配置文件，可以避免修改默认 OpenCode 配置。",
       "模型能力由实际上游决定；Agent 工具调用需要所选模型正确支持 tools。",
     ],
     snippets: (context) => [
-      keyedSnippet(context, "opencode.json", "json", () =>
+      keyedSnippet(context, "~/.config/opencode/ocg.json", "json", () =>
         JSON.stringify(
           {
             $schema: "https://opencode.ai/config.json",
@@ -402,7 +861,7 @@ export const APPLICATION_GUIDES = [
                 options: { baseURL: context.apiBaseUrl, apiKey: "{env:OCG_API_KEY}" },
                 models: Object.fromEntries(models(context).map((modelId) => [
                   modelId,
-                  { name: modelId, reasoning: true },
+                  { name: modelId, reasoning: applicationModelMetadata(modelId).reasoning },
                 ])),
               },
             },
@@ -416,16 +875,40 @@ export const APPLICATION_GUIDES = [
         context,
         t("当前 PowerShell 会话"),
         "powershell",
-        (key) => `$env:OCG_API_KEY = ${JSON.stringify(key)}`,
+        (key) => `$env:OCG_API_KEY = ${powerShellLiteral(key)}\n$env:OPENCODE_CONFIG = Join-Path $HOME '.config/opencode/ocg.json'\nopencode`,
       ),
       keyedSnippet(
         context,
         "macOS / Linux shell",
         "bash",
-        (key) => `export OCG_API_KEY=${JSON.stringify(key)}`,
+        (key) => `export OCG_API_KEY=${posixShellLiteral(key)}\nexport OPENCODE_CONFIG="$HOME/.config/opencode/ocg.json"\nopencode`,
       ),
     ],
     multipleModels: true,
+  },
+  {
+    id: "workbuddy",
+    name: "WorkBuddy",
+    category: "OpenAI 兼容",
+    protocol: "OpenAI Chat Completions",
+    endpointKind: "chat",
+    officialUrl: "https://www.workbuddy.cn/docs/workbuddy/From-Beginner-to-Expert-Guide/Function-Description/Model",
+    badge: "GUI",
+    summary: "通过 WorkBuddy 官方可视化自定义模型表单接入 OCG Manager，无需编辑 JSON。",
+    steps: [
+      "打开 WorkBuddy 设置 → 模型 → 自定义模型，点击添加模型并选择 自定义/Custom。",
+      "按下方参数填写完整 Chat Completions 地址、Key、模型 ID 与能力开关。",
+      "保持自定义协议关闭，保存后从对话模型选择器切换到该模型并发送测试任务。",
+    ],
+    notes: [
+      "WorkBuddy 没有公开模型配置导入协议；OCG 当前应使用官方可视化表单。",
+      "接口地址使用完整 /v1/chat/completions；该路径是标准 OpenAI Chat Completions，因此自定义协议保持关闭。",
+      "每个模型需要单独保存；工具调用、图片输入和推理开关必须与模型能力一致。",
+      "API Key 仅保存在本机模型配置中，但共享设备仍不应保存或导出。",
+    ],
+    snippets: (context) => [
+      keyedSnippet(context, "设置 → 模型 → 自定义模型", "text", (key) => workBuddyForm(context, key)),
+    ],
   },
   {
     id: "openclaw",
@@ -433,14 +916,18 @@ export const APPLICATION_GUIDES = [
     category: "OpenAI 兼容",
     protocol: "OpenAI Chat Completions",
     endpointKind: "chat",
-    officialUrl: "https://docs.openclaw.ai/concepts/model-providers",
-    summary: "选择 OpenAI Compatible provider，将对话请求转发到 OCG Manager。",
+    popular: true,
+    officialUrl: "https://docs.openclaw.ai/start/wizard-cli-automation",
+    summary: "首次安装优先运行官方非交互 onboarding；已有配置或需要多模型时使用下方 JSON 和 .env。",
     steps: [
+      "首次配置时运行下方 onboarding 命令；命令会修改 OpenClaw 本机配置，请先确认内容。",
       "填写下方 Base URL、Key 和模型 ID。",
-      "发送一条测试任务，再到 OCG Manager 的请求日志确认成功记录。",
+      "运行 openclaw models status --probe --probe-provider ocg，再到 OCG Manager 请求日志确认真实调用。",
     ],
     notes: [
+      "onboarding 的 ref 模式固定引用 CUSTOM_API_KEY；下方 .env 与手工 JSON 使用同一变量。",
       "baseURL 必须使用带 /v1 的 API Base URL。",
+      "已有配置或需要多模型时使用下方 JSON；模型上下文、输出上限与图片能力按已验证元数据生成。",
       "模型能力由实际上游决定；Agent 工具调用需要所选模型正确支持 tools。",
     ],
     snippets: (context) => {
@@ -451,9 +938,9 @@ export const APPLICATION_GUIDES = [
             providers: {
               ocg: {
                 baseUrl: context.apiBaseUrl,
-                apiKey: "${OCG_API_KEY}",
+                apiKey: "${CUSTOM_API_KEY}",
                 api: "openai-completions",
-                models: models(context).map((modelId) => ({ id: modelId, name: modelId })),
+                models: models(context).map(openClawModelConfig),
               },
             },
           },
@@ -468,12 +955,24 @@ export const APPLICATION_GUIDES = [
         2,
       );
       return [
+        keyedSnippet(
+          context,
+          "首次配置（PowerShell）",
+          "powershell",
+          (key) => openClawOnboardingCommand(context, key, "powershell"),
+        ),
+        keyedSnippet(
+          context,
+          "首次配置（macOS / Linux）",
+          "bash",
+          (key) => openClawOnboardingCommand(context, key, "bash"),
+        ),
         { label: "~/.openclaw/openclaw.json", language: "json5", display: config, copy: config },
         keyedSnippet(
           context,
           "~/.openclaw/.env",
           "dotenv",
-          (key) => `OCG_API_KEY=${JSON.stringify(key)}`,
+          (key) => `CUSTOM_API_KEY=${JSON.stringify(key)}`,
         ),
       ];
     },
@@ -485,22 +984,26 @@ export const APPLICATION_GUIDES = [
     category: "OpenAI 兼容",
     protocol: "OpenAI Chat Completions",
     endpointKind: "chat",
+    popular: true,
     officialUrl: "https://hermes-agent.nousresearch.com/docs/integrations/providers",
-    summary: "选择 OpenAI Compatible provider，将对话请求转发到 OCG Manager。",
+    summary: "运行 hermes model 的 Custom endpoint 向导完成首次接入；长期或多模型使用 key_env 配置。",
     steps: [
-      "填写下方 Base URL、Key 和模型 ID。",
-      "发送一条测试任务，再到 OCG Manager 的请求日志确认成功记录。",
+      "运行 hermes model，选择 Custom endpoint，再填写下方地址、Key 和模型。",
+      "api_mode 选择 chat_completions，并按下方元数据填写 context length 与图片能力。",
+      "运行 hermes chat -q 发送测试任务，再到 OCG Manager 请求日志确认真实调用。",
     ],
     notes: [
       "baseURL 必须使用带 /v1 的 API Base URL。",
+      "hermes model 向导可能把 Key 写入 config.yaml；长期使用优先采用下方 key_env 与 .env。",
+      "下方配置按模型元数据固定 context_length 和 supports_vision，避免自动探测不完整。",
       "模型能力由实际上游决定；Agent 工具调用需要所选模型正确支持 tools。",
     ],
     snippets: (context) => [
       {
         label: "~/.hermes/config.yaml",
         language: "yaml",
-        display: `custom_providers:\n  - name: ocg\n    base_url: ${JSON.stringify(context.apiBaseUrl)}\n    key_env: OCG_API_KEY\n    api_mode: chat_completions\n    models:\n${models(context).map((modelId) => `      ${JSON.stringify(modelId)}: {}`).join("\n")}\n\nmodel:\n  default: ${JSON.stringify(context.modelId)}\n  provider: custom:ocg`,
-        copy: `custom_providers:\n  - name: ocg\n    base_url: ${JSON.stringify(context.apiBaseUrl)}\n    key_env: OCG_API_KEY\n    api_mode: chat_completions\n    models:\n${models(context).map((modelId) => `      ${JSON.stringify(modelId)}: {}`).join("\n")}\n\nmodel:\n  default: ${JSON.stringify(context.modelId)}\n  provider: custom:ocg`,
+        display: `custom_providers:\n  - name: ocg\n    base_url: ${JSON.stringify(context.apiBaseUrl)}\n    key_env: OCG_API_KEY\n    api_mode: chat_completions\n    models:\n${models(context).map(hermesModelEntry).join("\n")}\n\nmodel:\n  default: ${JSON.stringify(context.modelId)}\n  provider: custom:ocg`,
+        copy: `custom_providers:\n  - name: ocg\n    base_url: ${JSON.stringify(context.apiBaseUrl)}\n    key_env: OCG_API_KEY\n    api_mode: chat_completions\n    models:\n${models(context).map(hermesModelEntry).join("\n")}\n\nmodel:\n  default: ${JSON.stringify(context.modelId)}\n  provider: custom:ocg`,
       },
       keyedSnippet(context, "~/.hermes/.env", "dotenv", (key) => `OCG_API_KEY=${JSON.stringify(key)}`),
     ],
@@ -513,10 +1016,10 @@ export const APPLICATION_GUIDES = [
     protocol: "OpenAI Chat Completions",
     endpointKind: "chat",
     officialUrl: "https://docs.cherry-ai.com/docs/en-us/pre-basic/settings/providers",
-    summary: "在服务商设置中新增 OpenAI 类型的自定义服务商，并手工添加可用模型。",
+    summary: "在服务商设置中新增 OpenAI 类型的自定义服务商，并通过 Manage 自动获取模型。",
     steps: [
       "进入设置 → 模型服务，新增 OpenAI 类型的自定义服务商。",
-      "填写下方 Base URL、Key 和模型 ID。",
+      "填写 API 地址和 Key 后，打开 Manage 获取模型列表并勾选需要的模型。",
       "执行连接检查或发送一条测试消息，再到 OCG Manager 的请求日志确认成功记录。",
     ],
     notes: ["API 地址使用不带 /v1 的根地址，由 Cherry Studio 补全 OpenAI 请求路径。"],
@@ -566,7 +1069,8 @@ export const APPLICATION_GUIDES = [
               name: modelId,
               url: context.chatCompletionsUrl,
               toolCalling: true,
-              vision: false,
+              vision: (applicationModelMetadata(modelId).ocgInput
+                ?? applicationModelMetadata(modelId).input).includes("image"),
               ...vscodeTokenLimits(modelId),
             })),
           }],
@@ -606,14 +1110,18 @@ export const APPLICATION_GUIDES = [
     category: "OpenAI 兼容",
     protocol: "OpenAI Chat Completions",
     endpointKind: "chat",
-    officialUrl: "https://roocodeinc.github.io/Roo-Code/providers/openai-compatible/",
+    officialUrl: "https://roocodeinc.github.io/Roo-Code/features/settings-management/",
     summary: "选择 OpenAI Compatible provider，将对话请求转发到 OCG Manager。",
     steps: [
       "打开 Roo Code 配置，将 API Provider 选择为 OpenAI Compatible。",
       "填写下方 Base URL、Key 和模型 ID。",
+      "首次配置后导出 roo-code-settings.json；其他环境可用 Import 或 roo-cline.autoImportSettingsPath 自动导入。",
       "发送一条测试任务，再到 OCG Manager 的请求日志确认成功记录。",
     ],
-    notes: ["Roo Code 仅支持原生工具调用；所选模型不支持 tools 时无法使用 Agent 模式。"],
+    notes: [
+      "Roo Code 导出文件包含明文 API Key，只能保存在可信位置。",
+      "Roo Code 仅支持原生工具调用；所选模型不支持 tools 时无法使用 Agent 模式。",
+    ],
     snippets: (context) => [
       keyedSnippet(
         context,
@@ -621,6 +1129,12 @@ export const APPLICATION_GUIDES = [
         "text",
         (key) => `Base URL: ${context.apiBaseUrl}\nAPI Key: ${key}\nModel ID: ${context.modelId}`,
       ),
+      {
+        label: "VS Code settings.json（复用已导出配置）",
+        language: "json",
+        display: JSON.stringify({ "roo-cline.autoImportSettingsPath": "~/roo-code-settings.json" }, null, 2),
+        copy: JSON.stringify({ "roo-cline.autoImportSettingsPath": "~/roo-code-settings.json" }, null, 2),
+      },
     ],
   },
   {
@@ -633,21 +1147,23 @@ export const APPLICATION_GUIDES = [
     summary: "在 Continue YAML 配置中添加 OpenAI provider，并明确关闭 Responses API。",
     steps: [
       "打开 Continue 用户级 YAML 配置，将下面的模型项合并到 models。",
+      "把 Key 写入 ~/.continue/.env，YAML 通过 secrets.OCG_API_KEY 引用。",
       "保持 provider 为 openai、apiBase 使用 /v1 地址、useResponsesApi 为 false。",
       "选择 OCG Manager 模型发送测试消息，再到请求日志确认成功记录。",
     ],
     notes: [
       "useResponsesApi: false 用于明确走 Chat Completions 兼容路径。",
+      "Continue Hub 适合共享固定配置；每个 OCG 节点的地址和 Key 不同时，本机 YAML 更直接。",
       "模型能力由实际上游决定；Agent 工具调用需要所选模型正确支持 tools。",
     ],
     snippets: (context) => [
-      keyedSnippet(
-        context,
-        "Continue YAML",
-        "yaml",
-        (key) =>
-          `name: OCG Manager\nversion: 1.0.0\nschema: v1\nmodels:\n${models(context).map((modelId) => `  - name: ${JSON.stringify(`${modelId} (OCG)`)}\n    provider: openai\n    model: ${JSON.stringify(modelId)}\n    apiBase: ${JSON.stringify(context.apiBaseUrl)}\n    apiKey: ${JSON.stringify(key)}\n    useResponsesApi: false\n    capabilities:\n      - tool_use`).join("\n")}`,
-      ),
+      {
+        label: "Continue YAML",
+        language: "yaml",
+        display: `name: OCG Manager\nversion: 1.0.0\nschema: v1\nmodels:\n${models(context).map((modelId) => `  - name: ${JSON.stringify(`${modelId} (OCG)`)}\n    provider: openai\n    model: ${JSON.stringify(modelId)}\n    apiBase: ${JSON.stringify(context.apiBaseUrl)}\n    apiKey: \${{ secrets.OCG_API_KEY }}\n    useResponsesApi: false\n    capabilities:\n      - tool_use`).join("\n")}`,
+        copy: `name: OCG Manager\nversion: 1.0.0\nschema: v1\nmodels:\n${models(context).map((modelId) => `  - name: ${JSON.stringify(`${modelId} (OCG)`)}\n    provider: openai\n    model: ${JSON.stringify(modelId)}\n    apiBase: ${JSON.stringify(context.apiBaseUrl)}\n    apiKey: \${{ secrets.OCG_API_KEY }}\n    useResponsesApi: false\n    capabilities:\n      - tool_use`).join("\n")}`,
+      },
+      keyedSnippet(context, "~/.continue/.env", "dotenv", (key) => `OCG_API_KEY=${JSON.stringify(key)}`),
     ],
     multipleModels: true,
   },
@@ -660,11 +1176,14 @@ export const APPLICATION_GUIDES = [
     officialUrl: "https://docs.chatboxai.app/en/guides/providers/import-config",
     summary: "新增 OpenAI API 类型提供商，API Host 使用 OCG Manager 根地址。",
     steps: [
-      "打开设置 → 模型提供方，选择 OpenAI API 或兼容提供方。",
+      "优先点击上方一键导入；若客户端未安装或浏览器阻止协议链接，再按下方参数手动添加。",
       "填写下方 API Host、Key 和模型 ID，保留默认的 /v1/chat/completions 路径。",
       "发送一条测试消息，再到 OCG Manager 的请求日志确认成功记录。",
     ],
-    notes: ["API Host 使用不带 /v1 的根地址，避免形成重复路径。"],
+    notes: [
+      "Chatbox 深链中的 Base64 只是编码，不是加密；不要分享包含 Key 的导入链接。",
+      "API Host 使用不带 /v1 的根地址，避免形成重复路径。",
+    ],
     snippets: (context) => [
       keyedSnippet(
         context,

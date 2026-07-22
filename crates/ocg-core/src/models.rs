@@ -2,6 +2,7 @@ use std::fmt;
 
 use chrono::{DateTime, Datelike, Local, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Account {
@@ -336,6 +337,12 @@ pub struct GatewayLog {
     pub category: String,
     pub message: String,
     pub created_at: DateTime<Utc>,
+    pub request_id: Option<String>,
+    pub attempt: Option<i64>,
+    pub error_source: Option<String>,
+    pub error_stage: Option<String>,
+    pub duration_ms: Option<i64>,
+    pub diagnostic: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -358,6 +365,12 @@ pub struct ForwardLog {
     pub service_tier: Option<String>,
     pub cost_state: String,
     pub error_message: Option<String>,
+    pub request_id: Option<String>,
+    pub attempt: Option<i64>,
+    pub error_source: Option<String>,
+    pub error_stage: Option<String>,
+    pub duration_ms: Option<i64>,
+    pub diagnostic: Option<Value>,
 }
 
 #[derive(Debug, Clone)]

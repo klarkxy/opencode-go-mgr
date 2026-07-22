@@ -1,4 +1,8 @@
-use crate::db::Database;
+use crate::db::{Database, ForwardLogDiagnosticUpdate};
+use crate::gateway::diagnostics::{
+    ErrorDiagnostic, RequestTrace, api_format_name, emit_failure, safe_upstream_headers,
+    sanitize_upstream_error_value, serialize_diagnostic,
+};
 use crate::gateway::limit::{parse_reset, parse_usage_limit_window};
 use crate::gateway::protocol::{
     ApiFormat, RequestPlan, UsageCounts, error_body, extract_usage, format_error,
@@ -20,7 +24,9 @@ use parking_lot::Mutex;
 use reqwest::Client;
 use serde_json::Value;
 use std::sync::Arc;
-use std::time::Duration as StdDuration;
+use std::time::{Duration as StdDuration, Instant};
+
+const MAX_UPSTREAM_ERROR_BODY_BYTES: usize = 64 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ForwardAction {
@@ -29,18 +35,125 @@ pub(crate) enum ForwardAction {
     TryNextAccount,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct UpstreamPayloadTooLargeResponse;
+
 pub struct ForwardResult {
     pub response: Response,
     pub(crate) action: ForwardAction,
     pub error_message: Option<String>,
 }
 
+#[derive(Clone)]
+struct ForwardAttemptContext {
+    trace: RequestTrace,
+    client_body_bytes: usize,
+    upstream_body_bytes: usize,
+    attempt: u32,
+    client_format: ApiFormat,
+    upstream_format: ApiFormat,
+    model: String,
+    stream: bool,
+}
+
+impl ForwardAttemptContext {
+    fn new(
+        trace: &RequestTrace,
+        client_body_bytes: usize,
+        attempt: u32,
+        plan: &RequestPlan,
+    ) -> Self {
+        Self {
+            trace: trace.clone(),
+            client_body_bytes,
+            upstream_body_bytes: plan.body.len(),
+            attempt,
+            client_format: plan.client,
+            upstream_format: plan.upstream,
+            model: plan.model.clone(),
+            stream: plan.stream,
+        }
+    }
+
+    fn failure(&self, spec: FailureSpec<'_>) -> FailureRecord {
+        let mut diagnostic = ErrorDiagnostic::new(
+            &self.trace,
+            self.attempt,
+            spec.error_source,
+            spec.error_stage,
+            self.client_format,
+        );
+        diagnostic.upstream_format = Some(api_format_name(self.upstream_format).to_string());
+        diagnostic.model = Some(self.model.clone());
+        diagnostic.stream = Some(self.stream);
+        diagnostic.client_body_bytes = Some(self.client_body_bytes);
+        diagnostic.upstream_body_bytes = Some(self.upstream_body_bytes);
+        diagnostic.upstream_wait_ms = spec.upstream_wait_ms;
+        diagnostic.downstream_status = spec.downstream_status;
+        diagnostic.upstream_status = spec.upstream_status;
+        diagnostic.retry_action = spec.retry_action.map(str::to_string);
+        if let Some(headers) = spec.upstream_headers {
+            diagnostic.upstream_headers = safe_upstream_headers(headers);
+        }
+        if let Some(body) = spec.request_body {
+            diagnostic = diagnostic.with_request_summary(body);
+        }
+        if let Some(error) = spec.upstream_error {
+            diagnostic = diagnostic.with_upstream_error(error);
+        }
+        let duration_ms = diagnostic.duration_ms.min(i64::MAX as u64) as i64;
+        let diagnostic_json = serialize_diagnostic(diagnostic);
+        emit_failure(&diagnostic_json);
+        FailureRecord {
+            error_source: spec.error_source.to_string(),
+            error_stage: spec.error_stage.to_string(),
+            duration_ms,
+            diagnostic_json,
+        }
+    }
+}
+
+struct FailureSpec<'a> {
+    error_source: &'static str,
+    error_stage: &'static str,
+    downstream_status: Option<u16>,
+    upstream_status: Option<u16>,
+    upstream_wait_ms: Option<u64>,
+    retry_action: Option<&'static str>,
+    upstream_headers: Option<&'a HeaderMap>,
+    upstream_error: Option<&'a str>,
+    request_body: Option<&'a [u8]>,
+}
+
+struct FailureRecord {
+    error_source: String,
+    error_stage: String,
+    duration_ms: i64,
+    diagnostic_json: String,
+}
+
+impl FailureRecord {
+    fn update(&self) -> ForwardLogDiagnosticUpdate<'_> {
+        ForwardLogDiagnosticUpdate {
+            error_source: &self.error_source,
+            error_stage: &self.error_stage,
+            duration_ms: self.duration_ms,
+            diagnostic_json: &self.diagnostic_json,
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 pub async fn forward_request(
     client: &Client,
     state: &CoreState,
     account: &Account,
     config: &AppConfig,
     plan: &RequestPlan,
+    trace: &RequestTrace,
+    client_body: &[u8],
+    attempt: u32,
+    allow_same_account_retry: bool,
     headers: HeaderMap,
     pricing_snapshot: Arc<PricingSnapshot>,
 ) -> Result<ForwardResult> {
@@ -50,29 +163,63 @@ pub async fn forward_request(
         account,
         config,
         plan,
+        trace,
+        client_body,
+        attempt,
+        allow_same_account_retry,
         headers,
         pricing_snapshot,
     )
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn forward_request_impl(
     client: &Client,
     state: &CoreState,
     account: &Account,
     config: &AppConfig,
     plan: &RequestPlan,
+    trace: &RequestTrace,
+    client_body: &[u8],
+    attempt: u32,
+    allow_same_account_retry: bool,
     headers: HeaderMap,
     pricing_snapshot: Arc<PricingSnapshot>,
 ) -> Result<ForwardResult> {
+    let attempt_context = ForwardAttemptContext::new(trace, client_body.len(), attempt, plan);
     ensure_safe_upstream_base_url(&config.upstream_base_url)?;
     let key = match state.decrypt_key(&account.key_cipher) {
         Ok(key) => key,
         Err(error) => {
-            return Ok(account_preflight_failure(
-                plan,
-                format!("failed to decrypt account credentials: {error}"),
-            ));
+            let message = format!("failed to decrypt account credentials: {error}");
+            let failure = attempt_context.failure(FailureSpec {
+                error_source: "gateway",
+                error_stage: "credential",
+                downstream_status: Some(StatusCode::BAD_GATEWAY.as_u16()),
+                upstream_status: None,
+                upstream_wait_ms: None,
+                retry_action: Some("try_next_account"),
+                upstream_headers: None,
+                upstream_error: None,
+                request_body: Some(client_body),
+            });
+            log_forward(
+                &state.db.lock(),
+                account,
+                &plan.model,
+                "error",
+                None,
+                metadata_metrics(
+                    &pricing_snapshot,
+                    plan.service_tier.as_deref(),
+                    "not_applicable",
+                ),
+                Some(&message),
+                &attempt_context,
+                Some(failure),
+            )?;
+            return Ok(account_preflight_failure(plan, message));
         }
     };
     let mut upstream_headers = reqwest::header::HeaderMap::new();
@@ -108,10 +255,34 @@ async fn forward_request_impl(
         let key_header = match reqwest::header::HeaderValue::from_str(&key) {
             Ok(value) => value,
             Err(error) => {
-                return Ok(account_preflight_failure(
-                    plan,
-                    format!("account key is not a valid upstream header value: {error}"),
-                ));
+                let message = format!("account key is not a valid upstream header value: {error}");
+                let failure = attempt_context.failure(FailureSpec {
+                    error_source: "gateway",
+                    error_stage: "credential",
+                    downstream_status: Some(StatusCode::BAD_GATEWAY.as_u16()),
+                    upstream_status: None,
+                    upstream_wait_ms: None,
+                    retry_action: Some("try_next_account"),
+                    upstream_headers: None,
+                    upstream_error: None,
+                    request_body: Some(client_body),
+                });
+                log_forward(
+                    &state.db.lock(),
+                    account,
+                    &plan.model,
+                    "error",
+                    None,
+                    metadata_metrics(
+                        &pricing_snapshot,
+                        plan.service_tier.as_deref(),
+                        "not_applicable",
+                    ),
+                    Some(&message),
+                    &attempt_context,
+                    Some(failure),
+                )?;
+                return Ok(account_preflight_failure(plan, message));
             }
         };
         upstream_headers.insert("x-api-key", key_header);
@@ -125,10 +296,34 @@ async fn forward_request_impl(
         let authorization = match reqwest::header::HeaderValue::from_str(&format!("Bearer {key}")) {
             Ok(value) => value,
             Err(error) => {
-                return Ok(account_preflight_failure(
-                    plan,
-                    format!("account key is not a valid upstream header value: {error}"),
-                ));
+                let message = format!("account key is not a valid upstream header value: {error}");
+                let failure = attempt_context.failure(FailureSpec {
+                    error_source: "gateway",
+                    error_stage: "credential",
+                    downstream_status: Some(StatusCode::BAD_GATEWAY.as_u16()),
+                    upstream_status: None,
+                    upstream_wait_ms: None,
+                    retry_action: Some("try_next_account"),
+                    upstream_headers: None,
+                    upstream_error: None,
+                    request_body: Some(client_body),
+                });
+                log_forward(
+                    &state.db.lock(),
+                    account,
+                    &plan.model,
+                    "error",
+                    None,
+                    metadata_metrics(
+                        &pricing_snapshot,
+                        plan.service_tier.as_deref(),
+                        "not_applicable",
+                    ),
+                    Some(&message),
+                    &attempt_context,
+                    Some(failure),
+                )?;
+                return Ok(account_preflight_failure(plan, message));
             }
         };
         upstream_headers.insert(reqwest::header::AUTHORIZATION, authorization);
@@ -153,6 +348,7 @@ async fn forward_request_impl(
         .post(&url)
         .headers(upstream_headers)
         .body(plan.body.clone());
+    let upstream_started = Instant::now();
     let upstream_resp = if plan.stream {
         match tokio::time::timeout(
             StdDuration::from_secs(config.stream_idle_timeout_secs),
@@ -167,6 +363,18 @@ async fn forward_request_impl(
                     config.stream_idle_timeout_secs
                 );
                 let error_message = outcome_unknown_message(&detail);
+                let upstream_wait_ms = upstream_started.elapsed().as_millis() as u64;
+                let failure = attempt_context.failure(FailureSpec {
+                    error_source: "transport",
+                    error_stage: "response_headers",
+                    downstream_status: Some(StatusCode::GATEWAY_TIMEOUT.as_u16()),
+                    upstream_status: None,
+                    upstream_wait_ms: Some(upstream_wait_ms),
+                    retry_action: Some("return"),
+                    upstream_headers: None,
+                    upstream_error: Some(&detail),
+                    request_body: Some(client_body),
+                });
                 {
                     let db = state.db.lock();
                     log_forward(
@@ -181,6 +389,8 @@ async fn forward_request_impl(
                             "outcome_unknown",
                         ),
                         Some(&error_message),
+                        &attempt_context,
+                        Some(failure),
                     )?;
                 }
                 return Ok(ForwardResult {
@@ -204,6 +414,7 @@ async fn forward_request_impl(
     let upstream_resp = match upstream_resp {
         Ok(resp) => resp,
         Err(e) => {
+            let upstream_wait_ms = upstream_started.elapsed().as_millis() as u64;
             let connect_failure = e.is_connect();
             let outcome_unknown = !connect_failure;
             let detail = if e.is_timeout() {
@@ -216,6 +427,30 @@ async fn forward_request_impl(
             } else {
                 detail.clone()
             };
+            let status = if e.is_timeout() {
+                StatusCode::GATEWAY_TIMEOUT
+            } else {
+                StatusCode::BAD_GATEWAY
+            };
+            let failure = attempt_context.failure(FailureSpec {
+                error_source: "transport",
+                error_stage: if connect_failure {
+                    "connect"
+                } else {
+                    "response_headers"
+                },
+                downstream_status: Some(status.as_u16()),
+                upstream_status: None,
+                upstream_wait_ms: Some(upstream_wait_ms),
+                retry_action: Some(if connect_failure && allow_same_account_retry {
+                    "retry_same_account"
+                } else {
+                    "return"
+                }),
+                upstream_headers: None,
+                upstream_error: Some(&detail),
+                request_body: Some(client_body),
+            });
             {
                 let db = state.db.lock();
                 log_forward(
@@ -238,20 +473,17 @@ async fn forward_request_impl(
                         },
                     ),
                     Some(&error_message),
+                    &attempt_context,
+                    Some(failure),
                 )?;
             }
-            let status = if e.is_timeout() {
-                StatusCode::GATEWAY_TIMEOUT
-            } else {
-                StatusCode::BAD_GATEWAY
-            };
             return Ok(ForwardResult {
                 response: if outcome_unknown {
                     outcome_unknown_response(plan.client, status, &detail)
                 } else {
                     error_response(plan.client, &error_message, None)
                 },
-                action: if connect_failure {
+                action: if connect_failure && allow_same_account_retry {
                     ForwardAction::RetrySameAccount
                 } else {
                     ForwardAction::Return
@@ -260,6 +492,8 @@ async fn forward_request_impl(
             });
         }
     };
+
+    let upstream_wait_ms = upstream_started.elapsed().as_millis() as u64;
 
     let status = upstream_resp.status();
     let is_stream = upstream_resp
@@ -277,14 +511,30 @@ async fn forward_request_impl(
         // A response status is authoritative even if its error body stalls. Keep
         // that status and never replay the request; the bounded read only affects
         // how much safe diagnostic text we can return.
-        let text = response_text_with_timeout(upstream_resp, body_timeout)
-            .await
-            .unwrap_or_else(ResponseBodyFailure::into_detail);
+        let error_headers = upstream_resp.headers().clone();
+        let text = response_text_with_timeout(
+            upstream_resp,
+            body_timeout,
+            Some(MAX_UPSTREAM_ERROR_BODY_BYTES),
+        )
+        .await
+        .unwrap_or_else(ResponseBodyFailure::into_detail);
         let error_message = format!(
             "upstream error {}: {}",
             status.as_u16(),
             sanitize_upstream_error(&text)
         );
+        let failure = attempt_context.failure(FailureSpec {
+            error_source: "upstream",
+            error_stage: "upstream_http",
+            downstream_status: Some(status.as_u16()),
+            upstream_status: Some(status.as_u16()),
+            upstream_wait_ms: Some(upstream_wait_ms),
+            retry_action: Some("return"),
+            upstream_headers: Some(&error_headers),
+            upstream_error: Some(&text),
+            request_body: Some(client_body),
+        });
         {
             let db = state.db.lock();
             log_forward(
@@ -299,6 +549,8 @@ async fn forward_request_impl(
                     "not_applicable",
                 ),
                 Some(&error_message),
+                &attempt_context,
+                Some(failure),
             )?;
         }
         return Ok(ForwardResult {
@@ -312,9 +564,14 @@ async fn forward_request_impl(
         // As above, a known 4xx proves the upstream rejected the request. Body
         // read failures must not turn into a replay or account fallback except
         // for the explicit 401/403/429 status policy below.
-        let text = response_text_with_timeout(upstream_resp, body_timeout)
-            .await
-            .unwrap_or_else(ResponseBodyFailure::into_detail);
+        let error_headers = upstream_resp.headers().clone();
+        let text = response_text_with_timeout(
+            upstream_resp,
+            body_timeout,
+            Some(MAX_UPSTREAM_ERROR_BODY_BYTES),
+        )
+        .await
+        .unwrap_or_else(ResponseBodyFailure::into_detail);
 
         if status.as_u16() == 429 {
             // 429 from opencode-go carries the exact reset window ("Resets in 13 days" / "4 days" / "13min").
@@ -322,11 +579,23 @@ async fn forward_request_impl(
             // Unlike a rejected 429, ambiguous transport failures and 5xx responses are not replayed.
             let cooldown = parse_reset(&text).unwrap_or_else(|| Duration::minutes(5));
             let until = Utc::now() + cooldown;
+            let sanitized = sanitize_upstream_error(&text);
             let error_message = format!(
                 "rate limited: {} (resets in {}s)",
-                text.trim(),
+                sanitized,
                 cooldown.num_seconds()
             );
+            let failure = attempt_context.failure(FailureSpec {
+                error_source: "upstream",
+                error_stage: "upstream_http",
+                downstream_status: Some(StatusCode::BAD_GATEWAY.as_u16()),
+                upstream_status: Some(status.as_u16()),
+                upstream_wait_ms: Some(upstream_wait_ms),
+                retry_action: Some("try_next_account"),
+                upstream_headers: Some(&error_headers),
+                upstream_error: Some(&text),
+                request_body: Some(client_body),
+            });
             {
                 let db = state.db.lock();
                 log_forward(
@@ -340,12 +609,14 @@ async fn forward_request_impl(
                         plan.service_tier.as_deref(),
                         "not_applicable",
                     ),
-                    Some(&text),
+                    Some(&sanitized),
+                    &attempt_context,
+                    Some(failure),
                 )?;
                 db.set_account_rate_limit(
                     &account.id,
                     until,
-                    &text,
+                    &sanitized,
                     parse_usage_limit_window(&text),
                 )?;
             }
@@ -359,6 +630,17 @@ async fn forward_request_impl(
         if status.as_u16() == 408 {
             let detail = format!("upstream returned 408: {}", sanitize_upstream_error(&text));
             let error_message = outcome_unknown_message(&detail);
+            let failure = attempt_context.failure(FailureSpec {
+                error_source: "upstream",
+                error_stage: "upstream_http",
+                downstream_status: Some(StatusCode::GATEWAY_TIMEOUT.as_u16()),
+                upstream_status: Some(status.as_u16()),
+                upstream_wait_ms: Some(upstream_wait_ms),
+                retry_action: Some("return"),
+                upstream_headers: Some(&error_headers),
+                upstream_error: Some(&text),
+                request_body: Some(client_body),
+            });
             {
                 let db = state.db.lock();
                 log_forward(
@@ -373,6 +655,8 @@ async fn forward_request_impl(
                         "outcome_unknown",
                     ),
                     Some(&error_message),
+                    &attempt_context,
+                    Some(failure),
                 )?;
             }
             return Ok(ForwardResult {
@@ -393,6 +677,18 @@ async fn forward_request_impl(
                 status.as_u16(),
                 sanitize_upstream_error(&text)
             );
+            let sanitized = sanitize_upstream_error(&text);
+            let failure = attempt_context.failure(FailureSpec {
+                error_source: "upstream",
+                error_stage: "upstream_http",
+                downstream_status: Some(StatusCode::BAD_GATEWAY.as_u16()),
+                upstream_status: Some(status.as_u16()),
+                upstream_wait_ms: Some(upstream_wait_ms),
+                retry_action: Some("try_next_account"),
+                upstream_headers: Some(&error_headers),
+                upstream_error: Some(&text),
+                request_body: Some(client_body),
+            });
             {
                 let db = state.db.lock();
                 log_forward(
@@ -406,7 +702,9 @@ async fn forward_request_impl(
                         plan.service_tier.as_deref(),
                         "not_applicable",
                     ),
-                    Some(&sanitize_upstream_error(&text)),
+                    Some(&sanitized),
+                    &attempt_context,
+                    Some(failure),
                 )?;
             }
             return Ok(ForwardResult {
@@ -418,6 +716,18 @@ async fn forward_request_impl(
 
         // Other 4xx: request-level error. Convert its envelope for the caller,
         // but don't retry another account for the same invalid request.
+        let sanitized = sanitize_upstream_error(&text);
+        let failure = attempt_context.failure(FailureSpec {
+            error_source: "upstream",
+            error_stage: "upstream_http",
+            downstream_status: Some(status.as_u16()),
+            upstream_status: Some(status.as_u16()),
+            upstream_wait_ms: Some(upstream_wait_ms),
+            retry_action: Some("return"),
+            upstream_headers: Some(&error_headers),
+            upstream_error: Some(&text),
+            request_body: Some(client_body),
+        });
         {
             let db = state.db.lock();
             log_forward(
@@ -431,14 +741,22 @@ async fn forward_request_impl(
                     plan.service_tier.as_deref(),
                     "not_applicable",
                 ),
-                Some(&sanitize_upstream_error(&text)),
+                Some(&sanitized),
+                &attempt_context,
+                Some(failure),
             )?;
         }
         let upstream_error = serde_json::from_str::<Value>(&text).ok();
-        let message = sanitize_upstream_error(&text);
+        let message = sanitized;
         let body = format_error(plan.client, status, &message, upstream_error.as_ref());
+        let mut response = (status, axum::Json(body)).into_response();
+        if status == StatusCode::PAYLOAD_TOO_LARGE {
+            response
+                .extensions_mut()
+                .insert(UpstreamPayloadTooLargeResponse);
+        }
         return Ok(ForwardResult {
-            response: (status, axum::Json(body)).into_response(),
+            response,
             action: ForwardAction::Return,
             error_message: None,
         });
@@ -473,6 +791,8 @@ async fn forward_request_impl(
                     "not_applicable",
                 ),
                 None,
+                &attempt_context,
+                None,
             )?
         };
 
@@ -502,6 +822,7 @@ async fn forward_request_impl(
         let model_for_stream = model.clone();
         let pricing_map = pricing_snapshot.clone();
         let service_tier_map = plan.service_tier.clone();
+        let attempt_map = attempt_context.clone();
 
         let mapped = stream
             .flat_map(move |result| {
@@ -532,8 +853,21 @@ async fn forward_request_impl(
                                         state.error = true;
                                         state.outcome_unknown = true;
                                         state.error_message = Some(msg.clone());
+                                        state.diagnostic_recorded = true;
                                     }
                                     let chunks = converter_map.lock().outcome_unknown_event(&msg);
+                                    let failure = attempt_map.failure(FailureSpec {
+                                        error_source: "gateway",
+                                        error_stage: "response_transform",
+                                        downstream_status: Some(status.as_u16()),
+                                        upstream_status: Some(status.as_u16()),
+                                        upstream_wait_ms: Some(upstream_wait_ms),
+                                        retry_action: Some("return"),
+                                        upstream_headers: None,
+                                        upstream_error: Some(&detail),
+                                        request_body: None,
+                                    });
+                                    let diagnostic = failure.update();
                                     let db = state_h.db.lock();
                                     let _ = db.update_forward_log(
                                         initial_id,
@@ -545,6 +879,7 @@ async fn forward_request_impl(
                                             "outcome_unknown",
                                         ),
                                         Some(&msg),
+                                        Some(&diagnostic),
                                     );
                                     (chunks, true)
                                 }
@@ -562,8 +897,21 @@ async fn forward_request_impl(
                                 state.error = true;
                                 state.outcome_unknown = true;
                                 state.error_message = Some(msg.clone());
+                                state.diagnostic_recorded = true;
                             }
                             let chunks = converter_map.lock().outcome_unknown_event(&msg);
+                            let failure = attempt_map.failure(FailureSpec {
+                                error_source: "transport",
+                                error_stage: "stream",
+                                downstream_status: Some(status.as_u16()),
+                                upstream_status: Some(status.as_u16()),
+                                upstream_wait_ms: Some(upstream_wait_ms),
+                                retry_action: Some("return"),
+                                upstream_headers: None,
+                                upstream_error: Some(&detail),
+                                request_body: None,
+                            });
+                            let diagnostic = failure.update();
                             let db = state_h.db.lock();
                             let _ = db.update_forward_log(
                                 initial_id,
@@ -575,6 +923,7 @@ async fn forward_request_impl(
                                     "outcome_unknown",
                                 ),
                                 Some(&msg),
+                                Some(&diagnostic),
                             );
                             (chunks, true)
                         }
@@ -593,8 +942,21 @@ async fn forward_request_impl(
                                 state.error = true;
                                 state.outcome_unknown = true;
                                 state.error_message = Some(msg.clone());
+                                state.diagnostic_recorded = true;
                             }
                             let chunks = converter_map.lock().outcome_unknown_event(&msg);
+                            let failure = attempt_map.failure(FailureSpec {
+                                error_source: "transport",
+                                error_stage: "stream",
+                                downstream_status: Some(status.as_u16()),
+                                upstream_status: Some(status.as_u16()),
+                                upstream_wait_ms: Some(upstream_wait_ms),
+                                retry_action: Some("return"),
+                                upstream_headers: None,
+                                upstream_error: Some(&detail),
+                                request_body: None,
+                            });
+                            let diagnostic = failure.update();
                             let db = state_h.db.lock();
                             let _ = db.update_forward_log(
                                 initial_id,
@@ -606,6 +968,7 @@ async fn forward_request_impl(
                                     "outcome_unknown",
                                 ),
                                 Some(&msg),
+                                Some(&diagnostic),
                             );
                             (chunks, true)
                         }
@@ -635,6 +998,7 @@ async fn forward_request_impl(
             let mdl = model.clone();
             let service_tier_f = plan.service_tier.clone();
             let pricing_f = pricing_snapshot.clone();
+            let attempt_f = attempt_context.clone();
             let stream_guard = StreamOutcomeGuard::new(
                 state.clone(),
                 initial_id,
@@ -642,6 +1006,9 @@ async fn forward_request_impl(
                 model.clone(),
                 pricing_snapshot.clone(),
                 plan.service_tier.clone(),
+                attempt_context.clone(),
+                status.as_u16(),
+                upstream_wait_ms,
             );
             // `unfold` is a clean "run once, then end" stream. The DB write is the
             // unfold's state transition, the body emits a single empty chunk, and
@@ -653,11 +1020,12 @@ async fn forward_request_impl(
                     converter_f,
                     mdl,
                     initial_id,
-                    guard: stream_guard,
+                    guard: Box::new(stream_guard),
                 },
                 move |state| {
                     let service_tier = service_tier_f.clone();
                     let pricing = pricing_f.clone();
+                    let attempt = attempt_f.clone();
                     async move {
                         let (db_h, st_f, converter_f, mdl, initial_id, mut guard) = match state {
                             FinalizerState::Init {
@@ -694,6 +1062,7 @@ async fn forward_request_impl(
                             }
                         };
                         let stream_error = st_f.lock().error_message.clone();
+                        let diagnostic_recorded = st_f.lock().diagnostic_recorded;
                         let (status_str, metrics) = {
                             let g = st_f.lock();
                             if g.error {
@@ -742,6 +1111,36 @@ async fn forward_request_impl(
                                 )
                             }
                         };
+                        let failure = if diagnostic_recorded {
+                            None
+                        } else if let Some(error) = finish_error.as_deref() {
+                            Some(attempt.failure(FailureSpec {
+                                error_source: "gateway",
+                                error_stage: "response_transform",
+                                downstream_status: Some(status.as_u16()),
+                                upstream_status: Some(status.as_u16()),
+                                upstream_wait_ms: Some(upstream_wait_ms),
+                                retry_action: Some("return"),
+                                upstream_headers: None,
+                                upstream_error: Some(error),
+                                request_body: None,
+                            }))
+                        } else {
+                            stream_error.as_deref().map(|error| {
+                                attempt.failure(FailureSpec {
+                                    error_source: "upstream",
+                                    error_stage: "stream",
+                                    downstream_status: Some(status.as_u16()),
+                                    upstream_status: Some(status.as_u16()),
+                                    upstream_wait_ms: Some(upstream_wait_ms),
+                                    retry_action: Some("return"),
+                                    upstream_headers: None,
+                                    upstream_error: Some(error),
+                                    request_body: None,
+                                })
+                            })
+                        };
+                        let diagnostic = failure.as_ref().map(FailureRecord::update);
                         let db = db_h.db.lock();
                         if let Err(e) = db.update_forward_log(
                             initial_id,
@@ -749,6 +1148,7 @@ async fn forward_request_impl(
                             None,
                             metrics,
                             finish_error.as_deref().or(stream_error.as_deref()),
+                            diagnostic.as_ref(),
                         ) {
                             let _ = db.log_gateway(
                                 "warn",
@@ -772,7 +1172,7 @@ async fn forward_request_impl(
             error_message: None,
         })
     } else {
-        let text = match response_text_with_timeout(upstream_resp, body_timeout).await {
+        let text = match response_text_with_timeout(upstream_resp, body_timeout, None).await {
             Ok(text) => text,
             Err(error) => {
                 let downstream_status = if error.is_timeout() {
@@ -782,6 +1182,17 @@ async fn forward_request_impl(
                 };
                 let detail = error.into_detail();
                 let error_message = outcome_unknown_message(&detail);
+                let failure = attempt_context.failure(FailureSpec {
+                    error_source: "transport",
+                    error_stage: "response_body",
+                    downstream_status: Some(downstream_status.as_u16()),
+                    upstream_status: Some(status.as_u16()),
+                    upstream_wait_ms: Some(upstream_wait_ms),
+                    retry_action: Some("return"),
+                    upstream_headers: None,
+                    upstream_error: Some(&detail),
+                    request_body: Some(client_body),
+                });
                 {
                     let db = state.db.lock();
                     log_forward(
@@ -796,6 +1207,8 @@ async fn forward_request_impl(
                             "outcome_unknown",
                         ),
                         Some(&error_message),
+                        &attempt_context,
+                        Some(failure),
                     )?;
                 }
                 return Ok(ForwardResult {
@@ -809,6 +1222,17 @@ async fn forward_request_impl(
             Ok(value) => value,
             Err(_) => {
                 let message = "upstream returned invalid JSON";
+                let failure = attempt_context.failure(FailureSpec {
+                    error_source: "upstream",
+                    error_stage: "response_body",
+                    downstream_status: Some(StatusCode::BAD_GATEWAY.as_u16()),
+                    upstream_status: Some(status.as_u16()),
+                    upstream_wait_ms: Some(upstream_wait_ms),
+                    retry_action: Some("return"),
+                    upstream_headers: None,
+                    upstream_error: Some(&text),
+                    request_body: Some(client_body),
+                });
                 let db = state.db.lock();
                 log_forward(
                     &db,
@@ -822,6 +1246,8 @@ async fn forward_request_impl(
                         "not_applicable",
                     ),
                     Some(message),
+                    &attempt_context,
+                    Some(failure),
                 )?;
                 return Ok(ForwardResult {
                     response: error_response(plan.client, message, None),
@@ -855,6 +1281,17 @@ async fn forward_request_impl(
             Ok(value) => value,
             Err(error) => {
                 let message = format!("response conversion failed: {}", error.message);
+                let failure = attempt_context.failure(FailureSpec {
+                    error_source: "gateway",
+                    error_stage: "response_transform",
+                    downstream_status: Some(StatusCode::BAD_GATEWAY.as_u16()),
+                    upstream_status: Some(status.as_u16()),
+                    upstream_wait_ms: Some(upstream_wait_ms),
+                    retry_action: Some("return"),
+                    upstream_headers: None,
+                    upstream_error: Some(&message),
+                    request_body: Some(client_body),
+                });
                 let db = state.db.lock();
                 log_forward(
                     &db,
@@ -864,6 +1301,8 @@ async fn forward_request_impl(
                     Some(status.as_u16() as i32),
                     metrics.clone(),
                     Some(&message),
+                    &attempt_context,
+                    Some(failure),
                 )?;
                 return Ok(ForwardResult {
                     response: error_response(plan.client, &message, Some(&upstream_json)),
@@ -887,6 +1326,8 @@ async fn forward_request_impl(
                 Some(status.as_u16() as i32),
                 metrics,
                 None,
+                &attempt_context,
+                None,
             )?;
         }
 
@@ -905,10 +1346,14 @@ struct StreamOutcomeGuard {
     model: String,
     pricing: Arc<PricingSnapshot>,
     service_tier: Option<String>,
+    attempt_context: ForwardAttemptContext,
+    upstream_status: u16,
+    upstream_wait_ms: u64,
     armed: bool,
 }
 
 impl StreamOutcomeGuard {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         state: CoreState,
         log_id: i64,
@@ -916,6 +1361,9 @@ impl StreamOutcomeGuard {
         model: String,
         pricing: Arc<PricingSnapshot>,
         service_tier: Option<String>,
+        attempt_context: ForwardAttemptContext,
+        upstream_status: u16,
+        upstream_wait_ms: u64,
     ) -> Self {
         Self {
             state,
@@ -924,6 +1372,9 @@ impl StreamOutcomeGuard {
             model,
             pricing,
             service_tier,
+            attempt_context,
+            upstream_status,
+            upstream_wait_ms,
             armed: true,
         }
     }
@@ -939,12 +1390,23 @@ impl Drop for StreamOutcomeGuard {
             return;
         }
 
-        let (status, metrics, error_message) = {
+        let (status, metrics, error_message, failure) = {
             let stream = self.stream_state.lock();
             if !stream.terminal && !stream.error {
                 let message = outcome_unknown_message(
                     "downstream disconnected before the upstream stream outcome was confirmed",
                 );
+                let failure = self.attempt_context.failure(FailureSpec {
+                    error_source: "downstream",
+                    error_stage: "downstream_disconnect",
+                    downstream_status: Some(self.upstream_status),
+                    upstream_status: Some(self.upstream_status),
+                    upstream_wait_ms: Some(self.upstream_wait_ms),
+                    retry_action: Some("return"),
+                    upstream_headers: None,
+                    upstream_error: Some(&message),
+                    request_body: None,
+                });
                 (
                     "outcome_unknown",
                     metadata_metrics(
@@ -953,6 +1415,7 @@ impl Drop for StreamOutcomeGuard {
                         "outcome_unknown",
                     ),
                     Some(message),
+                    Some(failure),
                 )
             } else if stream.error {
                 let status = if stream.outcome_unknown {
@@ -960,6 +1423,23 @@ impl Drop for StreamOutcomeGuard {
                 } else {
                     "error"
                 };
+                let failure = (!stream.diagnostic_recorded).then(|| {
+                    let error = stream
+                        .error_message
+                        .as_deref()
+                        .unwrap_or("upstream stream error");
+                    self.attempt_context.failure(FailureSpec {
+                        error_source: "upstream",
+                        error_stage: "stream",
+                        downstream_status: Some(self.upstream_status),
+                        upstream_status: Some(self.upstream_status),
+                        upstream_wait_ms: Some(self.upstream_wait_ms),
+                        retry_action: Some("return"),
+                        upstream_headers: None,
+                        upstream_error: Some(error),
+                        request_body: None,
+                    })
+                });
                 (
                     status,
                     metadata_metrics(
@@ -972,6 +1452,7 @@ impl Drop for StreamOutcomeGuard {
                         },
                     ),
                     stream.error_message.clone(),
+                    failure,
                 )
             } else if stream.has_usage {
                 let (prompt, completion, cached, cache_creation) = token_counts(stream.usage);
@@ -989,20 +1470,27 @@ impl Drop for StreamOutcomeGuard {
                 } else {
                     "success_unpriced"
                 };
-                (status, metrics, None)
+                (status, metrics, None, None)
             } else {
                 (
                     "success_no_usage",
                     metadata_metrics(&self.pricing, self.service_tier.as_deref(), "usage_missing"),
                     None,
+                    None,
                 )
             }
         };
 
+        let diagnostic = failure.as_ref().map(FailureRecord::update);
         let db = self.state.db.lock();
-        if let Err(error) =
-            db.update_forward_log(self.log_id, status, None, metrics, error_message.as_deref())
-        {
+        if let Err(error) = db.update_forward_log(
+            self.log_id,
+            status,
+            None,
+            metrics,
+            error_message.as_deref(),
+            diagnostic.as_ref(),
+        ) {
             let _ = db.log_gateway(
                 "warn",
                 "forwarder",
@@ -1025,7 +1513,7 @@ enum FinalizerState {
         converter_f: Arc<Mutex<StreamConverter>>,
         mdl: String,
         initial_id: i64,
-        guard: StreamOutcomeGuard,
+        guard: Box<StreamOutcomeGuard>,
     },
     Done,
 }
@@ -1154,7 +1642,13 @@ pub async fn forward_get(
 
             let mut headers = HeaderMap::new();
             headers.insert("content-type", HeaderValue::from_static("application/json"));
-            return Ok((status, headers, body).into_response());
+            let mut response = (status, headers, body).into_response();
+            if status == StatusCode::PAYLOAD_TOO_LARGE {
+                response
+                    .extensions_mut()
+                    .insert(UpstreamPayloadTooLargeResponse);
+            }
+            return Ok(response);
         }
     }
 }
@@ -1176,16 +1670,14 @@ fn is_loopback_host(url: &reqwest::Url) -> bool {
 }
 
 fn sanitize_upstream_error(text: &str) -> String {
-    let mut out = String::new();
-    for token in text.split_whitespace().take(40) {
-        if token.starts_with("sk-") || token.to_ascii_lowercase().contains("bearer") {
-            out.push_str("<redacted> ");
-        } else {
-            out.push_str(token);
-            out.push(' ');
-        }
-    }
-    out.trim_end().chars().take(500).collect()
+    let safe = sanitize_upstream_error_value(text);
+    safe.get("text")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .unwrap_or_else(|| safe.to_string())
+        .chars()
+        .take(500)
+        .collect()
 }
 
 fn response_body_error(error: &reqwest::Error) -> String {
@@ -1224,17 +1716,52 @@ impl ResponseBodyFailure {
 async fn response_text_with_timeout(
     response: reqwest::Response,
     timeout: Option<StdDuration>,
+    max_bytes: Option<usize>,
 ) -> std::result::Result<String, ResponseBodyFailure> {
+    let read = response_text(response, max_bytes);
     match timeout {
-        Some(timeout) => match tokio::time::timeout(timeout, response.text()).await {
+        Some(timeout) => match tokio::time::timeout(timeout, read).await {
             Ok(result) => result.map_err(ResponseBodyFailure::Transport),
             Err(_) => Err(ResponseBodyFailure::IdleTimeout(timeout)),
         },
-        None => response
-            .text()
-            .await
-            .map_err(ResponseBodyFailure::Transport),
+        None => read.await.map_err(ResponseBodyFailure::Transport),
     }
+}
+
+async fn response_text(
+    response: reqwest::Response,
+    max_bytes: Option<usize>,
+) -> std::result::Result<String, reqwest::Error> {
+    let Some(max_bytes) = max_bytes else {
+        return response.text().await;
+    };
+
+    let read_limit = max_bytes.saturating_add(1);
+    let capacity = response
+        .content_length()
+        .and_then(|length| usize::try_from(length).ok())
+        .map_or(read_limit, |length| length.min(read_limit));
+    let mut body = Vec::with_capacity(capacity);
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk?;
+        let remaining = read_limit.saturating_sub(body.len());
+        if remaining == 0 {
+            break;
+        }
+        body.extend_from_slice(&chunk[..chunk.len().min(remaining)]);
+        if body.len() == read_limit {
+            break;
+        }
+    }
+
+    let truncated = body.len() > max_bytes;
+    body.truncate(max_bytes);
+    let mut text = String::from_utf8_lossy(&body).into_owned();
+    if truncated {
+        text.push_str("\n<upstream error body truncated>");
+    }
+    Ok(text)
 }
 
 fn error_response(format: ApiFormat, message: &str, upstream: Option<&Value>) -> Response {
@@ -1289,6 +1816,7 @@ pub(crate) fn rate_limited_response(
     (StatusCode::TOO_MANY_REQUESTS, axum::Json(body)).into_response()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn log_forward(
     db: &Database,
     account: &Account,
@@ -1297,6 +1825,8 @@ fn log_forward(
     http_status: Option<i32>,
     metrics: ForwardMetrics,
     error_message: Option<&str>,
+    context: &ForwardAttemptContext,
+    failure: Option<FailureRecord>,
 ) -> Result<i64> {
     let cost_state = match (metrics.cost_state, status) {
         ("not_applicable", "outcome_unknown") => "outcome_unknown",
@@ -1304,6 +1834,9 @@ fn log_forward(
         ("not_applicable", "success_unpriced") => "unpriced",
         (state, _) => state,
     };
+    let failure_value = failure
+        .as_ref()
+        .and_then(|failure| serde_json::from_str(&failure.diagnostic_json).ok());
     db.log_forward(&ForwardLog {
         id: 0,
         timestamp: Utc::now(),
@@ -1323,6 +1856,12 @@ fn log_forward(
         service_tier: metrics.service_tier,
         cost_state: cost_state.to_string(),
         error_message: error_message.map(|s| s.to_string()),
+        request_id: Some(context.trace.request_id.clone()),
+        attempt: Some(context.attempt as i64),
+        error_source: failure.as_ref().map(|failure| failure.error_source.clone()),
+        error_stage: failure.as_ref().map(|failure| failure.error_stage.clone()),
+        duration_ms: failure.as_ref().map(|failure| failure.duration_ms),
+        diagnostic: failure_value,
     })
 }
 
@@ -1385,6 +1924,7 @@ struct StreamState {
     error: bool,
     outcome_unknown: bool,
     error_message: Option<String>,
+    diagnostic_recorded: bool,
 }
 
 const MAX_SSE_BUF: usize = 64 * 1024;

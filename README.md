@@ -28,8 +28,9 @@ native OpenCode-Go protocol and converts the response back.
   expiry with remaining days in the dashboard; expiry never blocks an account.
 - **OpenCode Go quota estimates** — 5-hour, weekly, and monthly usage bars
   from a USD pricing snapshot you can refresh in Settings.
-- **13 client guides** — copy-ready configuration snippets for Claude Code,
-  Claude Desktop, Codex, Gemini CLI, and nine other tools.
+- **16 client guides** — copy-ready configuration snippets for Claude Code,
+  Claude Desktop, Codex, Gemini CLI, Pi, Kimi Code CLI, WorkBuddy, and nine
+  other tools.
 - **Tray app and headless CLI** — a Tauri v2 tray app for Windows, macOS, and
   Linux, plus `ocg-manager-cli` for servers and Docker.
 - **Signed desktop updates** — installed desktop builds check, verify, and
@@ -93,10 +94,10 @@ attached to each Release) as `compose.yaml` and optionally create a
 neighboring `.env`. Or run from a checkout:
 
 ```bash
-git clone --branch v1.5.1 --depth 1 https://github.com/klarkxy/opencode-go-mgr.git
+git clone --branch v1.5.2 --depth 1 https://github.com/klarkxy/opencode-go-mgr.git
 cd opencode-go-mgr
 cp .env.example .env
-# Edit .env: choose first-run administrator setup and pin OCG_IMAGE to 1.5.1.
+# Edit .env: choose first-run administrator setup and pin OCG_IMAGE to 1.5.2.
 docker compose pull
 docker compose up -d --no-build
 docker compose ps

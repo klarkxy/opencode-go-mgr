@@ -100,6 +100,36 @@ export interface GatewayLog {
   category: string;
   message: string;
   created_at: string;
+  request_id?: string | null;
+  attempt?: number | null;
+  error_source?: string | null;
+  error_stage?: string | null;
+  duration_ms?: number | null;
+  diagnostic?: ErrorDiagnostic | null;
+}
+
+export interface ErrorDiagnostic {
+  version: number;
+  request_id: string;
+  attempt: number;
+  error_source: string;
+  error_stage: string;
+  client_format: string;
+  upstream_format?: string | null;
+  model?: string | null;
+  stream?: boolean | null;
+  client_body_bytes?: number | null;
+  upstream_body_bytes?: number | null;
+  duration_ms: number;
+  upstream_wait_ms?: number | null;
+  downstream_status?: number | null;
+  upstream_status?: number | null;
+  retry_action?: string | null;
+  upstream_headers?: Record<string, string> | null;
+  request_summary?: unknown;
+  request_fingerprint?: string | null;
+  upstream_error?: unknown;
+  truncated: boolean;
 }
 
 export interface ForwardLog {
@@ -121,6 +151,12 @@ export interface ForwardLog {
   local_adjustment_multiplier?: number | null;
   service_tier?: string | null;
   error_message: string | null;
+  request_id?: string | null;
+  attempt?: number | null;
+  error_source?: string | null;
+  error_stage?: string | null;
+  duration_ms?: number | null;
+  diagnostic?: ErrorDiagnostic | null;
 }
 
 export interface ForwardLogSummary {
@@ -142,6 +178,7 @@ export interface ForwardLogQuery {
   status?: string | null;
   account_id?: string | null;
   model?: string | null;
+  request_id?: string | null;
   start_time?: string | null;
   end_time?: string | null;
   sort_by?: string | null;
@@ -396,7 +433,11 @@ export const tauriApi = {
     method: "POST",
     body: jsonBody({ expected_version: expectedVersion }),
   }),
-  getGatewayLogs: (limit?: number) => request<GatewayLog[]>(`/logs/gateway?limit=${limit ?? 100}`),
+  getGatewayLogs: (limit?: number, requestId?: string | null) => {
+    const params = new URLSearchParams({ limit: String(limit ?? 100) });
+    if (requestId) params.set("request_id", requestId);
+    return request<GatewayLog[]>(`/logs/gateway?${params}`);
+  },
   getForwardLogs: (query: ForwardLogQuery = {}) => {
     const params = new URLSearchParams({
       limit: String(query.limit ?? 20),
@@ -405,6 +446,7 @@ export const tauriApi = {
     if (query.status) params.set("status", query.status);
     if (query.account_id) params.set("account_id", query.account_id);
     if (query.model) params.set("model", query.model);
+    if (query.request_id) params.set("request_id", query.request_id);
     if (query.start_time) params.set("start_time", query.start_time);
     if (query.end_time) params.set("end_time", query.end_time);
     if (query.sort_by) params.set("sort_by", query.sort_by);

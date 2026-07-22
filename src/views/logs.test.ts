@@ -35,6 +35,7 @@ test("forward log API sends remote paging and filter parameters", async () => {
     offset: 40,
     status: "success",
     account_id: "account 117",
+    request_id: "ocg-test id",
   });
 
   const query = new URL(requested, "http://localhost").searchParams;
@@ -42,6 +43,7 @@ test("forward log API sends remote paging and filter parameters", async () => {
   assert.equal(query.get("offset"), "40");
   assert.equal(query.get("status"), "success");
   assert.equal(query.get("account_id"), "account 117");
+  assert.equal(query.get("request_id"), "ocg-test id");
 });
 
 test("dashboard request errors preserve status for localized handling", async () => {
@@ -201,6 +203,7 @@ test("logs view shows top stats, extra filters, sorting, and a useful empty stat
   assert.match(template, /class="filter-bar"/);
   assert.match(template, /\bremote\b/);
   assert.match(template, /v-model:value="modelFilter"/);
+  assert.match(template, /v-model:value="requestIdFilter"/);
   assert.match(template, /v-model:value="customTimeRange"/);
   assert.match(template, /v-model:value="sortBy"/);
   assert.match(template, /:aria-label="t\('刷新运行日志'\)"/);
@@ -213,6 +216,13 @@ test("logs view shows top stats, extra filters, sorting, and a useful empty stat
   assert.doesNotMatch(source, /getForwardLogs\(200\)|filteredForwardLogs/);
   assert.match(source, /const request = \+\+forwardRequest/);
   assert.match(source, /request !== forwardRequest/);
+  assert.match(source, /const request = \+\+gatewayRequest/);
+  assert.match(source, /request !== gatewayRequest/);
+  const gatewayLoad = source.slice(
+    source.indexOf("async function loadGatewayLogs"),
+    source.indexOf("let forwardRequest"),
+  );
+  assert.match(gatewayLoad, /if \(request === gatewayRequest\) gatewayLoading\.value = false/);
   const forwardLoad = source.slice(
     source.indexOf("async function loadForwardLogs"),
     source.indexOf("async function loadAccounts"),
@@ -224,6 +234,19 @@ test("logs view shows top stats, extra filters, sorting, and a useful empty stat
   assert.match(source, /row\.cost_state === "legacy_estimate"/);
   assert.match(source, /success_unpriced: \{ label: t\("无价格"\)/);
   assert.match(source, /outcome_unknown: \{ label: t\("结果未知"\)/);
+  assert.match(source, /row\.error_source === "upstream"/);
+  assert.match(source, /t\("上游拒绝"\)/);
+  assert.match(source, /diagnostic\.request_fingerprint/);
+  assert.match(source, /getGatewayLogs\(200, requestIdFilter\.value\)/);
+  const requestIdWatchStart = source.indexOf("watch(requestIdFilter");
+  const forwardFilterWatch = source.slice(
+    source.indexOf("[statusFilter, accountFilter"),
+    requestIdWatchStart,
+  );
+  const requestIdWatch = source.slice(requestIdWatchStart, source.indexOf("onMounted", requestIdWatchStart));
+  assert.doesNotMatch(forwardFilterWatch, /requestIdFilter|loadGatewayLogs/);
+  assert.match(requestIdWatch, /loadForwardLogs\(\)/);
+  assert.match(requestIdWatch, /loadGatewayLogs\(\)/);
   assert.doesNotMatch(source, /legacy_estimate: \{ label:/);
   assert.match(template, /额度消耗（估算）/);
   const clearFilters = source.slice(source.indexOf("function clearFilters"), source.indexOf("function toggleSortOrder"));

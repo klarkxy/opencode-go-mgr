@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   APPLICATION_GUIDES,
+  APPLICATION_MODEL_METADATA,
   buildChatboxConfig,
   buildChatboxUrl,
   recommendClaudeCodeModel,
@@ -176,16 +177,40 @@ test("model refresh preserves valid selections and falls back only when needed",
   );
 });
 
-test("application catalog has thirteen verified clients and never displays a complete key", () => {
-  assert.equal(APPLICATION_GUIDES.length, 13);
-  assert.equal(new Set(APPLICATION_GUIDES.map((guide) => guide.id)).size, 13);
+test("application catalog has sixteen verified clients and never displays a complete key", () => {
+  assert.equal(APPLICATION_GUIDES.length, 16);
+  assert.equal(new Set(APPLICATION_GUIDES.map((guide) => guide.id)).size, 16);
   assert.ok(APPLICATION_GUIDES.every((guide) => String(guide.id) !== "trae"));
+  const officialUrls = new Map([
+    ["claude-code", "https://code.claude.com/docs/en/llm-gateway-connect"],
+    ["claude-desktop", "https://claude.com/docs/third-party/claude-desktop/gateway"],
+    ["codex", "https://learn.chatgpt.com/docs/config-file/config-reference#configtoml"],
+    ["gemini-cli", "https://github.com/google-gemini/gemini-cli/blob/main/docs/reference/configuration.md"],
+    ["pi", "https://pi.dev/docs/latest/models"],
+    ["kimi-code", "https://www.kimi.com/code/docs/en/kimi-code-cli/configuration/env-vars.html"],
+    ["opencode", "https://opencode.ai/docs/providers/"],
+    ["workbuddy", "https://www.workbuddy.cn/docs/workbuddy/From-Beginner-to-Expert-Guide/Function-Description/Model"],
+    ["openclaw", "https://docs.openclaw.ai/start/wizard-cli-automation"],
+    ["hermes", "https://hermes-agent.nousresearch.com/docs/integrations/providers"],
+    ["cherry-studio", "https://docs.cherry-ai.com/docs/en-us/pre-basic/settings/providers"],
+    ["vscode-copilot", "https://code.visualstudio.com/docs/agent-customization/language-models"],
+    ["cline", "https://docs.cline.bot/provider-config/openai-compatible"],
+    ["roo-code", "https://roocodeinc.github.io/Roo-Code/features/settings-management/"],
+    ["continue", "https://docs.continue.dev/customize/model-providers/top-level/openai"],
+    ["chatbox", "https://docs.chatboxai.app/en/guides/providers/import-config"],
+  ]);
+  for (const guide of APPLICATION_GUIDES) {
+    assert.equal(guide.officialUrl, officialUrls.get(guide.id), `${guide.id} official docs`);
+  }
   for (const appId of [
     "claude-code",
     "claude-desktop",
     "codex",
     "gemini-cli",
+    "pi",
+    "kimi-code",
     "opencode",
+    "workbuddy",
     "openclaw",
     "hermes",
   ]) {
@@ -203,22 +228,22 @@ test("application catalog has thirteen verified clients and never displays a com
   const actualKey = "ocg-this-is-the-complete-secret-key";
   const urls = resolveConnectionUrls("https://edge.example.com/ocg", "https://ignored", 9042, false);
   const modelValues = {
-    ANTHROPIC_MODEL: "verified-model",
-    ANTHROPIC_DEFAULT_FABLE_MODEL: "second-model",
-    ANTHROPIC_DEFAULT_HAIKU_MODEL: "verified-model",
-    ANTHROPIC_DEFAULT_SONNET_MODEL: "second-model",
-    ANTHROPIC_DEFAULT_OPUS_MODEL: "verified-model",
-    CLAUDE_CODE_SUBAGENT_MODEL: "second-model",
-    ANTHROPIC_CUSTOM_MODEL_OPTION: "verified-model",
-    model: "verified-model",
-    review_model: "second-model",
+    ANTHROPIC_MODEL: "kimi-k3",
+    ANTHROPIC_DEFAULT_FABLE_MODEL: "glm-5.1",
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: "kimi-k3",
+    ANTHROPIC_DEFAULT_SONNET_MODEL: "glm-5.1",
+    ANTHROPIC_DEFAULT_OPUS_MODEL: "kimi-k3",
+    CLAUDE_CODE_SUBAGENT_MODEL: "glm-5.1",
+    ANTHROPIC_CUSTOM_MODEL_OPTION: "kimi-k3",
+    model: "kimi-k3",
+    review_model: "glm-5.1",
   };
   const context = {
     ...urls,
     displayKey: maskConnectionKey(actualKey),
     actualKey,
-    modelId: "verified-model",
-    modelIds: ["verified-model", "second-model"],
+    modelId: "kimi-k3",
+    modelIds: ["kimi-k3", "glm-5.1"],
     modelValues,
     iconUrl: "https://edge.example.com/dashboard/ocg.png",
   };
@@ -227,7 +252,10 @@ test("application catalog has thirteen verified clients and never displays a com
     ["claude-desktop", `${urls.rootUrl}/claude-desktop`],
     ["codex", urls.apiBaseUrl],
     ["gemini-cli", urls.rootUrl],
+    ["pi", urls.apiBaseUrl],
+    ["kimi-code", urls.apiBaseUrl],
     ["opencode", urls.apiBaseUrl],
+    ["workbuddy", urls.chatCompletionsUrl],
     ["openclaw", urls.apiBaseUrl],
     ["hermes", urls.apiBaseUrl],
     ["cherry-studio", urls.rootUrl],
@@ -255,7 +283,7 @@ test("application catalog has thirteen verified clients and never displays a com
   const claudeGuide = APPLICATION_GUIDES.find((guide) => guide.id === "claude-code");
   assert.ok(claudeGuide);
   const claudeSettings = JSON.parse(claudeGuide.snippets(context)[0].copy);
-  assert.equal(claudeSettings.env.CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY, "1");
+  assert.ok(!("CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY" in claudeSettings.env));
   for (const variable of [
     "ANTHROPIC_MODEL",
     "ANTHROPIC_DEFAULT_FABLE_MODEL",
@@ -271,16 +299,20 @@ test("application catalog has thirteen verified clients and never displays a com
   const codex = APPLICATION_GUIDES.find((guide) => guide.id === "codex");
   assert.ok(codex);
   assert.deepEqual(codex.modelFields, ["model", "review_model"]);
-  const codexConfig = codex.snippets(context)[0].copy;
-  assert.match(codexConfig, /model = "verified-model"/);
-  assert.match(codexConfig, /review_model = "second-model"/);
+  const codexSnippets = codex.snippets(context);
+  assert.equal(codexSnippets[0].label, "~/.codex/ocg.config.toml");
+  const codexConfig = codexSnippets[0].copy;
+  assert.match(codexConfig, /model = "kimi-k3"/);
+  assert.match(codexConfig, /review_model = "glm-5.1"/);
+  assert.ok(codexSnippets.some((snippet) => snippet.copy.includes("codex --profile ocg")));
 
   const claudeDesktop = APPLICATION_GUIDES.find((guide) => guide.id === "claude-desktop");
   assert.ok(claudeDesktop);
   assert.deepEqual(claudeDesktop.modelFields, ["sonnet", "opus", "haiku"]);
-  const desktopProfile = JSON.parse(claudeDesktop.snippets(context)[0].copy);
-  assert.equal(desktopProfile.inferenceGatewayBaseUrl, `${urls.rootUrl}/claude-desktop`);
-  assert.equal(desktopProfile.inferenceGatewayApiKey, actualKey);
+  const desktopForm = claudeDesktop.snippets(context)[0].copy;
+  assert.match(desktopForm, /Inference provider: Gateway/);
+  assert.match(desktopForm, new RegExp(`Gateway base URL: ${urls.rootUrl}/claude-desktop`));
+  assert.match(desktopForm, new RegExp(`Gateway API key: ${actualKey}`));
 
   const gemini = APPLICATION_GUIDES.find((guide) => guide.id === "gemini-cli");
   assert.ok(gemini);
@@ -310,7 +342,7 @@ test("application catalog has thirteen verified clients and never displays a com
   }
   assert.doesNotMatch(geminiSnippets[1].copy, /"model":\s*"gemini-/);
 
-  for (const appId of ["codex", "opencode"]) {
+  for (const appId of ["codex", "pi", "opencode"]) {
     const guide = APPLICATION_GUIDES.find((candidate) => candidate.id === appId);
     assert.ok(guide);
     const snippets = guide.snippets(context);
@@ -329,17 +361,138 @@ test("application catalog has thirteen verified clients and never displays a com
     });
   }
   assert.doesNotMatch(openCode.snippets(context)[0].copy, new RegExp(actualKey));
+  assert.equal(openCode.snippets(context)[0].label, "~/.config/opencode/ocg.json");
+  assert.ok(openCode.snippets(context).some((snippet) => snippet.copy.includes("OPENCODE_CONFIG")));
+  assert.ok(openCode.snippets(context).some((snippet) => snippet.copy.includes("\nopencode")));
+
+  const workBuddy = APPLICATION_GUIDES.find((guide) => guide.id === "workbuddy");
+  assert.ok(workBuddy);
+  assert.ok(!("multipleModels" in workBuddy));
+  const workBuddyForm = workBuddy.snippets(context)[0].copy;
+  assert.match(workBuddyForm, /Provider: Custom/);
+  assert.match(workBuddyForm, new RegExp(`URL: ${urls.chatCompletionsUrl}`));
+  assert.match(workBuddyForm, new RegExp(`API Key: ${actualKey}`));
+  assert.match(workBuddyForm, /Model: kimi-k3/);
+  assert.match(workBuddyForm, /Custom Protocol: Off/);
+  assert.match(workBuddyForm, /Tool Calling: On/);
+  assert.match(workBuddyForm, /Image Input: On/);
+  assert.match(workBuddyForm, /Reasoning Mode: On/);
+
+  const pi = APPLICATION_GUIDES.find((guide) => guide.id === "pi");
+  assert.ok(pi);
+  const piConfig = JSON.parse(pi.snippets(context)[0].copy);
+  assert.equal(piConfig.providers.ocg.baseUrl, urls.apiBaseUrl);
+  assert.equal(piConfig.providers.ocg.api, "openai-completions");
+  assert.equal(piConfig.providers.ocg.apiKey, "$OCG_API_KEY");
+  assert.deepEqual(piConfig.providers.ocg.compat, {
+    supportsStore: false,
+    supportsDeveloperRole: false,
+    maxTokensField: "max_tokens",
+  });
+  assert.deepEqual(piConfig.providers.ocg.models, [
+    {
+      id: "kimi-k3",
+      reasoning: true,
+      input: ["text", "image"],
+      contextWindow: 1_048_576,
+      maxTokens: 131_072,
+      thinkingLevelMap: {
+        off: null,
+        minimal: null,
+        low: null,
+        medium: null,
+        high: null,
+        xhigh: null,
+        max: "max",
+      },
+    },
+    {
+      id: "glm-5.1",
+      reasoning: true,
+      input: ["text"],
+      contextWindow: 202_752,
+      maxTokens: 32_768,
+      thinkingLevelMap: {
+        off: null,
+        minimal: null,
+        low: null,
+        medium: null,
+        xhigh: null,
+        max: null,
+      },
+      compat: { supportsReasoningEffort: false },
+    },
+  ]);
+
+  const kimiCode = APPLICATION_GUIDES.find((guide) => guide.id === "kimi-code");
+  assert.ok(kimiCode);
+  const kimiSnippets = kimiCode.snippets(context);
+  const kimiPowerShell = kimiSnippets.find((snippet) => snippet.language === "powershell")!.copy;
+  const kimiBash = kimiSnippets.find((snippet) => snippet.language === "bash")!.copy;
+  const kimiConfig = kimiSnippets.find((snippet) => snippet.language === "toml")!.copy;
+  for (const command of [kimiPowerShell, kimiBash]) {
+    assert.match(command, /KIMI_MODEL_NAME/);
+    assert.match(command, /KIMI_MODEL_PROVIDER_TYPE/);
+    assert.match(command, /KIMI_MODEL_BASE_URL/);
+    assert.match(command, /KIMI_MODEL_MAX_CONTEXT_SIZE/);
+    assert.match(command, /KIMI_MODEL_CAPABILITIES/);
+  }
+  assert.match(kimiConfig, /\[providers\.ocg\]\ntype = "openai"/);
+  assert.match(kimiConfig, new RegExp(`base_url = ${JSON.stringify(urls.apiBaseUrl)}`));
+  assert.match(kimiConfig, new RegExp(`api_key = ${JSON.stringify(actualKey)}`));
+  assert.match(kimiConfig, /default_permission_mode = "manual"/);
+  assert.ok(context.modelIds.every((modelId) => kimiConfig.includes(`[models."ocg\/${modelId}"]`)));
+  assert.match(kimiConfig, /\[models\."ocg\/kimi-k3"\][\s\S]*?max_context_size = 1048576/);
+  assert.match(
+    kimiConfig,
+    /capabilities = \["thinking","always_thinking","image_in","video_in","tool_use"\]/,
+  );
+  assert.match(kimiConfig, /support_efforts = \["max"\]\ndefault_effort = "max"/);
 
   const openClaw = APPLICATION_GUIDES.find((guide) => guide.id === "openclaw");
   assert.ok(openClaw);
   const openClawSnippets = openClaw.snippets(context);
-  const openClawConfig = JSON.parse(openClawSnippets[0].copy);
-  assert.equal(openClawConfig.models.providers.ocg.apiKey, "${OCG_API_KEY}");
-  assert.doesNotMatch(openClawSnippets[0].copy, new RegExp(actualKey));
-  assert.equal(openClawSnippets[1].copy, `OCG_API_KEY=${JSON.stringify(actualKey)}`);
+  const openClawConfigSnippet = openClawSnippets.find((snippet) => snippet.language === "json5")!;
+  const openClawEnv = openClawSnippets.find((snippet) => snippet.label === "~/.openclaw/.env")!;
+  const openClawOnboarding = openClawSnippets.find((snippet) => snippet.language === "powershell")!.copy;
+  const openClawConfig = JSON.parse(openClawConfigSnippet.copy);
+  assert.equal(openClawConfig.models.providers.ocg.apiKey, "${CUSTOM_API_KEY}");
+  assert.deepEqual(openClawConfig.models.providers.ocg.models[0], {
+    id: "kimi-k3",
+    name: "kimi-k3",
+    reasoning: true,
+    input: ["text", "image"],
+    contextWindow: 1_048_576,
+    maxTokens: 131_072,
+  });
+  assert.doesNotMatch(openClawConfigSnippet.copy, new RegExp(actualKey));
+  assert.equal(openClawEnv.copy, `CUSTOM_API_KEY=${JSON.stringify(actualKey)}`);
+  assert.match(openClawOnboarding, /openclaw onboard --non-interactive --accept-risk/);
+  assert.match(openClawOnboarding, /--secret-input-mode ref/);
+  assert.match(openClawOnboarding, /--custom-compatibility openai/);
+  assert.match(openClawOnboarding, /--custom-image-input/);
+  assert.doesNotMatch(openClawOnboarding, /--custom-api-key/);
+
+  const hermes = APPLICATION_GUIDES.find((guide) => guide.id === "hermes")!;
+  const hermesConfig = hermes.snippets(context)[0].copy;
+  assert.match(hermesConfig, /"kimi-k3":\n\s+context_length: 1048576\n\s+supports_vision: true/);
+  assert.match(hermesConfig, /"glm-5\.1":\n\s+context_length: 202752\n\s+supports_vision: false/);
+
+  assert.deepEqual(
+    APPLICATION_GUIDES.filter((guide) => "popular" in guide && guide.popular).map((guide) => guide.id),
+    ["openclaw", "hermes"],
+  );
+
+  const rooCode = APPLICATION_GUIDES.find((guide) => guide.id === "roo-code")!;
+  const rooAutoImport = JSON.parse(
+    rooCode.snippets(context).find((snippet) => snippet.label.startsWith("VS Code settings.json"))!.copy,
+  );
+  assert.equal(rooAutoImport["roo-cline.autoImportSettingsPath"], "~/roo-code-settings.json");
 
   for (const appId of [
     "opencode",
+    "pi",
+    "kimi-code",
     "openclaw",
     "hermes",
     "cherry-studio",
@@ -352,6 +505,163 @@ test("application catalog has thirteen verified clients and never displays a com
     const config = guide.snippets(context).map(({ copy }) => copy).join("\n");
     assert.ok(context.modelIds.every((modelId) => config.includes(modelId)), appId);
   }
+});
+
+test("Pi and Kimi Code configs use verified per-model limits and capabilities without fallback guesses", () => {
+  const expected = new Map<string, {
+    contextWindow: number;
+    maxOutputTokens: number;
+    piInput: readonly string[];
+    kimiCapabilities: readonly string[];
+  }>([
+    ["grok-4.5", { contextWindow: 500_000, maxOutputTokens: 500_000, piInput: ["text", "image"], kimiCapabilities: ["thinking", "always_thinking", "image_in", "tool_use"] }],
+    ["glm-5.2", { contextWindow: 1_000_000, maxOutputTokens: 131_072, piInput: ["text"], kimiCapabilities: ["thinking", "tool_use"] }],
+    ["glm-5.1", { contextWindow: 202_752, maxOutputTokens: 32_768, piInput: ["text"], kimiCapabilities: ["thinking", "tool_use"] }],
+    ["kimi-k3", { contextWindow: 1_048_576, maxOutputTokens: 131_072, piInput: ["text", "image"], kimiCapabilities: ["thinking", "always_thinking", "image_in", "video_in", "tool_use"] }],
+    ["kimi-k2.7-code", { contextWindow: 262_144, maxOutputTokens: 262_144, piInput: ["text", "image"], kimiCapabilities: ["thinking", "always_thinking", "image_in", "video_in", "tool_use"] }],
+    ["kimi-k2.6", { contextWindow: 262_144, maxOutputTokens: 65_536, piInput: ["text", "image"], kimiCapabilities: ["thinking", "image_in", "video_in", "tool_use"] }],
+    ["mimo-v2.5", { contextWindow: 1_000_000, maxOutputTokens: 128_000, piInput: ["text", "image"], kimiCapabilities: ["thinking", "image_in", "video_in", "audio_in", "tool_use"] }],
+    ["mimo-v2.5-pro", { contextWindow: 1_048_576, maxOutputTokens: 128_000, piInput: ["text"], kimiCapabilities: ["thinking", "tool_use"] }],
+    ["minimax-m3", { contextWindow: 1_000_000, maxOutputTokens: 131_072, piInput: ["text", "image"], kimiCapabilities: ["thinking", "image_in", "tool_use"] }],
+    ["minimax-m2.7", { contextWindow: 204_800, maxOutputTokens: 131_072, piInput: ["text"], kimiCapabilities: ["thinking", "always_thinking", "tool_use"] }],
+    ["minimax-m2.7-highspeed", { contextWindow: 204_800, maxOutputTokens: 131_072, piInput: ["text"], kimiCapabilities: ["thinking", "always_thinking", "tool_use"] }],
+    ["minimax-m2.5", { contextWindow: 204_800, maxOutputTokens: 65_536, piInput: ["text"], kimiCapabilities: ["thinking", "always_thinking", "tool_use"] }],
+    ["minimax-m2.5-highspeed", { contextWindow: 204_800, maxOutputTokens: 65_536, piInput: ["text"], kimiCapabilities: ["thinking", "always_thinking", "tool_use"] }],
+    ["qwen3.7-max", { contextWindow: 1_000_000, maxOutputTokens: 65_536, piInput: ["text"], kimiCapabilities: ["thinking", "tool_use"] }],
+    ["qwen3.7-plus", { contextWindow: 1_000_000, maxOutputTokens: 65_536, piInput: ["text", "image"], kimiCapabilities: ["thinking", "image_in", "tool_use"] }],
+    ["qwen3.6-plus", { contextWindow: 1_000_000, maxOutputTokens: 65_536, piInput: ["text", "image"], kimiCapabilities: ["thinking", "image_in", "tool_use"] }],
+    ["deepseek-v4-pro", { contextWindow: 1_000_000, maxOutputTokens: 384_000, piInput: ["text"], kimiCapabilities: ["thinking", "tool_use"] }],
+    ["deepseek-v4-flash", { contextWindow: 1_000_000, maxOutputTokens: 384_000, piInput: ["text"], kimiCapabilities: ["thinking", "tool_use"] }],
+  ]);
+  assert.deepEqual(new Set(Object.keys(APPLICATION_MODEL_METADATA)), new Set(expected.keys()));
+  for (const [modelId, spec] of expected) {
+    assert.equal(APPLICATION_MODEL_METADATA[modelId].contextWindow, spec.contextWindow, `${modelId} context`);
+    assert.equal(APPLICATION_MODEL_METADATA[modelId].maxOutputTokens, spec.maxOutputTokens, `${modelId} output`);
+  }
+
+  const urls = resolveConnectionUrls("https://edge.example.com/ocg", "https://ignored", 9042, false);
+  const context = {
+    ...urls,
+    displayKey: "ocg-…7890",
+    actualKey: "ocg-secret-key",
+    modelId: expected.keys().next().value!,
+    modelIds: [...expected.keys()],
+    modelValues: {},
+    iconUrl: "https://edge.example.com/dashboard/ocg.png",
+  };
+
+  const pi = APPLICATION_GUIDES.find((guide) => guide.id === "pi")!;
+  const piConfig = JSON.parse(pi.snippets(context)[0].copy);
+  assert.deepEqual(piConfig.providers.ocg.compat, {
+    supportsStore: false,
+    supportsDeveloperRole: false,
+    maxTokensField: "max_tokens",
+  });
+  assert.equal(piConfig.providers.ocg.models.length, expected.size);
+  for (const model of piConfig.providers.ocg.models) {
+    const spec = expected.get(model.id)!;
+    assert.equal(model.contextWindow, spec.contextWindow, `${model.id} Pi context`);
+    assert.equal(model.maxTokens, spec.maxOutputTokens, `${model.id} Pi output`);
+    assert.deepEqual(model.input, spec.piInput, `${model.id} Pi input`);
+    assert.equal(model.reasoning, true, `${model.id} Pi reasoning`);
+  }
+  const piModels = new Map<string, Record<string, unknown>>(
+    piConfig.providers.ocg.models.map((model: Record<string, unknown>) => [String(model.id), model] as const),
+  );
+  assert.deepEqual(piModels.get("kimi-k2.6")!.compat, {
+    thinkingFormat: "deepseek",
+    supportsReasoningEffort: false,
+    supportsLongCacheRetention: false,
+  });
+  assert.deepEqual(piModels.get("kimi-k2.6")!.thinkingLevelMap, {
+    minimal: null,
+    low: null,
+    medium: null,
+  });
+  assert.deepEqual(piModels.get("kimi-k2.7-code")!.compat, {
+    supportsReasoningEffort: false,
+  });
+  assert.deepEqual(piModels.get("kimi-k2.7-code")!.thinkingLevelMap, {
+    off: null,
+    minimal: null,
+    low: null,
+    medium: null,
+    xhigh: null,
+    max: null,
+  });
+  assert.deepEqual(piModels.get("glm-5.2")!.thinkingLevelMap, {
+    off: null,
+    minimal: null,
+    low: null,
+    medium: null,
+    high: "high",
+    xhigh: null,
+    max: "max",
+  });
+  assert.deepEqual(piModels.get("glm-5.1")!.compat, { supportsReasoningEffort: false });
+  assert.deepEqual(piModels.get("glm-5.1")!.thinkingLevelMap, {
+    off: null,
+    minimal: null,
+    low: null,
+    medium: null,
+    xhigh: null,
+    max: null,
+  });
+  for (const modelId of [
+    "minimax-m2.7",
+    "minimax-m2.7-highspeed",
+    "minimax-m2.5",
+    "minimax-m2.5-highspeed",
+  ]) {
+    assert.deepEqual(piModels.get(modelId)!.compat, { supportsReasoningEffort: false }, modelId);
+    assert.deepEqual(piModels.get(modelId)!.thinkingLevelMap, {
+      off: null,
+      minimal: null,
+      low: null,
+      medium: null,
+      xhigh: null,
+      max: null,
+    }, modelId);
+  }
+  for (const modelId of ["minimax-m3", "qwen3.7-max", "qwen3.7-plus", "qwen3.6-plus"]) {
+    assert.equal(piModels.get(modelId)!.compat, undefined, modelId);
+    assert.deepEqual(piModels.get(modelId)!.thinkingLevelMap, { minimal: "low" }, modelId);
+  }
+
+  const kimiCode = APPLICATION_GUIDES.find((guide) => guide.id === "kimi-code")!;
+  const kimiConfig = kimiCode.snippets(context).find((snippet) => snippet.language === "toml")!.copy;
+  assert.doesNotMatch(kimiConfig, /max_context_size = 128000(?:\r?\n|$)/);
+  assert.doesNotMatch(kimiConfig, /max_output_size/);
+  const kimiTables = new Map<string, string>();
+  for (const [modelId, spec] of expected) {
+    const header = `[models.${JSON.stringify(`ocg/${modelId}`)}]`;
+    const start = kimiConfig.indexOf(header);
+    assert.notEqual(start, -1, `${modelId} Kimi table`);
+    const next = kimiConfig.indexOf("\n\n[models.", start + header.length);
+    const table = kimiConfig.slice(start, next === -1 ? undefined : next);
+    kimiTables.set(modelId, table);
+    assert.match(table, new RegExp(`max_context_size = ${spec.contextWindow}(?:\\r?\\n|$)`), `${modelId} Kimi context`);
+    assert.ok(
+      table.includes(`capabilities = ${JSON.stringify(spec.kimiCapabilities)}`),
+      `${modelId} Kimi capabilities`,
+    );
+  }
+  assert.match(kimiTables.get("grok-4.5")!, /support_efforts = \["low","medium","high"\]\ndefault_effort = "high"/);
+  assert.match(kimiTables.get("glm-5.2")!, /support_efforts = \["high","max"\]\ndefault_effort = "max"/);
+  assert.match(kimiTables.get("kimi-k3")!, /support_efforts = \["max"\]\ndefault_effort = "max"/);
+  for (const modelId of ["deepseek-v4-pro", "deepseek-v4-flash"]) {
+    assert.match(kimiTables.get(modelId)!, /support_efforts = \["high","max"\]\ndefault_effort = "high"/);
+  }
+
+  const unknownContext = { ...context, modelId: "future-unverified-model", modelIds: ["future-unverified-model"] };
+  assert.throws(
+    () => pi.snippets(unknownContext),
+    /Missing verified application model metadata for "future-unverified-model"/,
+  );
+  assert.throws(
+    () => kimiCode.snippets(unknownContext),
+    /Missing verified application model metadata for "future-unverified-model"/,
+  );
 });
 
 test("Claude Code defaults balance model capability and cost with safe fallbacks", () => {
@@ -382,8 +692,8 @@ test("dotenv snippets quote keys containing comments and replacement tokens", ()
     ...urls,
     displayKey: maskConnectionKey(actualKey),
     actualKey,
-    modelId: "selected-model",
-    modelIds: ["selected-model"],
+    modelId: "kimi-k3",
+    modelIds: ["kimi-k3"],
     modelValues: {},
     iconUrl: "https://edge.example.com/dashboard/ocg.png",
   };
@@ -465,12 +775,14 @@ test("generated VS Code and Continue configs use their current complete shapes",
   assert.equal(vscodeConfig[0].models[0].vision, false);
   assert.deepEqual(vscodeConfig[0].models.map((model: { id: string }) => model.id), vscodeContext.modelIds);
   for (const model of vscodeConfig[0].models) {
+    const metadata = APPLICATION_MODEL_METADATA[model.id];
     assert.equal(
       model.maxInputTokens + model.maxOutputTokens,
       vscodeWindows.get(model.id),
       model.id,
     );
     assert.equal(model.maxOutputTokens, model.id === "glm-5.1" ? 32_768 : 65_536, model.id);
+    assert.equal(model.vision, (metadata.ocgInput ?? metadata.input).includes("image"), model.id);
   }
 
   const continueGuide = APPLICATION_GUIDES.find((guide) => guide.id === "continue")!;
@@ -478,8 +790,14 @@ test("generated VS Code and Continue configs use their current complete shapes",
   assert.match(yaml, /^name: OCG Manager\nversion: 1\.0\.0\nschema: v1\nmodels:/);
   assert.match(yaml, /model: "selected-model"/);
   assert.match(yaml, /model: "second-model"/);
+  assert.match(yaml, /apiKey: \$\{\{ secrets\.OCG_API_KEY \}\}/);
+  assert.doesNotMatch(yaml, new RegExp(context.actualKey));
   assert.match(yaml, /useResponsesApi: false/);
   assert.match(yaml, /capabilities:\n\s+- tool_use/);
+  assert.equal(
+    continueGuide.snippets(context).find((snippet) => snippet.language === "dotenv")!.copy,
+    `OCG_API_KEY=${JSON.stringify(context.actualKey)}`,
+  );
 });
 
 test("dashboard keeps the connection center first and protects key regeneration", async () => {
@@ -569,6 +887,8 @@ test("applications view uses deep-linked subpages and a responsive second naviga
   assert.doesNotMatch(applications, /<n-layout/);
   assert.match(applications, /<n-menu/);
   assert.match(applications, /<n-select/);
+  assert.match(applications, /v-if="activeGuide\.popular"[\s\S]*?t\("常用"\)/);
+  assert.match(applications, /function guideOptionLabel[\s\S]*?guide\.popular[\s\S]*?t\("常用"\)/);
   assert.match(applications, /tauriApi\.getApplicationModels\(\)/);
   assert.match(applications, /tauriApi\.getClaudeDesktopModels\(\)/);
   assert.match(applications, /Promise\.allSettled/);
