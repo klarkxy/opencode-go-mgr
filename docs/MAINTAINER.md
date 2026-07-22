@@ -140,7 +140,7 @@ The frontend unit tests live next to the code they cover
 `--experimental-strip-types` flag — no extra test runner is required. Pair
 them with `pnpm run build:web` for a final smoke test.
 
-The application guides are driven by the 15 entries in
+The application guides are driven by the 16 entries in
 `src/views/application-guides.ts`. When changing that registry, check the
 guide count, unique IDs, protocol endpoints, the display/copy masking
 difference, and the Claude Desktop three-role persistence behavior.
@@ -223,9 +223,10 @@ difference, and the Claude Desktop three-role persistence behavior.
   clicks the button; it is not telemetry.
 - Docker may bootstrap the first administrator with `OCG_ADMIN_USERNAME` and
   `OCG_ADMIN_PASSWORD`; otherwise the first registration wins.
-- The Applications view is generated from 15 guides: Claude Code, Claude
-  Desktop, Codex, Gemini CLI, Pi, Kimi Code CLI, OpenCode, OpenClaw, Hermes,
-  Cherry Studio, VS Code Copilot Chat, Cline, Roo Code, Continue, and Chatbox.
+- The Applications view is generated from 16 guides: Claude Code, Claude
+  Desktop, Codex, Gemini CLI, Pi, Kimi Code CLI, OpenCode, WorkBuddy, OpenClaw,
+  Hermes, Cherry Studio, VS Code Copilot Chat, Cline, Roo Code, Continue, and
+  Chatbox.
   The Claude Desktop copy action also saves its three role models; every
   other guide only produces client configuration and does not change gateway
   settings.
@@ -637,7 +638,7 @@ most of them; the manual parts need a real desktop.
       restart with the same data directory, and verify the mappings survive.
       On a non-loopback dashboard, verify the mapping API returns `401`
       without a valid session.
-- [ ] Open the **Applications** view and confirm all 15 guides are present
+- [ ] Open the **Applications** view and confirm all 16 guides are present
       and selectable. Spot-check that copied results contain no masked key,
       and actually launch Claude Desktop and Gemini CLI once each for a text
       and a tool call.

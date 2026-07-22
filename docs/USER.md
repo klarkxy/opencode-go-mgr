@@ -94,7 +94,7 @@ browser.
 2. In the dashboard's **Connection Center**, copy the **Gateway Key** and the
    **API Base URL** (`http://127.0.0.1:9042/v1`).
 3. Point your client at the base URL with the Gateway Key. The
-   **Applications** view has a per-client guide for 15 common tools.
+   **Applications** view has a per-client guide for 16 common tools.
 4. Verify the setup with a real request.
 
 The Gateway Key is the only credential a client needs, and it works in three
@@ -294,12 +294,12 @@ contents to the network.
 
 ### Application Guides
 
-The **Applications** view ships with per-client configuration snippets for 15
+The **Applications** view ships with per-client configuration snippets for 16
 tools: Claude Code, Claude Desktop, Codex, Gemini CLI, Pi, Kimi Code CLI,
-OpenCode, OpenClaw, Hermes, Cherry Studio, VS Code Copilot Chat, Cline, Roo
-Code, Continue, and Chatbox. Each guide shows the protocol the tool speaks,
-the official documentation URL, step-by-step instructions, model selectors,
-and one or more editable code blocks with a **Copy** button. The displayed
+OpenCode, WorkBuddy, OpenClaw, Hermes, Cherry Studio, VS Code Copilot Chat,
+Cline, Roo Code, Continue, and Chatbox. Each guide shows the protocol the tool
+speaks, the official documentation URL, step-by-step instructions, model
+selectors, and one or more editable code blocks with a **Copy** button. The displayed
 block masks the Gateway Key; copying restores the real key, so screenshots
 remain shareable without producing an unusable configuration.
 
@@ -314,8 +314,8 @@ Base URL conventions per client:
   when the resolved root violates this client-side rule.
 - Pi, Kimi Code CLI, OpenCode, OpenClaw, Hermes, Cline, Roo Code, and Continue
   use the API Base URL ending in `/v1`.
-- VS Code Copilot Chat needs the full `/v1/chat/completions` URL. Codex needs
-  `/v1` plus `wire_api = "responses"`.
+- VS Code Copilot Chat and WorkBuddy need the full `/v1/chat/completions` URL.
+  Codex needs `/v1` plus `wire_api = "responses"`.
 
 Selectable models are the intersection of the upstream's current catalog,
 models the gateway knows how to route, and the active pricing snapshot. The
@@ -691,7 +691,7 @@ checkout containing `compose.yaml` and `.env.example` (preferably the
 matching release tag):
 
 ```bash
-git clone --branch v1.5.1 --depth 1 https://github.com/klarkxy/opencode-go-mgr.git
+git clone --branch v1.5.2 --depth 1 https://github.com/klarkxy/opencode-go-mgr.git
 cd opencode-go-mgr
 cp .env.example .env
 # PowerShell: Copy-Item .env.example .env
@@ -707,7 +707,7 @@ docker compose ps
   `ghcr.io/klarkxy/opencode-go-mgr:latest`; the Release
   `compose.example.yaml` defaults to its matching full version.
 - For repeatable production deployments, set `OCG_IMAGE` in `.env` to a full
-  release tag such as `ghcr.io/klarkxy/opencode-go-mgr:1.5.1`.
+  release tag such as `ghcr.io/klarkxy/opencode-go-mgr:1.5.2`.
 - Full-version and `sha-<commit>` tags identify one release and are intended
   not to move; `1.5` and `latest` move forward. Only a digest such as
   `ghcr.io/klarkxy/opencode-go-mgr@sha256:...` is technically immutable.
@@ -802,9 +802,9 @@ Each stable image includes an SPDX SBOM, BuildKit SLSA provenance, and a
 GitHub signed provenance attestation. Inspect and verify a release with:
 
 ```bash
-docker buildx imagetools inspect ghcr.io/klarkxy/opencode-go-mgr:1.5.1
+docker buildx imagetools inspect ghcr.io/klarkxy/opencode-go-mgr:1.5.2
 gh attestation verify \
-  oci://ghcr.io/klarkxy/opencode-go-mgr:1.5.1 \
+  oci://ghcr.io/klarkxy/opencode-go-mgr:1.5.2 \
   --repo klarkxy/opencode-go-mgr
 ```
 

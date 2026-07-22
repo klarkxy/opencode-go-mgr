@@ -785,6 +785,12 @@ async fn loopback_forward_logs_apply_filters_before_pagination() {
                 service_tier: None,
                 cost_state: "legacy_estimate".into(),
                 error_message: None,
+                request_id: None,
+                attempt: None,
+                error_source: None,
+                error_stage: None,
+                duration_ms: None,
+                diagnostic: None,
             })
             .unwrap();
     }

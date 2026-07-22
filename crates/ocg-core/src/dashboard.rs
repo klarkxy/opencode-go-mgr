@@ -1416,6 +1416,7 @@ async fn application_models(State(state): State<CoreState>) -> Result<Json<Vec<S
 struct LimitQuery {
     limit: Option<i64>,
     days: Option<i64>,
+    request_id: Option<String>,
 }
 
 #[derive(Default, Deserialize)]
@@ -1425,6 +1426,7 @@ struct ForwardLogQuery {
     status: Option<String>,
     account_id: Option<String>,
     model: Option<String>,
+    request_id: Option<String>,
     start_time: Option<String>,
     end_time: Option<String>,
     sort_by: Option<String>,
@@ -1489,7 +1491,7 @@ async fn gateway_logs(
     state
         .db
         .lock()
-        .list_gateway_logs(q.limit.unwrap_or(100))
+        .query_gateway_logs(q.limit.unwrap_or(100), q.request_id.as_deref())
         .map(Json)
         .map_err(ApiError::internal)
 }
@@ -1508,6 +1510,7 @@ async fn forward_logs(
             status: q.status.as_deref(),
             account_id: q.account_id.as_deref(),
             model: q.model.as_deref(),
+            request_id: q.request_id.as_deref(),
             start_time: start_time.as_deref(),
             end_time: end_time.as_deref(),
             sort_by: q.sort_by.as_deref(),

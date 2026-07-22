@@ -1,3 +1,4 @@
+pub mod diagnostics;
 pub mod forwarder;
 pub mod handler;
 pub mod limit;
@@ -9,6 +10,8 @@ use crate::state::{CoreState, GatewayHandle};
 use anyhow::Result;
 use axum::Router;
 use axum::extract::DefaultBodyLimit;
+use axum::http::HeaderName;
+use axum::middleware;
 use axum::routing::{get, post};
 use std::net::SocketAddr;
 use tokio::sync::oneshot;
@@ -22,7 +25,8 @@ pub fn build_router(state: CoreState) -> Router {
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods(Any)
-        .allow_headers(Any);
+        .allow_headers(Any)
+        .expose_headers([HeaderName::from_static(diagnostics::REQUEST_ID_HEADER)]);
 
     let gateway_api = Router::new()
         .route("/v1/chat/completions", post(handler::chat_completions))
@@ -46,7 +50,11 @@ pub fn build_router(state: CoreState) -> Router {
             post(handler::gemini_model_action),
         )
         .layer(cors)
-        .layer(DefaultBodyLimit::max(MAX_GATEWAY_REQUEST_BODY_BYTES));
+        .layer(DefaultBodyLimit::max(MAX_GATEWAY_REQUEST_BODY_BYTES))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            handler::request_trace_middleware,
+        ));
 
     Router::new()
         .merge(gateway_api)
@@ -143,11 +151,26 @@ mod tests {
         let accepted = client
             .post(format!("{root}/v1/chat/completions"))
             .bearer_auth("gateway-test-key")
+            .header("origin", "https://example.test")
             .body(accepted_body)
             .send()
             .await
             .expect("request at the body limit should complete");
         assert_eq!(accepted.status(), StatusCode::BAD_REQUEST);
+        let accepted_request_id = accepted
+            .headers()
+            .get("x-ocg-request-id")
+            .and_then(|value| value.to_str().ok())
+            .expect("parse failure should return a request id")
+            .to_string();
+        assert!(accepted_request_id.starts_with("ocg-"));
+        assert!(
+            accepted
+                .headers()
+                .get("access-control-expose-headers")
+                .and_then(|value| value.to_str().ok())
+                .is_some_and(|value| value.contains("x-ocg-request-id"))
+        );
         let accepted_error: serde_json::Value = accepted
             .json()
             .await
@@ -161,11 +184,227 @@ mod tests {
         let rejected = client
             .post(format!("{root}/v1/chat/completions"))
             .bearer_auth("gateway-test-key")
+            .header("origin", "https://example.test")
             .body(vec![b'x'; MAX_GATEWAY_REQUEST_BODY_BYTES + 1])
             .send()
             .await
             .expect("request above the body limit should complete");
         assert_eq!(rejected.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        let rejected_request_id = rejected
+            .headers()
+            .get("x-ocg-request-id")
+            .and_then(|value| value.to_str().ok())
+            .expect("body limit failure should return a request id")
+            .to_string();
+        assert!(rejected_request_id.starts_with("ocg-"));
+        assert_ne!(accepted_request_id, rejected_request_id);
+
+        let db = state.db.lock();
+        for (request_id, stage) in [
+            (&accepted_request_id, "parse"),
+            (&rejected_request_id, "body_limit"),
+        ] {
+            let logs = db
+                .query_gateway_logs(10, Some(request_id))
+                .expect("request id query should work");
+            assert_eq!(logs.len(), 1);
+            assert_eq!(logs[0].request_id.as_deref(), Some(request_id.as_str()));
+            assert_eq!(logs[0].error_source.as_deref(), Some("client"));
+            assert_eq!(logs[0].error_stage.as_deref(), Some(stage));
+            assert!(logs[0].diagnostic.is_some());
+        }
+        drop(db);
+
+        let _ = handle.shutdown.send(());
+        handle.task.await.expect("test gateway should stop");
+        drop(state);
+        fs::remove_dir_all(dir).expect("test data directory should be removed");
+    }
+
+    #[tokio::test]
+    async fn unauthorized_and_expected_fallback_requests_are_not_persisted() {
+        let mut dir = std::env::temp_dir();
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock should be valid")
+            .as_nanos();
+        dir.push(format!("ocg-gateway-unlogged-control-flow-{nanos}"));
+        fs::create_dir_all(&dir).expect("test data directory should be created");
+        let db = Database::open(dir.clone()).expect("test database should open");
+        let cipher: Arc<dyn KeyCipher + Send + Sync> = Arc::new(StaticKeyCipher::new("test"));
+        let state =
+            Arc::new(CoreStateInner::new(db, dir.clone(), cipher).expect("state should load"));
+        let mut config = state.config();
+        config.gateway_key = "gateway-test-key".to_string();
+        state.set_config(config).expect("test config should save");
+        let handle = start_gateway_on(state.clone(), SocketAddr::from(([127, 0, 0, 1], 0)))
+            .await
+            .expect("test gateway should start");
+        let root = format!("http://127.0.0.1:{}", handle.port);
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .build()
+            .expect("test client should build");
+        let chat_body = json!({
+            "model": "deepseek-v4-flash",
+            "messages": [{"role": "user", "content": "hello"}],
+            "max_tokens": 1
+        });
+        let responses_body = json!({
+            "model": "deepseek-v4-flash",
+            "input": "hello",
+            "store": false,
+            "max_output_tokens": 1
+        });
+        let messages_body = json!({
+            "model": "minimax-m3",
+            "messages": [{"role": "user", "content": "hello"}],
+            "max_tokens": 1
+        });
+        let gemini_body = json!({
+            "contents": [{"role": "user", "parts": [{"text": "hello"}]}]
+        });
+
+        let unauthorized_requests = [
+            client
+                .get(format!("{root}/v1/models"))
+                .bearer_auth("wrong-key"),
+            client
+                .get(format!("{root}/claude-desktop/v1/models"))
+                .header("x-api-key", "wrong-key"),
+            client
+                .post(format!("{root}/v1/chat/completions"))
+                .bearer_auth("wrong-key")
+                .json(&chat_body),
+            client
+                .post(format!("{root}/v1/responses"))
+                .bearer_auth("wrong-key")
+                .json(&responses_body),
+            client
+                .post(format!("{root}/v1/messages"))
+                .header("x-api-key", "wrong-key")
+                .json(&messages_body),
+            client
+                .post(format!("{root}/claude-desktop/v1/messages"))
+                .header("x-api-key", "wrong-key")
+                .json(&messages_body),
+            client
+                .post(format!("{root}/v1beta/models/minimax-m3:generateContent"))
+                .header("x-goog-api-key", "wrong-key")
+                .json(&gemini_body),
+            client
+                .post(format!("{root}/v1beta/models/minimax-m3:countTokens"))
+                .header("x-goog-api-key", "wrong-key")
+                .json(&gemini_body),
+            client
+                .post(format!("{root}/v1beta/models/minimax-m3:embedContent"))
+                .header("x-goog-api-key", "wrong-key")
+                .json(&gemini_body),
+        ];
+        for request in unauthorized_requests {
+            let response = request
+                .send()
+                .await
+                .expect("unauthorized request should complete");
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+            let request_id = response
+                .headers()
+                .get("x-ocg-request-id")
+                .and_then(|value| value.to_str().ok())
+                .expect("unauthorized response should keep correlation id");
+            assert!(
+                state
+                    .db
+                    .lock()
+                    .query_gateway_logs(10, Some(request_id))
+                    .expect("gateway logs should query")
+                    .is_empty(),
+                "unauthorized request {request_id} must not be persisted"
+            );
+        }
+
+        let oversized = client
+            .post(format!("{root}/v1/chat/completions"))
+            .bearer_auth("wrong-key")
+            .header("content-type", "application/json")
+            .body(vec![b'x'; MAX_GATEWAY_REQUEST_BODY_BYTES + 1])
+            .send()
+            .await
+            .expect("oversized unauthorized request should complete");
+        assert_eq!(oversized.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        let oversized_request_id = oversized
+            .headers()
+            .get("x-ocg-request-id")
+            .and_then(|value| value.to_str().ok())
+            .expect("oversized unauthorized response should keep correlation id");
+        assert!(
+            state
+                .db
+                .lock()
+                .query_gateway_logs(10, Some(oversized_request_id))
+                .expect("gateway logs should query")
+                .is_empty(),
+            "oversized unauthorized request must not be persisted"
+        );
+        assert!(
+            state
+                .db
+                .lock()
+                .list_forward_logs(100)
+                .expect("forward logs should query")
+                .is_empty()
+        );
+
+        let count_tokens = client
+            .post(format!("{root}/v1beta/models/minimax-m3:countTokens"))
+            .header("x-goog-api-key", "gateway-test-key")
+            .json(&gemini_body)
+            .send()
+            .await
+            .expect("countTokens fallback should complete");
+        assert_eq!(count_tokens.status(), StatusCode::NOT_IMPLEMENTED);
+        let count_tokens_request_id = count_tokens
+            .headers()
+            .get("x-ocg-request-id")
+            .and_then(|value| value.to_str().ok())
+            .expect("countTokens fallback should keep correlation id");
+        assert!(
+            state
+                .db
+                .lock()
+                .query_gateway_logs(10, Some(count_tokens_request_id))
+                .expect("gateway logs should query")
+                .is_empty(),
+            "expected countTokens fallback must not be persisted as a failure"
+        );
+
+        let invalid_json = client
+            .post(format!("{root}/v1/chat/completions"))
+            .bearer_auth("gateway-test-key")
+            .header("content-type", "application/json")
+            .body("{")
+            .send()
+            .await
+            .expect("invalid JSON request should complete");
+        assert_eq!(invalid_json.status(), StatusCode::BAD_REQUEST);
+        let invalid_request_id = invalid_json
+            .headers()
+            .get("x-ocg-request-id")
+            .and_then(|value| value.to_str().ok())
+            .expect("validation failure should keep correlation id");
+        let logs = state
+            .db
+            .lock()
+            .query_gateway_logs(10, Some(invalid_request_id))
+            .expect("gateway logs should query");
+        assert_eq!(logs.len(), 1, "real local failures should stay diagnosable");
+        assert_eq!(logs[0].error_stage.as_deref(), Some("parse"));
+        let diagnostic = logs[0]
+            .diagnostic
+            .as_ref()
+            .expect("parse failure should keep bounded diagnostic detail");
+        assert!(diagnostic["upstream_body_bytes"].is_null());
+        assert_eq!(diagnostic["client_body_bytes"], 1);
 
         let _ = handle.shutdown.send(());
         handle.task.await.expect("test gateway should stop");

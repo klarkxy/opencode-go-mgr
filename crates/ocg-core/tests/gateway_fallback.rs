@@ -386,6 +386,14 @@ async fn protocol_call(port: u16, path: &str, model: &str) -> (StatusCode, serde
     };
     let response = request.send().await.unwrap();
     let status = response.status();
+    assert!(
+        response
+            .headers()
+            .get("x-ocg-request-id")
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.starts_with("ocg-")),
+        "{path} should return a request id"
+    );
     let body = response.json().await.unwrap();
     (status, body)
 }
@@ -424,6 +432,14 @@ async fn protocol_stream_call(port: u16, path: &str, model: &str) -> (StatusCode
     };
     let response = request.send().await.unwrap();
     let status = response.status();
+    assert!(
+        response
+            .headers()
+            .get("x-ocg-request-id")
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.starts_with("ocg-")),
+        "{path} should return a request id"
+    );
     let body = response.text().await.unwrap();
     (status, body)
 }
@@ -454,6 +470,7 @@ async fn model_discovery_does_not_create_inference_logs() {
             status: None,
             account_id: None,
             model: None,
+            request_id: None,
             start_time: None,
             end_time: None,
             sort_by: None,
@@ -495,6 +512,7 @@ async fn model_discovery_keeps_rate_limit_cooldown_without_logging() {
             status: None,
             account_id: None,
             model: None,
+            request_id: None,
             start_time: None,
             end_time: None,
             sort_by: None,
@@ -706,6 +724,7 @@ async fn application_models_intersects_upstream_models_in_upstream_order() {
                 status: None,
                 account_id: None,
                 model: None,
+                request_id: None,
                 start_time: None,
                 end_time: None,
                 sort_by: None,
@@ -975,6 +994,15 @@ async fn routes_all_client_formats_to_each_models_native_protocol() {
         assert_eq!(log.cost_state, "priced");
         assert!(log.cost.is_some());
         assert!(log.pricing_revision_id.is_some());
+        assert!(
+            log.request_id
+                .as_deref()
+                .is_some_and(|id| id.starts_with("ocg-"))
+        );
+        assert_eq!(log.attempt, Some(1));
+        assert!(log.error_source.is_none());
+        assert!(log.error_stage.is_none());
+        assert!(log.diagnostic.is_none());
 
         gateway::stop_gateway(gateway_handle);
         let _ = stop_mock.send(());
@@ -1048,9 +1076,33 @@ async fn inference_skips_accounts_with_unusable_stored_credentials() {
         assert_eq!(calls[0].path, case.upstream_path, "{}", case.client_path);
         drop(calls);
         let logs = state.db.lock().list_forward_logs(10).unwrap();
-        assert_eq!(logs.len(), 1, "{}", case.client_path);
-        assert_eq!(logs[0].account_id, "acct-3", "{}", case.client_path);
-        assert_eq!(logs[0].status, "success", "{}", case.client_path);
+        assert_eq!(logs.len(), 3, "{}", case.client_path);
+        let success = logs
+            .iter()
+            .find(|log| log.status == "success")
+            .expect("successful fallback attempt should be logged");
+        assert_eq!(success.account_id, "acct-3", "{}", case.client_path);
+        let request_id = success.request_id.as_deref().unwrap();
+        assert!(
+            logs.iter()
+                .all(|log| log.request_id.as_deref() == Some(request_id))
+        );
+        let mut attempts = logs
+            .iter()
+            .filter_map(|log| log.attempt)
+            .collect::<Vec<_>>();
+        attempts.sort_unstable();
+        assert_eq!(attempts, [1, 2, 3]);
+        let credential_failures = logs
+            .iter()
+            .filter(|log| log.error_stage.as_deref() == Some("credential"))
+            .collect::<Vec<_>>();
+        assert_eq!(credential_failures.len(), 2);
+        assert!(
+            credential_failures
+                .iter()
+                .all(|log| log.diagnostic.is_some())
+        );
 
         gateway::stop_gateway(gateway_handle);
         let _ = stop_mock.send(());
@@ -1473,12 +1525,68 @@ async fn connect_failure_retries_once_without_account_fallback() {
     state.set_config(config).unwrap();
     let (port, gateway_handle) = start_gateway(state.clone()).await;
 
-    let (status, _) = protocol_call(port, "/v1/messages", "minimax-m2.7").await;
-    assert_eq!(status, StatusCode::BAD_GATEWAY);
+    let response = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{port}/v1/messages"))
+        .header("x-api-key", "gw-test")
+        .json(&serde_json::json!({
+            "model": "minimax-m2.7",
+            "messages": [{"role": "user", "content": "ping"}],
+            "max_tokens": 3,
+            "stream": false
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    let response_request_id = response
+        .headers()
+        .get("x-ocg-request-id")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string();
     let logs = state.db.lock().list_forward_logs(10).unwrap();
     assert_eq!(logs.len(), 2);
     assert!(logs.iter().all(|log| log.account_id == "acct-1"));
     assert!(logs.iter().all(|log| log.status == "error"));
+    assert!(
+        logs.iter()
+            .all(|log| log.request_id.as_deref() == Some(&response_request_id))
+    );
+    let mut attempts = logs
+        .iter()
+        .filter_map(|log| log.attempt)
+        .collect::<Vec<_>>();
+    attempts.sort_unstable();
+    assert_eq!(attempts, [1, 2]);
+    assert!(logs.iter().all(|log| {
+        log.diagnostic
+            .as_ref()
+            .and_then(|value| value.get("request_id"))
+            .and_then(serde_json::Value::as_str)
+            == Some(response_request_id.as_str())
+    }));
+    let mut retry_actions = logs
+        .iter()
+        .filter_map(|log| {
+            Some((
+                log.attempt?,
+                log.diagnostic
+                    .as_ref()?
+                    .get("retry_action")?
+                    .as_str()?
+                    .to_string(),
+            ))
+        })
+        .collect::<Vec<_>>();
+    retry_actions.sort_by_key(|(attempt, _)| *attempt);
+    assert_eq!(
+        retry_actions,
+        [
+            (1, "retry_same_account".to_string()),
+            (2, "return".to_string())
+        ]
+    );
 
     gateway::stop_gateway(gateway_handle);
     let _ = fs::remove_dir_all(dir);
@@ -1682,6 +1790,120 @@ async fn converted_request_error_uses_callers_envelope_without_fallback() {
     assert_eq!(body["error"]["type"], "invalid_request_error");
     assert_eq!(body["error"]["message"], "bad request");
     assert_eq!(calls.lock().unwrap().len(), 1);
+
+    gateway::stop_gateway(gateway_handle);
+    let _ = stop_mock.send(());
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn upstream_payload_too_large_is_not_mislabeled_as_client_body_limit() {
+    let replies = HashMap::from([
+        (
+            "key-1".to_string(),
+            VecDeque::from([MockReply {
+                status: 413,
+                body: r#"{"error":{"message":"provider input too large"}}"#,
+            }]),
+        ),
+        (
+            "key-2".to_string(),
+            VecDeque::from([MockReply {
+                status: 200,
+                body: SUCCESS_BODY,
+            }]),
+        ),
+    ]);
+    let (base_url, calls, stop_mock) = start_mock_upstream(replies).await;
+    let (state, dir) = build_state(base_url, &["key-1", "key-2"]);
+    let (port, gateway_handle) = start_gateway(state.clone()).await;
+
+    let response = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{port}/v1/messages"))
+        .header("x-api-key", "gw-test")
+        .json(&serde_json::json!({
+            "model": "deepseek-v4-flash",
+            "messages": [{"role": "user", "content": "ping"}],
+            "max_tokens": 3,
+            "stream": false
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    let request_id = response
+        .headers()
+        .get("x-ocg-request-id")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(calls.lock().unwrap().len(), 1);
+
+    let forward_logs = state.db.lock().list_forward_logs(10).unwrap();
+    assert_eq!(forward_logs.len(), 1);
+    assert_eq!(
+        forward_logs[0].request_id.as_deref(),
+        Some(request_id.as_str())
+    );
+    assert_eq!(forward_logs[0].error_source.as_deref(), Some("upstream"));
+    assert_eq!(
+        forward_logs[0].error_stage.as_deref(),
+        Some("upstream_http")
+    );
+    assert!(
+        state
+            .db
+            .lock()
+            .query_gateway_logs(10, Some(&request_id))
+            .unwrap()
+            .is_empty(),
+        "upstream 413 must not create a second client/body_limit diagnostic"
+    );
+
+    gateway::stop_gateway(gateway_handle);
+    let _ = stop_mock.send(());
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn model_discovery_payload_too_large_is_not_mislabeled_as_client_body_limit() {
+    let replies = HashMap::from([(
+        "key-1".to_string(),
+        VecDeque::from([MockReply {
+            status: 413,
+            body: r#"{"error":{"message":"provider model response too large"}}"#,
+        }]),
+    )]);
+    let (base_url, calls, stop_mock) = start_mock_upstream(replies).await;
+    let (state, dir) = build_state(base_url, &["key-1"]);
+    let (port, gateway_handle) = start_gateway(state.clone()).await;
+
+    let response = reqwest::Client::new()
+        .get(format!("http://127.0.0.1:{port}/v1/models"))
+        .bearer_auth("gw-test")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    let request_id = response
+        .headers()
+        .get("x-ocg-request-id")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(calls.lock().unwrap().len(), 1);
+    assert!(state.db.lock().list_forward_logs(10).unwrap().is_empty());
+    assert!(
+        state
+            .db
+            .lock()
+            .query_gateway_logs(10, Some(&request_id))
+            .unwrap()
+            .is_empty(),
+        "model discovery upstream 413 must not create a client/body_limit diagnostic"
+    );
 
     gateway::stop_gateway(gateway_handle);
     let _ = stop_mock.send(());

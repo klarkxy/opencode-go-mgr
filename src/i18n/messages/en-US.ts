@@ -487,6 +487,23 @@ export const enUSMessages = {
   "设置加载失败，请先重试": "Settings failed to load; retry first",
   "请先在仪表盘设置 Key": "Set a Key on the Dashboard first",
   "加载中…": "Loading…",
+  "按请求 ID 精确搜索": "Exact request ID search",
+  "请求 ID": "Request ID",
+  "复制请求 ID": "Copy request ID",
+  "错误来源": "Error source",
+  "失败阶段": "Failure stage",
+  "协议路径": "Protocol path",
+  "尝试次数": "Attempt",
+  "耗时": "Duration",
+  "上游响应头耗时": "Upstream header latency",
+  "重试动作": "Retry action",
+  "上游 Trace ID": "Upstream trace IDs",
+  "请求结构与指纹": "Request structure and fingerprint",
+  "脱敏上游错误": "Redacted upstream error",
+  "上游拒绝": "Upstream rejected",
+  "上游连接错误": "Upstream connection error",
+  "请求错误": "Request error",
+  "下游断开": "Downstream disconnected",
 } as const;
 
 export type MessageKey = keyof typeof enUSMessages;

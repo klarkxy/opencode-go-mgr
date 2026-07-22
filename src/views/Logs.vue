@@ -3,6 +3,12 @@
     <n-tabs v-model:value="activeTab" type="line" animated>
       <n-tab-pane name="gateway" :tab="t('运行日志')">
         <div class="log-toolbar">
+          <n-input
+            v-model:value="requestIdFilter"
+            clearable
+            class="request-id-filter"
+            :placeholder="t('按请求 ID 精确搜索')"
+          />
           <n-tooltip trigger="hover">
             <template #trigger>
               <n-button
@@ -27,7 +33,7 @@
           :data="gatewayLogs"
           :loading="gatewayLoading"
           :pagination="gatewayPagination"
-          :scroll-x="920"
+          :scroll-x="1200"
           size="small"
           @update:page="changeGatewayPage"
         />
@@ -56,6 +62,14 @@
           </div>
         </div>
         <div class="filter-bar">
+          <div class="filter-field request-id-field">
+            <span class="filter-label">{{ t("请求 ID") }}</span>
+            <n-input
+              v-model:value="requestIdFilter"
+              clearable
+              :placeholder="t('按请求 ID 精确搜索')"
+            />
+          </div>
           <div class="filter-field">
             <span class="filter-label">{{ t("状态") }}</span>
             <n-select
@@ -181,7 +195,7 @@
           :data="forwardLogs"
           :loading="forwardLoading"
           :pagination="forwardPagination"
-          :scroll-x="1470"
+          :scroll-x="1750"
           remote
           size="small"
           @update:page="changeForwardPage"
@@ -204,6 +218,7 @@ import {
   NDatePicker,
   NEmpty,
   NIcon,
+  NInput,
   NPopover,
   NSelect,
   NTabPane,
@@ -246,6 +261,7 @@ const forwardLoading = ref(false);
 const statusFilter = ref<string>(query.get("status") ?? "");
 const accountFilter = ref<string>(query.get("account") ?? "");
 const modelFilter = ref<string>(query.get("model") ?? "");
+const requestIdFilter = ref<string>(query.get("request_id") ?? "");
 const querySort = query.get("sort");
 const queryOrder = query.get("order");
 const sortBy = ref<SortBy>(
@@ -350,6 +366,7 @@ const hasFilters = computed(() =>
   !!statusFilter.value
   || !!accountFilter.value
   || !!modelFilter.value
+  || !!requestIdFilter.value
   || !!timeRange.value,
 );
 
@@ -405,17 +422,81 @@ function formatQuotaCost(row: ForwardLog): string {
   return formatCost(row.cost, 5);
 }
 
-async function copyError(target: string, error: string) {
+async function copyText(target: string, value: string, label: string) {
   try {
-    await copy(target, error, t("错误"));
-    message.success(t("已复制 {label}", { label: t("错误") }));
+    await copy(target, value, label);
+    message.success(t("已复制 {label}", { label }));
   } catch (e) {
     message.error(e instanceof Error ? e.message : t("复制失败"));
   }
 }
 
+function renderRequestId(row: GatewayLog | ForwardLog) {
+  if (!row.request_id) return "—";
+  const target = `request-id-${row.id}`;
+  return h("div", { class: "request-id-cell" }, [
+    h("code", row.request_id),
+    h(NButton, {
+      text: true,
+      type: "primary",
+      "aria-label": t("复制请求 ID"),
+      onClick: () => copyText(target, row.request_id!, t("请求 ID")),
+    }, {
+      icon: () => h(NIcon, { component: copiedTarget.value === target ? CheckOutlined : CopyOutlined }),
+    }),
+  ]);
+}
+
+function renderDiagnostic(row: GatewayLog | ForwardLog) {
+  const diagnostic = row.diagnostic;
+  const items = [
+    [t("错误来源"), row.error_source ?? diagnostic?.error_source],
+    [t("失败阶段"), row.error_stage ?? diagnostic?.error_stage],
+    [t("协议路径"), diagnostic?.upstream_format
+      ? `${diagnostic.client_format} → ${diagnostic.upstream_format}`
+      : diagnostic?.client_format],
+    [t("尝试次数"), diagnostic?.attempt ?? ("attempt" in row ? row.attempt : null)],
+    [t("耗时"), row.duration_ms !== null && row.duration_ms !== undefined
+      ? `${row.duration_ms} ms`
+      : diagnostic ? `${diagnostic.duration_ms} ms` : null],
+    [t("上游响应头耗时"), diagnostic?.upstream_wait_ms !== null && diagnostic?.upstream_wait_ms !== undefined
+      ? `${diagnostic.upstream_wait_ms} ms` : null],
+    [t("重试动作"), diagnostic?.retry_action],
+  ].filter((item) => item[1] !== null && item[1] !== undefined && item[1] !== "");
+  const detailBlocks = [
+    diagnostic?.upstream_headers && [t("上游 Trace ID"), diagnostic.upstream_headers],
+    diagnostic?.request_summary && [t("请求结构与指纹"), {
+      fingerprint: diagnostic.request_fingerprint,
+      summary: diagnostic.request_summary,
+    }],
+    diagnostic?.upstream_error && [t("脱敏上游错误"), diagnostic.upstream_error],
+  ].filter(Boolean) as Array<[string, unknown]>;
+  const errorMessage = "error_message" in row ? row.error_message : row.message;
+  return h("div", { class: "diagnostic-detail" }, [
+    h("dl", { class: "diagnostic-meta" }, items.flatMap(([label, value]) => [
+      h("dt", String(label)),
+      h("dd", String(value)),
+    ])),
+    errorMessage ? h("section", [
+      h("h4", t("错误")),
+      h("pre", { class: "error-text" }, errorMessage),
+    ]) : null,
+    ...detailBlocks.map(([label, value]) => h("section", [
+      h("h4", label),
+      h("pre", { class: "diagnostic-json" }, JSON.stringify(value, null, 2)),
+    ])),
+  ]);
+}
+
 const gatewayColumns = computed(() => [
+  {
+    type: "expand" as const,
+    width: 44,
+    expandable: (row: GatewayLog) => !!row.diagnostic || !!row.error_source,
+    renderExpand: renderDiagnostic,
+  },
   { title: t("时间"), key: "created_at", width: 150, render: (row: GatewayLog) => formatDate(row.created_at) },
+  { title: t("请求 ID"), key: "request_id", width: 245, render: renderRequestId },
   { title: t("级别"), key: "level", width: 80 },
   { title: t("分类"), key: "category", width: 100 },
   { title: t("消息"), key: "message", minWidth: 480, ellipsis: { tooltip: true } },
@@ -424,22 +505,11 @@ const forwardColumns = computed(() => [
   {
     type: "expand" as const,
     width: 44,
-    expandable: (row: ForwardLog) => !!row.error_message,
-    renderExpand: (row: ForwardLog) => {
-      const target = `error-${row.id}`;
-      return h("div", { class: "expand-error" }, [
-        h("pre", { class: "error-text" }, row.error_message!),
-        h(NButton, {
-          size: "small",
-          onClick: () => copyError(target, row.error_message!),
-        }, {
-          default: () => t("复制错误"),
-          icon: () => h(NIcon, { component: copiedTarget.value === target ? CheckOutlined : CopyOutlined }),
-        }),
-      ]);
-    },
+    expandable: (row: ForwardLog) => !!row.error_message || !!row.diagnostic,
+    renderExpand: renderDiagnostic,
   },
   { title: t("时间"), key: "timestamp", width: 150, render: (row: ForwardLog) => formatDate(row.timestamp) },
+  { title: t("请求 ID"), key: "request_id", width: 245, render: renderRequestId },
   { title: t("模型"), key: "model", width: 160, ellipsis: { tooltip: true } },
   { title: t("账号"), key: "account_name", width: 120, ellipsis: { tooltip: true } },
   {
@@ -447,7 +517,18 @@ const forwardColumns = computed(() => [
     key: "status",
     width: 112,
     render: (row: ForwardLog) => {
-      const meta = statusMeta.value[row.status] ?? { label: row.status, type: "default" as const };
+      const sourceLabel = row.error_source === "upstream"
+        ? t("上游拒绝")
+        : row.error_source === "transport"
+          ? t("上游连接错误")
+          : row.error_source === "client" || (row.error_source === "gateway" && ["auth", "parse", "validation", "body_limit"].includes(row.error_stage ?? ""))
+            ? t("请求错误")
+            : row.error_source === "downstream"
+              ? t("下游断开")
+              : null;
+      const meta = sourceLabel
+        ? { label: sourceLabel, type: row.error_source === "downstream" ? "warning" as const : "error" as const }
+        : statusMeta.value[row.status] ?? { label: row.status, type: "default" as const };
       const tags = [h(NTag, { type: meta.type, size: "small", bordered: false }, { default: () => meta.label })];
       if (row.cost_state === "legacy_estimate") {
         tags.push(h(NTag, { type: "default", size: "small", bordered: false }, { default: () => t("旧口径") }));
@@ -468,6 +549,7 @@ function clearFilters() {
   statusFilter.value = "";
   accountFilter.value = "";
   modelFilter.value = "";
+  requestIdFilter.value = "";
   activePreset.value = "all";
   timeRange.value = null;
   customTimeRange.value = null;
@@ -487,6 +569,8 @@ function syncQueryState() {
   else url.searchParams.delete("account");
   if (modelFilter.value) url.searchParams.set("model", modelFilter.value);
   else url.searchParams.delete("model");
+  if (requestIdFilter.value) url.searchParams.set("request_id", requestIdFilter.value);
+  else url.searchParams.delete("request_id");
   if (activePreset.value === "custom" && timeRange.value) {
     url.searchParams.set("start", toIsoString(timeRange.value[0]));
     url.searchParams.set("end", toIsoString(timeRange.value[1]));
@@ -503,17 +587,24 @@ function syncQueryState() {
   window.history.replaceState(null, "", url);
 }
 
+let gatewayRequest = 0;
+
 async function loadGatewayLogs() {
+  const request = ++gatewayRequest;
   gatewayLoading.value = true;
   gatewayError.value = "";
   try {
-    gatewayLogs.value = await tauriApi.getGatewayLogs(200);
+    const logs = await tauriApi.getGatewayLogs(200, requestIdFilter.value);
+    if (request !== gatewayRequest) return;
+    gatewayLogs.value = logs;
     gatewayPage.value = 1;
   } catch (e) {
-    gatewayError.value = e instanceof Error ? e.message : String(e);
-    message.error(t("加载运行日志失败: {error}", { error: gatewayError.value }));
+    if (request === gatewayRequest) {
+      gatewayError.value = e instanceof Error ? e.message : String(e);
+      message.error(t("加载运行日志失败: {error}", { error: gatewayError.value }));
+    }
   } finally {
-    gatewayLoading.value = false;
+    if (request === gatewayRequest) gatewayLoading.value = false;
   }
 }
 
@@ -532,6 +623,7 @@ async function loadForwardLogs() {
       status: statusFilter.value,
       account_id: accountFilter.value,
       model: modelFilter.value,
+      request_id: requestIdFilter.value,
       start_time: requestRange ? toIsoString(requestRange[0]) : null,
       end_time: requestRange ? toIsoString(requestRange[1]) : null,
       sort_by: sortBy.value,
@@ -589,6 +681,13 @@ watch(
     void loadForwardLogs();
   },
 );
+watch(requestIdFilter, () => {
+  forwardPage.value = 1;
+  gatewayPage.value = 1;
+  syncQueryState();
+  void loadForwardLogs();
+  void loadGatewayLogs();
+});
 
 onMounted(() => {
   syncQueryState();
@@ -644,7 +743,7 @@ onUnmounted(cleanup);
 }
 .filter-bar {
   display: grid;
-  grid-template-columns: 140px 180px 180px auto 120px auto 1fr;
+  grid-template-columns: 240px 140px 180px 180px auto 120px auto 1fr;
   align-items: end;
   gap: 8px;
   margin-bottom: 12px;
@@ -734,17 +833,50 @@ onUnmounted(cleanup);
 .log-toolbar {
   margin-bottom: 8px;
 }
+.request-id-filter {
+  width: min(360px, 100%);
+  margin-right: auto;
+}
+:deep(.request-id-cell) {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+:deep(.request-id-cell code) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 :deep(.status-tags) {
   display: flex;
   flex-wrap: wrap;
   gap: 3px;
 }
-.expand-error {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+.diagnostic-detail {
+  display: grid;
+  gap: 12px;
   padding: 8px 0;
 }
+.diagnostic-detail h4 {
+  margin: 0 0 5px;
+  color: var(--ocg-text-secondary);
+  font-size: var(--ocg-font-sm);
+}
+.diagnostic-meta {
+  display: grid;
+  grid-template-columns: max-content minmax(120px, 1fr) max-content minmax(120px, 1fr);
+  gap: 5px 12px;
+  margin: 0;
+}
+.diagnostic-meta dt {
+  color: var(--ocg-subtle);
+}
+.diagnostic-meta dd {
+  margin: 0;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  word-break: break-word;
+}
+.diagnostic-json,
 .error-text {
   margin: 0;
   padding: 10px 12px;
@@ -758,10 +890,17 @@ onUnmounted(cleanup);
   white-space: pre-wrap;
   word-break: break-word;
 }
+.diagnostic-json {
+  max-height: 320px;
+  overflow: auto;
+}
 
 @media (max-width: 1200px) {
   .filter-bar {
     grid-template-columns: repeat(4, 1fr) auto;
+  }
+  .request-id-field {
+    grid-column: span 2;
   }
   .time-range-field {
     grid-column: span 2;

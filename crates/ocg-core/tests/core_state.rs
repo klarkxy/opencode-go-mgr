@@ -290,6 +290,12 @@ fn list_forward_logs_binds_limit_parameter() {
         service_tier: None,
         cost_state: "legacy_estimate".into(),
         error_message: None,
+        request_id: None,
+        attempt: None,
+        error_source: None,
+        error_stage: None,
+        duration_ms: None,
+        diagnostic: None,
     })
     .unwrap();
 
@@ -327,6 +333,12 @@ fn query_forward_logs_filters_before_limit_and_summarizes_all_matches() {
             service_tier: None,
             cost_state: "legacy_estimate".into(),
             error_message: None,
+            request_id: None,
+            attempt: None,
+            error_source: None,
+            error_stage: None,
+            duration_ms: None,
+            diagnostic: None,
         })
         .unwrap();
     }
@@ -352,6 +364,12 @@ fn query_forward_logs_filters_before_limit_and_summarizes_all_matches() {
             service_tier: None,
             cost_state: "legacy_estimate".into(),
             error_message: None,
+            request_id: None,
+            attempt: None,
+            error_source: None,
+            error_stage: None,
+            duration_ms: None,
+            diagnostic: None,
         })
         .unwrap();
     }
@@ -363,6 +381,7 @@ fn query_forward_logs_filters_before_limit_and_summarizes_all_matches() {
             status: Some("success"),
             account_id: Some("selected"),
             model: None,
+            request_id: None,
             start_time: None,
             end_time: None,
             sort_by: None,
@@ -384,6 +403,7 @@ fn query_forward_logs_filters_before_limit_and_summarizes_all_matches() {
             status: Some("success"),
             account_id: Some("selected"),
             model: None,
+            request_id: None,
             start_time: None,
             end_time: None,
             sort_by: None,
@@ -401,6 +421,7 @@ fn query_forward_logs_filters_before_limit_and_summarizes_all_matches() {
             status: None,
             account_id: None,
             model: None,
+            request_id: None,
             start_time: None,
             end_time: None,
             sort_by: None,
@@ -447,6 +468,12 @@ fn daily_cost_by_model_groups_chargeable_rows_only() {
             }
             .into(),
             error_message: None,
+            request_id: None,
+            attempt: None,
+            error_source: None,
+            error_stage: None,
+            duration_ms: None,
+            diagnostic: None,
         })
         .unwrap();
     }
