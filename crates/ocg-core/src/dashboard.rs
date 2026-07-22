@@ -1,6 +1,7 @@
 use crate::auth;
 use crate::db::{ForwardLogQueryOptions, ReorderAccountsError};
 use crate::gateway::{
+    diagnostics::sanitize_upstream_error_value,
     forwarder::forward_get,
     limit::{parse_reset, parse_usage_limit_window},
     protocol::supported_model_ids,
@@ -367,6 +368,7 @@ struct DashboardAccount {
     cooldown_week_until: Option<String>,
     cooldown_month_until: Option<String>,
     last_error: Option<String>,
+    auth_error: Option<String>,
     created_at: String,
     updated_at: String,
 }
@@ -387,6 +389,7 @@ fn dashboard_account(account: Account) -> DashboardAccount {
         cooldown_week_until: account.cooldown_week_until.map(|t| t.to_rfc3339()),
         cooldown_month_until: account.cooldown_month_until.map(|t| t.to_rfc3339()),
         last_error: account.last_error,
+        auth_error: account.auth_error,
         created_at: account.created_at.to_rfc3339(),
         updated_at: account.updated_at.to_rfc3339(),
     }
@@ -739,6 +742,7 @@ async fn create_account(
         cooldown_week_until: None,
         cooldown_month_until: None,
         last_error: None,
+        auth_error: None,
         created_at: now,
         updated_at: now,
     };
@@ -908,13 +912,45 @@ async fn test_account(
             ApiError::internal(error)
         }
     })?;
+    if status == StatusCode::UNAUTHORIZED {
+        let sanitized = sanitize_upstream_error_value(&body).to_string();
+        let auth_error = format!("upstream auth error 401: {}", short_body(&sanitized));
+        {
+            let db = state.db.lock();
+            db.set_account_auth_error_if_key_matches(
+                &account.id,
+                &account.key_cipher,
+                Some(&auth_error),
+            )
+            .map_err(ApiError::internal)?;
+            let _ = db.log_gateway(
+                "warn",
+                "account",
+                &format!("ping authentication failed for account {}", account.name),
+            );
+        }
+        // Dashboard HTTP 401 is reserved for the administrator session. Keep
+        // this upstream account failure as a normal API validation error so the
+        // frontend does not treat it as a logout signal.
+        return Err(ApiError::bad_request(format!("Ping failed: {auth_error}")));
+    }
     if status == StatusCode::TOO_MANY_REQUESTS {
         let cooldown = parse_reset(&body).unwrap_or_else(|| Duration::minutes(5));
         let until = Utc::now() + cooldown;
         {
             let db = state.db.lock();
-            db.set_account_rate_limit(&account.id, until, &body, parse_usage_limit_window(&body))
+            let credential_matches = db
+                .set_account_auth_error_if_key_matches(&account.id, &account.key_cipher, None)
                 .map_err(ApiError::internal)?;
+            if credential_matches {
+                db.set_account_rate_limit(
+                    &account.id,
+                    until,
+                    &body,
+                    parse_usage_limit_window(&body),
+                )
+                .map_err(ApiError::internal)?;
+            }
             let _ = db.log_gateway(
                 "warn",
                 "account",
@@ -936,6 +972,11 @@ async fn test_account(
             short_body(&body)
         )));
     }
+    state
+        .db
+        .lock()
+        .set_account_auth_error_if_key_matches(&account.id, &account.key_cipher, None)
+        .map_err(ApiError::internal)?;
     let masked = if key.len() > 8 && key.is_char_boundary(4) && key.is_char_boundary(key.len() - 4)
     {
         format!("{}...{}", &key[..4], &key[key.len() - 4..])
@@ -1440,6 +1481,7 @@ fn validate_forward_log_query(
         !matches!(
             value,
             "timestamp"
+                | "attempt"
                 | "prompt_tokens"
                 | "completion_tokens"
                 | "cached_tokens"
@@ -1538,7 +1580,7 @@ async fn dashboard_summary(
     let now = Utc::now();
     let available_accounts = accounts
         .iter()
-        .filter(|a| a.enabled && !a.is_cooling_at(now))
+        .filter(|a| a.enabled && a.auth_error.is_none() && !a.is_cooling_at(now))
         .count();
     let (today_cost, week_cost, month_cost) = db.total_usage().map_err(ApiError::internal)?;
     Ok(Json(DashboardSummary {
@@ -1659,6 +1701,7 @@ mod tests {
             cooldown_week_until: None,
             cooldown_month_until: None,
             last_error: None,
+            auth_error: None,
             created_at: now,
             updated_at: now,
         }
@@ -2022,7 +2065,7 @@ mod tests {
         let query = ForwardLogQuery {
             start_time: Some("2026-07-17T12:00:00+08:00".into()),
             end_time: Some("2026-07-17T05:00:00Z".into()),
-            sort_by: Some("cost".into()),
+            sort_by: Some("attempt".into()),
             sort_order: Some("asc".into()),
             ..ForwardLogQuery::default()
         };
@@ -2075,6 +2118,7 @@ mod tests {
             cooldown_week_until: None,
             cooldown_month_until: None,
             last_error: None,
+            auth_error: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };
@@ -2293,6 +2337,7 @@ mod tests {
             cooldown_week_until: None,
             cooldown_month_until: None,
             last_error: None,
+            auth_error: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         })
@@ -2410,6 +2455,21 @@ mod tests {
                 .to_string(),
             "2026-02-28"
         );
+        state
+            .db
+            .lock()
+            .set_account_auth_error("acct-usage", Some("upstream auth error 401"))
+            .expect("auth error should save");
+        let summary = dashboard_summary(State(state.clone()))
+            .await
+            .expect("summary should load")
+            .0;
+        assert_eq!(summary.available_accounts, 0);
+        state
+            .db
+            .lock()
+            .set_account_auth_error("acct-usage", None)
+            .expect("auth error should clear");
         let summary = dashboard_summary(State(state))
             .await
             .expect("summary should load")

@@ -613,8 +613,9 @@ async fn forward_request_impl(
                     &attempt_context,
                     Some(failure),
                 )?;
-                db.set_account_rate_limit(
+                db.set_account_rate_limit_if_key_matches(
                     &account.id,
+                    &account.key_cipher,
                     until,
                     &sanitized,
                     parse_usage_limit_window(&text),
@@ -706,6 +707,13 @@ async fn forward_request_impl(
                     &attempt_context,
                     Some(failure),
                 )?;
+                if status == StatusCode::UNAUTHORIZED {
+                    db.set_account_auth_error_if_key_matches(
+                        &account.id,
+                        &account.key_cipher,
+                        Some(&error_message),
+                    )?;
+                }
             }
             return Ok(ForwardResult {
                 response: error_response(plan.client, &error_message, None),
@@ -1627,11 +1635,23 @@ pub async fn forward_get(
             if status.as_u16() == 429 {
                 let db = state.db.lock();
                 let cooldown = parse_reset(&body).unwrap_or_else(|| Duration::minutes(5));
-                db.set_account_rate_limit(
+                db.set_account_rate_limit_if_key_matches(
                     &account.id,
+                    &account.key_cipher,
                     Utc::now() + cooldown,
                     &body,
                     parse_usage_limit_window(&body),
+                )?;
+            }
+            if status == StatusCode::UNAUTHORIZED {
+                let auth_error = format!(
+                    "upstream auth error 401: {}",
+                    sanitize_upstream_error(&body)
+                );
+                state.db.lock().set_account_auth_error_if_key_matches(
+                    &account.id,
+                    &account.key_cipher,
+                    Some(&auth_error),
                 )?;
             }
             if matches!(status.as_u16(), 401 | 403 | 429) {

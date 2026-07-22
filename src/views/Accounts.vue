@@ -86,13 +86,13 @@
               <div class="account-heading">
                 <div class="account-name-row">
                   <span class="account-name">{{ account.name }}</span>
-                  <n-tooltip v-if="accountIsCooling(account)">
+                  <n-tooltip v-if="account.auth_error || accountIsCooling(account)">
                     <template #trigger>
                       <n-tag :type="accountStatusTagType(account)" size="small">
                         {{ accountStatusLabel(account) }}
                       </n-tag>
                     </template>
-                    {{ cooldownDetails(account) }}
+                    {{ account.auth_error || cooldownDetails(account) }}
                   </n-tooltip>
                   <n-tag v-else :type="accountStatusTagType(account)" size="small">
                     {{ accountStatusLabel(account) }}
@@ -721,12 +721,18 @@ function accountExpiryLabel(account: Account): string {
 }
 
 function accountStatusLabel(account: Account): string {
+  if (account.auth_error) {
+    return account.enabled
+      ? t("认证失效（401 熔断）")
+      : `${t("已禁用")} · ${t("认证失效（401 熔断）")}`;
+  }
   if (!account.enabled) return t("已禁用");
   if (accountIsCooling(account)) return t("冷却中·剩 {time}", { time: formatRemaining(account) });
   return t("可用");
 }
 
-function accountStatusTagType(account: Account): "success" | "warning" | "default" {
+function accountStatusTagType(account: Account): "success" | "warning" | "error" | "default" {
+  if (account.auth_error) return "error";
   if (!account.enabled) return "default";
   if (accountIsCooling(account)) return "warning";
   return "success";

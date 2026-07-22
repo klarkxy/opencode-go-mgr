@@ -70,6 +70,7 @@ export const enUSMessages = {
   "已禁用": "Disabled",
   "冷却中": "Cooling down",
   "可用": "Available",
+  "认证失效（401 熔断）": "Authentication failed (401 breaker)",
   "暂无用量": "No usage data",
   "已复制 {label}": "Copied {label}",
   "Key 已刷新": "Key regenerated",

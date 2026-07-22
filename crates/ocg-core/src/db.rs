@@ -66,24 +66,6 @@ impl From<rusqlite::Error> for ReorderAccountsError {
     }
 }
 
-fn ensure_account_text_column(tx: &rusqlite::Transaction<'_>, column: &'static str) -> Result<()> {
-    let exists = {
-        let mut stmt = tx.prepare("PRAGMA table_info(accounts)")?;
-        let columns = stmt.query_map([], |row| row.get::<_, String>(1))?;
-        columns
-            .collect::<rusqlite::Result<Vec<_>>>()?
-            .iter()
-            .any(|existing| existing == column)
-    };
-    if !exists {
-        tx.execute(
-            &format!("ALTER TABLE accounts ADD COLUMN {column} TEXT"),
-            [],
-        )?;
-    }
-    Ok(())
-}
-
 /// 幂等地为指定表添加列。若列已存在则跳过，避免 v1.4.2 -> v1.5.0 升级时
 /// 旧 v9 migration（HEAD 固定窗口）和 upstream v9（cost_state）冲突导致的
 /// "duplicate column" 错误。
@@ -396,7 +378,7 @@ impl Database {
                 "cooldown_week_until",
                 "cooldown_month_until",
             ] {
-                ensure_account_text_column(&tx, column)?;
+                ensure_column(&tx, "accounts", column, "TEXT")?;
             }
             tx.execute_batch(
                 "CREATE INDEX IF NOT EXISTS idx_forward_logs_model ON forward_logs(model);
@@ -731,6 +713,18 @@ impl Database {
             )?;
         }
 
+        if version < 15 {
+            // A 401 is account-specific and safe to fail over, but unlike a
+            // quota cooldown it has no trustworthy reset time. Persist it in a
+            // separate slot so routing can exclude the account without
+            // conflating auth failure with a manual disable or rate limit.
+            ensure_column(&tx, "accounts", "auth_error", "TEXT")?;
+            tx.execute(
+                "INSERT OR REPLACE INTO schema_version (version) VALUES (15)",
+                [],
+            )?;
+        }
+
         // Detailed diagnostics are intentionally short-lived. Keep the base log row,
         // stable request id, source, stage, and original compact error indefinitely.
         tx.execute(
@@ -791,8 +785,8 @@ impl Database {
             normalize_purchase_date(&account.purchase_date)?
         };
         self.conn.execute(
-            "INSERT INTO accounts (id, name, username, password_cipher, key_cipher, enabled, referral_code, recharge_date, sort_order, cooldown_until, cooldown_generic_until, cooldown_5h_until, cooldown_week_until, cooldown_month_until, last_error, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, (SELECT COALESCE(MAX(sort_order), -1) + 1 FROM accounts), ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+            "INSERT INTO accounts (id, name, username, password_cipher, key_cipher, enabled, referral_code, recharge_date, sort_order, cooldown_until, cooldown_generic_until, cooldown_5h_until, cooldown_week_until, cooldown_month_until, last_error, auth_error, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, (SELECT COALESCE(MAX(sort_order), -1) + 1 FROM accounts), ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
             params![
                 account.id,
                 account.name,
@@ -808,6 +802,7 @@ impl Database {
                 account.cooldown_week_until.map(|t| t.to_rfc3339()),
                 account.cooldown_month_until.map(|t| t.to_rfc3339()),
                 account.last_error,
+                account.auth_error,
                 account.created_at.to_rfc3339(),
                 account.updated_at.to_rfc3339(),
             ],
@@ -852,7 +847,8 @@ impl Database {
         self.conn.execute(
             "UPDATE accounts SET name = ?1, username = ?2, password_cipher = ?3, key_cipher = ?4, enabled = ?5, referral_code = ?6, recharge_date = ?7,
              usage_month_window_cost_offset = CASE WHEN ?8 THEN 0 ELSE usage_month_window_cost_offset END,
-             updated_at = ?9 WHERE id = ?10",
+             auth_error = CASE WHEN ?9 THEN NULL ELSE auth_error END,
+             updated_at = ?10 WHERE id = ?11",
             params![
                 name,
                 username,
@@ -862,6 +858,7 @@ impl Database {
                 referral_code,
                 purchase_date,
                 purchase_date_changed,
+                key_cipher.is_some(),
                 Utc::now().to_rfc3339(),
                 id,
             ],
@@ -878,7 +875,7 @@ impl Database {
 
     pub fn get_account(&self, id: &str) -> Result<Option<Account>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, username, password_cipher, key_cipher, enabled, referral_code, recharge_date, cooldown_until, cooldown_generic_until, cooldown_5h_until, cooldown_week_until, cooldown_month_until, last_error, created_at, updated_at FROM accounts WHERE id = ?1"
+            "SELECT id, name, username, password_cipher, key_cipher, enabled, referral_code, recharge_date, cooldown_until, cooldown_generic_until, cooldown_5h_until, cooldown_week_until, cooldown_month_until, last_error, created_at, updated_at, auth_error FROM accounts WHERE id = ?1"
         )?;
         let account = stmt.query_row([id], account_from_row).optional()?;
         Ok(account)
@@ -886,7 +883,7 @@ impl Database {
 
     pub fn list_accounts(&self) -> Result<Vec<Account>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, username, password_cipher, key_cipher, enabled, referral_code, recharge_date, cooldown_until, cooldown_generic_until, cooldown_5h_until, cooldown_week_until, cooldown_month_until, last_error, created_at, updated_at FROM accounts ORDER BY sort_order ASC, created_at ASC, id ASC"
+            "SELECT id, name, username, password_cipher, key_cipher, enabled, referral_code, recharge_date, cooldown_until, cooldown_generic_until, cooldown_5h_until, cooldown_week_until, cooldown_month_until, last_error, created_at, updated_at, auth_error FROM accounts ORDER BY sort_order ASC, created_at ASC, id ASC"
         )?;
         let rows = stmt.query_map([], account_from_row)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.into())
@@ -1291,6 +1288,35 @@ impl Database {
         self.set_account_cooldown(id, None, None)
     }
 
+    /// Persist or clear an account-specific upstream 401. This state is kept
+    /// separate from cooldowns because authentication failures do not carry a
+    /// reset deadline and must not be reported as rate limits.
+    pub fn set_account_auth_error(&self, id: &str, error: Option<&str>) -> Result<()> {
+        self.conn.execute(
+            "UPDATE accounts SET auth_error = ?2, updated_at = ?3 WHERE id = ?1",
+            params![id, error, Utc::now().to_rfc3339()],
+        )?;
+        Ok(())
+    }
+
+    /// Update auth state only when the stored credential is still the one that
+    /// produced this upstream response. A late response from a replaced key
+    /// must not break or recover the new credential.
+    pub fn set_account_auth_error_if_key_matches(
+        &self,
+        id: &str,
+        expected_key_cipher: &str,
+        error: Option<&str>,
+    ) -> Result<bool> {
+        let updated = self.conn.execute(
+            "UPDATE accounts
+             SET auth_error = ?3, updated_at = ?4
+             WHERE id = ?1 AND key_cipher = ?2",
+            params![id, expected_key_cipher, error, Utc::now().to_rfc3339()],
+        )?;
+        Ok(updated > 0)
+    }
+
     /// Record a real upstream 429 and reset only the identified manual usage window.
     pub fn set_account_rate_limit(
         &self,
@@ -1299,6 +1325,32 @@ impl Database {
         err: &str,
         window: Option<UsageWindowKind>,
     ) -> Result<()> {
+        self.set_account_rate_limit_inner(id, None, until, err, window)?;
+        Ok(())
+    }
+
+    /// Record a 429 only when the credential that produced it is still current.
+    /// This prevents a delayed response from an old key from cooling down a
+    /// replacement credential.
+    pub fn set_account_rate_limit_if_key_matches(
+        &self,
+        id: &str,
+        expected_key_cipher: &str,
+        until: DateTime<Utc>,
+        err: &str,
+        window: Option<UsageWindowKind>,
+    ) -> Result<bool> {
+        self.set_account_rate_limit_inner(id, Some(expected_key_cipher), until, err, window)
+    }
+
+    fn set_account_rate_limit_inner(
+        &self,
+        id: &str,
+        expected_key_cipher: Option<&str>,
+        until: DateTime<Utc>,
+        err: &str,
+        window: Option<UsageWindowKind>,
+    ) -> Result<bool> {
         let now = Utc::now();
         let now_rfc = now.to_rfc3339();
         let tx = self.conn.unchecked_transaction()?;
@@ -1311,12 +1363,16 @@ impl Database {
             Some(UsageWindowKind::Month) => "cooldown_month_until",
             None => "cooldown_generic_until",
         };
-        tx.execute(
+        let updated = tx.execute(
             &format!(
-                "UPDATE accounts SET {column} = ?2, last_error = ?3, updated_at = ?4 WHERE id = ?1"
+                "UPDATE accounts SET {column} = ?2, last_error = ?3, updated_at = ?4
+                 WHERE id = ?1 AND (?5 IS NULL OR key_cipher = ?5)"
             ),
-            params![id, until.to_rfc3339(), err, now_rfc],
+            params![id, until.to_rfc3339(), err, now_rfc, expected_key_cipher],
         )?;
+        if updated == 0 {
+            return Ok(false);
+        }
 
         // Legacy callers use cooldown_until as the time when this account is usable.
         let new_cooldown = Self::compute_cooldown_until(&tx, id, &now_rfc)?;
@@ -1329,7 +1385,7 @@ impl Database {
         // 冷却到期后账号恢复可用，用量窗口照常计算。429 仅用于阻断选择器重试。
         // 旧 baseline 列保留不读不写，避免迁移风险。
         tx.commit()?;
-        Ok(())
+        Ok(true)
     }
 
     fn compute_cooldown_until(
@@ -1362,7 +1418,10 @@ impl Database {
             .query_row(
                 "SELECT MIN(cooldown_until)
                  FROM accounts
-                 WHERE enabled = 1 AND cooldown_until IS NOT NULL AND cooldown_until > ?1",
+                 WHERE enabled = 1
+                   AND auth_error IS NULL
+                   AND cooldown_until IS NOT NULL
+                   AND cooldown_until > ?1",
                 params![now],
                 |row| row.get(0),
             )
@@ -1877,6 +1936,7 @@ fn forward_log_filter(
 fn forward_log_order(sort_by: Option<&str>, sort_order: Option<&str>) -> String {
     let column = match sort_by {
         Some("timestamp") => "timestamp",
+        Some("attempt") => "attempt",
         Some("prompt_tokens") => "prompt_tokens",
         Some("completion_tokens") => "completion_tokens",
         Some("cached_tokens") => "cached_tokens",
@@ -1958,6 +2018,7 @@ fn account_from_row(row: &Row<'_>) -> rusqlite::Result<Account> {
         cooldown_week_until: row.get::<_, Option<String>>(11)?.map(parse_datetime),
         cooldown_month_until: row.get::<_, Option<String>>(12)?.map(parse_datetime),
         last_error: row.get(13)?,
+        auth_error: row.get(16)?,
         created_at: parse_datetime(created_at),
         updated_at: parse_datetime(row.get::<_, String>(15)?),
     })
@@ -2018,6 +2079,7 @@ mod tests {
             cooldown_week_until: None,
             cooldown_month_until: None,
             last_error: None,
+            auth_error: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }
@@ -2198,7 +2260,7 @@ mod tests {
                     row.get(0)
                 })
                 .expect("schema version should load");
-            assert_eq!(version, 14, "{label}");
+            assert_eq!(version, 15, "{label}");
             let account = db
                 .get_account("old")
                 .expect("account query should work")
@@ -2276,7 +2338,7 @@ mod tests {
             })
             .expect("schema version should be readable");
         let usage = db.account_usage("old").expect("usage should load");
-        assert_eq!(version, 14);
+        assert_eq!(version, 15);
         assert_eq!(
             db.get_account("old")
                 .expect("account should load")
@@ -2425,7 +2487,7 @@ mod tests {
                 row.get(0)
             })
             .expect("schema version should load");
-        assert_eq!(version, 14);
+        assert_eq!(version, 15);
         assert_eq!(
             db.get_account("valid")
                 .expect("valid account query should work")
@@ -2569,7 +2631,7 @@ mod tests {
                 row.get(0)
             })
             .expect("schema version should load");
-        assert_eq!(version, 14);
+        assert_eq!(version, 15);
         let states = db
             .conn
             .prepare("SELECT cost, cost_state FROM forward_logs ORDER BY id")
@@ -2618,7 +2680,7 @@ mod tests {
                 row.get(0)
             })
             .expect("schema version should load");
-        assert_eq!(version, 14);
+        assert_eq!(version, 15);
 
         let created_at = DateTime::parse_from_rfc3339("2026-01-02T01:30:00+02:00")
             .expect("fixed timestamp should parse")
@@ -2967,7 +3029,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .expect("migration state should load");
-        assert_eq!(version, 14);
+        assert_eq!(version, 15);
         assert_eq!(remaining_baselines, 0);
 
         finalize_success(&db, "legacy-calibration", 2.0, Utc::now());
@@ -3021,7 +3083,7 @@ mod tests {
                 row.get(0)
             })
             .expect("schema version should load");
-        assert_eq!(version, 14);
+        assert_eq!(version, 15);
         for index in ["idx_forward_logs_request_id", "idx_gateway_logs_request_id"] {
             let exists: bool = db
                 .conn
@@ -3061,6 +3123,42 @@ mod tests {
         assert_eq!(gateway.message, "legacy gateway error");
         assert!(gateway.request_id.is_none());
         assert!(gateway.diagnostic.is_none());
+
+        drop(db);
+        fs::remove_dir_all(dir).expect("test data dir should be removed");
+    }
+
+    #[test]
+    fn v15_migration_adds_nullable_auth_error() {
+        let dir = temp_data_dir("v15-auth-error");
+        let conn = Connection::open(dir.join("data.sqlite")).expect("legacy db should open");
+        conn.execute_batch(
+            "CREATE TABLE schema_version (version INTEGER PRIMARY KEY);
+             INSERT INTO schema_version (version) VALUES (14);
+             CREATE TABLE accounts (id TEXT PRIMARY KEY);
+             INSERT INTO accounts (id) VALUES ('legacy');
+             CREATE TABLE forward_logs (
+                 timestamp TEXT,
+                 cost_state TEXT NOT NULL DEFAULT 'not_applicable',
+                 diagnostic_json TEXT
+             );
+             CREATE TABLE gateway_logs (created_at TEXT, diagnostic_json TEXT);",
+        )
+        .expect("v14 fixture should be created");
+        drop(conn);
+
+        let db = Database::open(dir.clone()).expect("v14 database should migrate");
+        let (version, auth_error): (i32, Option<String>) = db
+            .conn
+            .query_row(
+                "SELECT (SELECT MAX(version) FROM schema_version), auth_error
+                 FROM accounts WHERE id = 'legacy'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("v15 migration state should load");
+        assert_eq!(version, 15);
+        assert!(auth_error.is_none());
 
         drop(db);
         fs::remove_dir_all(dir).expect("test data dir should be removed");
@@ -3528,6 +3626,123 @@ mod tests {
     }
 
     #[test]
+    fn replacing_key_clears_auth_error_but_other_updates_preserve_it() {
+        let dir = temp_data_dir("auth-error-key-replacement");
+        let db = Database::open(dir.clone()).expect("db should open");
+        db.create_account(&account("auth-failed"))
+            .expect("account should be created");
+        let old_key_cipher = db
+            .get_account("auth-failed")
+            .expect("account should load")
+            .expect("account should exist")
+            .key_cipher;
+        db.set_account_auth_error("auth-failed", Some("upstream auth error 401"))
+            .expect("auth error should save");
+
+        let rename = AccountUpdate {
+            name: Some("renamed".into()),
+            username: None,
+            password: None,
+            key: None,
+            enabled: None,
+            referral_code: None,
+            purchase_date: None,
+        };
+        db.update_account("auth-failed", &rename, None, None)
+            .expect("non-key update should save");
+        assert!(
+            db.get_account("auth-failed")
+                .expect("account should load")
+                .expect("account should exist")
+                .auth_error
+                .is_some()
+        );
+
+        let no_fields = AccountUpdate {
+            name: None,
+            username: None,
+            password: None,
+            key: None,
+            enabled: None,
+            referral_code: None,
+            purchase_date: None,
+        };
+        db.update_account("auth-failed", &no_fields, Some("replacement-cipher"), None)
+            .expect("key replacement should save");
+        assert!(
+            db.get_account("auth-failed")
+                .expect("account should load")
+                .expect("account should exist")
+                .auth_error
+                .is_none()
+        );
+
+        assert!(
+            !db.set_account_auth_error_if_key_matches(
+                "auth-failed",
+                &old_key_cipher,
+                Some("late old-key 401"),
+            )
+            .expect("stale auth response should be ignored")
+        );
+        assert!(
+            db.get_account("auth-failed")
+                .expect("account should load")
+                .expect("account should exist")
+                .auth_error
+                .is_none(),
+            "a delayed 401 from the old key must not break its replacement"
+        );
+
+        assert!(
+            db.set_account_auth_error_if_key_matches(
+                "auth-failed",
+                "replacement-cipher",
+                Some("new-key auth error"),
+            )
+            .expect("current-key auth response should save")
+        );
+        assert!(
+            !db.set_account_auth_error_if_key_matches("auth-failed", &old_key_cipher, None)
+                .expect("stale success response should be ignored")
+        );
+        assert_eq!(
+            db.get_account("auth-failed")
+                .expect("account should load")
+                .expect("account should exist")
+                .auth_error
+                .as_deref(),
+            Some("new-key auth error"),
+            "a delayed success from the old key must not recover its replacement"
+        );
+        assert!(
+            db.set_account_auth_error_if_key_matches("auth-failed", "replacement-cipher", None)
+                .expect("current-key success should clear auth state")
+        );
+
+        let stale_cooldown = Utc::now() + Duration::days(3);
+        assert!(
+            !db.set_account_rate_limit_if_key_matches(
+                "auth-failed",
+                &old_key_cipher,
+                stale_cooldown,
+                "late old-key 429",
+                None,
+            )
+            .expect("stale rate limit should be ignored")
+        );
+        let stored = db
+            .get_account("auth-failed")
+            .expect("account should load")
+            .expect("account should exist");
+        assert!(stored.cooldown_until.is_none());
+        assert!(stored.last_error.is_none());
+
+        drop(db);
+        fs::remove_dir_all(dir).expect("test data dir should be removed");
+    }
+
+    #[test]
     fn calibrate_rejects_reset_outside_fixed_window_without_panicking() {
         let dir = temp_data_dir("calibrate-reset-bounds");
         let db = Database::open(dir.clone()).expect("db should open");
@@ -3587,6 +3802,14 @@ mod tests {
             .expect("a reset should exist");
         assert!((reset - second_latest).num_seconds().abs() < 2);
 
+        db.set_account_auth_error("second", Some("upstream auth error 401"))
+            .expect("auth breaker should save");
+        let reset = db
+            .soonest_cooldown_reset()
+            .expect("reset query should work")
+            .expect("an eligible reset should exist");
+        assert!((reset - first_latest).num_seconds().abs() < 2);
+
         drop(db);
         fs::remove_dir_all(dir).expect("test data dir should be removed");
     }
@@ -3629,6 +3852,47 @@ mod tests {
         assert_eq!(page.summary.total_requests, 1);
         assert_eq!(page.items.len(), 1);
         assert_eq!(page.items[0].model, "inside");
+
+        drop(db);
+        fs::remove_dir_all(dir).expect("test data dir should be removed");
+    }
+
+    #[test]
+    fn forward_logs_can_sort_by_attempt() {
+        let dir = temp_data_dir("forward-log-attempt-sort");
+        let db = Database::open(dir.clone()).expect("db should open");
+        for attempt in [2, 1] {
+            db.conn
+                .execute(
+                    "INSERT INTO forward_logs
+                     (timestamp, model, account_id, account_name, status, cost, attempt)
+                     VALUES ('2026-07-23T00:00:00Z', ?1, 'a', 'a', 'client_error', 0, ?2)",
+                    params![format!("attempt-{attempt}"), attempt],
+                )
+                .expect("forward log should save");
+        }
+
+        let page = db
+            .query_forward_logs(ForwardLogQueryOptions {
+                limit: 20,
+                offset: 0,
+                status: None,
+                account_id: None,
+                model: None,
+                request_id: None,
+                start_time: None,
+                end_time: None,
+                sort_by: Some("attempt"),
+                sort_order: Some("asc"),
+            })
+            .expect("attempt sort should query");
+        assert_eq!(
+            page.items
+                .iter()
+                .filter_map(|log| log.attempt)
+                .collect::<Vec<_>>(),
+            [1, 2]
+        );
 
         drop(db);
         fs::remove_dir_all(dir).expect("test data dir should be removed");

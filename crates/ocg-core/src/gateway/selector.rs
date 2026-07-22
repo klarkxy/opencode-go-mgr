@@ -22,6 +22,9 @@ impl AccountSelector {
             if !account.enabled {
                 continue;
             }
+            if account.auth_error.is_some() {
+                continue;
+            }
             if exclude_ids.iter().any(|excluded| account.id == *excluded) {
                 continue;
             }
@@ -74,6 +77,7 @@ mod tests {
             cooldown_week_until: None,
             cooldown_month_until: None,
             last_error: None,
+            auth_error: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }
@@ -91,6 +95,9 @@ mod tests {
             Some(Utc::now() + Duration::hours(1)),
         ))
         .unwrap();
+        let mut auth_failed = account("auth-failed", true, None);
+        auth_failed.auth_error = Some("upstream auth error 401".into());
+        db.create_account(&auth_failed).unwrap();
         db.create_account(&account("failed", true, None)).unwrap();
         db.create_account(&account("next", true, None)).unwrap();
 

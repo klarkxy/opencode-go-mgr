@@ -44,6 +44,7 @@ pub fn create_account(state: State<'_, AppState>, input: AccountInput) -> Result
         cooldown_week_until: None,
         cooldown_month_until: None,
         last_error: None,
+        auth_error: None,
         created_at: now,
         updated_at: now,
     };

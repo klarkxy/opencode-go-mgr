@@ -72,6 +72,7 @@ export const ptBRMessages = {
   "已禁用": "Desativada",
   "冷却中": "Em cooldown",
   "可用": "Disponível",
+  "认证失效（401 熔断）": "Falha de autenticação (bloqueio 401)",
   "暂无用量": "Nenhum dado de uso",
   "已复制 {label}": "{label} copiado",
   "Key 已刷新": "Key regenerada",

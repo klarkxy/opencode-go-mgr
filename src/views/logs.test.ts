@@ -36,6 +36,8 @@ test("forward log API sends remote paging and filter parameters", async () => {
     status: "success",
     account_id: "account 117",
     request_id: "ocg-test id",
+    sort_by: "attempt",
+    sort_order: "asc",
   });
 
   const query = new URL(requested, "http://localhost").searchParams;
@@ -44,6 +46,8 @@ test("forward log API sends remote paging and filter parameters", async () => {
   assert.equal(query.get("status"), "success");
   assert.equal(query.get("account_id"), "account 117");
   assert.equal(query.get("request_id"), "ocg-test id");
+  assert.equal(query.get("sort_by"), "attempt");
+  assert.equal(query.get("sort_order"), "asc");
 });
 
 test("dashboard request errors preserve status for localized handling", async () => {
@@ -202,6 +206,7 @@ test("logs view shows top stats, extra filters, sorting, and a useful empty stat
   assert.match(template, /class="stats-row"/);
   assert.match(template, /class="filter-bar"/);
   assert.match(template, /\bremote\b/);
+  assert.equal(template.match(/:row-key="logRowKey"/g)?.length, 2);
   assert.match(template, /v-model:value="modelFilter"/);
   assert.match(template, /v-model:value="requestIdFilter"/);
   assert.match(template, /v-model:value="customTimeRange"/);
@@ -237,6 +242,12 @@ test("logs view shows top stats, extra filters, sorting, and a useful empty stat
   assert.match(source, /row\.error_source === "upstream"/);
   assert.match(source, /t\("上游拒绝"\)/);
   assert.match(source, /diagnostic\.request_fingerprint/);
+  assert.match(source, /function logRowKey\(row: GatewayLog \| ForwardLog\): number \{\s*return row\.id;\s*\}/);
+  assert.match(source, /type SortBy = [^;]*"attempt"/);
+  assert.match(source, /value: "attempt"/);
+  assert.match(source, /key: "attempt"/);
+  assert.match(source, /focusRequestChain\(requestId\)/);
+  assert.match(source, /requestIdFilter\.value = requestId[\s\S]*sortBy\.value = "attempt"[\s\S]*sortOrder\.value = "asc"/);
   assert.match(source, /getGatewayLogs\(200, requestIdFilter\.value\)/);
   const requestIdWatchStart = source.indexOf("watch(requestIdFilter");
   const forwardFilterWatch = source.slice(
@@ -244,8 +255,9 @@ test("logs view shows top stats, extra filters, sorting, and a useful empty stat
     requestIdWatchStart,
   );
   const requestIdWatch = source.slice(requestIdWatchStart, source.indexOf("onMounted", requestIdWatchStart));
-  assert.doesNotMatch(forwardFilterWatch, /requestIdFilter|loadGatewayLogs/);
-  assert.match(requestIdWatch, /loadForwardLogs\(\)/);
+  assert.match(forwardFilterWatch, /requestIdFilter/);
+  assert.doesNotMatch(forwardFilterWatch, /loadGatewayLogs/);
+  assert.doesNotMatch(requestIdWatch, /loadForwardLogs\(\)|syncQueryState\(\)/);
   assert.match(requestIdWatch, /loadGatewayLogs\(\)/);
   assert.doesNotMatch(source, /legacy_estimate: \{ label:/);
   assert.match(template, /额度消耗（估算）/);

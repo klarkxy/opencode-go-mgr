@@ -72,6 +72,7 @@ export const deDEMessages = {
   "已禁用": "Deaktiviert",
   "冷却中": "In Abkühlphase",
   "可用": "Verfügbar",
+  "认证失效（401 熔断）": "Authentifizierung fehlgeschlagen (401-Sperre)",
   "暂无用量": "Keine Nutzungsdaten vorhanden",
   "已复制 {label}": "{label} kopiert",
   "Key 已刷新": "Key neu erzeugt",

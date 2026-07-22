@@ -15,6 +15,7 @@ export interface Account {
   cooldown_week_until: string | null;
   cooldown_month_until: string | null;
   last_error: string | null;
+  auth_error: string | null;
   created_at: string;
   updated_at: string;
 }

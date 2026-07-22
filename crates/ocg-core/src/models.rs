@@ -29,6 +29,11 @@ pub struct Account {
     #[serde(default)]
     pub cooldown_month_until: Option<DateTime<Utc>>,
     pub last_error: Option<String>,
+    /// A persisted upstream 401 marker. Accounts with an auth error remain
+    /// enabled for management purposes, but are excluded from gateway routing
+    /// until their key is replaced or a direct ping proves the key works again.
+    #[serde(default)]
+    pub auth_error: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

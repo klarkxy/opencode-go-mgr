@@ -1016,7 +1016,7 @@ test("accounts confirm deletes through a dialog and keep modal state fresh", asy
 
   assert.match(accounts, /useDialog/);
   assert.doesNotMatch(accounts, /renderAccountMenuOption|NPopconfirm/);
-  assert.match(accounts, /v-if="accountIsCooling\(account\)"/);
+  assert.match(accounts, /v-if="account\.auth_error \|\| accountIsCooling\(account\)"/);
   assert.match(accounts, /editingAccount\.value = account/);
 });
 

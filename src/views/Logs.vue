@@ -31,6 +31,7 @@
         <n-data-table
           :columns="gatewayColumns"
           :data="gatewayLogs"
+          :row-key="logRowKey"
           :loading="gatewayLoading"
           :pagination="gatewayPagination"
           :scroll-x="1200"
@@ -193,9 +194,10 @@
         <n-data-table
           :columns="forwardColumns"
           :data="forwardLogs"
+          :row-key="logRowKey"
           :loading="forwardLoading"
           :pagination="forwardPagination"
-          :scroll-x="1750"
+          :scroll-x="1830"
           remote
           size="small"
           @update:page="changeForwardPage"
@@ -237,10 +239,11 @@ import { computeTimeRange, resolveTimeRange, timePresetValues } from "./log-time
 import type { TimePreset } from "./log-time-range.ts";
 
 type LogTab = "gateway" | "forward";
-type SortBy = "timestamp" | "prompt_tokens" | "completion_tokens" | "cached_tokens" | "cost";
+type SortBy = "timestamp" | "attempt" | "prompt_tokens" | "completion_tokens" | "cached_tokens" | "cost";
 type SortOrder = "asc" | "desc";
 const sortValues = new Set<SortBy>([
   "timestamp",
+  "attempt",
   "prompt_tokens",
   "completion_tokens",
   "cached_tokens",
@@ -357,6 +360,7 @@ const accountOptions = computed(() => [allOption.value, ...accounts.value.map((a
 const modelOptions = computed(() => [allOption.value, ...models.value.map((model) => ({ label: model, value: model }))]);
 const sortOptions = computed(() => [
   { label: t("时间"), value: "timestamp" },
+  { label: t("尝试次数"), value: "attempt" },
   { label: t("输入"), value: "prompt_tokens" },
   { label: t("输出"), value: "completion_tokens" },
   { label: t("缓存"), value: "cached_tokens" },
@@ -432,19 +436,36 @@ async function copyText(target: string, value: string, label: string) {
 }
 
 function renderRequestId(row: GatewayLog | ForwardLog) {
-  if (!row.request_id) return "—";
+  const requestId = row.request_id;
+  if (!requestId) return "—";
   const target = `request-id-${row.id}`;
   return h("div", { class: "request-id-cell" }, [
-    h("code", row.request_id),
+    h(NButton, {
+      text: true,
+      type: "primary",
+      class: "request-id-link",
+      title: requestId,
+      onClick: () => focusRequestChain(requestId),
+    }, { default: () => h("code", requestId) }),
     h(NButton, {
       text: true,
       type: "primary",
       "aria-label": t("复制请求 ID"),
-      onClick: () => copyText(target, row.request_id!, t("请求 ID")),
+      onClick: () => copyText(target, requestId, t("请求 ID")),
     }, {
       icon: () => h(NIcon, { component: copiedTarget.value === target ? CheckOutlined : CopyOutlined }),
     }),
   ]);
+}
+
+function logRowKey(row: GatewayLog | ForwardLog): number {
+  return row.id;
+}
+
+function focusRequestChain(requestId: string) {
+  requestIdFilter.value = requestId;
+  sortBy.value = "attempt";
+  sortOrder.value = "asc";
 }
 
 function renderDiagnostic(row: GatewayLog | ForwardLog) {
@@ -510,6 +531,13 @@ const forwardColumns = computed(() => [
   },
   { title: t("时间"), key: "timestamp", width: 150, render: (row: ForwardLog) => formatDate(row.timestamp) },
   { title: t("请求 ID"), key: "request_id", width: 245, render: renderRequestId },
+  {
+    title: t("尝试次数"),
+    key: "attempt",
+    width: 82,
+    align: "center" as const,
+    render: (row: ForwardLog) => row.attempt ? `#${row.attempt}` : "—",
+  },
   { title: t("模型"), key: "model", width: 160, ellipsis: { tooltip: true } },
   { title: t("账号"), key: "account_name", width: 120, ellipsis: { tooltip: true } },
   {
@@ -674,7 +702,7 @@ function changeGatewayPage(page: number) {
 
 watch(activeTab, syncQueryState);
 watch(
-  [statusFilter, accountFilter, modelFilter, timeRange, activePreset, sortBy, sortOrder],
+  [statusFilter, accountFilter, modelFilter, requestIdFilter, timeRange, activePreset, sortBy, sortOrder],
   () => {
     forwardPage.value = 1;
     syncQueryState();
@@ -682,10 +710,7 @@ watch(
   },
 );
 watch(requestIdFilter, () => {
-  forwardPage.value = 1;
   gatewayPage.value = 1;
-  syncQueryState();
-  void loadForwardLogs();
   void loadGatewayLogs();
 });
 

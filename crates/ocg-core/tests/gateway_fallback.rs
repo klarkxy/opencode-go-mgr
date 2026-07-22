@@ -142,6 +142,7 @@ async fn start_delayed_upstream(
 ) -> (String, Arc<AtomicUsize>, tokio::sync::oneshot::Sender<()>) {
     let calls = Arc::new(AtomicUsize::new(0));
     let app = Router::new()
+        .route("/v1/chat/completions", post(delayed_reply))
         .route("/v1/messages", post(delayed_reply))
         .route("/v1/models", get(delayed_reply))
         .with_state(DelayedReply {
@@ -303,6 +304,7 @@ fn build_state(base_url: String, keys: &[&str]) -> (Arc<CoreStateInner>, PathBuf
             cooldown_week_until: None,
             cooldown_month_until: None,
             last_error: None,
+            auth_error: None,
             created_at: now + chrono::Duration::seconds(idx as i64),
             updated_at: now + chrono::Duration::seconds(idx as i64),
         };
@@ -820,8 +822,10 @@ async fn model_discovery_auth_failure_falls_back_without_same_account_replay() {
     ]);
     let (base_url, calls, stop_mock) = start_mock_upstream(replies).await;
     let (state, dir) = build_state(base_url, &["key-1", "key-2"]);
-    let (port, gateway_handle) = start_gateway(state).await;
+    let (port, gateway_handle) = start_gateway(state.clone()).await;
 
+    let (status, body) = models(port).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
     let (status, body) = models(port).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(
@@ -831,7 +835,70 @@ async fn model_discovery_auth_failure_falls_back_without_same_account_replay() {
             .iter()
             .map(|call| call.key.as_str())
             .collect::<Vec<_>>(),
-        ["key-1", "key-2"]
+        ["key-1", "key-2", "key-1", "key-2"]
+    );
+    assert!(
+        state
+            .db
+            .lock()
+            .get_account("acct-1")
+            .unwrap()
+            .unwrap()
+            .auth_error
+            .is_none(),
+        "403 must not permanently break an account"
+    );
+
+    gateway::stop_gateway(gateway_handle);
+    let _ = stop_mock.send(());
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn model_discovery_401_breaker_skips_account_on_later_requests() {
+    let replies = HashMap::from([
+        (
+            "key-1".to_string(),
+            VecDeque::from([MockReply {
+                status: 401,
+                body: r#"{"error":"expired key"}"#,
+            }]),
+        ),
+        (
+            "key-2".to_string(),
+            VecDeque::from([MockReply {
+                status: 200,
+                body: r#"{"object":"list","data":[]}"#,
+            }]),
+        ),
+    ]);
+    let (base_url, calls, stop_mock) = start_mock_upstream(replies).await;
+    let (state, dir) = build_state(base_url, &["key-1", "key-2"]);
+    let (port, gateway_handle) = start_gateway(state.clone()).await;
+
+    for _ in 0..2 {
+        let (status, body) = models(port).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+    }
+    assert_eq!(
+        calls
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|call| call.key.as_str())
+            .collect::<Vec<_>>(),
+        ["key-1", "key-2", "key-2"]
+    );
+    assert!(
+        state
+            .db
+            .lock()
+            .get_account("acct-1")
+            .unwrap()
+            .unwrap()
+            .auth_error
+            .as_deref()
+            .is_some_and(|error| error.contains("401"))
     );
 
     gateway::stop_gateway(gateway_handle);
@@ -2051,6 +2118,58 @@ async fn auth_failure_fails_over_without_same_account_replay() {
 }
 
 #[tokio::test]
+async fn auth_401_breaker_skips_account_on_later_inference_requests() {
+    let replies = HashMap::from([
+        (
+            "key-1".to_string(),
+            VecDeque::from([MockReply {
+                status: 401,
+                body: r#"{"error":{"message":"expired key"}}"#,
+            }]),
+        ),
+        (
+            "key-2".to_string(),
+            VecDeque::from([MockReply {
+                status: 200,
+                body: SUCCESS_BODY,
+            }]),
+        ),
+    ]);
+    let (base_url, calls, stop_mock) = start_mock_upstream(replies).await;
+    let (state, dir) = build_state(base_url, &["key-1", "key-2"]);
+    let (port, gateway_handle) = start_gateway(state.clone()).await;
+
+    for _ in 0..2 {
+        let (status, body) = chat(port).await;
+        assert_eq!(status, 200, "{body}");
+    }
+    assert_eq!(
+        calls
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|call| call.key.as_str())
+            .collect::<Vec<_>>(),
+        ["key-1", "key-2", "key-2"]
+    );
+    assert!(
+        state
+            .db
+            .lock()
+            .get_account("acct-1")
+            .unwrap()
+            .unwrap()
+            .auth_error
+            .as_deref()
+            .is_some_and(|error| error.contains("401"))
+    );
+
+    gateway::stop_gateway(gateway_handle);
+    let _ = stop_mock.send(());
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
 async fn all_limited_accounts_return_429_with_soonest_reset() {
     let replies = HashMap::from([
         (
@@ -2093,6 +2212,61 @@ async fn all_limited_accounts_return_429_with_soonest_reset() {
 }
 
 #[tokio::test]
+async fn dashboard_ping_401_sets_auth_error_and_success_clears_it() {
+    let replies = HashMap::from([(
+        "key-1".to_string(),
+        VecDeque::from([
+            MockReply {
+                status: 401,
+                body: r#"{"error":{"message":"expired key","api_key":"secret-value"}}"#,
+            },
+            MockReply {
+                status: 200,
+                body: SUCCESS_BODY,
+            },
+        ]),
+    )]);
+    let (base_url, calls, stop_mock) = start_mock_upstream(replies).await;
+    let (state, dir) = build_state(base_url, &["key-1"]);
+    let (port, gateway_handle) = start_gateway(state.clone()).await;
+    let endpoint = format!(
+        "http://127.0.0.1:{}/dashboard/api/accounts/acct-1/test",
+        port
+    );
+
+    let first = reqwest::Client::new().post(&endpoint).send().await.unwrap();
+    assert_eq!(first.status(), StatusCode::BAD_REQUEST);
+    let auth_error = state
+        .db
+        .lock()
+        .get_account("acct-1")
+        .unwrap()
+        .unwrap()
+        .auth_error
+        .expect("401 should persist an auth error");
+    assert!(auth_error.contains("401"));
+    assert!(!auth_error.contains("secret-value"));
+
+    let second = reqwest::Client::new().post(&endpoint).send().await.unwrap();
+    assert_eq!(second.status(), StatusCode::OK);
+    assert!(
+        state
+            .db
+            .lock()
+            .get_account("acct-1")
+            .unwrap()
+            .unwrap()
+            .auth_error
+            .is_none()
+    );
+    assert_eq!(calls.lock().unwrap().len(), 2);
+
+    gateway::stop_gateway(gateway_handle);
+    let _ = stop_mock.send(());
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
 async fn dashboard_ping_marks_quota_cooldown() {
     let replies = HashMap::from([(
         "key-1".to_string(),
@@ -2103,6 +2277,11 @@ async fn dashboard_ping_marks_quota_cooldown() {
     )]);
     let (base_url, calls, stop_mock) = start_mock_upstream(replies).await;
     let (state, dir) = build_state(base_url, &["key-1"]);
+    state
+        .db
+        .lock()
+        .set_account_auth_error("acct-1", Some("stale auth error"))
+        .unwrap();
     let (port, gateway_handle) = start_gateway(state.clone()).await;
 
     let response = reqwest::Client::new()
@@ -2122,12 +2301,74 @@ async fn dashboard_ping_marks_quota_cooldown() {
     let remaining = stored.cooldown_until.unwrap() - Utc::now();
     assert!(remaining > Duration::days(2) && remaining <= Duration::days(3));
     assert!(stored.last_error.unwrap().contains("Weekly usage limit"));
+    assert!(stored.auth_error.is_none());
 
     let calls = calls.lock().unwrap();
     assert_eq!(calls[0].key, "key-1");
     let payload: serde_json::Value = serde_json::from_str(&calls[0].body).unwrap();
     assert_eq!(payload["model"], "deepseek-v4-flash");
     assert_eq!(payload["messages"][0]["content"], "ping");
+
+    gateway::stop_gateway(gateway_handle);
+    let _ = stop_mock.send(());
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn delayed_dashboard_ping_429_does_not_cool_down_replaced_key() {
+    let (base_url, calls, stop_mock) = start_delayed_upstream(
+        StatusCode::TOO_MANY_REQUESTS,
+        "application/json",
+        vec![(StdDuration::from_millis(250), LIMITED_BODY)],
+    )
+    .await;
+    let (state, dir) = build_state(base_url, &["key-1"]);
+    let (port, gateway_handle) = start_gateway(state.clone()).await;
+
+    let request = tokio::spawn(async move {
+        reqwest::Client::new()
+            .post(format!(
+                "http://127.0.0.1:{}/dashboard/api/accounts/acct-1/test",
+                port
+            ))
+            .send()
+            .await
+            .unwrap()
+    });
+    tokio::time::timeout(StdDuration::from_secs(10), async {
+        while calls.load(Ordering::Relaxed) == 0 {
+            tokio::time::sleep(StdDuration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("ping should reach upstream");
+
+    state
+        .db
+        .lock()
+        .update_account(
+            "acct-1",
+            &AccountUpdate {
+                name: None,
+                username: None,
+                password: None,
+                key: None,
+                enabled: None,
+                referral_code: None,
+                purchase_date: None,
+            },
+            Some("replacement-cipher"),
+            None,
+        )
+        .unwrap();
+
+    let response = request.await.unwrap();
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    let stored = state.db.lock().get_account("acct-1").unwrap().unwrap();
+    assert_eq!(stored.key_cipher, "replacement-cipher");
+    assert!(stored.auth_error.is_none());
+    assert!(stored.cooldown_until.is_none());
+    assert!(stored.last_error.is_none());
 
     gateway::stop_gateway(gateway_handle);
     let _ = stop_mock.send(());

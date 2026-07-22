@@ -116,6 +116,16 @@ test("shows a live reset countdown below a quota progress bar during cooldown", 
   assert.match(source, /\.usage-reset-countdown \{[\s\S]*color: var\(--ocg-error\);/);
 });
 
+test("shows a distinct account authentication breaker instead of disguising it as cooldown", async () => {
+  const source = await readFile(new URL("./Accounts.vue", import.meta.url), "utf8");
+  const dashboard = await readFile(new URL("./Dashboard.vue", import.meta.url), "utf8");
+  assert.match(source, /account\.auth_error \|\| accountIsCooling\(account\)/);
+  assert.match(source, /account\.enabled[\s\S]*t\("认证失效（401 熔断）"\)[\s\S]*t\("已禁用"\)/);
+  assert.match(source, /if \(account\.auth_error\) return "error"/);
+  assert.match(dashboard, /account\.auth_error \? 'auth-error'/);
+  assert.match(dashboard, /\.account-status\.auth-error \{ color: var\(--ocg-error\); \}/);
+});
+
 test("maps each usage window to its cooldown reset deadline", () => {
   const account = {
     cooldown_5h_until: "2026-07-20T01:00:00Z",

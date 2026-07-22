@@ -195,7 +195,7 @@
             <strong>{{ account.name }}</strong>
             <span
               class="account-status"
-              :class="account.enabled ? (isCoolingDown(account) ? 'cooling' : 'active') : 'disabled'"
+              :class="account.auth_error ? 'auth-error' : account.enabled ? (isCoolingDown(account) ? 'cooling' : 'active') : 'disabled'"
             >{{ statusLabel(account) }}</span>
           </div>
           <n-tooltip trigger="click">
@@ -327,6 +327,11 @@ function isCoolingDown(account: Account): boolean {
 }
 
 function statusLabel(account: Account): string {
+  if (account.auth_error) {
+    return account.enabled
+      ? t("认证失效（401 熔断）")
+      : `${t("已禁用")} · ${t("认证失效（401 熔断）")}`;
+  }
   if (!account.enabled) return t("已禁用");
   return isCoolingDown(account) ? t("冷却中") : t("可用");
 }
@@ -779,6 +784,7 @@ onUnmounted(() => {
 }
 .account-status.active { color: var(--ocg-success); }
 .account-status.cooling { color: var(--ocg-warning); }
+.account-status.auth-error { color: var(--ocg-error); }
 .account-status.disabled { color: var(--ocg-subtle); }
 .account-expiry {
   margin-bottom: 7px;

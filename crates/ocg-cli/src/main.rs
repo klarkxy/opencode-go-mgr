@@ -272,6 +272,7 @@ async fn key_command(
                 cooldown_week_until: None,
                 cooldown_month_until: None,
                 last_error: None,
+                auth_error: None,
                 created_at: now,
                 updated_at: now,
             };

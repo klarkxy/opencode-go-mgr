@@ -72,6 +72,7 @@ export const frFRMessages = {
   "已禁用": "Désactivé",
   "冷却中": "En période de refroidissement",
   "可用": "Disponible",
+  "认证失效（401 熔断）": "Échec d’authentification (circuit 401)",
   "暂无用量": "Aucune donnée d’utilisation",
   "已复制 {label}": "{label} copié",
   "Key 已刷新": "Key régénérée",

@@ -72,6 +72,7 @@ export const esESMessages = {
   "已禁用": "Desactivada",
   "冷却中": "En enfriamiento",
   "可用": "Disponible",
+  "认证失效（401 熔断）": "Autenticación fallida (corte por 401)",
   "暂无用量": "No hay datos de uso",
   "已复制 {label}": "Se ha copiado {label}",
   "Key 已刷新": "Key regenerada",
