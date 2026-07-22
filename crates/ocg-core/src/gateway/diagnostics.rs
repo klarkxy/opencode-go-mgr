@@ -32,6 +32,12 @@ impl RequestTrace {
     }
 }
 
+impl Default for RequestTrace {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ErrorDiagnostic {
     pub version: u8,

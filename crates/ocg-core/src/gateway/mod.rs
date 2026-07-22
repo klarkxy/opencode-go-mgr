@@ -199,21 +199,22 @@ mod tests {
         assert!(rejected_request_id.starts_with("ocg-"));
         assert_ne!(accepted_request_id, rejected_request_id);
 
-        let db = state.db.lock();
-        for (request_id, stage) in [
-            (&accepted_request_id, "parse"),
-            (&rejected_request_id, "body_limit"),
-        ] {
-            let logs = db
-                .query_gateway_logs(10, Some(request_id))
-                .expect("request id query should work");
-            assert_eq!(logs.len(), 1);
-            assert_eq!(logs[0].request_id.as_deref(), Some(request_id.as_str()));
-            assert_eq!(logs[0].error_source.as_deref(), Some("client"));
-            assert_eq!(logs[0].error_stage.as_deref(), Some(stage));
-            assert!(logs[0].diagnostic.is_some());
+        {
+            let db = state.db.lock();
+            for (request_id, stage) in [
+                (&accepted_request_id, "parse"),
+                (&rejected_request_id, "body_limit"),
+            ] {
+                let logs = db
+                    .query_gateway_logs(10, Some(request_id))
+                    .expect("request id query should work");
+                assert_eq!(logs.len(), 1);
+                assert_eq!(logs[0].request_id.as_deref(), Some(request_id.as_str()));
+                assert_eq!(logs[0].error_source.as_deref(), Some("client"));
+                assert_eq!(logs[0].error_stage.as_deref(), Some(stage));
+                assert!(logs[0].diagnostic.is_some());
+            }
         }
-        drop(db);
 
         let _ = handle.shutdown.send(());
         handle.task.await.expect("test gateway should stop");

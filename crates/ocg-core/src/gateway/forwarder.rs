@@ -143,6 +143,7 @@ impl FailureRecord {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn forward_request(
     client: &Client,
     state: &CoreState,
@@ -172,6 +173,7 @@ pub async fn forward_request(
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn forward_request_impl(
     client: &Client,
     state: &CoreState,
@@ -1018,7 +1020,7 @@ async fn forward_request_impl(
                     converter_f,
                     mdl,
                     initial_id,
-                    guard: stream_guard,
+                    guard: Box::new(stream_guard),
                 },
                 move |state| {
                     let service_tier = service_tier_f.clone();
@@ -1351,6 +1353,7 @@ struct StreamOutcomeGuard {
 }
 
 impl StreamOutcomeGuard {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         state: CoreState,
         log_id: i64,
@@ -1510,7 +1513,7 @@ enum FinalizerState {
         converter_f: Arc<Mutex<StreamConverter>>,
         mdl: String,
         initial_id: i64,
-        guard: StreamOutcomeGuard,
+        guard: Box<StreamOutcomeGuard>,
     },
     Done,
 }
@@ -1813,6 +1816,7 @@ pub(crate) fn rate_limited_response(
     (StatusCode::TOO_MANY_REQUESTS, axum::Json(body)).into_response()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn log_forward(
     db: &Database,
     account: &Account,

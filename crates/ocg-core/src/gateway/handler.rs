@@ -349,7 +349,7 @@ fn rewrite_claude_desktop_model(
     body: &Bytes,
     models: &ClaudeDesktopModels,
 ) -> Result<Bytes, ProtocolError> {
-    let mut request: serde_json::Value = serde_json::from_slice(&body)
+    let mut request: serde_json::Value = serde_json::from_slice(body)
         .map_err(|error| ProtocolError::new(format!("invalid JSON request: {error}")))?;
     let object = request
         .as_object_mut()
@@ -423,6 +423,7 @@ async fn gemini_proxy_handler(
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn execute_plan(
     state: CoreState,
     trace: RequestTrace,
