@@ -113,22 +113,6 @@
 
           <template #header-extra>
             <n-space align="center" :size="8">
-              <n-tooltip v-if="usageEdits[account.id]" trigger="hover">
-                <template #trigger>
-                  <n-button
-                    circle
-                    quaternary
-                    size="small"
-                    :aria-label="t('校准用量')"
-                    :disabled="!hasAvailableUsageEditor(account)"
-                    @click="focusUsageEditor(account.id)"
-                  >
-                    <template #icon><n-icon :component="EditOutlined" /></template>
-                  </n-button>
-                </template>
-                {{ t("校准用量") }}
-              </n-tooltip>
-
               <n-tooltip trigger="hover">
                 <template #trigger>
                   <n-button
@@ -155,6 +139,154 @@
                 </template>
                 {{ account.enabled ? t("禁用账号 {name}", { name: account.name }) : t("启用账号 {name}", { name: account.name }) }}
               </n-tooltip>
+
+              <n-popover
+                v-if="usageEdits[account.id]"
+                trigger="click"
+                placement="bottom-end"
+                :show-arrow="false"
+                :width="320"
+                style="max-width: calc(100vw - 64px)"
+                @update:show="(show: boolean) => show && focusUsageEditor(account.id)"
+              >
+                <template #trigger>
+                  <n-tooltip trigger="hover">
+                    <template #trigger>
+                      <n-button
+                        circle
+                        quaternary
+                        size="small"
+                        :aria-label="t('校准用量')"
+                        :disabled="!hasAvailableUsageEditor(account)"
+                      >
+                        <template #icon><n-icon :component="EditOutlined" /></template>
+                      </n-button>
+                    </template>
+                    {{ t("校准用量") }}
+                  </n-tooltip>
+                </template>
+
+                <div
+                  class="usage-editor-popover"
+                  :data-usage-editor-account-id="account.id"
+                >
+                  <p class="usage-editor-caption">
+                    {{ t("手动上报用量百分比，仅用于校准额度显示") }}
+                  </p>
+                  <template v-for="limit in usageLimits" :key="limit.key">
+                    <div
+                      v-if="!accountUsageLimitReached(account, limit.key)"
+                      class="usage-editor-row"
+                    >
+                      <div class="usage-editor-label">
+                        <span>{{ limit.label }}</span>
+                        <span class="usage-editor-value">
+                          {{ formatCost(usageCost(account.id, limit.key)) }} /
+                          {{ formatCost(limit.limit) }} ·
+                          {{ usageEdits[account.id][limit.key].draft }}%
+                        </span>
+                      </div>
+                      <div class="usage-editor">
+                        <n-input-number
+                          :value="usageEdits[account.id][limit.key].draft"
+                          :min="0"
+                          :max="100"
+                          :step="0.1"
+                          :precision="1"
+                          size="tiny"
+                          :show-button="false"
+                          :disabled="usageLoading[account.id] || usageEdits[account.id][limit.key].saving"
+                          :status="usageEdits[account.id][limit.key].error ? 'error' : undefined"
+                          :input-props="{
+                            'aria-label': t('{name} {period} 当前用量百分比', {
+                              name: account.name,
+                              period: limit.label,
+                            }),
+                          }"
+                          @update:value="updateUsageDraft(account.id, limit.key, $event)"
+                          @blur="saveUsage(account.id, limit.key)"
+                          @keydown.enter.prevent="saveUsage(account.id, limit.key)"
+                        >
+                          <template #suffix>%</template>
+                        </n-input-number>
+                        <n-slider
+                          v-usage-slider-label="t('{name} {period} 当前用量百分比', {
+                            name: account.name,
+                            period: limit.label,
+                          })"
+                          :value="usageEdits[account.id][limit.key].draft"
+                          :min="0"
+                          :max="100"
+                          :step="0.1"
+                          :disabled="usageLoading[account.id] || usageEdits[account.id][limit.key].saving"
+                          @update:value="updateUsageDraft(account.id, limit.key, $event)"
+                          @dragend="saveUsage(account.id, limit.key)"
+                          @focusout="saveUsage(account.id, limit.key)"
+                        />
+                      </div>
+                      <div class="usage-resets-row">
+                        <template v-if="WINDOW_FULL_MINUTES[limit.key] !== null">
+                          <span class="usage-resets-hint">{{ t("距上游重置还剩") }}</span>
+                          <n-input-number
+                            :value="resetsFirstField(account.id, limit.key)"
+                            :min="0"
+                            :max="resetsFirstMax(limit.key)"
+                            :step="1"
+                            size="tiny"
+                            :show-button="false"
+                            :disabled="usageLoading[account.id] || usageEdits[account.id][limit.key].saving"
+                            :input-props="{
+                              'aria-label': t('{name} {period} 距上游重置还剩{unit}', {
+                                name: account.name,
+                                period: limit.label,
+                                unit: resetsFirstLabel(limit.key),
+                              }),
+                            }"
+                            @update:value="updateResetsFirstField(account.id, limit.key, $event)"
+                            @blur="saveUsage(account.id, limit.key)"
+                            @keydown.enter.prevent="saveUsage(account.id, limit.key)"
+                          >
+                            <template #suffix>{{ resetsFirstLabel(limit.key) }}</template>
+                          </n-input-number>
+                          <n-input-number
+                            :value="resetsSecondField(account.id, limit.key)"
+                            :min="0"
+                            :max="resetsSecondMax(limit.key)"
+                            :step="1"
+                            size="tiny"
+                            :show-button="false"
+                            :disabled="usageLoading[account.id] || usageEdits[account.id][limit.key].saving"
+                            :input-props="{
+                              'aria-label': t('{name} {period} 距上游重置还剩{unit}', {
+                                name: account.name,
+                                period: limit.label,
+                                unit: resetsSecondLabel(limit.key),
+                              }),
+                            }"
+                            @update:value="updateResetsSecondField(account.id, limit.key, $event)"
+                            @blur="saveUsage(account.id, limit.key)"
+                            @keydown.enter.prevent="saveUsage(account.id, limit.key)"
+                          >
+                            <template #suffix>{{ resetsSecondLabel(limit.key) }}</template>
+                          </n-input-number>
+                        </template>
+                        <span v-else class="usage-resets-hint">
+                          {{ t("到期于 {date}", { date: account.expires_on }) }}
+                        </span>
+                      </div>
+                      <span
+                        v-if="usageEdits[account.id][limit.key].error"
+                        class="usage-save-error"
+                        role="alert"
+                      >
+                        {{ t("用量保存失败: {error}", {
+                          error: usageEdits[account.id][limit.key].error || "",
+                        }) }}
+                      </span>
+                    </div>
+                  </template>
+                </div>
+              </n-popover>
 
               <n-dropdown
                 :options="accountMenuOptions(account)"
@@ -194,134 +326,39 @@
             </div>
             <div v-else class="usage-strip">
               <div class="usage-strip-body" role="group" :aria-label="t('用量')">
-              <div v-for="limit in usageLimits" :key="limit.key" class="usage-segment">
-              <div class="usage-meta">
-                <span>{{ limit.label }}</span>
-                <strong v-if="usageEdits[account.id]">
-                  {{ formatCost(usageCost(account.id, limit.key)) }} / {{ formatCost(limit.limit) }}
-                </strong>
-              </div>
-              <n-progress
-                v-if="accountUsageLimitReached(account, limit.key)"
-                type="line"
-                :height="8"
-                :percentage="usageProgressPercentage(account, limit.key, 100)"
-                :status="usageProgressStatus(account, limit.key, 100)"
-                :show-indicator="false"
-              />
-              <template v-else-if="usageEdits[account.id]">
-                <div class="usage-editor">
-                  <n-input-number
-                    :value="usageEdits[account.id][limit.key].draft"
-                    :min="0"
-                    :max="100"
-                    :step="0.1"
-                    :precision="1"
-                    size="tiny"
-                    :show-button="false"
-                    :disabled="usageLoading[account.id] || usageEdits[account.id][limit.key].saving"
-                    :status="usageEdits[account.id][limit.key].error ? 'error' : undefined"
-                    :input-props="{
-                      'aria-label': t('{name} {period} 当前用量百分比', {
-                        name: account.name,
-                        period: limit.label,
-                      }),
-                    }"
-                    @update:value="updateUsageDraft(account.id, limit.key, $event)"
-                    @blur="saveUsage(account.id, limit.key)"
-                    @keydown.enter.prevent="saveUsage(account.id, limit.key)"
-                  >
-                    <template #suffix>%</template>
-                  </n-input-number>
-                  <n-slider
-                    v-usage-slider-label="t('{name} {period} 当前用量百分比', {
-                      name: account.name,
-                      period: limit.label,
-                    })"
-                    :value="usageEdits[account.id][limit.key].draft"
-                    :min="0"
-                    :max="100"
-                    :step="0.1"
-                    :disabled="usageLoading[account.id] || usageEdits[account.id][limit.key].saving"
-                    @update:value="updateUsageDraft(account.id, limit.key, $event)"
-                    @dragend="saveUsage(account.id, limit.key)"
-                    @focusout="saveUsage(account.id, limit.key)"
+                <div v-for="limit in usageLimits" :key="limit.key" class="usage-segment">
+                  <div class="usage-meta">
+                    <span>{{ limit.label }}</span>
+                    <strong v-if="usageEdits[account.id]">
+                      {{ formatCost(usageCost(account.id, limit.key)) }} / {{ formatCost(limit.limit) }}
+                    </strong>
+                  </div>
+                  <n-progress
+                    type="line"
+                    :height="8"
+                    :percentage="usageProgressPercentage(
+                      account,
+                      limit.key,
+                      usagePercent(account.id, limit.key),
+                      now,
+                    )"
+                    :status="usageProgressStatus(
+                      account,
+                      limit.key,
+                      usagePercent(account.id, limit.key),
+                      now,
+                    )"
+                    :processing="!usageEdits[account.id]"
+                    :show-indicator="false"
                   />
+                  <span
+                    v-if="accountUsageLimitReached(account, limit.key)"
+                    class="usage-reset-countdown"
+                  >
+                    {{ t("{time}后重置", { time: formatWindowRemaining(account, limit.key) }) }}
+                  </span>
                 </div>
-                <div class="usage-resets-row">
-                  <template v-if="WINDOW_FULL_MINUTES[limit.key] !== null">
-                    <span class="usage-resets-hint">{{ t("距上游重置还剩") }}</span>
-                    <n-input-number
-                      :value="resetsFirstField(account.id, limit.key)"
-                      :min="0"
-                      :max="resetsFirstMax(limit.key)"
-                      :step="1"
-                      size="tiny"
-                      :show-button="false"
-                      :disabled="usageLoading[account.id] || usageEdits[account.id][limit.key].saving"
-                      :input-props="{
-                        'aria-label': t('{name} {period} 距上游重置还剩{unit}', {
-                          name: account.name,
-                          period: limit.label,
-                          unit: resetsFirstLabel(limit.key),
-                        }),
-                      }"
-                      @update:value="updateResetsFirstField(account.id, limit.key, $event)"
-                      @blur="saveUsage(account.id, limit.key)"
-                      @keydown.enter.prevent="saveUsage(account.id, limit.key)"
-                    >
-                      <template #suffix>{{ resetsFirstLabel(limit.key) }}</template>
-                    </n-input-number>
-                    <n-input-number
-                      :value="resetsSecondField(account.id, limit.key)"
-                      :min="0"
-                      :max="resetsSecondMax(limit.key)"
-                      :step="1"
-                      size="tiny"
-                      :show-button="false"
-                      :disabled="usageLoading[account.id] || usageEdits[account.id][limit.key].saving"
-                      :input-props="{
-                        'aria-label': t('{name} {period} 距上游重置还剩{unit}', {
-                          name: account.name,
-                          period: limit.label,
-                          unit: resetsSecondLabel(limit.key),
-                        }),
-                      }"
-                      @update:value="updateResetsSecondField(account.id, limit.key, $event)"
-                      @blur="saveUsage(account.id, limit.key)"
-                      @keydown.enter.prevent="saveUsage(account.id, limit.key)"
-                    >
-                      <template #suffix>{{ resetsSecondLabel(limit.key) }}</template>
-                    </n-input-number>
-                  </template>
-                  <span v-else class="usage-resets-hint">{{ t("到期于 {date}", { date: account.expires_on }) }}</span>
-                </div>
-                <span
-                  v-if="usageEdits[account.id][limit.key].error"
-                  class="usage-save-error"
-                  role="alert"
-                >
-                  {{ t("用量保存失败: {error}", {
-                    error: usageEdits[account.id][limit.key].error || "",
-                  }) }}
-                </span>
-              </template>
-              <n-progress
-                v-else
-                type="line"
-                :height="8"
-                :percentage="usageProgressPercentage(account, limit.key, 0)"
-                :status="usageProgressStatus(account, limit.key, 0)"
-                processing
-                :show-indicator="false"
-              />
-              <span class="usage-reset-countdown">
-                <template v-if="accountUsageLimitReached(account, limit.key)">
-                  {{ t("{time}后重置", { time: formatWindowRemaining(account, limit.key) }) }}
-                </template>
-              </span>
-            </div>
-            </div>
+              </div>
             </div>
           </div>
         </n-card>
@@ -342,7 +379,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
 import {
   NAlert,
   NButton,
@@ -352,6 +389,7 @@ import {
   NH3,
   NIcon,
   NInputNumber,
+  NPopover,
   NProgress,
   NSpin,
   NSlider,
@@ -480,6 +518,10 @@ function usageLimit(key: UsageKey): number {
   return usageLimits.value.find((limit) => limit.key === key)?.limit ?? 0;
 }
 
+function usagePercent(accountId: string, key: UsageKey): number {
+  return usagePercentFromCost(usageCost(accountId, key), usageLimit(key));
+}
+
 function accountUsageLimitReached(account: Account, key: UsageKey): boolean {
   return isUsageLimitReached(account, key, now.value);
 }
@@ -487,6 +529,16 @@ function accountUsageLimitReached(account: Account, key: UsageKey): boolean {
 function hasAvailableUsageEditor(account: Account): boolean {
   if (usageLoading.value[account.id] || usageLoadErrors.value[account.id]) return false;
   return usageLimits.value.some(({ key }) => !accountUsageLimitReached(account, key));
+}
+
+async function focusUsageEditor(accountId: string) {
+  await nextTick();
+  requestAnimationFrame(() => {
+    const editor = Array.from(
+      document.querySelectorAll<HTMLElement>(".usage-editor-popover"),
+    ).find((element) => element.dataset.usageEditorAccountId === accountId);
+    editor?.querySelector<HTMLInputElement>(".n-input-number input")?.focus();
+  });
 }
 
 function formatWindowRemaining(account: Account, key: UsageKey): string {
@@ -551,18 +603,6 @@ function updateUsageDraft(accountId: string, key: UsageKey, value: number | null
   const edit = usageEdits.value[accountId]?.[key];
   if (!edit || edit.saving || value === null) return;
   edit.draft = normalizeUsagePercent(value);
-}
-
-// 校准按钮入口：滚动到该账号卡片第一个用量输入框并聚焦。
-// HEAD 的 inline editor 已经在卡片 body 中，这里只是 anchor 跳转。
-function focusUsageEditor(accountId: string) {
-  const card = document.querySelector<HTMLElement>(
-    `.account-card[data-account-id="${accountId}"] .usage-editor .n-input-number input`,
-  );
-  if (card) {
-    card.scrollIntoView({ behavior: "smooth", block: "center" });
-    card.focus();
-  }
 }
 
 // ponytail: 用户要求直接编辑"天+小时"或"小时+分钟"，而不是分钟总数。
@@ -667,6 +707,7 @@ async function saveUsage(accountId: string, key: UsageKey) {
     edit.resets_dirty = false;
   } catch (error) {
     edit.error = errorDetail(error);
+    message.error(t("用量保存失败: {error}", { error: edit.error }));
   } finally {
     edit.saving = false;
   }
@@ -1216,6 +1257,9 @@ onUnmounted(() => {
 
 .usage-strip {
   min-width: 0;
+}
+
+.usage-strip-body {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
@@ -1237,8 +1281,50 @@ onUnmounted(() => {
 
 .usage-meta strong {
   color: var(--ocg-ink);
+  font-size: var(--ocg-font-md);
   font-family: "Cascadia Mono", Consolas, monospace;
   font-weight: 600;
+}
+
+.usage-editor-popover {
+  display: grid;
+  width: 100%;
+  gap: 12px;
+}
+
+.usage-editor-caption {
+  margin: 0;
+  color: var(--ocg-muted);
+  font-size: var(--ocg-font-sm);
+  line-height: 1.5;
+}
+
+.usage-editor-row {
+  display: grid;
+  gap: 8px;
+}
+
+.usage-editor-row + .usage-editor-row {
+  padding-top: 12px;
+  border-top: 1px solid var(--ocg-divider);
+}
+
+.usage-editor-label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--ocg-ink);
+  font-size: var(--ocg-font-sm);
+  font-weight: 600;
+}
+
+.usage-editor-value {
+  color: var(--ocg-muted);
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: var(--ocg-font-xs);
+  font-weight: 500;
+  white-space: nowrap;
 }
 
 .usage-editor {
@@ -1253,7 +1339,6 @@ onUnmounted(() => {
 }
 
 .usage-reset-countdown {
-  min-height: 1.4em;
   color: var(--ocg-error);
   font-size: var(--ocg-font-xs);
   line-height: 1.4;
@@ -1261,6 +1346,7 @@ onUnmounted(() => {
 
 .usage-resets-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   font-size: var(--ocg-font-xs);
@@ -1281,7 +1367,7 @@ onUnmounted(() => {
 }
 
 @media (max-width: 900px) {
-  .usage-strip {
+  .usage-strip-body {
     grid-template-columns: 1fr;
   }
 

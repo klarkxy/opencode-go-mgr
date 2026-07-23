@@ -108,12 +108,13 @@ test("shows local estimated saturation as a warning, not a real breaker", () => 
 test("shows a live reset countdown below a quota progress bar during cooldown", async () => {
   const source = await readFile(new URL("./Accounts.vue", import.meta.url), "utf8");
   const progress = source.indexOf(":percentage=\"usageProgressPercentage(");
-  const countdown = source.indexOf("<span class=\"usage-reset-countdown\">");
+  const countdown = source.indexOf('class="usage-reset-countdown"');
 
   assert.ok(progress >= 0);
   assert.ok(countdown > progress);
-  assert.match(source, /accountUsageLimitReached\(account, limit\.key\)[\s\S]*formatWindowRemaining\(account, limit\.key\)/);
+  assert.match(source, /v-if="accountUsageLimitReached\(account, limit\.key\)"[\s\S]*class="usage-reset-countdown"[\s\S]*formatWindowRemaining\(account, limit\.key\)/);
   assert.match(source, /\.usage-reset-countdown \{[\s\S]*color: var\(--ocg-error\);/);
+  assert.doesNotMatch(source, /\.usage-reset-countdown \{[\s\S]*?min-height:/);
 });
 
 test("shows a distinct account authentication breaker instead of disguising it as cooldown", async () => {
@@ -137,7 +138,7 @@ test("maps each usage window to its cooldown reset deadline", () => {
   assert.equal(resetTimeForWindow(account, "window_month"), null);
 });
 
-test("keeps account cards compact with metadata tags and top-level usage calibration", async () => {
+test("keeps account cards compact with metadata tags and popover calibration", async () => {
   const source = await readFile(new URL("./Accounts.vue", import.meta.url), "utf8");
   const header = source.slice(
     source.indexOf("<template #header>"),
@@ -152,9 +153,22 @@ test("keeps account cards compact with metadata tags and top-level usage calibra
   assert.ok(header.indexOf("accountStatusLabel(account)") < header.indexOf('t("购买于 {date}"'));
   assert.match(header, /<n-tag size="small" :bordered="false">\s+\{\{ t\("购买于 \{date\}"/);
   assert.match(header, /<n-tag size="small" :bordered="false">\s+\{\{ t\("到期于 \{date\}"/);
+  assert.match(header, /<n-popover[\s\S]*?trigger="click"[\s\S]*?placement="bottom-end"[\s\S]*?:width="320"[\s\S]*?@update:show="\(show: boolean\) => show && focusUsageEditor\(account\.id\)"[\s\S]*?class="usage-editor-popover"/);
+  assert.doesNotMatch(header, /:flip="false"/);
+  assert.ok(header.indexOf("@update:value=\"toggleAccount(account.id)\"") < header.indexOf("<n-popover"));
+  assert.ok(header.indexOf("<n-popover") < header.indexOf("<n-dropdown"));
+  assert.match(header, /class="usage-editor-popover"[\s\S]*?class="usage-resets-row"/);
+  assert.match(source, /async function focusUsageEditor\(accountId: string\)[\s\S]*?requestAnimationFrame[\s\S]*?\.n-input-number input[\s\S]*?\.focus\(\)/);
   assert.match(header, /:aria-label="t\('校准用量'\)"/);
   assert.doesNotMatch(usage, /usage-strip-title|\{\{ t\("用量"\) \}\}/);
   assert.match(usage, /class="usage-strip-body" role="group" :aria-label="t\('用量'\)"/);
+  assert.match(usage, /<n-progress[\s\S]*?:percentage="usageProgressPercentage\(/);
+  assert.doesNotMatch(usage, /<n-input-number|<n-slider|class="usage-resets-row"/);
+  assert.match(
+    source,
+    /\.usage-strip\s*\{\s*min-width:\s*0;\s*\}\s*\.usage-strip-body\s*\{[\s\S]*?grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/,
+  );
+  assert.match(source, /@media \(max-width: 900px\) \{\s*\.usage-strip-body\s*\{\s*grid-template-columns: 1fr;/);
   assert.doesNotMatch(source, /class="account-lifecycle"|\.account-lifecycle\s*\{/);
   assert.match(source, /key: "edit", label: t\("编辑账号"\)/);
   assert.match(source, /v-if="quotaLimitsError"[\s\S]*?@click="retryQuotaLimits"/);
@@ -315,6 +329,7 @@ test("manual editor writes on commit events instead of each value update", async
   assert.match(source, /if \(!edit \|\| edit\.saving\) return;/);
   assert.equal(source.match(/edit\.resets_dirty = true;/g)?.length, 2);
   assert.match(source, /const resetsInMin = resetsInMinutesForSave\(edit, key\)/);
+  assert.match(source, /message\.error\(t\("用量保存失败: \{error\}"/);
 });
 
 test("account drag keeps receiving touch pointers after keyed cards move", async () => {
