@@ -566,6 +566,8 @@ fn browser_args(profile_dir: &Path, target_url: &str, new_tab: bool) -> Vec<Stri
         format!("--user-data-dir={}", profile_dir.display()),
         "--no-first-run".into(),
         "--no-default-browser-check".into(),
+        // Keep the sidecar profile self-contained; it has no desktop keyring.
+        "--password-store=basic".into(),
         "--ozone-platform=x11".into(),
         "--window-size=1440,900".into(),
     ];
@@ -991,6 +993,7 @@ mod tests {
         );
         assert!(args.iter().any(|arg| arg == "--no-first-run"));
         assert!(args.iter().any(|arg| arg == "--no-default-browser-check"));
+        assert!(args.iter().any(|arg| arg == "--password-store=basic"));
         assert!(!args.iter().any(|arg| arg == "--no-sandbox"));
         assert!(!args.iter().any(|arg| arg.contains("remote-debugging")));
         assert!(!args.iter().any(|arg| arg == "--disable-web-security"));

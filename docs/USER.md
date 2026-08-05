@@ -432,6 +432,9 @@ Each completed account card shows the account name, cooldown state, and the
   the console and write them back as local baselines. Sign in to the console
   in that profile first; if the browser is holding the cookie database, close
   it and retry. Failures surface an error and do not silently rewrite quotas.
+  The Linux Docker sidecar uses Chromium's basic password store so its
+  profile remains self-contained; desktop profiles continue to use the
+  browser's configured credential store.
 - **Identity and credentials.** The name is the account's required primary
   display label. The note/login account is optional; on Key-account creation,
   entering it first copies it into the name until you edit the name yourself.
@@ -842,6 +845,8 @@ shows it in a dedicated full browser tab through an authenticated same-origin
 WebSocket, including keyboard and pointer input. Use the page's explicit
 remote clipboard area to copy or paste a key. A reverse proxy in front of the
 dashboard must support WebSocket upgrades.
+The sidecar launches Chromium with its basic password store so its persistent
+profiles do not depend on a host keyring.
 
 Only one remote Chromium runs per node. Switching accounts first shuts down
 the current process cleanly and waits for its profile to flush, then starts

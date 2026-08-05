@@ -363,6 +363,8 @@ Manager 恢复，只能从备份恢复或重新登录。
   控制台 Go 页读取官方用量百分比并写回本地基线。请先在该 Profile 中登录过控制
   台；若浏览器正占用 Cookie 库，先关闭该账号浏览器再刷新。失败时会提示缺少
   会话或解析失败，不会静默改写额度。
+  Linux Docker Sidecar 使用 Chromium 的 basic 密码存储，因此 Profile 不依赖宿主
+  机密钥环；桌面 Profile 仍使用浏览器自身配置的凭据存储。
 - **标识与凭据**：名称是必填的主要展示标识。备注/登录账号可选；新增 Key 账号时
   如果先填写账号，它会自动同步为名称，手动修改名称后不再跟随。面板保存账号
   Key，但不收集或维护第三方登录密码。
@@ -701,6 +703,7 @@ docker compose ps
 Xvfb、轻量窗口管理器、x11vnc 与 noVNC；浏览画面会在 Dashboard 的独立完整标签页
 中通过同源 WebSocket 显示，键鼠输入也走该连接。远程剪贴板使用页面上明确的剪贴板
 区域复制或粘贴 Key。如果前面有反向代理，它必须支持 WebSocket 升级。
+Sidecar 启动 Chromium 时使用 basic 密码存储，持久化 Profile 不依赖宿主机密钥环。
 
 每个节点同一时刻只允许一个远程 Chromium。切换账号时会先正常关闭当前 Chromium、
 等待 Profile 写盘，再启动目标账号；之前打开的远程页面立即失效。Dashboard 浏览

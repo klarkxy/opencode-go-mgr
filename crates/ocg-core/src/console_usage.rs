@@ -15,6 +15,7 @@ use crate::pricing::PricingLimits;
 const AUTH_URL: &str = "https://opencode.ai/auth";
 const MAX_REDIRECTS: usize = 8;
 const USER_AGENT_VALUE: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36";
+const APPROVED_CONSOLE_HOSTS: &[&str] = &["opencode.ai", "auth.opencode.ai", "console.opencode.ai"];
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ConsoleUsageSnapshot {
@@ -50,7 +51,9 @@ pub async fn refresh_managed_account_usage(
     };
     let cookies = read_opencode_cookies(&profile)?;
     if cookies.is_empty() {
-        bail!("browser profile has no OpenCode session cookies; open the OpenCode console once and sign in");
+        bail!(
+            "browser profile has no OpenCode session cookies; open the OpenCode console once and sign in"
+        );
     }
 
     let snapshot = fetch_console_usage(&cookies).await?;
@@ -69,7 +72,9 @@ fn first_existing_profile(data_dir: &Path, account_id: &str) -> Result<PathBuf> 
         .into_iter()
         .find(|path| path.is_dir())
         .with_context(|| {
-            format!("browser profile for account {account_id} is missing; open the console once first")
+            format!(
+                "browser profile for account {account_id} is missing; open the console once first"
+            )
         })
 }
 
@@ -140,9 +145,7 @@ async fn fetch_console_usage(cookies: &BTreeMap<String, String>) -> Result<Conso
                 .get(LOCATION)
                 .and_then(|value| value.to_str().ok())
                 .context("OpenCode redirect missing Location")?;
-            url = url
-                .join(location)
-                .with_context(|| format!("invalid redirect location {location}"))?;
+            url = join_console_redirect(&url, location)?;
             continue;
         }
         if !status.is_success() {
@@ -161,9 +164,10 @@ async fn fetch_console_usage(cookies: &BTreeMap<String, String>) -> Result<Conso
 
     // Prefer an explicit Go workspace page when the landing page only links to it.
     if let Some(go_path) = extract_go_workspace_path(&html) {
-        let go_url = Url::parse("https://opencode.ai")?
-            .join(&go_path)
-            .context("invalid Go workspace path")?;
+        let go_url = join_console_redirect(
+            &Url::parse("https://opencode.ai").expect("base console url is valid"),
+            &go_path,
+        )?;
         let response = client
             .get(go_url)
             .header(USER_AGENT, USER_AGENT_VALUE)
@@ -181,6 +185,21 @@ async fn fetch_console_usage(cookies: &BTreeMap<String, String>) -> Result<Conso
 
     parse_console_usage_html(&html)
         .context("could not parse Go usage from the console page; sign in on this profile and open the Go page once")
+}
+
+fn join_console_redirect(current: &Url, location: &str) -> Result<Url> {
+    let next = current
+        .join(location)
+        .with_context(|| format!("invalid OpenCode redirect location {location}"))?;
+    if next.scheme() != "https"
+        || next.port_or_known_default() != Some(443)
+        || !next
+            .host_str()
+            .is_some_and(|host| APPROVED_CONSOLE_HOSTS.contains(&host))
+    {
+        bail!("OpenCode redirect left the approved HTTPS hosts");
+    }
+    Ok(next)
 }
 
 fn cookie_header_value(cookies: &BTreeMap<String, String>) -> Result<HeaderValue> {
@@ -204,7 +223,7 @@ pub fn extract_go_workspace_path(html: &str) -> Option<String> {
     while let Some(start) = search.find(marker) {
         let rest = &search[start..];
         let end = rest
-            .find(|c: char| c == '"' || c == '\'' || c == ' ' || c == '<' || c == '>' || c == '&')
+            .find(|c: char| ['"', '\'', ' ', '<', '>', '&'].contains(&c))
             .unwrap_or(rest.len());
         let path = &rest[..end];
         let trimmed = path.trim_end_matches('/');
@@ -584,7 +603,7 @@ mod chrome_cookies {
             let mut bytes = Vec::new();
             file.read_to_end(&mut bytes)
                 .with_context(|| format!("failed shared-read of {}", path.display()))?;
-            return Ok(bytes);
+            Ok(bytes)
         }
         #[cfg(not(windows))]
         {
@@ -607,10 +626,19 @@ mod chrome_cookies {
             .with_context(|| format!("failed to read {}", local_state.display()))?;
         let json: serde_json::Value =
             serde_json::from_str(&text).context("Local State is not valid JSON")?;
-        let encrypted_key = json
+        let Some(encrypted_key) = json
             .pointer("/os_crypt/encrypted_key")
             .and_then(|value| value.as_str())
-            .context("os_crypt.encrypted_key missing")?;
+        else {
+            #[cfg(not(windows))]
+            {
+                return Ok(linux_default_key());
+            }
+            #[cfg(windows)]
+            {
+                bail!("os_crypt.encrypted_key missing");
+            }
+        };
         let mut decoded = BASE64
             .decode(encrypted_key)
             .context("os_crypt.encrypted_key is not valid base64")?;
@@ -619,8 +647,14 @@ mod chrome_cookies {
             return dpapi_unprotect(&decoded);
         }
         if decoded.starts_with(b"v10") || decoded.starts_with(b"v11") {
-            // Linux keyring variants are uncommon in our headless profiles; try empty key path.
-            bail!("unsupported os_crypt key format");
+            #[cfg(not(windows))]
+            {
+                return Ok(linux_default_key());
+            }
+            #[cfg(windows)]
+            {
+                bail!("unsupported os_crypt key format");
+            }
         }
         Ok(decoded)
     }
@@ -631,6 +665,10 @@ mod chrome_cookies {
         }
         if encrypted.starts_with(b"v10") || encrypted.starts_with(b"v11") {
             let key = key.context("cookie is encrypted but OS crypt key is unavailable")?;
+            #[cfg(not(windows))]
+            {
+                return decrypt_linux_cookie(encrypted, key);
+            }
             return decrypt_aes_gcm(encrypted, key);
         }
         // Legacy DPAPI blob on older Chromium.
@@ -673,6 +711,18 @@ mod chrome_cookies {
         cookie_value_from_plain(plain)
     }
 
+    #[cfg(test)]
+    #[cfg(not(windows))]
+    pub(super) fn decrypt_cookie_value_for_test(encrypted: &[u8], key: &[u8]) -> Result<String> {
+        decrypt_cookie_value(encrypted, Some(key))
+    }
+
+    #[cfg(not(windows))]
+    #[cfg(test)]
+    pub(super) fn linux_default_key_for_test() -> Vec<u8> {
+        linux_default_key()
+    }
+
     fn aes_gcm_decrypt(key: &[u8], nonce: &[u8], ciphertext: &[u8], tag: &[u8]) -> Result<Vec<u8>> {
         use aes_gcm::aead::{Aead, KeyInit, Payload};
         use aes_gcm::{Aes256Gcm, Nonce};
@@ -689,20 +739,134 @@ mod chrome_cookies {
         let mut data = ciphertext.to_vec();
         data.extend_from_slice(tag);
         cipher
-            .decrypt(Nonce::from_slice(nonce), Payload { msg: &data, aad: b"" })
+            .decrypt(
+                Nonce::from_slice(nonce),
+                Payload {
+                    msg: &data,
+                    aad: b"",
+                },
+            )
             .map_err(|_| anyhow::anyhow!("AES-GCM cookie decryption failed"))
+    }
+
+    #[cfg(not(windows))]
+    fn linux_default_key() -> Vec<u8> {
+        pbkdf2_sha1(b"peanuts", b"saltysalt", 1, 16)
+    }
+
+    #[cfg(not(windows))]
+    fn linux_empty_key() -> Vec<u8> {
+        pbkdf2_sha1(b"", b"saltysalt", 1, 16)
+    }
+
+    #[cfg(not(windows))]
+    fn decrypt_linux_cookie(encrypted: &[u8], key: &[u8]) -> Result<String> {
+        let mut keys = vec![key.to_vec()];
+        if encrypted.starts_with(b"v11") {
+            keys.push(linux_empty_key());
+        }
+        for candidate in keys {
+            if let Ok(plain) = decrypt_linux_aes_cbc(encrypted, &candidate) {
+                return cookie_value_from_plain(plain);
+            }
+        }
+        bail!("Linux Chromium Cookie decryption failed")
+    }
+
+    #[cfg(not(windows))]
+    fn decrypt_linux_aes_cbc(encrypted: &[u8], key: &[u8]) -> Result<Vec<u8>> {
+        use aes_gcm::aes::{
+            Aes128,
+            cipher::{BlockDecrypt, KeyInit, generic_array::GenericArray},
+        };
+
+        if key.len() != 16 || encrypted.len() < 3 + 16 || (encrypted.len() - 3) % 16 != 0 {
+            bail!("invalid Linux Chromium Cookie payload");
+        }
+        let cipher = Aes128::new_from_slice(key).context("invalid Linux AES key")?;
+        let mut previous = [b' '; 16];
+        let mut plain = Vec::with_capacity(encrypted.len() - 3);
+        for chunk in encrypted[3..].chunks_exact(16) {
+            let mut block = GenericArray::clone_from_slice(chunk);
+            cipher.decrypt_block(&mut block);
+            for (value, previous) in block.iter_mut().zip(previous) {
+                *value ^= previous;
+            }
+            plain.extend_from_slice(&block);
+            previous.copy_from_slice(chunk);
+        }
+        let padding = *plain
+            .last()
+            .context("Linux Chromium Cookie plaintext is empty")? as usize;
+        if padding == 0
+            || padding > 16
+            || plain.len() < padding
+            || !plain[plain.len() - padding..]
+                .iter()
+                .all(|value| *value as usize == padding)
+        {
+            bail!("invalid Linux Chromium Cookie padding");
+        }
+        plain.truncate(plain.len() - padding);
+        Ok(plain)
+    }
+
+    #[cfg(not(windows))]
+    fn pbkdf2_sha1(password: &[u8], salt: &[u8], iterations: u32, length: usize) -> Vec<u8> {
+        use sha1::{Digest, Sha1};
+
+        fn hmac_sha1(key: &[u8], message: &[u8]) -> [u8; 20] {
+            use sha1::{Digest, Sha1};
+            let mut key_block = [0_u8; 64];
+            if key.len() > key_block.len() {
+                key_block[..20].copy_from_slice(&Sha1::digest(key));
+            } else {
+                key_block[..key.len()].copy_from_slice(key);
+            }
+            let mut inner = Sha1::new();
+            for byte in &mut key_block {
+                *byte ^= 0x36;
+            }
+            inner.update(key_block);
+            inner.update(message);
+            let inner_hash = inner.finalize();
+            for byte in &mut key_block {
+                *byte ^= 0x36 ^ 0x5c;
+            }
+            let mut outer = Sha1::new();
+            outer.update(key_block);
+            outer.update(inner_hash);
+            outer.finalize().into()
+        }
+
+        let mut output = Vec::with_capacity(length);
+        let blocks = length.div_ceil(20);
+        for block in 1..=blocks {
+            let mut message = Vec::with_capacity(salt.len() + 4);
+            message.extend_from_slice(salt);
+            message.extend_from_slice(&(block as u32).to_be_bytes());
+            let mut value = hmac_sha1(password, &message);
+            let mut accumulated = value;
+            for _ in 1..iterations {
+                value = hmac_sha1(password, &value);
+                for (left, right) in accumulated.iter_mut().zip(value) {
+                    *left ^= right;
+                }
+            }
+            output.extend_from_slice(&accumulated);
+        }
+        output.truncate(length);
+        output
     }
 
     #[cfg(windows)]
     fn dpapi_unprotect(data: &[u8]) -> Result<Vec<u8>> {
         use std::ptr;
         use windows::Win32::Foundation::LocalFree;
-        use windows::Win32::Security::Cryptography::{
-            CRYPT_INTEGER_BLOB, CryptUnprotectData,
-        };
+        use windows::Win32::Security::Cryptography::{CRYPT_INTEGER_BLOB, CryptUnprotectData};
 
         unsafe {
-            let mut input = CRYPT_INTEGER_BLOB {
+            let input = CRYPT_INTEGER_BLOB {
                 cbData: data.len() as u32,
                 pbData: data.as_ptr() as *mut u8,
             };
@@ -710,19 +874,10 @@ mod chrome_cookies {
                 cbData: 0,
                 pbData: ptr::null_mut(),
             };
-            CryptUnprotectData(
-                &mut input,
-                None,
-                None,
-                None,
-                None,
-                0,
-                &mut output,
-            )
-            .ok()
-            .context("CryptUnprotectData failed")?;
-            let bytes =
-                std::slice::from_raw_parts(output.pbData, output.cbData as usize).to_vec();
+            CryptUnprotectData(&input, None, None, None, None, 0, &mut output)
+                .ok()
+                .context("CryptUnprotectData failed")?;
+            let bytes = std::slice::from_raw_parts(output.pbData, output.cbData as usize).to_vec();
             if !output.pbData.is_null() {
                 let _ = LocalFree(Some(windows::Win32::Foundation::HLOCAL(output.pbData as _)));
             }
@@ -773,10 +928,7 @@ mod tests {
         assert_eq!(snapshot.window_week_percent, 3.0);
         assert_eq!(snapshot.window_month_percent, 76.0);
         assert_eq!(snapshot.resets_in_5h_minutes, Some(2 * 60 + 44));
-        assert_eq!(
-            snapshot.resets_in_week_minutes,
-            Some(4 * 24 * 60 + 13 * 60)
-        );
+        assert_eq!(snapshot.resets_in_week_minutes, Some(4 * 24 * 60 + 13 * 60));
         assert_eq!(
             snapshot.resets_in_month_minutes,
             Some(14 * 24 * 60 + 20 * 60)
@@ -798,10 +950,7 @@ mod tests {
         assert_eq!(snapshot.window_week_percent, 3.0);
         assert_eq!(snapshot.window_month_percent, 76.0);
         assert_eq!(snapshot.resets_in_5h_minutes, Some(91));
-        assert_eq!(
-            snapshot.resets_in_week_minutes,
-            Some(4 * 24 * 60 + 12 * 60)
-        );
+        assert_eq!(snapshot.resets_in_week_minutes, Some(4 * 24 * 60 + 12 * 60));
     }
 
     #[test]
@@ -860,6 +1009,58 @@ mod tests {
         assert_eq!(
             chrome_cookies::cookie_value_from_plain_for_test(b"legacy-plain".to_vec()).unwrap(),
             "legacy-plain"
+        );
+    }
+
+    #[test]
+    fn console_redirects_reject_cross_origin_and_insecure_targets() {
+        let current = Url::parse(AUTH_URL).unwrap();
+        assert_eq!(
+            join_console_redirect(&current, "https://console.opencode.ai/workspace/wrk/go")
+                .unwrap()
+                .host_str(),
+            Some("console.opencode.ai")
+        );
+        for location in [
+            "https://attacker.example/collect",
+            "http://opencode.ai/insecure",
+            "https://opencode.ai:444/other",
+            "https://opencode.ai.example/other",
+        ] {
+            assert!(
+                join_console_redirect(&current, location).is_err(),
+                "{location}"
+            );
+        }
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn decrypts_linux_basic_chromium_v10_cookie() {
+        use aes_gcm::aes::{
+            Aes128,
+            cipher::{BlockEncrypt, KeyInit, generic_array::GenericArray},
+        };
+
+        let key = chrome_cookies::linux_default_key_for_test();
+        let mut plain = b"session-token".to_vec();
+        let padding = 16 - plain.len() % 16;
+        plain.extend(std::iter::repeat_n(padding as u8, padding));
+        let cipher = Aes128::new_from_slice(&key).unwrap();
+        let mut previous = [b' '; 16];
+        let mut encrypted = b"v10".to_vec();
+        for chunk in plain.chunks_exact(16) {
+            let mut block = GenericArray::clone_from_slice(chunk);
+            for (value, previous) in block.iter_mut().zip(previous) {
+                *value ^= previous;
+            }
+            cipher.encrypt_block(&mut block);
+            previous.copy_from_slice(&block);
+            encrypted.extend_from_slice(&block);
+        }
+        assert_eq!(
+            chrome_cookies::decrypt_cookie_value_for_test(&encrypted, &key).unwrap(),
+            "session-token"
         );
     }
 }
