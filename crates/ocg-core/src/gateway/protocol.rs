@@ -104,6 +104,7 @@ struct ModelProtocol {
 // Probe matrix (direct OpenCode-Go, 2026-07-31, test account):
 // preferred stays on the official docs endpoint; supported is live 2xx shape.
 const CHAT_ONLY: &[ApiFormat] = &[ApiFormat::ChatCompletions];
+const RESPONSES_ONLY: &[ApiFormat] = &[ApiFormat::Responses];
 const CHAT_AND_RESPONSES: &[ApiFormat] = &[ApiFormat::ChatCompletions, ApiFormat::Responses];
 const CHAT_AND_MESSAGES: &[ApiFormat] = &[ApiFormat::ChatCompletions, ApiFormat::Messages];
 const ALL_THREE: &[ApiFormat] = &[
@@ -136,7 +137,7 @@ const MODEL_PROTOCOLS: &[ModelProtocol] = &[
     ModelProtocol {
         id: "gpt-5.6-luna",
         preferred: ApiFormat::Responses,
-        supported: CHAT_AND_RESPONSES,
+        supported: RESPONSES_ONLY,
     },
     ModelProtocol {
         id: "kimi-k3",
@@ -3355,7 +3356,7 @@ mod tests {
             })),
         )
         .unwrap();
-        assert_eq!(luna_chat.upstream, ApiFormat::ChatCompletions);
+        assert_eq!(luna_chat.upstream, ApiFormat::Responses);
 
         let luna_responses = prepare_request(
             ApiFormat::Responses,

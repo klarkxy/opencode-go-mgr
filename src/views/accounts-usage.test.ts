@@ -159,6 +159,7 @@ test("keeps account cards compact with metadata tags and popover calibration", a
   assert.ok(header.indexOf("<n-popover") < header.indexOf("<n-dropdown"));
   assert.match(header, /class="usage-editor-popover"[\s\S]*?class="usage-resets-row"/);
   assert.match(source, /async function focusUsageEditor\(accountId: string\)[\s\S]*?requestAnimationFrame[\s\S]*?\.n-input-number input[\s\S]*?\.focus\(\)/);
+  assert.match(header, /account\.account_type === 'managed'[\s\S]*?刷新额度/);
   assert.match(header, /:aria-label="t\('校准用量'\)"/);
   assert.doesNotMatch(usage, /usage-strip-title|\{\{ t\("用量"\) \}\}/);
   assert.match(usage, /class="usage-strip-body" role="group" :aria-label="t\('用量'\)"/);

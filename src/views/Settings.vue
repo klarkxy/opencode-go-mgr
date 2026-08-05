@@ -17,6 +17,7 @@
         </n-form-item>
         <n-form-item
           :label="t('OpenCode 邀请链接（注册新账号）')"
+          :show-feedback="true"
           :validation-status="inviteUrlPreview.status"
           :feedback="inviteUrlPreview.feedback"
         >
@@ -25,7 +26,7 @@
             :disabled="!loaded || regenerating"
             clearable
             class="mono"
-            placeholder="https://opencode.ai/..."
+            :placeholder="DEFAULT_OPENCODE_INVITE_URL"
             :input-props="{ 'aria-label': t('OpenCode 邀请链接（注册新账号）') }"
             @blur="normalizeInviteUrlInput"
           />
@@ -477,7 +478,7 @@ import {
   normalizeClientRootUrl,
   resolveConnectionUrls,
 } from "./dashboard-connection";
-import { normalizeOpenCodeInviteUrl } from "./managed-account";
+import { DEFAULT_OPENCODE_INVITE_URL, normalizeOpenCodeInviteUrl } from "./managed-account";
 import { mergeUnsavedSettings } from "./settings-merge";
 import {
   clearUpdateTarget,
@@ -528,7 +529,7 @@ const config = ref<AppConfig>({
   gateway_port: 9042,
   gateway_key: "",
   upstream_base_url: "https://opencode.ai/zen/go",
-  opencode_invite_url: "",
+  opencode_invite_url: DEFAULT_OPENCODE_INVITE_URL,
   client_root_url: "",
   client_root_url_from_env: false,
   auto_start: false,
@@ -633,10 +634,13 @@ const clientRootPreview = computed<{
 const inviteUrlPreview = computed<{ status?: "error"; feedback: string }>(() => {
   try {
     const normalized = normalizeOpenCodeInviteUrl(config.value.opencode_invite_url);
+    if (!normalized) {
+      return {
+        feedback: t("留空时“注册新账号”入口不可用。仅接受 opencode.ai 官方 HTTPS 链接。"),
+      };
+    }
     return {
-      feedback: normalized
-        ? t("仅用于注册向导打开邀请页面；更新后不会改写已完成账号。")
-        : t("留空时“注册新账号”入口不可用。仅接受 opencode.ai 官方 HTTPS 链接。"),
+      feedback: t("仅用于注册向导打开邀请页面。注册前请改为你自己的邀请链接；默认链接仅作演示，注册收益归链接所有者。"),
     };
   } catch (error) {
     return {

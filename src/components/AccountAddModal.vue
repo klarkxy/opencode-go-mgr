@@ -24,7 +24,7 @@
           >
             <n-icon :component="UserAddOutlined" size="28" aria-hidden="true" />
             <span class="account-add-option__title">{{ t("注册新账号（Beta）") }}</span>
-            <span>{{ t("使用独立浏览器 Profile，引导完成 Google、邀请注册、支付和 Key 验证。") }}</span>
+            <span>{{ t("独立 Profile：登录 → 邀请 → 支付 → 验证 Key。") }}</span>
           </button>
         </template>
         {{ managedReason }}

@@ -2,84 +2,74 @@
   <n-modal
     :show="show"
     preset="card"
-    :title="t('注册新账号（Beta）：{name}', { name: account.name })"
     class="managed-wizard-modal"
     style="width: 820px; max-width: calc(100vw - 32px)"
     :mask-closable="false"
     @update:show="$emit('update:show', $event)"
   >
+    <template #header>
+      <div class="managed-wizard__title">
+        <span>{{ t("注册新账号：{name}", { name: account.name }) }}</span>
+        <n-tag size="small" type="warning" :bordered="false">Beta</n-tag>
+      </div>
+    </template>
+
     <n-steps :current="currentStep" size="small" class="managed-wizard__steps">
-      <n-step :title="t('Google 账号')" />
-      <n-step :title="t('邀请注册')" />
-      <n-step :title="t('完成支付')" />
-      <n-step :title="t('验证 Key')" />
+      <n-step
+        v-for="(step, index) in wizardSteps"
+        :key="step.id"
+        :status="stepStatus(index)"
+      >
+        <template #title>
+          <button
+            type="button"
+            class="managed-wizard__step-btn"
+            :class="{ 'managed-wizard__step-btn--active': index + 1 === currentStep }"
+            :disabled="!canGoToStep(index) || busy"
+            @click="goToStep(index)"
+          >{{ step.title }}</button>
+        </template>
+      </n-step>
     </n-steps>
 
-    <n-alert type="warning" class="managed-wizard__alert">
-      {{ t("托管注册与独立浏览器 Profile 为 Beta 功能，尚未经过充分测试，请勿依赖其用于生产环境。") }}
-    </n-alert>
-
-    <n-alert v-if="browserCapabilities.mode === 'unsupported'" type="error" class="managed-wizard__alert">
+    <n-alert
+      v-if="browserCapabilities.mode === 'unsupported'"
+      type="error"
+      class="managed-wizard__alert"
+    >
       {{ browserCapabilities.reason || t("当前环境不支持独立浏览器") }}
     </n-alert>
-
-    <section class="managed-wizard__quick-links" aria-labelledby="managed-quick-links-title">
-      <div>
-        <h3 id="managed-quick-links-title">{{ t("重新打开已完成页面") }}</h3>
-        <p>{{ t("这些按钮始终使用该账号自己的浏览器 Profile，不会改变已保存的注册进度。") }}</p>
-      </div>
-      <n-space wrap>
-        <n-button
-          size="small"
-          secondary
-          :disabled="!browserAvailable"
-          :loading="openingTarget === 'google_signup'"
-          @click="$emit('openBrowser', 'google_signup')"
-        >{{ t("打开 Google") }}</n-button>
-        <n-button
-          v-if="currentStep >= 2"
-          size="small"
-          secondary
-          :disabled="!browserAvailable"
-          :loading="openingTarget === 'invite'"
-          @click="$emit('openBrowser', 'invite')"
-        >{{ t("打开邀请链接") }}</n-button>
-        <n-button
-          v-if="currentStep >= 3"
-          size="small"
-          secondary
-          :disabled="!browserAvailable"
-          :loading="openingTarget === 'console'"
-          @click="$emit('openBrowser', 'console')"
-        >{{ t("打开 OpenCode 官网") }}</n-button>
-      </n-space>
-    </section>
 
     <section class="managed-wizard__stage">
       <template v-if="account.setup_step === 'google_account'">
         <p class="managed-wizard__kicker">{{ t("第 1 步，共 4 步") }}</p>
-        <h2>{{ t("创建或登录 Google 账号") }}</h2>
-        <p>{{ t("打开一个没有该账号登录状态的独立浏览器 Profile，在 Google 页面中由你手动注册或登录。") }}</p>
-        <n-alert type="info" :show-icon="false">
-          {{ t("OCG Manager 不保存 Google 密码，不处理验证码，也不会自动填写注册信息。") }}
-        </n-alert>
+        <h2>{{ t("准备登录身份（可选）") }}</h2>
+        <p>{{ t("需要新账号时在此注册 Google 或 GitHub；已有账号可直接跳过，登录在下一步完成。") }}</p>
         <div class="managed-wizard__actions">
-          <n-button
-            secondary
-            :disabled="!browserAvailable"
-            :loading="openingTarget === 'google_signup'"
-            @click="$emit('openBrowser', 'google_signup')"
-          >{{ t("打开 Google 注册页面") }}</n-button>
+          <n-space wrap>
+            <n-button
+              secondary
+              :disabled="!browserAvailable"
+              :loading="openingTarget === 'google_signup'"
+              @click="$emit('openBrowser', 'google_signup')"
+            >{{ t("注册 Google") }}</n-button>
+            <n-button
+              secondary
+              :disabled="!browserAvailable"
+              :loading="openingTarget === 'github_signup'"
+              @click="$emit('openBrowser', 'github_signup')"
+            >{{ t("注册 GitHub") }}</n-button>
+          </n-space>
           <n-button type="primary" :loading="busy" @click="$emit('advance', 'opencode_registration')">
-            {{ t("我已完成 Google 注册或登录") }}
+            {{ t("跳过此步") }}
           </n-button>
         </div>
       </template>
 
       <template v-else-if="account.setup_step === 'opencode_registration'">
         <p class="managed-wizard__kicker">{{ t("第 2 步，共 4 步") }}</p>
-        <h2>{{ t("通过邀请链接注册 OpenCode Go") }}</h2>
-        <p>{{ t("使用同一个浏览器 Profile 打开设置中的邀请链接，并使用刚才的 Google 账号完成 OpenCode 登录或注册。") }}</p>
+        <h2>{{ t("打开邀请并完成 OpenCode 登录/注册") }}</h2>
+        <p>{{ t("在同一 Profile 打开邀请链接，用 Google 或 GitHub 登录。") }}</p>
         <div class="managed-wizard__actions">
           <n-button
             secondary
@@ -88,25 +78,22 @@
             @click="$emit('openBrowser', 'invite')"
           >{{ t("打开邀请链接") }}</n-button>
           <n-button type="primary" :loading="busy" @click="$emit('advance', 'payment')">
-            {{ t("我已完成 OpenCode 注册") }}
+            {{ t("我已完成登录/注册") }}
           </n-button>
         </div>
       </template>
 
       <template v-else-if="account.setup_step === 'payment'">
         <p class="managed-wizard__kicker">{{ t("第 3 步，共 4 步") }}</p>
-        <h2>{{ t("在 OpenCode 中完成支付") }}</h2>
-        <p>{{ t("在浏览器中检查套餐、金额和支付信息。真实支付只会由你在 OpenCode 页面中明确执行。") }}</p>
-        <n-alert type="warning" :show-icon="false">
-          {{ t("OCG Manager 不读取支付页面，也不会自动点击支付按钮。") }}
-        </n-alert>
+        <h2>{{ t("完成支付") }}</h2>
+        <p>{{ t("在控制台确认套餐与金额；支付仅由你在页面上完成。") }}</p>
         <div class="managed-wizard__actions">
           <n-button
             secondary
             :disabled="!browserAvailable"
             :loading="openingTarget === 'console'"
             @click="$emit('openBrowser', 'console')"
-          >{{ t("返回 OpenCode 页面") }}</n-button>
+          >{{ t("打开控制台") }}</n-button>
           <n-button type="primary" :loading="busy" @click="$emit('advance', 'key_verification')">
             {{ t("我已完成支付") }}
           </n-button>
@@ -115,8 +102,8 @@
 
       <template v-else-if="account.setup_step === 'key_verification'">
         <p class="managed-wizard__kicker">{{ t("第 4 步，共 4 步") }}</p>
-        <h2>{{ t("复制并验证 Key") }}</h2>
-        <p>{{ t("在 OpenCode 官网复制 Key，填入下方后由 OCG Manager 真实请求上游验证。只有验证成功才会启用账号。") }}</p>
+        <h2>{{ t("粘贴并验证 Key") }}</h2>
+        <p>{{ t("从控制台复制 Key；实测成功后账号才启用。") }}</p>
         <n-input
           v-model:value="keyDraft"
           type="password"
@@ -132,7 +119,7 @@
             :disabled="!browserAvailable"
             :loading="openingTarget === 'console'"
             @click="$emit('openBrowser', 'console')"
-          >{{ t("打开 OpenCode 官网") }}</n-button>
+          >{{ t("打开控制台") }}</n-button>
           <n-button type="primary" :disabled="!keyDraft.trim()" :loading="busy" @click="verifyKey">
             {{ t("保存并实测 Key") }}
           </n-button>
@@ -140,18 +127,21 @@
       </template>
     </section>
 
-    <template #footer>
-      <div class="managed-wizard__footer">
-        <span>{{ t("关闭后可随时从账号列表继续，浏览器登录状态会保留。") }}</span>
-        <n-button @click="$emit('update:show', false)">{{ t("暂时关闭") }}</n-button>
-      </div>
-    </template>
   </n-modal>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { NAlert, NButton, NInput, NModal, NSpace, NStep, NSteps } from "naive-ui";
+import {
+  NAlert,
+  NButton,
+  NInput,
+  NModal,
+  NSpace,
+  NStep,
+  NSteps,
+  NTag,
+} from "naive-ui";
 import type {
   Account,
   AccountSetupStep,
@@ -159,7 +149,7 @@ import type {
   BrowserTarget,
 } from "../api/tauri";
 import { t } from "../i18n/index.ts";
-import { setupStepIndex } from "../views/managed-account";
+import { MANAGED_SETUP_STEPS, setupStepIndex } from "../views/managed-account";
 
 const props = defineProps<{
   show: boolean;
@@ -177,12 +167,39 @@ const emit = defineEmits<{
 }>();
 
 const keyDraft = ref("");
+const wizardStepIds = MANAGED_SETUP_STEPS.filter((step) => step !== "ready");
+const wizardSteps = computed(() => [
+  { id: "google_account" as const, title: t("登录身份") },
+  { id: "opencode_registration" as const, title: t("邀请注册") },
+  { id: "payment" as const, title: t("完成支付") },
+  { id: "key_verification" as const, title: t("验证 Key") },
+]);
 const currentStep = computed(() => Math.min(4, setupStepIndex(props.account.setup_step) + 1));
 const browserAvailable = computed(() => props.browserCapabilities.mode !== "unsupported");
 
 watch(() => [props.show, props.account.id, props.account.setup_step] as const, () => {
   keyDraft.value = "";
 });
+
+function stepStatus(index: number): "process" | "finish" | "wait" {
+  const current = currentStep.value;
+  if (index + 1 < current) return "finish";
+  if (index + 1 === current) return "process";
+  return "wait";
+}
+
+function canGoToStep(index: number): boolean {
+  // Only rewind to earlier finished steps; forward stays on primary CTAs.
+  return index + 1 < currentStep.value;
+}
+
+function goToStep(index: number): void {
+  if (!canGoToStep(index) || props.busy) return;
+  const target = wizardStepIds[index];
+  if (target && target !== props.account.setup_step) {
+    emit("advance", target);
+  }
+}
 
 function verifyKey(): void {
   const key = keyDraft.value.trim();
@@ -191,58 +208,70 @@ function verifyKey(): void {
 </script>
 
 <style scoped>
+.managed-wizard__title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--ocg-font-lg);
+  font-weight: 700;
+}
+
 .managed-wizard__steps {
-  margin-bottom: 20px;
+  margin-bottom: 16px;
+}
+
+.managed-wizard__step-btn {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+  text-align: left;
+  background: transparent;
+  cursor: pointer;
+}
+
+.managed-wizard__step-btn:disabled {
+  cursor: default;
+}
+
+.managed-wizard__step-btn:not(:disabled):hover,
+.managed-wizard__step-btn:not(:disabled):focus-visible {
+  color: var(--ocg-primary);
+  text-decoration: underline;
+  outline: none;
+}
+
+.managed-wizard__step-btn--active {
+  cursor: default;
 }
 
 .managed-wizard__alert {
   margin-bottom: 14px;
 }
 
-.managed-wizard__quick-links {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 14px 16px;
-  border: 1px solid var(--ocg-divider);
-  border-radius: 12px;
-  background: var(--ocg-canvas);
-}
-
-.managed-wizard__quick-links h3,
-.managed-wizard__stage h2 {
-  margin: 0;
-}
-
-.managed-wizard__quick-links h3 {
-  font-size: var(--ocg-font-md);
-}
-
-.managed-wizard__quick-links p,
-.managed-wizard__stage p,
-.managed-wizard__footer {
-  color: var(--ocg-muted);
-  font-size: var(--ocg-font-sm);
-  line-height: 1.6;
-}
-
-.managed-wizard__quick-links p {
-  margin: 4px 0 0;
-}
-
 .managed-wizard__stage {
   display: grid;
-  gap: 16px;
-  min-height: 260px;
-  margin-top: 16px;
+  gap: 14px;
+  min-height: 220px;
   padding: 22px;
   border: 1px solid var(--ocg-divider);
   border-radius: 14px;
 }
 
+.managed-wizard__stage h2 {
+  margin: 0;
+  font-size: var(--ocg-font-lg);
+}
+
 .managed-wizard__stage p {
   margin: 0;
+  color: var(--ocg-muted);
+  font-size: var(--ocg-font-sm);
+  line-height: 1.6;
 }
 
 .managed-wizard__kicker {
@@ -254,8 +283,7 @@ function verifyKey(): void {
   max-width: 560px;
 }
 
-.managed-wizard__actions,
-.managed-wizard__footer {
+.managed-wizard__actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -264,8 +292,7 @@ function verifyKey(): void {
 }
 
 @media (max-width: 640px) {
-  .managed-wizard__quick-links,
-  .managed-wizard__footer {
+  .managed-wizard__actions {
     align-items: stretch;
     flex-direction: column;
   }

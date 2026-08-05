@@ -70,7 +70,13 @@ export interface AppConfig {
 }
 
 export type BrowserMode = "native" | "remote" | "unsupported";
-export type BrowserTarget = "google_signup" | "invite" | "console";
+export type BrowserTarget =
+  | "google_signup"
+  | "google_login"
+  | "github_signup"
+  | "github_login"
+  | "invite"
+  | "console";
 
 export interface BrowserCapabilities {
   mode: BrowserMode;
@@ -426,6 +432,10 @@ export const tauriApi = {
     method: "PATCH",
     body: jsonBody({ window, percent, resets_in_minutes: resets_in_minutes ?? null }),
   }),
+  refreshManagedAccountUsage: (id: string) =>
+    request<{ usage: UsageWindow; source: string }>(`/accounts/${id}/usage/refresh`, {
+      method: "POST",
+    }),
   resetAccountCooldown: (id: string) =>
     request<Account>(`/accounts/${id}/reset-cooldown`, { method: "POST" }),
   advanceAccountSetup: (id: string, setupStep: AccountSetupStep) =>

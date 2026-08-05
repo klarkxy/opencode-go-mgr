@@ -1,5 +1,8 @@
 import type { AccountSetupStep, BrowserTarget } from "../api/tauri";
 
+export const DEFAULT_OPENCODE_INVITE_URL =
+  "https://opencode.ai/go?ref=68XPB6NP8V";
+
 export const MANAGED_SETUP_STEPS: readonly AccountSetupStep[] = [
   "google_account",
   "opencode_registration",

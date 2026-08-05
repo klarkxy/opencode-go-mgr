@@ -121,7 +121,7 @@ test("settings API maps the loaded revision to conditional writes and returns ne
     gateway_port: 9042,
     gateway_key: "ocg-old-key",
     upstream_base_url: "https://opencode.ai/zen/go",
-    opencode_invite_url: "",
+    opencode_invite_url: "https://opencode.ai/go?ref=68XPB6NP8V",
     client_root_url: "",
     client_root_url_from_env: false,
     auto_start: false,

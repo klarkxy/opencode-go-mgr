@@ -14,7 +14,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 use tauri::State;
 
-const OCG_CONSOLE_URL: &str = "https://opencode.ai/zen/go";
+const OCG_CONSOLE_URL: &str = "https://opencode.ai/auth";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BrowserKind {

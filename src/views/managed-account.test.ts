@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
+  DEFAULT_OPENCODE_INVITE_URL,
   browserViewUrl,
   nextSetupStep,
   normalizeOpenCodeInviteUrl,
@@ -20,6 +21,14 @@ test("managed signup steps advance in order and map to allowed browser targets",
   assert.equal(setupBrowserTarget("opencode_registration"), "invite");
   assert.equal(setupBrowserTarget("payment"), "console");
   assert.equal(setupBrowserTarget("key_verification"), "console");
+});
+
+test("default OpenCode invite URL is allowlisted", () => {
+  assert.equal(
+    normalizeOpenCodeInviteUrl(DEFAULT_OPENCODE_INVITE_URL),
+    DEFAULT_OPENCODE_INVITE_URL,
+  );
+  assert.match(DEFAULT_OPENCODE_INVITE_URL, /^https:\/\/opencode\.ai\/go\?ref=68XPB6NP8V$/);
 });
 
 test("OpenCode invite URLs are HTTPS, credential-free, bounded, and host allowlisted", () => {
@@ -46,27 +55,34 @@ test("remote browser view URL preserves dashboard location and carries the opaqu
 });
 
 test("managed account UI isolates pending controls and renders noVNC in a dedicated view", async () => {
-  const [accounts, chooser, wizard, browser, app, managedMessages] = await Promise.all([
+  const [accounts, chooser, wizard, browser, app] = await Promise.all([
     readFile(new URL("./Accounts.vue", import.meta.url), "utf8"),
     readFile(new URL("../components/AccountAddModal.vue", import.meta.url), "utf8"),
     readFile(new URL("../components/ManagedAccountWizard.vue", import.meta.url), "utf8"),
     readFile(new URL("./BrowserSession.vue", import.meta.url), "utf8"),
     readFile(new URL("../App.vue", import.meta.url), "utf8"),
-    readFile(new URL("../i18n/messages/managed-account.ts", import.meta.url), "utf8"),
   ]);
 
   assert.match(chooser, /导入已有 Key/);
   assert.match(chooser, /注册新账号/);
   assert.match(chooser, /注册新账号（Beta）/);
   assert.match(chooser, /:disabled="!managedAvailable"/);
-  assert.match(wizard, /注册新账号（Beta）：\{name\}/);
-  assert.match(wizard, /托管注册与独立浏览器 Profile 为 Beta 功能，尚未经过充分测试，请勿依赖其用于生产环境。/);
-  assert.match(managedMessages, /Managed signup and isolated browser profiles are Beta features\. They have not been thoroughly tested; do not rely on them in production\./);
+  assert.match(chooser, /独立 Profile：登录 → 邀请 → 支付 → 验证 Key。/);
+  assert.doesNotMatch(chooser, /注册前请先在设置中填写你自己的邀请链接/);
+  assert.match(accounts, /请确认邀请链接是你自己的（默认仅演示）。修改后会写入设置。草稿可随时继续。/);
+  assert.match(accounts, /managedDraft\.inviteUrl/);
+  assert.match(accounts, /ensureInviteUrlSaved/);
+  assert.match(accounts, /canCreateManagedDraft/);
+  assert.match(wizard, /注册新账号：\{name\}/);
+  assert.match(wizard, /n-tag[\s\S]*?Beta/);
+  assert.doesNotMatch(wizard, /托管注册与独立浏览器 Profile 为 Beta 功能/);
   assert.match(accounts, /v-if="accountIsReady\(account\)"[\s\S]*?@click="pingAccount/);
   assert.match(accounts, /v-if="accountIsReady\(account\)"[\s\S]*?<n-switch/);
   assert.match(accounts, /loaded\.filter\(accountIsReady\)/);
   assert.match(accounts, /window\.open\("", "_blank"\)[\s\S]*?remoteTab\.location\.replace/);
   assert.match(wizard, /google_account[\s\S]*?opencode_registration[\s\S]*?payment[\s\S]*?key_verification/);
+  assert.doesNotMatch(wizard, /重新打开页面/);
+  assert.match(wizard, /goToStep|canGoToStep/);
   const registrationStage = wizard.slice(
     wizard.indexOf(`account.setup_step === 'opencode_registration'`),
     wizard.indexOf(`account.setup_step === 'payment'`),
@@ -76,7 +92,20 @@ test("managed account UI isolates pending controls and renders noVNC in a dedica
     wizard.indexOf(`account.setup_step === 'key_verification'`),
   );
   assert.match(registrationStage, /openBrowser', 'invite'/);
+  assert.match(registrationStage, /我已完成登录\/注册/);
   assert.match(paymentStage, /openBrowser', 'console'/);
+  assert.match(paymentStage, /打开控制台/);
+  const googleStage = wizard.slice(
+    wizard.indexOf(`account.setup_step === 'google_account'`),
+    wizard.indexOf(`account.setup_step === 'opencode_registration'`),
+  );
+  assert.match(googleStage, /openBrowser', 'google_signup'/);
+  assert.match(googleStage, /openBrowser', 'github_signup'/);
+  assert.match(googleStage, /跳过此步/);
+  assert.doesNotMatch(googleStage, /打开 Google 登录/);
+  assert.doesNotMatch(accounts, /skipGoogle/);
+  assert.doesNotMatch(wizard, /不代填密码、不代点支付/);
+  assert.match(accounts, /仅作备注/);
   assert.match(browser, /from "@novnc\/novnc"/);
   assert.match(browser, /clipboardPasteFrom/);
   assert.match(browser, /const client = rfb;[\s\S]*?rfb = null;[\s\S]*?client\.disconnect\(\)/);

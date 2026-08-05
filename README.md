@@ -141,7 +141,7 @@ Passthrough matrix (live test-account probe, 2026-07-31). ✓ = client protocol 
 | `glm-5.2` | Chat | ✓ | ✓ | ✓ |
 | `glm-5.1` | Chat | ✓ | ✓ | ✓ |
 | `glm-5` | Chat | ✓ | ✓ | ✓ |
-| `gpt-5.6-luna` | Responses | ✓ | ✓ | |
+| `gpt-5.6-luna` | Responses | | ✓ | |
 | `kimi-k3` | Chat | ✓ | | |
 | `kimi-k2.7-code` | Chat | ✓ | | |
 | `kimi-k2.6` | Chat | ✓ | | |

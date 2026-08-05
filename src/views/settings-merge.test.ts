@@ -9,7 +9,7 @@ function config(overrides: Partial<AppConfig> = {}): AppConfig {
     gateway_port: 9042,
     gateway_key: "server-key-1",
     upstream_base_url: "https://opencode.ai/zen/go",
-    opencode_invite_url: "",
+    opencode_invite_url: "https://opencode.ai/go?ref=68XPB6NP8V",
     client_root_url: "",
     client_root_url_from_env: false,
     auto_start: false,

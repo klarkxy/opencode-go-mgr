@@ -96,6 +96,28 @@ impl AccountSetupStep {
         self == Self::Ready
     }
 
+    /// Wizard progress index for unfinished steps. `ready` is not part of the wizard.
+    pub const fn wizard_index(self) -> Option<u8> {
+        match self {
+            Self::GoogleAccount => Some(0),
+            Self::OpencodeRegistration => Some(1),
+            Self::Payment => Some(2),
+            Self::KeyVerification => Some(3),
+            Self::Ready => None,
+        }
+    }
+
+    /// Forward exactly one step, or rewind to any earlier unfinished step.
+    pub fn can_transition_to(self, to: Self) -> bool {
+        let Some(from_i) = self.wizard_index() else {
+            return false;
+        };
+        let Some(to_i) = to.wizard_index() else {
+            return false;
+        };
+        to_i == from_i + 1 || to_i < from_i
+    }
+
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::GoogleAccount => "google_account",
@@ -231,6 +253,8 @@ pub enum RoutingMode {
     RoundRobin,
 }
 
+pub const DEFAULT_OPENCODE_INVITE_URL: &str = "https://opencode.ai/go?ref=68XPB6NP8V";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppConfig {
@@ -255,7 +279,7 @@ impl Default for AppConfig {
             gateway_port: 9042,
             gateway_key: String::new(),
             upstream_base_url: "https://opencode.ai/zen/go".to_string(),
-            opencode_invite_url: String::new(),
+            opencode_invite_url: DEFAULT_OPENCODE_INVITE_URL.to_string(),
             client_root_url: String::new(),
             auto_start: false,
             show_dock_icon: true,
@@ -609,7 +633,7 @@ pub struct DailyModelCost {
 mod tests {
     use super::{
         AccountInput, AppConfig, CLAUDE_DESKTOP_HAIKU_ALIAS, CLAUDE_DESKTOP_OPUS_ALIAS,
-        CLAUDE_DESKTOP_SONNET_ALIAS, ClaudeDesktopModels, RoutingMode,
+        CLAUDE_DESKTOP_SONNET_ALIAS, ClaudeDesktopModels, DEFAULT_OPENCODE_INVITE_URL, RoutingMode,
         normalize_opencode_invite_url, normalize_purchase_date, purchase_expires_on,
     };
 
@@ -732,6 +756,18 @@ mod tests {
                 "routing_mode": "weighted"
             }))
             .is_err()
+        );
+    }
+
+    #[test]
+    fn default_opencode_invite_url_is_allowlisted() {
+        assert_eq!(
+            normalize_opencode_invite_url(DEFAULT_OPENCODE_INVITE_URL).unwrap(),
+            DEFAULT_OPENCODE_INVITE_URL
+        );
+        assert_eq!(
+            AppConfig::default().opencode_invite_url,
+            DEFAULT_OPENCODE_INVITE_URL
         );
     }
 

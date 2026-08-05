@@ -144,8 +144,28 @@
                 {{ account.enabled ? t("禁用账号 {name}", { name: account.name }) : t("启用账号 {name}", { name: account.name }) }}
               </n-tooltip>
 
+              <n-tooltip
+                v-if="accountIsReady(account) && account.account_type === 'managed'"
+                trigger="hover"
+              >
+                <template #trigger>
+                  <n-button
+                    circle
+                    quaternary
+                    size="small"
+                    :aria-label="t('刷新额度')"
+                    :loading="usageRefreshLoading[account.id]"
+                    :disabled="usageLoading[account.id] || !!usageLoadErrors[account.id]"
+                    @click="refreshManagedUsage(account.id)"
+                  >
+                    <template #icon><n-icon :component="ReloadOutlined" /></template>
+                  </n-button>
+                </template>
+                {{ t("从 OpenCode 控制台刷新额度") }}
+              </n-tooltip>
+
               <n-popover
-                v-if="accountIsReady(account) && usageEdits[account.id]"
+                v-else-if="accountIsReady(account) && usageEdits[account.id]"
                 trigger="click"
                 placement="bottom-end"
                 :show-arrow="false"
@@ -418,17 +438,33 @@
             :input-props="{ 'aria-label': t('名称') }"
           />
         </n-form-item>
-        <n-form-item :label="t('邮箱备注（可选）')">
+        <n-form-item :label="t('备注（可选）')">
           <n-input
             v-model:value="managedDraft.username"
             :disabled="busy"
-            :placeholder="t('仅作为账号备注，不保存 Google 密码')"
-            :input-props="{ 'aria-label': t('邮箱备注（可选）') }"
+            :placeholder="t('仅作备注')"
+            :input-props="{ 'aria-label': t('备注（可选）') }"
+          />
+        </n-form-item>
+        <n-form-item
+          :label="t('邀请链接')"
+          required
+          :show-feedback="true"
+          :validation-status="managedInviteStatus"
+          :feedback="managedInviteFeedback"
+        >
+          <n-input
+            v-model:value="managedDraft.inviteUrl"
+            :disabled="busy"
+            class="mono"
+            :placeholder="DEFAULT_OPENCODE_INVITE_URL"
+            :input-props="{ 'aria-label': t('邀请链接') }"
+            @blur="normalizeManagedInviteDraft"
           />
         </n-form-item>
       </n-form>
-      <n-alert type="info" :show-icon="false">
-        {{ t("创建后会立即保存注册草稿；关闭页面或服务重启后仍可继续。") }}
+      <n-alert type="warning" :show-icon="false">
+        {{ t("请确认邀请链接是你自己的（默认仅演示）。修改后会写入设置。草稿可随时继续。") }}
       </n-alert>
       <template #footer>
         <n-space justify="end">
@@ -438,7 +474,7 @@
           <n-button
             type="primary"
             :loading="busy"
-            :disabled="!managedDraft.name.trim()"
+            :disabled="!canCreateManagedDraft"
             @click="createManagedAccount"
           >{{ t("创建并开始") }}</n-button>
         </n-space>
@@ -490,6 +526,7 @@ import {
   HolderOutlined,
   MoreOutlined,
   PlusOutlined,
+  ReloadOutlined,
   ThunderboltOutlined,
 } from "@vicons/antd";
 import { DashboardRequestError, tauriApi } from "../api/tauri";
@@ -520,11 +557,15 @@ import {
 } from "./accounts-usage";
 import type { UsageEditState, UsageKey } from "./accounts-usage";
 import { daysUntilDate, expiryTagType, moveItem } from "./account-lifecycle";
-import { t } from "../i18n/index.ts";
+import { t, type MessageKey } from "../i18n/index.ts";
 import { formatCost } from "../utils/format.ts";
 import { userFacingError } from "../utils/errors.ts";
 import { mapWithConcurrency } from "../utils/async.ts";
-import { browserViewUrl } from "./managed-account";
+import {
+  DEFAULT_OPENCODE_INVITE_URL,
+  browserViewUrl,
+  normalizeOpenCodeInviteUrl,
+} from "./managed-account";
 import AccountAddModal from "../components/AccountAddModal.vue";
 import AccountFormModal from "../components/AccountFormModal.vue";
 import ManagedAccountWizard from "../components/ManagedAccountWizard.vue";
@@ -577,6 +618,7 @@ const usageMap = ref<Record<string, UsageWindow>>({});
 const usageEdits = ref<Record<string, AccountUsageEdits>>({});
 const usageLoading = ref<Record<string, boolean>>({});
 const usageLoadErrors = ref<Record<string, string | null>>({});
+const usageRefreshLoading = ref<Record<string, boolean>>({});
 const pinging = ref<Record<string, boolean>>({});
 const showModal = ref(false);
 const showAddModal = ref(false);
@@ -584,7 +626,11 @@ const showManagedCreate = ref(false);
 const showManagedWizard = ref(false);
 const editingAccount = ref<Account | null>(null);
 const managedWizardAccountId = ref<string | null>(null);
-const managedDraft = ref({ name: "", username: "" });
+const managedDraft = ref({
+  name: "",
+  username: "",
+  inviteUrl: "",
+});
 const opencodeInviteUrl = ref("");
 const browserCapabilities = ref<BrowserCapabilities>({
   mode: "unsupported",
@@ -602,15 +648,39 @@ const managedWizardAccount = computed(() => (
   accounts.value.find(({ id }) => id === managedWizardAccountId.value) ?? null
 ));
 const managedRegistrationAvailable = computed(() => (
-  Boolean(opencodeInviteUrl.value) && browserCapabilities.value.mode !== "unsupported"
+  browserCapabilities.value.mode !== "unsupported"
 ));
 const managedRegistrationReason = computed(() => {
-  if (!opencodeInviteUrl.value) return t("请先在设置中填写 OpenCode 邀请链接");
   if (browserCapabilities.value.mode === "unsupported") {
     return browserCapabilities.value.reason || t("当前环境不支持独立浏览器");
   }
   return "";
 });
+const managedInvitePreview = computed(() => {
+  try {
+    const normalized = normalizeOpenCodeInviteUrl(managedDraft.value.inviteUrl);
+    return {
+      status: undefined as "error" | undefined,
+      feedback: normalized
+        ? t("将用于打开邀请页；与设置不同时会写回设置。")
+        : t("必填。仅接受 opencode.ai 官方 HTTPS 链接。"),
+      normalized,
+    };
+  } catch (error) {
+    return {
+      status: "error" as const,
+      feedback: error instanceof Error ? t(error.message as MessageKey) : t("邀请链接格式无效"),
+      normalized: "",
+    };
+  }
+});
+const managedInviteStatus = computed(() => managedInvitePreview.value.status);
+const managedInviteFeedback = computed(() => managedInvitePreview.value.feedback);
+const canCreateManagedDraft = computed(() => (
+  Boolean(managedDraft.value.name.trim())
+  && Boolean(managedInvitePreview.value.normalized)
+  && !managedInvitePreview.value.status
+));
 
 function errorDetail(error: unknown): string {
   return userFacingError(error, t("无法连接到本地服务，请确认程序正在运行后重试"));
@@ -797,6 +867,21 @@ function updateResetsSecondField(accountId: string, key: UsageKey, value: number
   edit.resets_dirty = true;
 }
 
+async function refreshManagedUsage(accountId: string): Promise<void> {
+  if (usageRefreshLoading.value[accountId] || usageLoading.value[accountId]) return;
+  usageRefreshLoading.value = { ...usageRefreshLoading.value, [accountId]: true };
+  try {
+    const result = await tauriApi.refreshManagedAccountUsage(accountId);
+    usageMap.value[accountId] = result.usage;
+    syncUsageEdits(accountId, result.usage);
+    message.success(t("额度已从 OpenCode 控制台刷新"));
+  } catch (error) {
+    message.error(t("刷新额度失败: {error}", { error: errorDetail(error) }));
+  } finally {
+    usageRefreshLoading.value = { ...usageRefreshLoading.value, [accountId]: false };
+  }
+}
+
 async function saveUsage(accountId: string, key: UsageKey) {
   const edit = usageEdits.value[accountId]?.[key];
   if (!edit || edit.saving) return;
@@ -845,7 +930,7 @@ function accountIsReady(account: Account): boolean {
 
 function managedStepLabel(step: AccountSetupStep): string {
   switch (step) {
-    case "google_account": return t("待完成：Google 账号");
+    case "google_account": return t("待完成：登录身份");
     case "opencode_registration": return t("待完成：邀请注册");
     case "payment": return t("待完成：支付");
     case "key_verification": return t("待完成：验证 Key");
@@ -1005,8 +1090,31 @@ function openCreateModal(): void {
 function openManagedCreateModal(): void {
   if (!managedRegistrationAvailable.value) return;
   showAddModal.value = false;
-  managedDraft.value = { name: "", username: "" };
+  managedDraft.value = {
+    name: "",
+    username: "",
+    inviteUrl: opencodeInviteUrl.value || DEFAULT_OPENCODE_INVITE_URL,
+  };
   showManagedCreate.value = true;
+}
+
+function normalizeManagedInviteDraft(): void {
+  try {
+    managedDraft.value.inviteUrl = normalizeOpenCodeInviteUrl(managedDraft.value.inviteUrl);
+  } catch {
+    // Keep the raw value so the form can show validation feedback.
+  }
+}
+
+async function ensureInviteUrlSaved(inviteUrl: string): Promise<void> {
+  if (inviteUrl === opencodeInviteUrl.value) return;
+  const settings = await tauriApi.getSettings();
+  const result = await tauriApi.updateSettings({
+    ...settings,
+    opencode_invite_url: inviteUrl,
+  });
+  opencodeInviteUrl.value = inviteUrl;
+  void result;
 }
 
 function setManagedCreateVisible(show: boolean): void {
@@ -1038,9 +1146,24 @@ function openEditModal(id: string): void {
 
 async function createManagedAccount(): Promise<void> {
   const name = managedDraft.value.name.trim();
-  if (!name || busy.value || !managedRegistrationAvailable.value) return;
+  if (!name || busy.value || !managedRegistrationAvailable.value || !canCreateManagedDraft.value) {
+    return;
+  }
+  let inviteUrl = "";
+  try {
+    inviteUrl = normalizeOpenCodeInviteUrl(managedDraft.value.inviteUrl);
+  } catch (error) {
+    message.error(error instanceof Error ? t(error.message as MessageKey) : t("邀请链接格式无效"));
+    return;
+  }
+  if (!inviteUrl) {
+    message.error(t("请填写邀请链接"));
+    return;
+  }
+  managedDraft.value.inviteUrl = inviteUrl;
   busy.value = true;
   try {
+    await ensureInviteUrlSaved(inviteUrl);
     const username = managedDraft.value.username.trim();
     const created = await tauriApi.createManagedAccount({
       name,

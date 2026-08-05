@@ -671,7 +671,13 @@ fn validate_target_url(value: &str) -> std::result::Result<Url, String> {
         return Err("url must not contain credentials".into());
     }
     match parsed.host_str() {
-        Some("accounts.google.com" | "opencode.ai" | "console.opencode.ai") => Ok(parsed),
+        Some(
+            "accounts.google.com"
+            | "github.com"
+            | "opencode.ai"
+            | "console.opencode.ai"
+            | "auth.opencode.ai",
+        ) => Ok(parsed),
         _ => Err("url host is not allowed".into()),
     }
 }
@@ -959,8 +965,10 @@ mod tests {
     fn target_urls_are_limited_to_signup_and_opencode_hosts() {
         for valid in [
             "https://accounts.google.com/signup",
+            "https://github.com/login",
             "https://opencode.ai/zen/go",
             "https://console.opencode.ai/invite?code=test",
+            "https://auth.opencode.ai/authorize",
         ] {
             assert!(validate_target_url(valid).is_ok(), "{valid}");
         }

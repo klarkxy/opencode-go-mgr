@@ -127,7 +127,7 @@ Linux 服务器需要托管注册/官网登录时，至少预留 2 CPU、2 GiB �
 | `glm-5.2` | Chat | ✓ | ✓ | ✓ |
 | `glm-5.1` | Chat | ✓ | ✓ | ✓ |
 | `glm-5` | Chat | ✓ | ✓ | ✓ |
-| `gpt-5.6-luna` | Responses | ✓ | ✓ | |
+| `gpt-5.6-luna` | Responses | | ✓ | |
 | `kimi-k3` | Chat | ✓ | | |
 | `kimi-k2.7-code` | Chat | ✓ | | |
 | `kimi-k2.6` | Chat | ✓ | | |

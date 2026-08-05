@@ -65,6 +65,10 @@ pub fn api_router(state: CoreState) -> Router<CoreState> {
             get(account_usage).patch(update_account_usage),
         )
         .route(
+            "/accounts/{id}/usage/refresh",
+            post(refresh_account_usage_from_console),
+        )
+        .route(
             "/accounts/{id}/reset-cooldown",
             post(reset_account_cooldown),
         )
@@ -923,19 +927,16 @@ async fn advance_account_setup(
             "setup steps are only available for managed accounts",
         ));
     }
-    let expected = current.setup_step.next().ok_or_else(|| {
-        ApiError::status(
-            StatusCode::CONFLICT,
-            "the current setup step cannot be advanced manually",
-        )
-    })?;
-    if expected != input.setup_step || input.setup_step == AccountSetupStep::Ready {
+    if current.setup_step == input.setup_step {
+        return Ok(Json(dashboard_account(&state, current)));
+    }
+    if !current.setup_step.can_transition_to(input.setup_step) {
         return Err(ApiError::status(
             StatusCode::CONFLICT,
             format!(
-                "setup must advance from {} to {}",
+                "setup cannot move from {} to {}",
                 current.setup_step.as_str(),
-                expected.as_str()
+                input.setup_step.as_str()
             ),
         ));
     }
@@ -960,12 +961,18 @@ async fn advance_account_setup(
 }
 
 const GOOGLE_SIGNUP_URL: &str = "https://accounts.google.com/signup";
-const OPENCODE_CONSOLE_URL: &str = "https://opencode.ai/zen/go";
+const GOOGLE_LOGIN_URL: &str = "https://accounts.google.com/ServiceLogin";
+const GITHUB_SIGNUP_URL: &str = "https://github.com/signup";
+const GITHUB_LOGIN_URL: &str = "https://github.com/login";
+const OPENCODE_CONSOLE_URL: &str = "https://opencode.ai/auth";
 
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum BrowserTarget {
     GoogleSignup,
+    GoogleLogin,
+    GithubSignup,
+    GithubLogin,
     Invite,
     Console,
 }
@@ -1005,6 +1012,9 @@ async fn open_account_browser(
     }
     let url = match input.target {
         BrowserTarget::GoogleSignup => GOOGLE_SIGNUP_URL.to_string(),
+        BrowserTarget::GoogleLogin => GOOGLE_LOGIN_URL.to_string(),
+        BrowserTarget::GithubSignup => GITHUB_SIGNUP_URL.to_string(),
+        BrowserTarget::GithubLogin => GITHUB_LOGIN_URL.to_string(),
         BrowserTarget::Invite => {
             let invite = state.config().opencode_invite_url;
             if invite.is_empty() {
@@ -1748,6 +1758,28 @@ struct AccountUsageUpdate {
     /// 月窗口忽略此字段（固定到 purchase_expires_on）。
     #[serde(default)]
     resets_in_minutes: Option<i64>,
+}
+
+async fn refresh_account_usage_from_console(
+    State(state): State<CoreState>,
+    Path(id): Path<String>,
+) -> Result<Json<crate::console_usage::ConsoleUsageRefreshResult>, ApiError> {
+    let limits = state.pricing_snapshot().limits.clone();
+    let data_dir = state.data_dir.clone();
+    let refreshed =
+        crate::console_usage::refresh_managed_account_usage(&state.db, &data_dir, &id, &limits)
+            .await
+            .map_err(|error| {
+                let message = error.to_string();
+                if message.contains("only ready managed") {
+                    ApiError::bad_request(message)
+                } else if message.contains("not found") || message.contains("missing") {
+                    ApiError::not_found(message)
+                } else {
+                    ApiError::status(StatusCode::BAD_GATEWAY, message)
+                }
+            })?;
+    Ok(Json(refreshed))
 }
 
 async fn update_account_usage(
@@ -3205,6 +3237,10 @@ mod tests {
             CoreStateInner::new(db, dir.clone(), cipher).expect("test state should initialize"),
         );
 
+        let mut config = state.config();
+        config.opencode_invite_url.clear();
+        state.set_config(config).unwrap();
+
         let missing_invite = create_managed_account(
             State(state.clone()),
             Json(ManagedAccountInput {
@@ -3241,7 +3277,7 @@ mod tests {
             }),
         )
         .await
-        .expect_err("setup must not skip steps");
+        .expect_err("setup must not skip steps forward");
         assert_eq!(skipped.status, StatusCode::CONFLICT);
 
         let advanced = advance_account_setup(
@@ -3255,6 +3291,31 @@ mod tests {
         .expect("next setup step should save")
         .0;
         assert_eq!(advanced.setup_step, AccountSetupStep::OpencodeRegistration);
+
+        let paid = advance_account_setup(
+            State(state.clone()),
+            AxumPath(draft.id.clone()),
+            Json(AccountSetupUpdate {
+                setup_step: AccountSetupStep::Payment,
+            }),
+        )
+        .await
+        .expect("payment step should save")
+        .0;
+        assert_eq!(paid.setup_step, AccountSetupStep::Payment);
+
+        let rewound = advance_account_setup(
+            State(state.clone()),
+            AxumPath(draft.id.clone()),
+            Json(AccountSetupUpdate {
+                setup_step: AccountSetupStep::GoogleAccount,
+            }),
+        )
+        .await
+        .expect("setup should allow rewinding to earlier steps")
+        .0;
+        assert_eq!(rewound.setup_step, AccountSetupStep::GoogleAccount);
+
         let persisted = state.db.lock().get_account(&draft.id).unwrap().unwrap();
         assert!(persisted.key_cipher.is_empty());
         assert!(!persisted.enabled);

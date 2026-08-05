@@ -26,9 +26,20 @@ export default defineConfig({
     },
   },
   envPrefix: ["VITE_", "TAURI_"],
+  // @novnc/novnc@1.7 uses top-level await in core/util/browser.js.
+  esbuild: {
+    target: "es2022",
+    supported: { "top-level-await": true },
+  },
+  optimizeDeps: {
+    esbuildOptions: {
+      target: "es2022",
+      supported: { "top-level-await": true },
+    },
+  },
   build: {
     target: "es2022",
-    minify: true,
+    minify: "esbuild",
     sourcemap: !!process.env.TAURI_DEBUG,
     rollupOptions: {
       output: {
