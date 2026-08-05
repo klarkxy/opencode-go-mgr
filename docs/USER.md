@@ -354,12 +354,12 @@ page.
 ### Accounts
 
 The **Accounts** view splits creation into **Import existing Key** and
-**Register new account**:
+**Register new account (Beta)**:
 
 - A **Key account** keeps the existing flow and stores an OpenCode-Go key you
   already have.
 - A **managed account** immediately creates a disabled, recoverable draft,
-  then advances in order through Google account, invite registration,
+  then runs the wizard through optional sign-in identity, invite registration,
   payment, and key verification. The draft and current step are persisted to
   SQLite, so closing the page or restarting the service does not lose the
   flow. Pending accounts cannot be selected by the gateway and do not expose
@@ -368,28 +368,34 @@ The **Accounts** view splits creation into **Import existing Key** and
 Managed signup and isolated browser profiles are **Beta** features. They have
 not been thoroughly tested; do not rely on them in production.
 
-Before registering a managed account, save the invite URL under
-**Settings → OpenCode Go invite URL**. It must be an HTTPS URL no longer than
-2,048 characters, contain no username or password, and use exactly
-`opencode.ai` or `console.opencode.ai` as its host. The registration entry is
-disabled while it is empty. Changing it affects future invite-page opens; it
-does not rewrite completed accounts.
+When you create a managed draft, the form shows the **invite URL** (prefilled
+from Settings; fresh installs may ship a demo default). Edit it in place: it
+must be an HTTPS URL no longer than 2,048 characters, contain no username or
+password, and use exactly `opencode.ai` or `console.opencode.ai` as its host.
+If it differs from Settings, it is written back to **Settings → OpenCode Go
+invite URL**. Changes affect later invite-page opens only; they do not rewrite
+completed accounts. Replace the demo default with your own invite link before
+a real signup, or referral credit goes to the link owner.
 
-The managed wizard is intentionally manual:
+The managed wizard is intentionally manual (no password autofill, no payment
+clicks, no automatic key extraction):
 
-1. Create or sign in to a Google account in that account's isolated browser
-   profile.
-2. Open the invite URL in the same profile and register OpenCode Go.
-3. Review and complete payment yourself on the official site.
-4. Copy the key from the site, paste it into the wizard, and run a real
-   verification.
+1. **Sign-in identity (optional).** Sign up for Google or GitHub only if you
+   need a new account; otherwise **skip this step**. OpenCode sign-in can also
+   finish on the next step.
+2. **Invite registration.** Open the invite URL in the same isolated profile
+   and complete OpenCode sign-in/registration with Google or GitHub.
+3. **Payment.** Confirm the plan and amount in the console; only you complete
+   payment on the page.
+4. **Verify Key.** Copy the key from the console, paste it, and run a real
+   upstream probe.
 
-OCG Manager does not save Google passwords, solve verification challenges,
-automate payments, scrape pages, or extract keys. A `2xx` verification
-completes and enables the account. A `429` also proves that the key is valid,
-completes the account, and records the current cooldown. `401`/`403`, network
-errors, and `5xx` responses leave the account at key verification so you can
-correct it and retry.
+Click an earlier finished step in the step bar to **rewind**; forward progress
+still uses each step's primary button. A `2xx` verification completes and
+enables the account. A `429` also proves that the key is valid, completes the
+account, and records the current cooldown. `401`/`403`, network errors, and
+`5xx` responses leave the account at key verification so you can correct it
+and retry.
 
 Every account has a durable, isolated browser profile. Desktop builds launch
 an external Chromium-family browser: Windows prefers Edge and then Chrome;
@@ -400,38 +406,44 @@ does not enable CDP, automation, `--no-sandbox`, or weakened web security.
 Older `profiles/<account_id>` WebView data is deliberately not imported, so
 the first open after upgrading requires another login.
 
-Every completed account has **Open OpenCode website**. A legacy account starts
-with a blank isolated profile the first time; sign in once and its cookies
-remain available for later checks of authoritative quota and referral use.
-Google and OpenCode cookies belong to different domains, but both stay in the
-same account profile.
+Every completed account has **Open OpenCode console**
+(`https://opencode.ai/auth`). A legacy account starts with a blank isolated
+profile the first time; sign in once and its cookies remain available.
+Google/GitHub and OpenCode cookies belong to different domains, but both stay
+in the same account profile.
 
 Resetting browser identity first closes that account's browser and removes
 both new and legacy profile directories. A completed account keeps its key
-and is only signed out of the website; a pending managed account also returns
-to the Google step. Deleting an account likewise deletes its cookies/profile,
-and the confirmation states this explicitly. That login state can then be
-recovered only from a backup or by signing in again.
+and is only signed out of the console; a pending managed account also returns
+to the sign-in identity step. Deleting an account likewise deletes its
+cookies/profile, and the confirmation states this explicitly. That login state
+can then be recovered only from a backup or by signing in again.
 
 Each completed account card shows the account name, cooldown state, and the
 5-hour / weekly / monthly usage bars driven by local accounting.
 
-- **Usage baselines.** Type a percentage or drag a bar to set its current
-  real-world usage baseline. After the value is saved, successful request
-  cost recorded by OCG Manager continues to accumulate above that baseline.
-  Reaching 100% is still only a warning; it does not stop the gateway from
-  selecting the account.
+- **Usage baselines (Key accounts).** Type a percentage or drag a bar to set
+  its current real-world usage baseline. After the value is saved, successful
+  request cost recorded by OCG Manager continues to accumulate above that
+  baseline. Reaching 100% is still only a warning; it does not stop the
+  gateway from selecting the account.
+- **Refresh quota (ready managed accounts).** Uses the OpenCode session in
+  that account's browser profile to read official Go usage percentages from
+  the console and write them back as local baselines. Sign in to the console
+  in that profile first; if the browser is holding the cookie database, close
+  it and retry. Failures surface an error and do not silently rewrite quotas.
 - **Identity and credentials.** The name is the account's required primary
-  display label. The login account is optional; on creation, entering it first
-  copies it into the name until you edit the name yourself. The dashboard
-  stores the account key but does not collect or manage the OpenCode-Go login
-  password.
+  display label. The note/login account is optional; on Key-account creation,
+  entering it first copies it into the name until you edit the name yourself.
+  The dashboard stores the account key but does not collect or manage
+  third-party login passwords.
 - **Purchase date.** New accounts default to the browser's current date, and
-  the value remains editable. Expiry is the same day in the next natural
-  month, clamped to that month's last day when necessary: `2026-01-31`
-  expires on `2026-02-28`. Accounts and Dashboard show days remaining, due
-  today, or days expired. This is informational only and never disables an
-  account or prevents the gateway from selecting it.
+  the value remains editable. The managed wizard also writes the purchase date
+  when payment advances to key verification. Expiry is the same day in the
+  next natural month, clamped to that month's last day when necessary:
+  `2026-01-31` expires on `2026-02-28`. Accounts and Dashboard show days
+  remaining, due today, or days expired. This is informational only and never
+  disables an account or prevents the gateway from selecting it.
 - **Priority order.** Use the drag handle on an account card to persist its
   priority with a mouse, touchscreen, or pen. When the handle has keyboard
   focus, the Up and Down arrow keys move the account as well. Dashboard, the
@@ -478,7 +490,9 @@ The **Settings** view exposes the persistent gateway configuration:
 - **Gateway Key** — the same value shown in the Connection Center.
 - **Upstream URL** — the OpenCode-Go base URL.
 - **OpenCode Go invite URL** — the restricted HTTPS invite used by managed
-  account onboarding.
+  account onboarding. Fresh installs may ship a demo default; replace it with
+  your own link before a real signup. Creating a managed draft can also edit
+  and write this value back.
 - **Downstream Access Root** — see [Connection Center](#connection-center).
 - **Auto-start on login** — only the installed Windows desktop build exposes
   this switch. Development builds, the CLI, Docker, macOS, and Linux
@@ -562,7 +576,8 @@ preferred upstream protocol and the **response body** (or SSE stream) back to
 the client protocol. Conversion covers text, system instructions, images, tool
 calls and tool results, reasoning content, completion status, errors, and
 usage fields. Example: `glm-5.2` passthroughs Chat Completions, Responses, and
-Messages; `deepseek-v4-flash` is Chat-only and converts other client formats to
+Messages; `gpt-5.6-luna` is Responses-only and converts Chat / Messages / Gemini
+entries to Responses; `deepseek-v4-flash` is Chat-only and converts other client formats to
 Chat Completions.
 
 Unknown models keep the request's native Chat Completions or Messages
@@ -678,9 +693,10 @@ Edge cases in the log:
   `success_unpriced`, display no quota cost, and do not enter quota totals.
 - Pre-snapshot successful rows retain their old value and are marked as a
   legacy estimate; they are never recalculated.
-- A manually saved percentage becomes the baseline for that window;
-  successful priced costs recorded after the save are added to it until the
-  next manual change or a recognized upstream limit reset.
+- A manually saved percentage becomes the baseline for that window. **Refresh
+  quota** on a ready managed account overwrites the baseline with official
+  console percentages. Successful priced costs recorded afterward are added
+  until the next manual change, refresh, or recognized upstream limit reset.
 - An `outcome_unknown` row means the upstream may have completed and charged
   the request while the gateway lost the response; the request is not
   retried and its local cost stays unknown.

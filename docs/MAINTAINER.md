@@ -247,25 +247,40 @@ difference, and the Claude Desktop three-role persistence behavior.
   Existing rows migrate to `key + ready`. A managed draft is persisted
   immediately with an empty key and `enabled=false`; the selector, enable
   endpoint, and request path must all require both `ready` and a non-empty
-  key.
-- `opencode_invite_url` accepts only a credential-free HTTPS URL up to 2,048
-  characters whose host is exactly `opencode.ai` or `console.opencode.ai`.
-  Onboarding never scrapes pages: Google registration and challenges,
-  OpenCode registration, and payment remain manual, and the user copies the
-  key back into the dashboard.
-- Managed steps advance only in order. A real key probe returning `2xx`
+  key. The `google_account` step is labeled **sign-in identity** in the UI and
+  is skippable.
+- `AppConfig::default()` seeds `opencode_invite_url` with
+  `DEFAULT_OPENCODE_INVITE_URL` (demo). Normalized values must be a
+  credential-free HTTPS URL up to 2,048 characters whose host is exactly
+  `opencode.ai` or `console.opencode.ai`. Creating a managed draft can edit the
+  invite URL and write it back to Settings when it differs. Signup challenges,
+  OpenCode registration, and payment remain manual in the isolated browser; the
+  user copies the key back. Never add CDP autofill or automated payment clicks.
+- Managed setup may move **forward exactly one step** or **rewind to any earlier
+  unfinished step** (`can_transition_to`). Skipping forward is rejected; the
+  setup API must not enter `ready` directly. A real key probe returning `2xx`
   transitions to `ready + enabled`; `429` also proves validity and records
   cooldown. `401`/`403`, network errors, and `5xx` remain at
   `key_verification`. APIs, DTOs, and logs must never return plaintext keys.
+- Ready managed accounts can
+  `POST /dashboard/api/accounts/{id}/usage/refresh` to read Go usage from the
+  OpenCode console via that account's Chromium profile cookies
+  (`console_usage.rs`). Handle Chrome 127+ 32-byte domain-hash cookie prefixes,
+  shared reads of a locked Cookies DB on Windows, and Solid-serialized /
+  comment-wrapped usage percentages. Key accounts keep manual calibration;
+  refresh failures must surface explicitly.
 - Protected lifecycle endpoints are `POST /accounts/managed`,
-  `PATCH /accounts/{id}/setup`, and
-  `POST /accounts/{id}/setup/verify-key`. Browser endpoints are
+  `PATCH /accounts/{id}/setup`, `POST /accounts/{id}/setup/verify-key`, and
+  `POST /accounts/{id}/usage/refresh`. Browser endpoints are
   `GET /browser/capabilities`, `POST /accounts/{id}/browser`,
   `DELETE /accounts/{id}/browser-profile`, and
-  `/browser/sessions/{token}/ws`, all below `/dashboard/api`. Targets are
-  limited to Google signup, the configured invite, and the OpenCode console.
-  Remote tokens are memory-only, administrator-session-bound, and
-  Origin-checked; they expire after 30 minutes idle or four hours total.
+  `/browser/sessions/{token}/ws`, all below `/dashboard/api`. Targets include
+  Google signup/login, GitHub signup/login, the configured invite, and the
+  OpenCode console (`https://opencode.ai/auth`). The worker host allowlist
+  includes `accounts.google.com`, `github.com`, `opencode.ai`,
+  `console.opencode.ai`, and `auth.opencode.ai`. Remote tokens are memory-only,
+  administrator-session-bound, and Origin-checked; they expire after 30 minutes
+  idle or four hours total.
 - Tauri registers native launch/stop hooks, while Vue still calls the HTTP
   API. Windows discovers Edge then Chrome; macOS checks Chrome, Edge, and
   Chromium; Linux searches `PATH` for Chrome/Chromium/Edge. The external
@@ -758,20 +773,23 @@ most of them; the manual parts need a real desktop.
       and selectable. Spot-check that copied results contain no masked key,
       and actually launch Claude Desktop and Gemini CLI once each for a text
       and a tool call.
-- [ ] Cover schema v16 migration, legacy `key + ready`, ordered managed
-      transitions, pending-route isolation, the invite URL allowlist, and the
+- [ ] Cover schema v16 migration, legacy `key + ready`, managed transitions
+      (forward one step / rewind earlier steps / no skip-forward), pending-route
+      isolation, the invite URL allowlist and demo-default write-back, and the
       `2xx`/`429`/`401`/`403`/network/`5xx` key-verification branches. Confirm
       that no DTO or log contains a plaintext key.
 - [ ] Verify Edge/Chrome priority on Windows and browser discovery on
       macOS/Linux. With two accounts, prove profile isolation and cookie
-      persistence across restart. Reset must sign out but keep a completed
-      key; delete must clean new and legacy profiles; legacy WebView profiles
-      must not be imported.
-- [ ] Manually complete Google → invite URL → OpenCode login → payment review
-      page → key paste. A tester performs real payment only when explicitly
-      intended. Log in once for a legacy key account and verify later access
-      to authoritative quota and referral use. Cover desktop and Docker
-      sidecar paths.
+      persistence across restart. Reset must sign out of the console but keep a
+      completed key; delete must clean new and legacy profiles; legacy WebView
+      profiles must not be imported.
+- [ ] Manually complete (optional) sign-in identity → invite URL → OpenCode
+      login → payment review → key paste. A tester performs real payment only
+      when explicitly intended. Console opens `opencode.ai/auth`. Log in once
+      for a legacy key account and verify later access to authoritative quota
+      and referral use. For a ready managed account, exercise **Refresh quota**
+      (missing session / locked Cookies DB must error clearly). Cover desktop
+      and Docker sidecar paths.
 - [ ] On Windows, run the installer once, confirm SmartScreen warning text,
       open the dashboard, add an account, send one request.
 - [ ] On macOS, mount the DMG, confirm the **Open Anyway** flow works, open

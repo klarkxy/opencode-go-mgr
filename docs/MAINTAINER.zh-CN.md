@@ -213,20 +213,32 @@ Desktop 三个角色模型的持久化行为。
 - schema v16 给账号增加 `account_type`（`key | managed`）与 `setup_step`
   （`google_account → opencode_registration → payment → key_verification → ready`）。
   旧行迁移为 `key + ready`。托管草稿立即持久化为空 Key、`enabled=false`；选择器、
-  启用接口和路由都必须同时要求 `ready` 与非空 Key。
-- 设置中的 `opencode_invite_url` 只接受最长 2048 字符、无用户名密码的 HTTPS URL，
-  主机严格限定为 `opencode.ai` 或 `console.opencode.ai`。注册步骤不抓取网页：Google
-  注册、验证码、OpenCode 注册和付款完全由用户操作，Key 也由用户复制回填。
-- 托管状态只能顺序前进。Key 实测返回 `2xx` 时进入 `ready + enabled`；`429` 同样
-  证明 Key 有效，同时写入冷却；`401`/`403`、网络错误或 `5xx` 保持
-  `key_verification`。API、DTO 与日志绝不能返回明文 Key。
+  启用接口和路由都必须同时要求 `ready` 与非空 Key。步骤名 `google_account` 在 UI
+  上展示为「登录身份」，可跳过。
+- `AppConfig::default()` 的 `opencode_invite_url` 带演示默认值
+  （`DEFAULT_OPENCODE_INVITE_URL`）。规范化后只接受最长 2048 字符、无用户名密码的
+  HTTPS URL，主机严格限定为 `opencode.ai` 或 `console.opencode.ai`。创建托管草稿
+  时可编辑邀请链接；与设置不同时写回 SQLite。注册/支付/验证码仍由用户在浏览器中
+  完成，Key 由用户复制回填；**不得** CDP 自动填表或代点支付。
+- 托管状态允许 **向前一步** 或 **回退到任意更早的未完成步骤**（`can_transition_to`）；
+  禁止跳步前进，禁止经 setup API 直接进入 `ready`。Key 实测返回 `2xx` 时进入
+  `ready + enabled`；`429` 同样证明 Key 有效并写入冷却；`401`/`403`、网络错误或
+  `5xx` 保持 `key_verification`。API、DTO 与日志绝不能返回明文 Key。
+- 已完成的托管账号可通过 `POST /dashboard/api/accounts/{id}/usage/refresh` 从该
+  账号 Chromium Profile 的 Cookie 读取 OpenCode 控制台 Go 页用量并校准本地基线
+  （`console_usage.rs`）。实现须处理 Chrome 127+ Cookie 32 字节域哈希前缀、Windows
+  Cookie 库共享读，以及 Solid 序列化 / SSR comment 包裹的百分比。Key 账号仍用手
+  动校准；刷新失败必须显式报错。
 - 受 Dashboard 鉴权保护的生命周期接口为 `POST /accounts/managed`、
-  `PATCH /accounts/{id}/setup` 与 `POST /accounts/{id}/setup/verify-key`；浏览器接口
-  为 `GET /browser/capabilities`、`POST /accounts/{id}/browser`、
-  `DELETE /accounts/{id}/browser-profile` 和
-  `/browser/sessions/{token}/ws`（都位于 `/dashboard/api` 下）。浏览目标只允许
-  Google 注册、配置的邀请 URL 与 OpenCode 官网。远程会话令牌只在内存中保存，
-  绑定管理员会话并检查 Origin，空闲 30 分钟或总计 4 小时失效。
+  `PATCH /accounts/{id}/setup`、`POST /accounts/{id}/setup/verify-key` 与
+  `POST /accounts/{id}/usage/refresh`；浏览器接口为 `GET /browser/capabilities`、
+  `POST /accounts/{id}/browser`、`DELETE /accounts/{id}/browser-profile` 和
+  `/browser/sessions/{token}/ws`（都位于 `/dashboard/api` 下）。浏览目标允许
+  Google 注册/登录、GitHub 注册/登录、配置的邀请 URL 与 OpenCode 控制台
+  （`https://opencode.ai/auth`）。worker 主机白名单含 `accounts.google.com`、
+  `github.com`、`opencode.ai`、`console.opencode.ai`、`auth.opencode.ai`。远程
+  会话令牌只在内存中保存，绑定管理员会话并检查 Origin，空闲 30 分钟或总计 4 小时
+  失效。
 - 桌面端由 Tauri 注册原生启动/停止 hook，但 Vue 仍通过 HTTP API 调用。Windows
   依次查 Edge、Chrome；macOS 查 Chrome、Edge、Chromium；Linux 从 `PATH` 查
   Chrome/Chromium/Edge。外部浏览器使用
@@ -616,15 +628,18 @@ Rust 测试覆盖 Gemini/Claude Desktop 路由、鉴权、别名改写、非流�
       会话时映射 API 返回 `401`。
 - [ ] 打开 **应用** 视图，确认 16 个教程完整可选；逐项抽查复制结果不含掩码
       Key，并实际启动 Claude Desktop 与 Gemini CLI 各完成一次文本和工具调用。
-- [ ] 覆盖 schema v16 迁移、旧账号 `key + ready`、托管状态机顺序、Pending 路由
-      隔离、邀请 URL 白名单，以及 Key 验证的 `2xx`/`429`/`401`/`403`/网络/
-      `5xx` 分支；确认任何 DTO 和日志都没有明文 Key。
+- [ ] 覆盖 schema v16 迁移、旧账号 `key + ready`、托管状态机（前进一格 / 回退更
+      早步骤、禁止跳步）、Pending 路由隔离、邀请 URL 白名单与演示默认写回，以及
+      Key 验证的 `2xx`/`429`/`401`/`403`/网络/`5xx` 分支；确认任何 DTO 和日志都
+      没有明文 Key。
 - [ ] 在 Windows 验证 Edge/Chrome 优先级，在 macOS/Linux 验证浏览器发现；用两个
-      账号确认 Profile 隔离和重启后 Cookie 保留。确认重置会退出官网但保留完成账号
-      Key，删除会同时清理新旧 Profile，旧 WebView Profile 不会被导入。
-- [ ] 人工完成 Google → 邀请链接 → OpenCode 登录 → 支付前确认页 → Key 回填；
-      真实支付只由测试者明确执行。旧 Key 账号首次打开官网后登录一次，再验证实际
-      额度和邀请使用情况可回访。分别覆盖桌面和 Docker Sidecar。
+      账号确认 Profile 隔离和重启后 Cookie 保留。确认重置会退出控制台但保留完成
+      账号 Key，删除会同时清理新旧 Profile，旧 WebView Profile 不会被导入。
+- [ ] 人工完成（可跳过）登录身份 → 邀请链接 → OpenCode 登录 → 支付前确认页 →
+      Key 回填；真实支付只由测试者明确执行。控制台打开 `opencode.ai/auth`。旧
+      Key 账号首次打开控制台后登录一次，再验证实际额度和邀请使用情况可回访。
+      已完成托管账号验证 **刷新额度**（缺会话 / Cookie 锁定有明确错误）。分别
+      覆盖桌面和 Docker Sidecar。
 - [ ] Windows 上本地跑一次安装包，确认 SmartScreen 警告文案，打开面板、添加
       账号、发一条请求。
 - [ ] macOS 上挂载 DMG，确认 **Open Anyway** 流程可用，打开面板、添加账号、

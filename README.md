@@ -24,14 +24,16 @@ native OpenCode-Go protocol and converts the response back.
   discovery, and Claude Desktop aliases on one port.
 - **Local multi-account rotation** — drag account cards to persist priority;
   the gateway skips disabled, cooling, or already-failed accounts.
-- **Managed onboarding and isolated profiles (Beta)** — manually complete Google,
-  OpenCode Go, payment, and key verification through an invite URL; each
-  account keeps its own browser login, with an optional Docker noVNC sidecar.
-  This feature has not been thoroughly tested; do not rely on it in production.
+- **Managed onboarding and isolated profiles (Beta)** — manually complete
+  optional sign-in identity (Google/GitHub), OpenCode Go, payment, and key
+  verification through an invite URL; steps can rewind; each account keeps its
+  own browser login, with an optional Docker noVNC sidecar. This feature has
+  not been thoroughly tested; do not rely on it in production.
 - **Purchase-cycle reminders** — per-account purchase dates and monthly
   expiry with remaining days in the dashboard; expiry never blocks an account.
 - **OpenCode Go quota estimates** — 5-hour, weekly, and monthly usage bars
-  from a USD pricing snapshot you can refresh in Settings.
+  from a USD pricing snapshot. Key accounts support manual calibration; ready
+  managed accounts can refresh quota from the console session in that profile.
 - **16 client guides** — copy-ready configuration snippets for Claude Code,
   Claude Desktop, Codex, Gemini CLI, Pi, Kimi Code CLI, WorkBuddy, and nine
   other tools.
@@ -75,8 +77,9 @@ upstream side.
 
 1. Install and launch OCG Manager. The dashboard opens in your system browser
    once the gateway is ready; use the tray icon to reopen it.
-2. Import an existing key in **Accounts**, or configure an invite URL in
-   Settings and use managed onboarding; then copy the Gateway Key.
+2. Import an existing key in **Accounts**, or use managed onboarding (edit the
+   invite URL on the create-draft form; replace the demo default with your own
+   before a real signup); then copy the Gateway Key.
 3. Point your client at `http://127.0.0.1:9042/v1`. The **Applications** view
    has per-client configuration guides.
 

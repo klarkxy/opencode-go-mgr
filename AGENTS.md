@@ -24,23 +24,28 @@
 - 容器固定以 UID/GID `10001` 运行并内置 `LICENSE`；Compose 透传可选的 `OCG_MANAGER_ENCRYPTION_KEY` 以支持显式密钥恢复，正常部署仍优先保留卷内 `.encryption-key`。
 - 下游访问根地址优先级：非空 `OCG_CLIENT_ROOT_URL` > SQLite 手工值 > 前端按生产 origin / 开发 Gateway 端口自动推导。环境变量覆盖只读且不得写回 SQLite。
 - Gemini 客户端使用 `/v1beta/models/{model}:generateContent` 或 `:streamGenerateContent`（也接受 `/v1/models/...`），可用 `x-goog-api-key` 鉴权；Gemini 只是客户端格式，Gateway 始终转换到已知模型的推荐上游协议。
-- 模型协议能力在 `protocol.rs` 的 `MODEL_PROTOCOLS` 硬编码：`preferred` 对齐官方 Go docs endpoint 表，`supported` 为测试账号探测结论。客户端协议 ∈ supported 时透传，否则转到 preferred；请求路径禁止试探协议（防双计费）。
+- 模型协议能力在 `protocol.rs` 的 `MODEL_PROTOCOLS` 硬编码：`preferred` 对齐官方 Go docs endpoint 表，`supported` 为测试账号探测结论。客户端协议 ∈ supported 时透传，否则转到 preferred；请求路径禁止试探协议（防双计费）。`gpt-5.6-luna` 仅 `supported = Responses`（Chat 入口须转换，勿再透传 Chat）。
 - Claude Desktop 使用 `/claude-desktop/v1/messages` 与 `/claude-desktop/v1/models`；`sonnet`、`opus`、`haiku` 映射保存在 `AppConfig.claude_desktop_models`，由受保护的 `GET/PUT /dashboard/api/claude-desktop/models` 管理。
+- 托管账号（Beta）：`setup_step` 为 `google_account`（UI：登录身份，可跳过）→ `opencode_registration` → `payment` → `key_verification` → `ready`。`PATCH .../setup` 允许前进一格或回退更早步骤，禁止跳步与直接 `ready`。创建草稿可编辑邀请链接并写回 `opencode_invite_url`（`DEFAULT_OPENCODE_INVITE_URL` 为演示默认）。浏览器目标含 Google/GitHub 注册与登录、邀请 URL、控制台 `https://opencode.ai/auth`。
+- 已完成托管账号的额度：`POST /dashboard/api/accounts/{id}/usage/refresh`（`console_usage.rs`）用 Profile Cookie 读控制台 Go 页用量；须处理 Chrome Cookie 域哈希前缀、锁定库共享读、Solid SSR。Key 账号仍手动校准。勿为刷新引入 CDP 自动化。
 
 ## 关键文件
 
 - `crates/ocg-core/src/gateway/`：OpenAI / Anthropic / Gemini 客户端协议路由与转换、Claude Desktop 别名改写、转发、选择器、冷却、费用统计。
 - `crates/ocg-core/src/dashboard.rs`：当前 Vue 面板使用的 `/dashboard/api`。
+- `crates/ocg-core/src/console_usage.rs`：托管账号从浏览器 Profile 刷新 OpenCode Go 控制台用量。
 - `crates/ocg-core/src/db.rs`：SQLite schema、迁移、查询。
-- `crates/ocg-core/src/models.rs`：共享 serde 类型和 `AppConfig`。
+- `crates/ocg-core/src/models.rs`：共享 serde 类型和 `AppConfig`（含 `DEFAULT_OPENCODE_INVITE_URL`）。
 - `crates/ocg-core/src/pricing.rs`：OpenCode Go 价格快照、倍率与额度估算。
 - `crates/ocg-cli/src/main.rs`：CLI `serve`、`key`、`status`。
 - `src-tauri/src/lib.rs`：Tauri 启动、Gateway 启动、托盘、命令注册。
 - `src-tauri/src/updater.rs`：签名桌面升级器桥接；由受保护的 dashboard HTTP API 触发，不向 WebView 暴露 updater command 权限。
 - `src-tauri/src/tray.rs`：托盘菜单和 dashboard 打开逻辑。
 - `src/views/`：Dashboard / Accounts / Pricing / Applications / Logs / Settings。
+- `src/components/ManagedAccountWizard.vue`：托管注册向导（步骤回退、Google/GitHub）。
 - `src/views/application-guides.ts`：16 个应用教程注册表（改数量/协议/脱敏时同步测）。
 - `src/theme.ts` + `DESIGN.md`：主题 token 与设计规范；改色/字号时两边一起改。
+- `vite.config.ts`：`build.target`/`esbuild` 须支持 top-level await（`@novnc/novnc`）。
 - `docs/`：USER、MAINTAINER、防滥用声明、CONTRIBUTORS、文档索引。
 
 ## 常用命令
