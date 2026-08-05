@@ -2,10 +2,6 @@
 
 # OCG Manager
 
-<p align="center">
-  <img src="assets/logo/ocg_logo_final_transparent.png" alt="OCG Manager Logo" width="140">
-</p>
-
 OCG Manager is a local operations console for OpenCode-Go accounts. It stores
 your account keys in a local SQLite database and serves them through a
 multi-protocol gateway at `http://127.0.0.1:9042` — the same port that hosts
@@ -14,7 +10,7 @@ Claude Desktop protocol; the gateway converts each request to the model's
 native OpenCode-Go protocol and converts the response back.
 
 <p align="center">
-  <img src="assets/opencode娘.png" alt="OpenCode-Go mascot" width="360">
+  <img src="assets/骑自行车的opencode娘.png" alt="OpenCode-Go mascot" width="360">
 </p>
 
 ## Highlights

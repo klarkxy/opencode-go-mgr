@@ -2,10 +2,6 @@
 
 # OCG Manager
 
-<p align="center">
-  <img src="assets/logo/ocg_logo_final_transparent.png" alt="OCG Manager Logo" width="140">
-</p>
-
 OCG Manager 是一个本地 OpenCode-Go 多账号运维控制台。它把账号 Key 保存在本地
 SQLite，并通过 `http://127.0.0.1:9042` 上的多协议 Gateway 暴露给客户端——管理
 面板也由同一个端口提供。客户端可以使用 OpenAI、Anthropic、Gemini 或 Claude
@@ -13,7 +9,7 @@ Desktop 协议；Gateway 会把请求转换到模型的 OpenCode-Go 原生协议
 客户端协议。
 
 <p align="center">
-  <img src="assets/opencode娘.png" alt="OpenCode-Go 娘" width="360">
+  <img src="assets/骑自行车的opencode娘.png" alt="OpenCode-Go 娘" width="360">
 </p>
 
 ## 主要特性
