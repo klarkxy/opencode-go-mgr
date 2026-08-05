@@ -10,7 +10,9 @@ Claude Desktop protocol; the gateway converts each request to the model's
 native OpenCode-Go protocol and converts the response back.
 
 <p align="center">
-  <img src="assets/骑自行车的opencode娘.png" alt="OpenCode-Go mascot" width="360">
+  <a href="https://github.com/klarkxy/opencode-go-mgr">
+    <img src="assets/star.png" alt="Star this repository on GitHub" width="420">
+  </a>
 </p>
 
 ## Highlights

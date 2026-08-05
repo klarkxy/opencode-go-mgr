@@ -9,7 +9,9 @@ Desktop 协议；Gateway 会把请求转换到模型的 OpenCode-Go 原生协议
 客户端协议。
 
 <p align="center">
-  <img src="assets/骑自行车的opencode娘.png" alt="OpenCode-Go 娘" width="360">
+  <a href="https://github.com/klarkxy/opencode-go-mgr">
+    <img src="assets/star.png" alt="去 GitHub 给本仓库点个 Star" width="420">
+  </a>
 </p>
 
 ## 主要特性
