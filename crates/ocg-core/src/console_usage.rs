@@ -669,7 +669,10 @@ mod chrome_cookies {
             {
                 return decrypt_linux_cookie(encrypted, key);
             }
-            return decrypt_aes_gcm(encrypted, key);
+            #[cfg(windows)]
+            {
+                return decrypt_aes_gcm(encrypted, key);
+            }
         }
         // Legacy DPAPI blob on older Chromium.
         if cfg!(windows) {
@@ -813,8 +816,6 @@ mod chrome_cookies {
 
     #[cfg(not(windows))]
     fn pbkdf2_sha1(password: &[u8], salt: &[u8], iterations: u32, length: usize) -> Vec<u8> {
-        use sha1::{Digest, Sha1};
-
         fn hmac_sha1(key: &[u8], message: &[u8]) -> [u8; 20] {
             use sha1::{Digest, Sha1};
             let mut key_block = [0_u8; 64];
