@@ -682,6 +682,7 @@ mod chrome_cookies {
         String::from_utf8(encrypted.to_vec()).context("cookie is not utf-8")
     }
 
+    #[cfg(windows)]
     fn decrypt_aes_gcm(encrypted: &[u8], key: &[u8]) -> Result<String> {
         // prefix(3) + nonce(12) + ciphertext + tag(16)
         if encrypted.len() < 3 + 12 + 16 {
@@ -726,6 +727,7 @@ mod chrome_cookies {
         linux_default_key()
     }
 
+    #[cfg(windows)]
     fn aes_gcm_decrypt(key: &[u8], nonce: &[u8], ciphertext: &[u8], tag: &[u8]) -> Result<Vec<u8>> {
         use aes_gcm::aead::{Aead, KeyInit, Payload};
         use aes_gcm::{Aes256Gcm, Nonce};
