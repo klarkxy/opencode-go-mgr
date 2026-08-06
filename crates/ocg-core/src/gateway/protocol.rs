@@ -2472,10 +2472,16 @@ fn flush_responses_text(output: &mut Vec<Value>, parts: &mut Vec<Value>, respons
 }
 
 fn message_to_chat(message: &Value) -> Result<Vec<Value>, ProtocolError> {
-    let role = message
+    let role = match message
         .get("role")
         .and_then(Value::as_str)
-        .unwrap_or("user");
+        .unwrap_or("user")
+    {
+        // Chat 上游只接受 system/user/assistant/tool；Responses/Messages 中间态可能携带
+        // developer 指令角色，归一化为 system 再透传，避免上游拒收。
+        "developer" => "system",
+        role => role,
+    };
     let content = message.get("content");
     if let Some(text) = content.and_then(Value::as_str) {
         return Ok(vec![json!({ "role": role, "content": text })]);
@@ -4051,6 +4057,80 @@ mod tests {
         assert_eq!(body["messages"][0]["role"], "user");
         assert_eq!(body["system"][0]["text"], "instructions");
         assert_eq!(body["system"][1]["text"], "dev");
+    }
+
+    #[test]
+    fn chat_upstream_converts_responses_developer_role_to_system() {
+        let plan = prepare_request(
+            ApiFormat::Responses,
+            bytes(json!({
+                "model":"deepseek-v4-pro",
+                "store":false,
+                "instructions":"instructions",
+                "input":[
+                    {"type":"message","role":"developer","content":[{"type":"input_text","text":"dev"}]},
+                    {"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}
+                ]
+            })),
+        )
+        .expect("Responses request to Chat upstream normalizes developer role");
+        assert_eq!(plan.upstream, ApiFormat::ChatCompletions);
+        let body: Value = serde_json::from_slice(&plan.body).expect("body is JSON");
+        let messages = body["messages"]
+            .as_array()
+            .expect("chat messages is an array");
+        assert!(
+            messages.iter().all(|m| m["role"] != "developer"),
+            "chat upstream must not carry developer role"
+        );
+        assert!(
+            messages
+                .iter()
+                .any(|m| m["role"] == "system" && m["content"] == "dev"),
+            "developer message should become a system message"
+        );
+        assert!(
+            messages
+                .iter()
+                .any(|m| m["role"] == "user" && m["content"] == "hello")
+        );
+    }
+
+    #[test]
+    fn chat_upstream_converts_messages_developer_role_to_system() {
+        // Messages 客户端直接请求携带 developer 指令角色，走同一 message_to_chat
+        // 转换链，必须同样归一化为 system（与 Responses 入口共享修复路径）。
+        let plan = prepare_request(
+            ApiFormat::Messages,
+            bytes(json!({
+                "model":"deepseek-v4-pro",
+                "messages":[
+                    {"role":"developer","content":"dev"},
+                    {"role":"user","content":"hello"}
+                ]
+            })),
+        )
+        .expect("Messages request to Chat upstream normalizes developer role");
+        assert_eq!(plan.upstream, ApiFormat::ChatCompletions);
+        let body: Value = serde_json::from_slice(&plan.body).expect("body is JSON");
+        let messages = body["messages"]
+            .as_array()
+            .expect("chat messages is an array");
+        assert!(
+            messages.iter().all(|m| m["role"] != "developer"),
+            "chat upstream must not carry developer role"
+        );
+        assert!(
+            messages
+                .iter()
+                .any(|m| m["role"] == "system" && m["content"] == "dev"),
+            "developer message should become a system message"
+        );
+        assert!(
+            messages
+                .iter()
+                .any(|m| m["role"] == "user" && m["content"] == "hello")
+        );
     }
 
     #[test]
