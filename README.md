@@ -80,9 +80,9 @@ Install, first-client checks for all five protocols, backup, and upgrades:
 
 ## Docker
 
-Public image: `ghcr.io/klarkxy/opencode-go-mgr` (`linux/amd64`, anonymous
-pull). Save [`compose.example.yaml`](compose.example.yaml) (also attached to
-each Release) as `compose.yaml` and run:
+Public image: `ghcr.io/klarkxy/opencode-go-mgr` (`linux/amd64, linux/arm64`,
+anonymous pull). Save [`compose.example.yaml`](compose.example.yaml) (also
+attached to each Release) as `compose.yaml` and run:
 
 ```bash
 docker compose pull

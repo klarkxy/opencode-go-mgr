@@ -991,8 +991,9 @@ dashboard.
 ## Docker
 
 The public headless image can be pulled from GHCR without signing in. It is a
-Linux container and currently publishes `linux/amd64` only; there is no
-native ARM64 image. Each release also includes a pull-only
+Linux container publishing `linux/amd64` and `linux/arm64`; a plain
+`docker pull` selects the matching native variant on either architecture. Each
+release also includes a pull-only
 `compose.example.yaml`; save it as `compose.yaml` and optionally create a
 neighboring `.env`. The example pins its matching release by default, while
 `OCG_IMAGE` can override it. Alternatively, run the Compose commands from a
@@ -1271,9 +1272,11 @@ and browser profiles.
   `show_dock_icon` switch.
 - Windows / Linux ARM64 and 32-bit x86 builds are not published. RPM, Snap,
   app-store packages, Windows Authenticode signing, and Apple notarization
-  are not implemented. Updater-enabled installed desktop builds can install
-  signed releases from Settings; 1.4.1, development builds, the CLI, and
-  Docker use the direct/manual upgrade path.
+  are not implemented. That covers desktop installers only; the container
+  images (`ghcr.io/klarkxy/opencode-go-mgr` and its `-browser` sidecar)
+  publish `linux/amd64` and `linux/arm64`. Updater-enabled installed desktop
+  builds can install signed releases from Settings; 1.4.1, development
+  builds, the CLI, and Docker use the direct/manual upgrade path.
 
 ## Troubleshooting
 

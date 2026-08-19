@@ -813,8 +813,9 @@ ocg-manager-cli
 
 ## Docker
 
-GHCR 上的公开无头镜像无需登录即可拉取。它是 Linux 容器，目前只发布
-`linux/amd64`，没有原生 ARM64 镜像。每个 Release 也会附带只拉取镜像的
+GHCR 上的公开无头镜像无需登录即可拉取。它是 Linux 容器，发布 `linux/amd64`
+与 `linux/arm64`；直接 `docker pull` 会在对应架构上自动选择原生变体。每个
+Release 也会附带只拉取镜像的
 `compose.example.yaml`；把它保存为 `compose.yaml`，并按需在同目录创建 `.env`。
 示例默认固定对应的发布版本，也可用 `OCG_IMAGE` 覆盖。或者在包含 `compose.yaml`
 与 `.env.example` 的仓库目录中运行（建议检出对应 Release tag）：
@@ -1044,7 +1045,9 @@ ocg.example.com {
 - macOS 桌面版可以在设置中隐藏 Dock 图标而只保留菜单栏图标；Windows、Linux、
   CLI 与 Docker 不暴露 `show_dock_icon` 开关。
 - 不发布 Windows / Linux ARM64、32 位 x86 构建；不支持 RPM、Snap、应用商店包、
-  Windows Authenticode 正式签名、Apple 公证。支持升级的已安装桌面版可在设置页
+  Windows Authenticode 正式签名、Apple 公证。该口径仅覆盖桌面安装包；容器镜像
+  （`ghcr.io/klarkxy/opencode-go-mgr` 及其 `-browser` 侧车）发布
+  `linux/amd64` 与 `linux/arm64`。支持升级的已安装桌面版可在设置页
   安装签名 Release；v1.4.1、开发构建、CLI、Docker 使用直接/手动升级路径。
 
 ## 常见问题

@@ -27,14 +27,12 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build:
-    name: Build and verify GHCR images
+  resolve:
+    name: Resolve release metadata
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 15
     outputs:
-      browser_digest: ${{ steps.push_browser.outputs.digest }}
       browser_image: ${{ steps.release.outputs.browser_image }}
-      digest: ${{ steps.push.outputs.digest }}
       full_sha: ${{ steps.commit.outputs.full_sha }}
       image: ${{ steps.release.outputs.image }}
       minor: ${{ steps.release.outputs.minor }}
@@ -45,17 +43,6 @@ jobs:
       version: ${{ steps.release.outputs.version }}
     permissions:
       contents: read
-      packages: write
-      attestations: write
-      id-token: write
-    env:
-      SMOKE_BROWSER_CONTAINER: ocg-browser-smoke-${{ github.run_id }}
-      SMOKE_BROWSER_IMAGE: ocg-browser:smoke-${{ github.run_id }}
-      SMOKE_BROWSER_PROFILE_VOLUME: ocg-browser-profile-smoke-${{ github.run_id }}
-      SMOKE_BROWSER_RUNTIME_VOLUME: ocg-browser-runtime-smoke-${{ github.run_id }}
-      SMOKE_IMAGE: ocg-manager:smoke-${{ github.run_id }}
-      SMOKE_CONTAINER: ocg-manager-smoke-${{ github.run_id }}
-      SMOKE_VOLUME: ocg-manager-smoke-${{ github.run_id }}
 
     steps:
       - name: Resolve release
@@ -139,6 +126,44 @@ jobs:
           echo "full_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "short_sha=$(git rev-parse --short=12 HEAD)" >> "$GITHUB_OUTPUT"
 
+  build:
+    name: Build and verify GHCR images (${{ matrix.arch }})
+    needs: resolve
+    runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: 120
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+        include:
+          - arch: amd64
+            runs-on: ubuntu-24.04
+          - arch: arm64
+            runs-on: ubuntu-24.04-arm
+    outputs:
+      browser_digest_amd64: ${{ steps.record_amd64.outputs.browser_digest }}
+      browser_digest_arm64: ${{ steps.record_arm64.outputs.browser_digest }}
+      digest_amd64: ${{ steps.record_amd64.outputs.digest }}
+      digest_arm64: ${{ steps.record_arm64.outputs.digest }}
+    permissions:
+      contents: read
+      packages: write
+    env:
+      SMOKE_BROWSER_CONTAINER: ocg-browser-smoke-${{ github.run_id }}-${{ matrix.arch }}
+      SMOKE_BROWSER_IMAGE: ocg-browser:smoke-${{ github.run_id }}-${{ matrix.arch }}
+      SMOKE_BROWSER_PROFILE_VOLUME: ocg-browser-profile-smoke-${{ github.run_id }}-${{ matrix.arch }}
+      SMOKE_BROWSER_RUNTIME_VOLUME: ocg-browser-runtime-smoke-${{ github.run_id }}-${{ matrix.arch }}
+      SMOKE_IMAGE: ocg-manager:smoke-${{ github.run_id }}-${{ matrix.arch }}
+      SMOKE_CONTAINER: ocg-manager-smoke-${{ github.run_id }}-${{ matrix.arch }}
+      SMOKE_VOLUME: ocg-manager-smoke-${{ github.run_id }}-${{ matrix.arch }}
+
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # Same ref policy as the resolve job; both architecture legs build the identical commit.
+          ref: ${{ inputs.source_ref != '' && inputs.source_ref || format('refs/tags/{0}', needs.resolve.outputs.tag) }}
+          persist-credentials: false
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
@@ -154,6 +179,8 @@ jobs:
           vars: |
             SMOKE_IMAGE=${{ env.SMOKE_IMAGE }}
             SMOKE_BROWSER_IMAGE=${{ env.SMOKE_BROWSER_IMAGE }}
+            CACHE_SCOPE=ocg-manager-linux-${{ matrix.arch }}
+            CACHE_BROWSER_SCOPE=ocg-browser-linux-${{ matrix.arch }}
 
       - name: Smoke-test container
         shell: bash
@@ -328,29 +355,29 @@ jobs:
         id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
-          images: ${{ steps.release.outputs.image }}
+          images: ${{ needs.resolve.outputs.image }}
           flavor: latest=false
           tags: |
-            type=semver,pattern={{version}},value=${{ steps.release.outputs.tag }}
+            type=semver,pattern={{version}},value=${{ needs.resolve.outputs.tag }}
           labels: |
             org.opencontainers.image.title=OCG Manager
             org.opencontainers.image.description=OpenCode-Go multi-account local manager and gateway
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ steps.commit.outputs.full_sha }}
+            org.opencontainers.image.revision=${{ needs.resolve.outputs.full_sha }}
 
       - name: Generate browser image metadata
         id: meta_browser
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
-          images: ${{ steps.release.outputs.browser_image }}
+          images: ${{ needs.resolve.outputs.browser_image }}
           flavor: latest=false
           tags: |
-            type=semver,pattern={{version}},value=${{ steps.release.outputs.tag }}
+            type=semver,pattern={{version}},value=${{ needs.resolve.outputs.tag }}
           labels: |
             org.opencontainers.image.title=OCG Manager Browser Worker
             org.opencontainers.image.description=Isolated Chromium and noVNC sidecar for OCG Manager
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ steps.commit.outputs.full_sha }}
+            org.opencontainers.image.revision=${{ needs.resolve.outputs.full_sha }}
 
       - name: Build and push image
         id: push
@@ -358,14 +385,14 @@ jobs:
         with:
           context: .
           file: ./Dockerfile
-          platforms: linux/amd64
-          outputs: type=image,name=${{ steps.release.outputs.image }},push=true,push-by-digest=true,name-canonical=true
+          platforms: linux/${{ matrix.arch }}
+          outputs: type=image,name=${{ needs.resolve.outputs.image }},push=true,push-by-digest=true,name-canonical=true,oci-mediatypes=true
           labels: ${{ steps.meta.outputs.labels }}
           annotations: |
-            index:org.opencontainers.image.version=${{ steps.release.outputs.version }}
-            index:org.opencontainers.image.revision=${{ steps.commit.outputs.full_sha }}
-          cache-from: type=gha,scope=ocg-manager-linux-amd64
-          cache-to: type=gha,mode=max,scope=ocg-manager-linux-amd64
+            index:org.opencontainers.image.version=${{ needs.resolve.outputs.version }}
+            index:org.opencontainers.image.revision=${{ needs.resolve.outputs.full_sha }}
+          cache-from: type=gha,scope=ocg-manager-linux-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=ocg-manager-linux-${{ matrix.arch }}
           provenance: mode=max
           sbom: true
 
@@ -375,20 +402,38 @@ jobs:
         with:
           context: .
           file: ./Dockerfile.browser
-          platforms: linux/amd64
-          outputs: type=image,name=${{ steps.release.outputs.browser_image }},push=true,push-by-digest=true,name-canonical=true
+          platforms: linux/${{ matrix.arch }}
+          outputs: type=image,name=${{ needs.resolve.outputs.browser_image }},push=true,push-by-digest=true,name-canonical=true,oci-mediatypes=true
           labels: ${{ steps.meta_browser.outputs.labels }}
           annotations: |
-            index:org.opencontainers.image.version=${{ steps.release.outputs.version }}
-            index:org.opencontainers.image.revision=${{ steps.commit.outputs.full_sha }}
-          cache-from: type=gha,scope=ocg-browser-linux-amd64
-          cache-to: type=gha,mode=max,scope=ocg-browser-linux-amd64
+            index:org.opencontainers.image.version=${{ needs.resolve.outputs.version }}
+            index:org.opencontainers.image.revision=${{ needs.resolve.outputs.full_sha }}
+          cache-from: type=gha,scope=ocg-browser-linux-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=ocg-browser-linux-${{ matrix.arch }}
           provenance: mode=max
           sbom: true
 
+      - name: Record amd64 digests
+        id: record_amd64
+        if: matrix.arch == 'amd64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "digest=${{ steps.push.outputs.digest }}" >> "$GITHUB_OUTPUT"
+          echo "browser_digest=${{ steps.push_browser.outputs.digest }}" >> "$GITHUB_OUTPUT"
+
+      - name: Record arm64 digests
+        id: record_arm64
+        if: matrix.arch == 'arm64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "digest=${{ steps.push.outputs.digest }}" >> "$GITHUB_OUTPUT"
+          echo "browser_digest=${{ steps.push_browser.outputs.digest }}" >> "$GITHUB_OUTPUT"
+
   publish:
     name: Publish immutable and moving GHCR tags
-    needs: build
+    needs: [resolve, build]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     concurrency:
@@ -417,19 +462,32 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Publish tags without moving immutable references or rolling channels back
+        id: publish_tags
         shell: bash
         env:
-          BROWSER_DIGEST: ${{ needs.build.outputs.browser_digest }}
-          BROWSER_IMAGE: ${{ needs.build.outputs.browser_image }}
-          CANDIDATE_VERSION: ${{ needs.build.outputs.version }}
-          MAIN_DIGEST: ${{ needs.build.outputs.digest }}
-          MAIN_IMAGE: ${{ needs.build.outputs.image }}
-          MINOR_CHANNEL: ${{ needs.build.outputs.minor }}
-          PUBLISH_LATEST: ${{ needs.build.outputs.publish_latest }}
-          SHORT_SHA: ${{ needs.build.outputs.short_sha }}
-          STABLE: ${{ needs.build.outputs.stable }}
+          BROWSER_DIGEST_AMD64: ${{ needs.build.outputs.browser_digest_amd64 }}
+          BROWSER_DIGEST_ARM64: ${{ needs.build.outputs.browser_digest_arm64 }}
+          BROWSER_IMAGE: ${{ needs.resolve.outputs.browser_image }}
+          CANDIDATE_VERSION: ${{ needs.resolve.outputs.version }}
+          FULL_SHA: ${{ needs.resolve.outputs.full_sha }}
+          MAIN_DIGEST_AMD64: ${{ needs.build.outputs.digest_amd64 }}
+          MAIN_DIGEST_ARM64: ${{ needs.build.outputs.digest_arm64 }}
+          MAIN_IMAGE: ${{ needs.resolve.outputs.image }}
+          MINOR_CHANNEL: ${{ needs.resolve.outputs.minor }}
+          PUBLISH_LATEST: ${{ needs.resolve.outputs.publish_latest }}
+          SHORT_SHA: ${{ needs.resolve.outputs.short_sha }}
+          STABLE: ${{ needs.resolve.outputs.stable }}
         run: |
           set -euo pipefail
+
+          for arch_digest_var in \
+            MAIN_DIGEST_AMD64 MAIN_DIGEST_ARM64 BROWSER_DIGEST_AMD64 BROWSER_DIGEST_ARM64; do
+            if [[ -z "${!arch_digest_var}" ]]; then
+              echo "Missing $arch_digest_var; both architecture legs must publish their digests." >&2
+              exit 1
+            fi
+          done
+
           inspect_digest() {
             local ref=$1
             local error_file="$RUNNER_TEMP/imagetools-inspect-error"
@@ -466,6 +524,11 @@ jobs:
             child_digest=$(jq -r '
               [.manifests[]? | select(.platform.os == "linux" and .platform.architecture == "amd64")][0].digest // empty
             ' <<<"$manifest")
+            if [[ -z "$child_digest" ]]; then
+              child_digest=$(jq -r '
+                [.manifests[]? | select(.platform.os == "linux" and .platform.architecture == "arm64")][0].digest // empty
+              ' <<<"$manifest")
+            fi
             if [[ -n "$child_digest" ]]; then
               image_ref="${ref%:*}@$child_digest"
             fi
@@ -487,13 +550,74 @@ jobs:
             fi
           }
 
+          arch_digests_for() {
+            local image=$1
+            if [[ "$image" == "$BROWSER_IMAGE" ]]; then
+              printf '%s %s' "$BROWSER_DIGEST_AMD64" "$BROWSER_DIGEST_ARM64"
+            else
+              printf '%s %s' "$MAIN_DIGEST_AMD64" "$MAIN_DIGEST_ARM64"
+            fi
+          }
+
+          merge_sources() {
+            local image=$1
+            local ref=$2
+            local amd64_digest
+            local arm64_digest
+            read -r amd64_digest arm64_digest <<<"$(arch_digests_for "$image")"
+            docker buildx imagetools create \
+              --tag "$ref" \
+              --annotation "index:org.opencontainers.image.version=$CANDIDATE_VERSION" \
+              --annotation "index:org.opencontainers.image.revision=$FULL_SHA" \
+              "$image@$amd64_digest" "$image@$arm64_digest"
+          }
+
+          verify_merged_index() {
+            local image=$1
+            local ref=$2
+            local amd64_digest
+            local arm64_digest
+            local annotation
+            local arch_manifests
+            local expected_manifests
+            local media_type
+            local raw
+            read -r amd64_digest arm64_digest <<<"$(arch_digests_for "$image")"
+            if ! raw=$(docker buildx imagetools inspect "$ref" --raw 2>"$RUNNER_TEMP/imagetools-index-error"); then
+              cat "$RUNNER_TEMP/imagetools-index-error" >&2
+              return 1
+            fi
+            arch_manifests=$(jq -r '[.manifests[]? | select(.platform.os == "linux") | .digest] | sort | join(",")' <<<"$raw")
+            expected_manifests=$(printf '%s\n%s\n' "$amd64_digest" "$arm64_digest" | LC_ALL=C sort | paste -sd, -)
+            if [[ "$arch_manifests" != "$expected_manifests" ]]; then
+              echo "Published index $ref does not merge exactly the candidate architecture manifests: $arch_manifests. An existing tag is immutable and cannot be replaced." >&2
+              return 1
+            fi
+            media_type=$(jq -r '.mediaType // empty' <<<"$raw")
+            if [[ "$media_type" != "application/vnd.oci.image.index.v1+json" ]]; then
+              echo "Published index $ref has media type '$media_type'; index annotations require an OCI image index. Rebuild with OCI media types before publishing." >&2
+              return 1
+            fi
+            annotation=$(jq -r '.annotations."org.opencontainers.image.version" // empty' <<<"$raw")
+            if [[ "$annotation" != "$CANDIDATE_VERSION" ]]; then
+              echo "Published index $ref carries version annotation '$annotation' instead of '$CANDIDATE_VERSION'." >&2
+              return 1
+            fi
+            local revision
+            revision=$(jq -r '.annotations."org.opencontainers.image.revision" // empty' <<<"$raw")
+            if [[ "$revision" != "$FULL_SHA" ]]; then
+              echo "Published index $ref carries revision annotation '$revision' instead of '$FULL_SHA'." >&2
+              return 1
+            fi
+          }
+
           check_immutable() {
             local image=$1
             local tag=$2
             local candidate_digest=$3
             local ref="$image:$tag"
             local existing
-            existing=$(inspect_digest "$ref")
+            existing=$(inspect_digest "$ref") || return 1
             node scripts/release-policy.mjs immutable-tag \
               --tag "$tag" \
               --candidate-digest "$candidate_digest" \
@@ -503,6 +627,7 @@ jobs:
           declare -A IMMUTABLE_DECISIONS
           declare -A MOVING_DECISIONS
           declare -A MOVING_CURRENT_VERSIONS
+          declare -A MOVING_EXISTING_DIGESTS
           declare -A EXPECTED_DIGESTS
           declare -A MOVING_EXPECTED_VERSIONS
 
@@ -555,9 +680,39 @@ jobs:
             MOVING_DECISIONS["$browser_ref"]=$browser_advance
             MOVING_CURRENT_VERSIONS["$main_ref"]=$main_current
             MOVING_CURRENT_VERSIONS["$browser_ref"]=$browser_current
-            EXPECTED_DIGESTS["$main_ref"]=$([[ "$main_advance" == true ]] && printf '%s' "$MAIN_DIGEST" || printf '%s' "$main_existing")
-            EXPECTED_DIGESTS["$browser_ref"]=$([[ "$browser_advance" == true ]] && printf '%s' "$BROWSER_DIGEST" || printf '%s' "$browser_existing")
+            MOVING_EXISTING_DIGESTS["$main_ref"]=$main_existing
+            MOVING_EXISTING_DIGESTS["$browser_ref"]=$browser_existing
             MOVING_EXPECTED_VERSIONS["$tag"]=$version
+          }
+
+          resolve_moving_expected_digests() {
+            local tag=$1
+            local main_ref="$MAIN_IMAGE:$tag"
+            local browser_ref="$BROWSER_IMAGE:$tag"
+            EXPECTED_DIGESTS["$main_ref"]=$([[ "${MOVING_DECISIONS["$main_ref"]}" == true ]] && printf '%s' "$MAIN_DIGEST" || printf '%s' "${MOVING_EXISTING_DIGESTS["$main_ref"]}")
+            EXPECTED_DIGESTS["$browser_ref"]=$([[ "${MOVING_DECISIONS["$browser_ref"]}" == true ]] && printf '%s' "$BROWSER_DIGEST" || printf '%s' "${MOVING_EXISTING_DIGESTS["$browser_ref"]}")
+          }
+
+          derive_candidate_index() {
+            local image=$1
+            local ref="$image:$CANDIDATE_VERSION"
+            local existing
+            existing=$(inspect_digest "$ref") || return 1
+            if [[ -z "$existing" ]]; then
+              merge_sources "$image" "$ref"
+              existing=$(inspect_digest "$ref")
+              if [[ -z "$existing" ]]; then
+                echo "Created $ref but could not read back its index digest." >&2
+                return 1
+              fi
+            fi
+            # buildx index assembly is deterministic (no timestamps or nonces), so an
+            # existing tag merging exactly these architecture manifests is the same
+            # digest a fresh create would produce; anything else must not be replaced.
+            # The explicit guard is required because errexit does not propagate into
+            # command substitutions and would silently continue with the old digest.
+            verify_merged_index "$image" "$ref" || return 1
+            printf '%s' "$existing"
           }
 
           publish_immutable() {
@@ -565,10 +720,10 @@ jobs:
             local tag=$2
             local candidate_digest=$3
             local decision=${IMMUTABLE_DECISIONS["$image:$tag"]}
-            local source_ref="$image@$candidate_digest"
             local ref="$image:$tag"
             if [[ "$decision" == create ]]; then
-              docker buildx imagetools create --tag "$ref" "$source_ref"
+              merge_sources "$image" "$ref"
+              verify_merged_index "$image" "$ref"
             else
               echo "Immutable tag $ref already resolves to the candidate digest; leaving it unchanged."
             fi
@@ -580,12 +735,12 @@ jobs:
             local tag=$2
             local candidate_digest=$3
             local key="$image:$tag"
-            local source_ref="$image@$candidate_digest"
             local ref="$key"
             local advance=${MOVING_DECISIONS["$key"]}
             local current_version=${MOVING_CURRENT_VERSIONS["$key"]}
             if [[ "$advance" == true ]]; then
-              docker buildx imagetools create --tag "$ref" "$source_ref"
+              merge_sources "$image" "$ref"
+              verify_merged_index "$image" "$ref"
               verify_published_digest "$ref" "$candidate_digest"
               echo "Advanced $ref from ${current_version:-none} to $CANDIDATE_VERSION."
             else
@@ -628,13 +783,28 @@ jobs:
             verify_paired_moving_tag "$tag"
           }
 
-          # Resolve both images completely before the first registry mutation.
-          preflight_immutable_image_tags "$MAIN_IMAGE" "$MAIN_DIGEST"
-          preflight_immutable_image_tags "$BROWSER_IMAGE" "$BROWSER_DIGEST"
+          # Decide every paired moving channel before the first registry mutation;
+          # these decisions compare remote channel versions and need no candidate
+          # digest.
           if [[ "$STABLE" == true ]]; then
             preflight_moving_pair "$MINOR_CHANNEL"
             if [[ "$PUBLISH_LATEST" == true ]]; then
               preflight_moving_pair latest
+            fi
+          fi
+
+          # Derive the merged multi-architecture index digests from the version tags
+          # (sidecar first) — the first registry writes — then finish the
+          # digest-dependent decisions before any further mutation.
+          BROWSER_DIGEST=$(derive_candidate_index "$BROWSER_IMAGE")
+          MAIN_DIGEST=$(derive_candidate_index "$MAIN_IMAGE")
+
+          preflight_immutable_image_tags "$MAIN_IMAGE" "$MAIN_DIGEST"
+          preflight_immutable_image_tags "$BROWSER_IMAGE" "$BROWSER_DIGEST"
+          if [[ "$STABLE" == true ]]; then
+            resolve_moving_expected_digests "$MINOR_CHANNEL"
+            if [[ "$PUBLISH_LATEST" == true ]]; then
+              resolve_moving_expected_digests latest
             fi
           fi
 
@@ -651,12 +821,15 @@ jobs:
             fi
           fi
 
+          echo "main_digest=$MAIN_DIGEST" >> "$GITHUB_OUTPUT"
+          echo "browser_digest=$BROWSER_DIGEST" >> "$GITHUB_OUTPUT"
+
       - name: Verify public anonymous GHCR pulls
         shell: bash
         env:
-          BROWSER_IMAGE: ${{ needs.build.outputs.browser_image }}
-          CANDIDATE_VERSION: ${{ needs.build.outputs.version }}
-          MAIN_IMAGE: ${{ needs.build.outputs.image }}
+          BROWSER_IMAGE: ${{ needs.resolve.outputs.browser_image }}
+          CANDIDATE_VERSION: ${{ needs.resolve.outputs.version }}
+          MAIN_IMAGE: ${{ needs.resolve.outputs.image }}
         run: |
           set -euo pipefail
           anonymous_docker_config=$(mktemp -d)
@@ -665,16 +838,31 @@ jobs:
           docker pull --quiet "$MAIN_IMAGE:$CANDIDATE_VERSION"
           docker pull --quiet "$BROWSER_IMAGE:$CANDIDATE_VERSION"
 
+          verify_public_index() {
+            local ref=$1
+            local arches
+            arches=$(docker buildx imagetools inspect --raw "$ref" \
+              | jq -r '[.manifests[]? | select(.platform.os == "linux") | .platform.architecture] | sort | unique | join(",")')
+            if [[ "$arches" != "amd64,arm64" ]]; then
+              echo "Public manifest $ref does not expose both linux/amd64 and linux/arm64: $arches" >&2
+              exit 1
+            fi
+          }
+          verify_public_index "$MAIN_IMAGE:$CANDIDATE_VERSION"
+          verify_public_index "$BROWSER_IMAGE:$CANDIDATE_VERSION"
+          test "$(docker image inspect --format '{{.Architecture}}' "$MAIN_IMAGE:$CANDIDATE_VERSION")" = amd64
+          test "$(docker image inspect --format '{{.Architecture}}' "$BROWSER_IMAGE:$CANDIDATE_VERSION")" = amd64
+
       - name: Generate signed GitHub provenance
         uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
         with:
-          subject-name: ${{ needs.build.outputs.image }}
-          subject-digest: ${{ needs.build.outputs.digest }}
+          subject-name: ${{ needs.resolve.outputs.image }}
+          subject-digest: ${{ steps.publish_tags.outputs.main_digest }}
           push-to-registry: true
 
       - name: Generate signed GitHub provenance for browser image
         uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
         with:
-          subject-name: ${{ needs.build.outputs.browser_image }}
-          subject-digest: ${{ needs.build.outputs.browser_digest }}
+          subject-name: ${{ needs.resolve.outputs.browser_image }}
+          subject-digest: ${{ steps.publish_tags.outputs.browser_digest }}
           push-to-registry: true

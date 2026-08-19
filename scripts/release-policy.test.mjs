@@ -170,6 +170,10 @@ test("container publication checks out the release tag or an explicit source ref
     workflow,
     /ref: \$\{\{ inputs\.source_ref != '' && inputs\.source_ref \|\| format\('refs\/tags\/\{0\}', steps\.release\.outputs\.tag\) \}\}/,
   );
+  assert.match(
+    workflow,
+    /ref: \$\{\{ inputs\.source_ref != '' && inputs\.source_ref \|\| format\('refs\/tags\/\{0\}', needs\.resolve\.outputs\.tag\) \}\}/,
+  );
   assert.match(workflow, /git show-ref --verify --quiet "\$expected_ref"/);
   assert.match(workflow, /tag_commit=\$\(git rev-parse "\$expected_ref\^\{commit\}"\)/);
   assert.match(workflow, /node scripts\/release\.mjs --check/);
@@ -177,7 +181,55 @@ test("container publication checks out the release tag or an explicit source ref
   assert.match(workflow, /file: \.\/Dockerfile\.browser/);
   assert.match(workflow, /Smoke-test browser container and real Chromium/);
   assert.match(workflow, /provenance: mode=max[\s\S]*?sbom: true/);
-  assert.match(workflow, /subject-name: \$\{\{ needs\.build\.outputs\.browser_image \}\}/);
+  assert.match(workflow, /subject-name: \$\{\{ needs\.resolve\.outputs\.browser_image \}\}/);
+  assert.match(workflow, /subject-name: \$\{\{ needs\.resolve\.outputs\.image \}\}/);
+  assert.match(workflow, /subject-digest: \$\{\{ steps\.publish_tags\.outputs\.main_digest \}\}/);
+  assert.match(workflow, /subject-digest: \$\{\{ steps\.publish_tags\.outputs\.browser_digest \}\}/);
+});
+
+test("container publication builds each architecture natively and merges both digests", () => {
+  const workflow = readFileSync(
+    new URL("../.github/workflows/container.yml", import.meta.url),
+    "utf8",
+  );
+  assert.match(workflow, /arch: \[amd64, arm64\]/);
+  assert.match(workflow, /- arch: amd64\n\s+runs-on: ubuntu-24\.04\n/);
+  assert.match(workflow, /- arch: arm64\n\s+runs-on: ubuntu-24\.04-arm\n/);
+  assert.match(workflow, /runs-on: \$\{\{ matrix\.runs-on \}\}/);
+  assert.match(workflow, /timeout-minutes: 120/);
+  // Without parameterized platforms the arm64 leg would bake amd64 images through QEMU.
+  assert.match(workflow, /platforms: linux\/\$\{\{ matrix\.arch \}\}/);
+  assert.doesNotMatch(workflow, /platforms: linux\/amd64\b/);
+
+  assert.match(workflow, /browser_digest_amd64: \$\{\{ steps\.record_amd64\.outputs\.browser_digest \}\}/);
+  assert.match(workflow, /browser_digest_arm64: \$\{\{ steps\.record_arm64\.outputs\.browser_digest \}\}/);
+  assert.match(workflow, /digest_amd64: \$\{\{ steps\.record_amd64\.outputs\.digest \}\}/);
+  assert.match(workflow, /digest_arm64: \$\{\{ steps\.record_arm64\.outputs\.digest \}\}/);
+  assert.match(workflow, /MAIN_DIGEST_AMD64: \$\{\{ needs\.build\.outputs\.digest_amd64 \}\}/);
+  assert.match(workflow, /MAIN_DIGEST_ARM64: \$\{\{ needs\.build\.outputs\.digest_arm64 \}\}/);
+  assert.match(workflow, /BROWSER_DIGEST_AMD64: \$\{\{ needs\.build\.outputs\.browser_digest_amd64 \}\}/);
+  assert.match(workflow, /BROWSER_DIGEST_ARM64: \$\{\{ needs\.build\.outputs\.browser_digest_arm64 \}\}/);
+  assert.match(workflow, /if: matrix\.arch == 'amd64'/);
+  assert.match(workflow, /if: matrix\.arch == 'arm64'/);
+  assert.match(workflow, /cache-from: type=gha,scope=ocg-manager-linux-\$\{\{ matrix\.arch \}\}/);
+  assert.match(workflow, /cache-to: type=gha,mode=max,scope=ocg-manager-linux-\$\{\{ matrix\.arch \}\}/);
+  assert.match(workflow, /cache-from: type=gha,scope=ocg-browser-linux-\$\{\{ matrix\.arch \}\}/);
+  assert.match(workflow, /cache-to: type=gha,mode=max,scope=ocg-browser-linux-\$\{\{ matrix\.arch \}\}/);
+  assert.match(workflow, /CACHE_SCOPE=ocg-manager-linux-\$\{\{ matrix\.arch \}\}/);
+  assert.match(workflow, /CACHE_BROWSER_SCOPE=ocg-browser-linux-\$\{\{ matrix\.arch \}\}/);
+  assert.match(workflow, /SMOKE_IMAGE: ocg-manager:smoke-\$\{\{ github\.run_id \}\}-\$\{\{ matrix\.arch \}\}/);
+
+  const bake = readFileSync(
+    new URL("../docker-bake.hcl", import.meta.url),
+    "utf8",
+  );
+  assert.match(bake, /variable "CACHE_SCOPE" \{\s*\n\s*default = "ocg-manager-linux-amd64"/);
+  assert.match(bake, /variable "CACHE_BROWSER_SCOPE" \{\s*\n\s*default = "ocg-browser-linux-amd64"/);
+  assert.match(bake, /cache-from = \["type=gha,scope=\$\{CACHE_SCOPE\}"\]/);
+  assert.match(bake, /cache-from = \["type=gha,scope=\$\{CACHE_BROWSER_SCOPE\}"\]/);
+  // A platforms pin in the bake smoke targets would bake the wrong architecture
+  // on the arm64 leg; the native runner default is required.
+  assert.doesNotMatch(bake, /platforms\s*=/);
 });
 
 test("paired moving channels either converge at the candidate or remain aligned", () => {
@@ -211,25 +263,68 @@ test("container publication preflights paired moving channels before publishing 
   const publishStep = workflow.match(
     /- name: Publish tags without moving immutable references or rolling channels back[\s\S]*?(?=\n      - name: Generate signed GitHub provenance)/,
   )?.[0] ?? "";
+  const deriveBrowser = publishStep.indexOf('derive_candidate_index "$BROWSER_IMAGE"');
+  const deriveMain = publishStep.indexOf('derive_candidate_index "$MAIN_IMAGE"');
   const mainPreflight = publishStep.indexOf('preflight_immutable_image_tags "$MAIN_IMAGE" "$MAIN_DIGEST"');
   const browserPreflight = publishStep.indexOf('preflight_immutable_image_tags "$BROWSER_IMAGE" "$BROWSER_DIGEST"');
   const movingPreflight = publishStep.indexOf('preflight_moving_pair "$MINOR_CHANNEL"');
   const browserPublish = publishStep.indexOf('publish_immutable_image_tags "$BROWSER_IMAGE" "$BROWSER_DIGEST"');
   const mainPublish = publishStep.indexOf('publish_immutable_image_tags "$MAIN_IMAGE" "$MAIN_DIGEST"');
   const pairVerification = publishStep.indexOf('verify_paired_tag "$CANDIDATE_VERSION"');
+  const movingPublish = publishStep.indexOf('publish_moving_pair "$MINOR_CHANNEL"');
 
+  assert.ok(publishStep.match(/MAIN_DIGEST_AMD64 MAIN_DIGEST_ARM64 BROWSER_DIGEST_AMD64 BROWSER_DIGEST_ARM64/),
+    "all four architecture digests must be asserted non-empty before any publication");
+  assert.match(publishStep, /\[\[ -z "\$\{!arch_digest_var\}" \]\]/,
+    "the non-empty assertion must fail the step, not just enumerate the variables");
+  assert.ok(deriveBrowser >= 0 && deriveMain >= 0,
+    "both images must derive a merged multi-architecture index digest");
+  assert.ok(deriveBrowser < deriveMain,
+    "derive and publish the browser sidecar digest before the main image");
   assert.ok(mainPreflight >= 0 && browserPreflight >= 0, "both images must be preflighted");
   assert.ok(movingPreflight >= 0, "moving channels must be preflighted as a pair");
+  assert.ok(movingPreflight < deriveBrowser,
+    "paired moving-channel decisions need no candidate digest and must precede the first registry write");
   assert.ok(mainPreflight < browserPublish && browserPreflight < browserPublish,
-    "all immutable and moving-tag decisions must finish before the first tag write");
+    "all sha- tag decisions must finish before the first sha- tag write");
+  assert.ok(movingPreflight < movingPublish,
+    "moving-channel decisions must finish before the first moving-channel write");
   assert.ok(browserPublish < mainPublish,
     "publish the browser sidecar before exposing the matching main image");
   assert.ok(mainPublish < pairVerification,
     "verify both images together only after their publication sequence completes");
   assert.match(publishStep, /paired-channel/);
   assert.match(publishStep, /MOVING_EXPECTED_VERSIONS\["\$tag"\]=\$version/);
+  assert.match(
+    publishStep,
+    /EXPECTED_DIGESTS\["\$main_ref"\]=\$\(\[\[ "\$\{MOVING_DECISIONS\["\$main_ref"\]\}" == true \]\] && printf '%s' "\$MAIN_DIGEST" \|\| printf '%s' "\$\{MOVING_EXISTING_DIGESTS\["\$main_ref"\]\}"\)/,
+    "the main expected-digest expansion must stay a plain parameter expansion (stray characters corrupt kept digests)",
+  );
+  assert.match(
+    publishStep,
+    /EXPECTED_DIGESTS\["\$browser_ref"\]=\$\(\[\[ "\$\{MOVING_DECISIONS\["\$browser_ref"\]\}" == true \]\] && printf '%s' "\$BROWSER_DIGEST" \|\| printf '%s' "\$\{MOVING_EXISTING_DIGESTS\["\$browser_ref"\]\}"\)/,
+    "the browser expected-digest expansion must stay a plain parameter expansion (stray characters corrupt kept digests)",
+  );
+  assert.match(publishStep, /verify_merged_index "\$image" "\$ref" \|\| return 1/,
+    "derive_candidate_index must propagate verify_merged_index failures explicitly; errexit does not reach command substitutions");
   assert.match(publishStep, /verify_paired_moving_tag/);
   assert.match(publishStep, /verify_published_digest "\$BROWSER_IMAGE:\$tag"/);
+  assert.match(
+    publishStep,
+    /docker buildx imagetools create[\s\S]*?--annotation "index:org\.opencontainers\.image\.version=\$CANDIDATE_VERSION"[\s\S]*?--annotation "index:org\.opencontainers\.image\.revision=\$FULL_SHA"[\s\S]*?"\$image@\$amd64_digest" "\$image@\$arm64_digest"/,
+    "every tag must be assembled from both architecture digests with explicit index annotations",
+  );
+  assert.match(publishStep, /application\/vnd\.oci\.image\.index\.v1\+json/,
+    "published indexes must be verified as OCI image indexes");
+  assert.match(workflow, /oci-mediatypes=true/,
+    "build-push must lock in OCI media types so index annotations cannot be dropped");
+  assert.match(publishStep, /'\.annotations\."org\.opencontainers\.image\.revision" \/\/ empty'/,
+    "verify_merged_index must check the revision annotation as well as the version");
+  assert.match(publishStep, /inspect_version/);
+  assert.match(workflow, /'\.annotations\."org\.opencontainers\.image\.version" \/\/ empty'/,
+    "inspect_version must prefer the index annotation");
+  assert.match(workflow, /\.platform\.architecture == "arm64"/,
+    "inspect_version must fall back to arm64 children after amd64");
 });
 
 test("container publication requires anonymous exact-version pulls", () => {
@@ -244,6 +339,10 @@ test("container publication requires anonymous exact-version pulls", () => {
   assert.match(anonymousPull, /export DOCKER_CONFIG="\$anonymous_docker_config"/);
   assert.match(anonymousPull, /docker pull --quiet "\$MAIN_IMAGE:\$CANDIDATE_VERSION"/);
   assert.match(anonymousPull, /docker pull --quiet "\$BROWSER_IMAGE:\$CANDIDATE_VERSION"/);
+  assert.match(anonymousPull, /verify_public_index "\$MAIN_IMAGE:\$CANDIDATE_VERSION"/);
+  assert.match(anonymousPull, /verify_public_index "\$BROWSER_IMAGE:\$CANDIDATE_VERSION"/);
+  assert.match(anonymousPull, /"amd64,arm64"/,
+    "anonymous pulls must expose both architectures in the public manifest");
 });
 
 test("release preflight rejects a tag that does not match repository versions", () => {

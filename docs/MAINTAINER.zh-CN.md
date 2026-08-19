@@ -356,7 +356,7 @@ SHA256SUMS
 每个 CLI 压缩包都包含可执行文件、`dist/`、`LICENSE`。**不要** 只发 CLI 可执
 行文件：`serve` 需要同级的 `dist/`。Windows 没有 portable GUI 安装包。
 
-`linux/amd64` 容器单独发布为 `ghcr.io/klarkxy/opencode-go-mgr`。GitHub Release
+`linux/amd64` 与 `linux/arm64` 容器单独发布为 `ghcr.io/klarkxy/opencode-go-mgr`。GitHub Release
 包含七份常规平台 payload、额外的 macOS 升级压缩包、四份升级签名、只拉取镜像
 的 Compose 示例、`latest.json` 与 `SHA256SUMS`（当前共 15 个附件）。本地验证器
 固定校验当前这 15 个文件，工作流同时要求 GitHub 附件的名称与数量和组装后的
@@ -532,16 +532,19 @@ closed。密钥轮换属于 break-glass 恢复，不是普通 secret 更新。�
 `.github/workflows/container.yml` 接受 Release 发布事件，但由 `release.yml` 使用
 `github.token` 公开的 Release 不会递归启动另一个工作流。签名 tag 流水线公开
 Release 后，稳定版必须对该 tag 显式触发 `container.yml`，并设置
-`publish_latest=true`。该工作流检出 Release tag，通过 `docker-bake.hcl` 并行构建
-两个 `linux/amd64` 冒烟镜像：主服务
+`publish_latest=true`。该工作流检出 Release tag，在各架构原生 runner 上构建
+（amd64 用 `ubuntu-24.04`、arm64 用 `ubuntu-24.04-arm`，发布产物不经 QEMU 模
+拟），并通过 `docker-bake.hcl` 并行构建本架构的冒烟镜像：主服务
 `ghcr.io/klarkxy/opencode-go-mgr` 与 Sidecar
 `ghcr.io/klarkxy/opencode-go-mgr-browser`。主镜像冒烟检查 Dashboard、鉴权和许可
 证；浏览器镜像在只读根文件系统、零 capability、Chromium 可用的 seccomp
 配置、无宿主机端口下启动 Xvfb/noVNC，并通过受 token 保护的控制 API 真正拉起
 普通 Chromium 与持久 Profile。
 
-两个镜像都先按 digest 推送而不分配可变名称，再进入仓库级串行标签队列。
-`X.Y.Z` 与 `sha-<12 位 commit>` 仅在不存在时创建；已存在时只有各自 digest 与
+全部验证通过的产物——每架构两个镜像——先按 digest 推送而不分配可变名称，再进入
+仓库级串行标签队列。`X.Y.Z` 与 `sha-<12 位 commit>` 由两个架构的 digest 合并为
+单一多架构 OCI index（显式携带 index 版本/revision 注解，多源组装不继承源注解），
+仅在不存在时创建；已存在时只有各自 digest 与
 候选完全相同才接受，否则失败。稳定版 `X.Y` 和选择更新的 `latest` 按镜像对整体
 决策：要么都收敛到候选版本，要么保留已经对齐的较新版本对；若通道仍会分裂，工作
 流会失败而不是静默保留。两个镜像各自记录 SPDX SBOM、BuildKit SLSA provenance
@@ -603,11 +606,12 @@ Docker 仍走直接/手动路径。
 
 PR 会自动运行三路并行质量门：前端检查、Linux workspace Rust 测试/Clippy（含
 Tauri crate），以及覆盖 Windows 专属 Tauri 行为编译和单测的 Windows job；原生
-安装包/打包冒烟仍只在手动候选或 tag 流程运行。容器工作流只覆盖 `linux/amd64`，
-并且只在 Release 发布后或手动触发时运行。
+安装包/打包冒烟仍只在手动候选或 tag 流程运行。容器工作流覆盖 `linux/amd64` 与
+`linux/arm64`（各自在原生 runner 上构建并冒烟），并且只在 Release 发布后或手动
+触发时运行。
 
-CI 不会操作真实桌面 UI，也不启动真实 Claude Desktop 或 Gemini CLI，不测试容
-器 ARM64、备份恢复、数据库降级、迁移回滚、真实上游账号或真实 Gateway 请求。
+CI 不会操作真实桌面 UI，也不启动真实 Claude Desktop 或 Gemini CLI，不测试备份
+恢复、数据库降级、迁移回滚、真实上游账号或真实 Gateway 请求。
 Rust 测试覆盖 Gemini/Claude Desktop 路由、鉴权、别名改写、非流式转换和 SSE 事
 件形状，但不能证明第三方客户端的新版本仍接受生成的配置。容器冒烟只检查 TCP
 健康、Dashboard HTML、auth status、镜像内许可证，以及未登录 settings 返回

@@ -420,7 +420,7 @@ Each CLI archive contains its executable, `dist/`, and `LICENSE`. Do not ship
 the CLI executable alone: `serve` needs the sibling dashboard assets. Windows
 has no portable GUI artifact.
 
-The `linux/amd64` container is published separately as
+The `linux/amd64` and `linux/arm64` containers are published separately as
 `ghcr.io/klarkxy/opencode-go-mgr`; the GitHub Release contains the seven
 ordinary platform payloads, the extra macOS updater archive, four updater
 signatures, the pull-only Compose example, `latest.json`, and `SHA256SUMS`
@@ -650,8 +650,10 @@ clients cannot trust a release signed only by the replacement key.
 Release published by `release.yml` with `github.token` does not recursively
 start another workflow. After the signed tag pipeline publishes the Release,
 dispatch `container.yml` explicitly for that tag with `publish_latest=true`
-for a stable release. It checks out the release tag and, via `docker-bake.hcl`, builds both
-`linux/amd64` smoke images in parallel: the main
+for a stable release. It checks out the release tag and builds each
+architecture natively (amd64 on `ubuntu-24.04`, arm64 on `ubuntu-24.04-arm` —
+no QEMU emulation for release artifacts). Via `docker-bake.hcl`, each leg
+builds its own `linux/<arch>` smoke images in parallel: the main
 `ghcr.io/klarkxy/opencode-go-mgr` service and the
 `ghcr.io/klarkxy/opencode-go-mgr-browser` sidecar. The main smoke covers the
 dashboard, authentication, and license. The browser smoke starts Xvfb/noVNC
@@ -660,9 +662,12 @@ configuration, and no host-published port, then uses the token-protected
 control API to launch a real ordinary Chromium process with a persistent
 profile.
 
-Both verified results are pushed by digest without assigning a mutable name,
-then enter the repository-wide serialized tag queue. `X.Y.Z` and
-`sha-<12-character-commit>` are created only when absent; an existing tag is
+All verified results — two images per architecture — are pushed by digest
+without assigning a mutable name, then enter the repository-wide serialized
+tag queue. `X.Y.Z` and `sha-<12-character-commit>` are assembled by merging
+the two architecture digests into one multi-architecture OCI index (with
+explicit index version/revision annotations, since multi-source assembly
+does not inherit them) and are created only when absent; an existing tag is
 accepted only when its image's exact candidate digest already matches.
 Stable `X.Y` and opted-in `latest` are decided as a pair: the workflow either
 converges both image channels at the candidate or retains an already aligned
@@ -739,11 +744,12 @@ Pull requests automatically receive the three-job quality gate: frontend
 checks, Linux workspace Rust tests/Clippy (including the Tauri crate), and
 the Windows job that covers compilation and unit tests for Windows-only
 Tauri behavior. Native installer/package smokes remain manual release
-candidates or tag runs. The container workflow covers `linux/amd64` only
-and runs after a release is published or manually dispatched.
+candidates or tag runs. The container workflow covers `linux/amd64` and
+`linux/arm64` (each built and smoke-tested on its native runner) and runs
+after a release is published or manually dispatched.
 
 CI does not drive real desktop UI interactions or launch real Claude Desktop
-or Gemini CLI clients, and it does not test container ARM64, backup/restore,
+or Gemini CLI clients, and it does not test backup/restore,
 database downgrade, migration rollback, an upstream account, or a real
 gateway request. Rust tests cover Gemini/Claude Desktop routing,
 authentication, alias rewriting, non-stream conversion, and SSE event shapes,
