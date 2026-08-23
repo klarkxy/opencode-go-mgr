@@ -1,5 +1,5 @@
 use anyhow::{Context, Result, anyhow, bail};
-use chrono::{DateTime, Timelike, Utc};
+use chrono::{DateTime, Datelike, Timelike, Utc};
 use futures_util::StreamExt;
 use reqwest::redirect::{Attempt, Policy};
 use serde::{Deserialize, Serialize};
@@ -902,7 +902,16 @@ fn select_priced_model<'a>(
 }
 
 fn is_official_peak_utc(at: DateTime<Utc>) -> bool {
-    // Official Go docs: DeepSeek Peak hours are 01:00-04:00 and 06:00-10:00 UTC.
+    // Official Go docs: DeepSeek Peak hours are 01:00-04:00 and 06:00-10:00 UTC,
+    // Monday through Friday. Saturday and Sunday are off-peak all day.
+    //
+    // The weekday is read in UTC rather than on DeepSeek's Beijing clock. That is
+    // sound only because both windows end at 10:00 UTC, well before 16:00 UTC --
+    // the instant a UTC date and a Beijing date begin to disagree. If a window
+    // ever extends past 16:00 UTC this needs to move to Asia/Shanghai.
+    if at.weekday().number_from_monday() > 5 {
+        return false;
+    }
     let minutes = at.hour() * 60 + at.minute();
     (60..240).contains(&minutes) || (360..600).contains(&minutes)
 }
@@ -1530,10 +1539,15 @@ mod tests {
     #[test]
     fn deepseek_uses_utc_peak_and_off_peak_rows() {
         let snapshot = embedded_seed();
-        let off_peak = DateTime::parse_from_rfc3339("2026-08-16T12:00:00Z")
+        // Both instants are on Monday 2026-08-17. They used to sit on Sunday
+        // 2026-08-16, which made the `peak` half assert the weekend bug: a
+        // Sunday 07:00Z session is off-peak, so it cannot cost 1.76. Keeping
+        // this pair on a weekday leaves it testing the hour axis only; the
+        // weekday axis is covered by the test below.
+        let off_peak = DateTime::parse_from_rfc3339("2026-08-17T12:00:00Z")
             .unwrap()
             .with_timezone(&Utc);
-        let peak = DateTime::parse_from_rfc3339("2026-08-16T07:00:00Z")
+        let peak = DateTime::parse_from_rfc3339("2026-08-17T07:00:00Z")
             .unwrap()
             .with_timezone(&Utc);
         let off = snapshot
@@ -1546,6 +1560,47 @@ mod tests {
             .unwrap();
         assert!((off - 0.88).abs() < 1e-12);
         assert!((on - 1.76).abs() < 1e-12);
+    }
+
+    #[test]
+    fn deepseek_weekend_is_off_peak_at_every_hour() {
+        // Peak is Monday through Friday only, so both weekend days must price
+        // at the Off-Peak rows even inside the 01:00-04:00 / 06:00-10:00 windows.
+        let snapshot = embedded_seed();
+        for at in [
+            "2026-08-15T02:00:00Z", // Saturday, inside the first peak window
+            "2026-08-15T07:00:00Z", // Saturday, inside the second
+            "2026-08-16T02:00:00Z", // Sunday, inside the first
+            "2026-08-16T07:00:00Z", // Sunday, inside the second
+        ] {
+            let when = DateTime::parse_from_rfc3339(at)
+                .unwrap()
+                .with_timezone(&Utc);
+            let cost = snapshot
+                .estimate_at("deepseek-v4-flash", 1_000_000, 0, 0, 0, None, when)
+                .cost
+                .unwrap();
+            assert!(
+                (cost - 0.88).abs() < 1e-12,
+                "{at} is on a weekend and must bill off-peak (0.88), got {cost}"
+            );
+        }
+
+        // The Friday and Monday either side of that weekend still bill at peak,
+        // so this is a weekday boundary and not a blanket disable.
+        for at in ["2026-08-14T07:00:00Z", "2026-08-17T07:00:00Z"] {
+            let when = DateTime::parse_from_rfc3339(at)
+                .unwrap()
+                .with_timezone(&Utc);
+            let cost = snapshot
+                .estimate_at("deepseek-v4-flash", 1_000_000, 0, 0, 0, None, when)
+                .cost
+                .unwrap();
+            assert!(
+                (cost - 1.76).abs() < 1e-12,
+                "{at} is a weekday peak hour and must bill 1.76, got {cost}"
+            );
+        }
     }
 
     #[test]
