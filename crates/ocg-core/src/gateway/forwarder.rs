@@ -745,20 +745,32 @@ async fn forward_request_impl(
 
         // Go uses 401 for ModelError ("model is not supported") as well as
         // invalid keys. Return it as-is so the client/CLI stops; do not rotate
-        // accounts or persist an auth breaker.
+        // accounts or persist an auth breaker. The one exception is a billing
+        // failure: "Insufficient balance" (CreditsError) is specific to the
+        // selected account, not the request — fail over to the next account
+        // (same as 403) instead of surfacing a pointless 401 to the client.
         if status == StatusCode::UNAUTHORIZED {
             let error_message = format!(
                 "upstream auth error 401: {}",
                 attempt_context.sanitize_upstream_error(&text)
             );
             let sanitized = attempt_context.sanitize_upstream_error(&text);
+            let insufficient_balance = text.to_ascii_lowercase().contains("insufficient balance");
             let failure = attempt_context.failure(FailureSpec {
                 error_source: "upstream",
                 error_stage: "upstream_http",
-                downstream_status: Some(status.as_u16()),
+                downstream_status: Some(if insufficient_balance {
+                    StatusCode::BAD_GATEWAY.as_u16()
+                } else {
+                    status.as_u16()
+                }),
                 upstream_status: Some(status.as_u16()),
                 upstream_wait_ms: Some(upstream_wait_ms),
-                retry_action: Some("return"),
+                retry_action: if insufficient_balance {
+                    Some("try_next_account")
+                } else {
+                    Some("return")
+                },
                 upstream_headers: Some(&error_headers),
                 upstream_error: Some(&text),
                 request_body: Some(client_body),
@@ -780,6 +792,13 @@ async fn forward_request_impl(
                     &attempt_context,
                     Some(failure),
                 )?;
+            }
+            if insufficient_balance {
+                return Ok(ForwardResult {
+                    response: error_response(plan.client, &error_message, None),
+                    action: ForwardAction::TryNextAccount,
+                    error_message: Some(error_message),
+                });
             }
             let upstream_error = Some(sanitize_upstream_error_value_with_known_secret(&text, &key));
             let body = format_error(plan.client, status, &sanitized, upstream_error.as_ref());
