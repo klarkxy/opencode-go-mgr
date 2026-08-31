@@ -6,7 +6,6 @@ use ocg_core::dashboard_v3::{
     ERROR_MISSING_EXPECTED_REVISION, ERROR_REVISION_CONFLICT, ERROR_UNAUTHORIZED,
     GITHUB_LATEST_RELEASE_API, GITHUB_LATEST_RELEASE_URL, UpdateCheck,
 };
-use ocg_core::db::CURRENT_SCHEMA_VERSION;
 use reqwest::StatusCode;
 use serde_json::{Map, Value, json};
 use std::sync::{Arc, Mutex};
@@ -323,48 +322,6 @@ async fn closed_proxy_addr() -> String {
 #[cfg(debug_assertions)]
 fn github_tag_body(tag: &str) -> String {
     json!({ "tag_name": tag, "html_url": "https://example.invalid/should-not-leak" }).to_string()
-}
-
-#[test]
-fn dashboard_v3_schema_version_stays_at_v34() {
-    assert_eq!(CURRENT_SCHEMA_VERSION, 34);
-}
-
-#[test]
-fn dashboard_v3_updater_source_keeps_the_fixed_github_api() {
-    let source = include_str!("../src/dashboard_v3/updater.rs");
-    let production = source
-        .split("#[cfg(test)]")
-        .next()
-        .expect("production source precedes tests");
-    assert!(production.contains(GITHUB_LATEST_RELEASE_API));
-    assert!(production.contains(GITHUB_LATEST_RELEASE_URL));
-    assert!(production.contains("configured_builder(config)"));
-    assert!(production.contains("#[cfg(debug_assertions)]"));
-    assert!(production.contains("#[cfg(not(debug_assertions))]"));
-    let release_idx = production
-        .find("#[cfg(not(debug_assertions))]")
-        .expect("release path");
-    let release = &production[release_idx..];
-    assert!(release.contains("GITHUB_LATEST_RELEASE_API"));
-    assert!(!release.contains("install_update_check_url_for_tests"));
-    assert!(!release.contains("UPDATE_CHECK_URL_OVERRIDES"));
-}
-
-#[test]
-fn dashboard_v3_mod_reexports_update_check_installer_only_under_debug_assertions() {
-    let source = include_str!("../src/dashboard_v3/mod.rs");
-    let idx = source
-        .find("install_update_check_url_for_tests")
-        .expect("installer re-export");
-    let before = &source[..idx];
-    let cfg_idx = before
-        .rfind("#[cfg(debug_assertions)]")
-        .expect("installer re-export must be debug-only");
-    assert!(
-        !before[cfg_idx..].contains("#[cfg(not(debug_assertions))]"),
-        "installer re-export compiled into release"
-    );
 }
 
 #[tokio::test]

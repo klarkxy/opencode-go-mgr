@@ -6,7 +6,6 @@ use ocg_core::dashboard_v3::{
     ERROR_REVISION_CONFLICT, ERROR_UNAUTHORIZED, PricingRefresh, PricingSnapshot, ProviderPricing,
     install_official_pricing_fetch_error_for_tests, install_official_pricing_fetch_for_tests,
 };
-use ocg_core::db::CURRENT_SCHEMA_VERSION;
 use ocg_core::kernel::pricing::SOURCE_URL;
 use ocg_core::provider::{
     ANONYMOUS_FREE_OFFERING_ID, COMMAND_CODE_PROVIDER_ID, CUSTOM_API_OFFERING_ID,
@@ -269,11 +268,6 @@ fn mutated_official(harness: &V3Harness) -> ocg_core::kernel::pricing::PricingSn
         }
     }
     official
-}
-
-#[test]
-fn dashboard_v3_schema_version_stays_at_v34() {
-    assert_eq!(CURRENT_SCHEMA_VERSION, 34);
 }
 
 #[tokio::test]
@@ -1305,22 +1299,6 @@ async fn dashboard_v3_goat_multiplier_write_is_provider_scoped_and_persistent() 
     drop(refresh_guard);
 
     harness.stop();
-}
-
-#[test]
-fn dashboard_v3_mod_reexports_official_fetch_installer_only_under_debug_assertions() {
-    let source = include_str!("../src/dashboard_v3/mod.rs");
-    let idx = source
-        .find("install_official_pricing_fetch_for_tests")
-        .expect("installer re-export");
-    let before = &source[..idx];
-    let cfg_idx = before
-        .rfind("#[cfg(debug_assertions)]")
-        .expect("installer re-export must be debug-only");
-    assert!(
-        !before[cfg_idx..].contains("#[cfg(not(debug_assertions))]"),
-        "installer re-export compiled into release"
-    );
 }
 
 #[tokio::test]

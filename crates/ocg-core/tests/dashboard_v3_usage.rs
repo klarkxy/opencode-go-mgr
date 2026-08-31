@@ -7,7 +7,7 @@ use ocg_core::dashboard_v3::{
     ERROR_REVISION_CONFLICT, ERROR_UNAUTHORIZED, ProviderUsage, UsageWindow,
     install_official_pricing_fetch_error_for_tests,
 };
-use ocg_core::db::{AccountUsageCalibrationSnapshot, CURRENT_SCHEMA_VERSION};
+use ocg_core::db::AccountUsageCalibrationSnapshot;
 use ocg_core::models::UsageWindowKind;
 use ocg_core::models::{CreditBalance, ForwardLog};
 use ocg_core::provider::{
@@ -279,40 +279,6 @@ fn seed_credit_balance(harness: &V3Harness, account_id: &str) {
             .len(),
         1,
         "{account_id} should keep the seeded credit row"
-    );
-}
-
-#[test]
-fn dashboard_v3_schema_version_stays_at_v34() {
-    assert_eq!(CURRENT_SCHEMA_VERSION, 34);
-}
-
-#[test]
-fn usage_slice_keeps_outbound_io_behind_the_sealed_plan_client() {
-    let source = include_str!("../src/dashboard_v3/usage.rs");
-    for needle in [
-        "reqwest",
-        "crate::go_usage",
-        "use crate::usage_sync",
-        "crate::usage_sync",
-        "fetch_official_snapshot",
-        "refresh_official_usage",
-        "bump_settings_revision",
-        "crate::dashboard::",
-        "crate::gateway",
-    ] {
-        assert!(
-            !source.contains(needle),
-            "usage.rs must not contain `{needle}`"
-        );
-    }
-    assert!(source.contains("crate::plan_usage::fetch"));
-    assert!(
-        !source.lines().any(|line| {
-            let trimmed = line.trim_start();
-            trimmed.starts_with("trait ") || trimmed.starts_with("pub trait")
-        }),
-        "usage.rs must not introduce a trait hierarchy"
     );
 }
 

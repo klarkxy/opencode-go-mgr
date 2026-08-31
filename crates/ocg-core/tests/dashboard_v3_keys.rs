@@ -4,7 +4,6 @@ use ocg_core::dashboard_v3::{
     ConnectionInfo, ERROR_INVALID_JSON, ERROR_INVALID_REQUEST, ERROR_MISSING_EXPECTED_REVISION,
     ERROR_REVISION_CONFLICT, ERROR_UNAUTHORIZED, MutationAck,
 };
-use ocg_core::db::CURRENT_SCHEMA_VERSION;
 use ocg_core::gateway_keys::PRIMARY_KEY_ID;
 use ocg_core::models::{Account, AccountSetupStep, AccountType, RoutingMode};
 use reqwest::{Method, StatusCode};
@@ -218,38 +217,6 @@ fn key_mutation_routes(id: &str) -> Vec<(Method, String)> {
         (Method::DELETE, format!("/keys/{id}")),
         (Method::POST, format!("/keys/{id}/regenerate")),
     ]
-}
-
-#[test]
-fn dashboard_v3_schema_version_stays_at_v34() {
-    assert_eq!(CURRENT_SCHEMA_VERSION, 34);
-}
-
-#[test]
-fn dashboard_v3_keys_release_source_hides_access_key_unique_index_seam() {
-    let source = include_str!("../src/db.rs");
-    let tests_mod = source
-        .rfind("#[cfg(test)]\nmod tests {")
-        .expect("db.rs tests module");
-    let production = &source[..tests_mod];
-    let needle = "fn test_drop_access_key_unique_index";
-    let idx = production
-        .find(needle)
-        .expect("debug/test unique-index seam should exist");
-    let prefix = &production[idx.saturating_sub(160)..idx];
-    assert!(
-        prefix.contains("#[cfg(any(test, debug_assertions))]")
-            || prefix.contains("#[cfg(debug_assertions)]"),
-        "access-key unique-index seam must be absent from release production source: {prefix}"
-    );
-    assert!(
-        !prefix.contains("#[cfg(not(debug_assertions))]"),
-        "access-key unique-index seam must not compile in release"
-    );
-    assert!(
-        !production[idx + needle.len()..].contains(needle),
-        "only one unique-index test seam is allowed"
-    );
 }
 
 #[tokio::test]

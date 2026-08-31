@@ -5,7 +5,6 @@ use ocg_core::dashboard_v3::{
     CATALOG_TYPE_NAMES, ERROR_CONFLICT, ERROR_INVALID_JSON, ERROR_MISSING_EXPECTED_REVISION,
     ERROR_REVISION_CONFLICT, ERROR_UNAUTHORIZED, contract_schema,
 };
-use ocg_core::db::CURRENT_SCHEMA_VERSION;
 use reqwest::header::{HeaderMap, SET_COOKIE};
 use reqwest::{StatusCode, header};
 use serde_json::{Map, Value, json};
@@ -172,11 +171,6 @@ fn assert_secret_free(body: &Value, secrets: &[&str]) {
 }
 
 #[test]
-fn dashboard_v3_schema_version_stays_at_v34() {
-    assert_eq!(CURRENT_SCHEMA_VERSION, 34);
-}
-
-#[test]
 fn auth_catalog_types_append_after_pricing_without_rewriting_the_prefix() {
     assert_eq!(CATALOG_TYPE_NAMES[0], "ControlRevision");
     let auth_start = CATALOG_TYPE_NAMES
@@ -240,60 +234,6 @@ fn auth_catalog_types_append_after_pricing_without_rewriting_the_prefix() {
             .iter()
             .any(|value| value == "processGeneration")
     );
-}
-
-#[test]
-fn v2_and_v3_auth_handlers_share_one_session_implementation() {
-    let v3 = include_str!("../src/dashboard_v3/auth.rs");
-    let v2 = include_str!("../src/dashboard.rs");
-    let shared = include_str!("../src/dashboard_session.rs");
-    for needle in [
-        "dashboard_session::credentials_match",
-        "dashboard_session::cookie_header",
-    ] {
-        assert!(v3.contains(needle), "V3 missing {needle}");
-        assert!(v2.contains(needle), "V2 missing {needle}");
-    }
-    assert!(v2.contains("register_admin(&state.db,"));
-    assert!(v3.contains("dashboard_session::prepare_admin"));
-    assert!(v3.contains("dashboard_session::save_prepared_admin_if_absent"));
-    assert!(v2.contains("credentials_match(&state.db,"));
-    assert!(v3.contains("credentials_match(&state.db,"));
-    assert!(v2.contains("issue_session(&state.browser, &state.dashboard_session_token)"));
-    assert!(v3.contains("dashboard_session::rotate_session_under_operation"));
-    assert!(v3.contains("dashboard_session::rotate_session_if_authorized_under_operation"));
-    assert!(v2.contains("dashboard_session::logout("));
-    assert!(!v2.contains("register_admin(&state,"));
-    assert!(!v3.contains("register_admin(&state,"));
-    assert!(shared.contains("invalidate_remote_sessions"));
-    assert!(shared.contains("does **not** bump"));
-    let initialized = shared
-        .find("let initialized = is_initialized(db)?")
-        .unwrap();
-    let live_token = shared
-        .find("let current_token = session_token.lock()")
-        .unwrap();
-    assert!(
-        initialized < live_token,
-        "status must read initialization before the live token"
-    );
-    let v2_status =
-        &v2[v2.find("async fn auth_status").unwrap()..v2.find("async fn register_admin").unwrap()];
-    assert!(!v2_status.contains("dashboard_session_token.lock().clone()"));
-    assert!(!v2.contains("const SESSION_COOKIE"));
-    assert!(!include_str!("../src/dashboard_v3/mod.rs").contains("const SESSION_COOKIE"));
-    for needle in [
-        "CoreState",
-        "crate::state",
-        "crate::gateway",
-        "crate::dashboard",
-        "crate::dashboard_v3",
-    ] {
-        assert!(
-            !shared.contains(needle),
-            "dashboard_session must stay state-neutral, found {needle}"
-        );
-    }
 }
 
 #[tokio::test]

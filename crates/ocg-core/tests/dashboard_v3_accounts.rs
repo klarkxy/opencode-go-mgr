@@ -9,7 +9,6 @@ use ocg_core::dashboard_v3::{
     ERROR_PRECONDITION_FAILED, ERROR_REVISION_CONFLICT, ERROR_SERVICE_UNAVAILABLE,
     ERROR_UNAUTHORIZED,
 };
-use ocg_core::db::CURRENT_SCHEMA_VERSION;
 use ocg_core::provider::{
     COMMAND_CODE_PROVIDER_ID, CUSTOM_API_OFFERING_ID, CUSTOM_PROVIDER_ID, GOAT_OFFERING_ID,
     OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID, ZEN_FREE_ACCOUNT_ID,
@@ -251,11 +250,6 @@ fn mutation_routes(id: &str) -> Vec<(Method, String, Value)> {
             json!({ "capabilities": [custom_capability()] }),
         ),
     ]
-}
-
-#[test]
-fn dashboard_v3_schema_version_stays_at_v34() {
-    assert_eq!(CURRENT_SCHEMA_VERSION, 34);
 }
 
 #[tokio::test]

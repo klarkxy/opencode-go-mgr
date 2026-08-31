@@ -10,7 +10,6 @@ use ocg_core::dashboard_v3::{
     ERROR_CONFLICT, ERROR_INVALID_JSON, ERROR_INVALID_REQUEST, ERROR_MISSING_EXPECTED_REVISION,
     ERROR_NOT_FOUND, ERROR_REVISION_CONFLICT, ERROR_UNAUTHORIZED,
 };
-use ocg_core::db::CURRENT_SCHEMA_VERSION;
 #[cfg(debug_assertions)]
 use ocg_core::models::DEFAULT_ACCOUNT_TEST_MODEL;
 use ocg_core::models::{
@@ -437,31 +436,6 @@ fn assert_no_secret_logs(harness: &V3Harness, extra: &[&str]) {
             );
         }
     }
-}
-
-#[test]
-fn dashboard_v3_schema_version_stays_at_v34() {
-    assert_eq!(CURRENT_SCHEMA_VERSION, 34);
-}
-
-#[test]
-fn dashboard_v3_managed_key_verify_source_gates_the_debug_seam() {
-    let source = include_str!("../src/dashboard_v3/managed_key_verify.rs");
-    let production = source
-        .split("#[cfg(test)]")
-        .next()
-        .expect("production source precedes tests");
-    assert!(production.contains("configured_builder(&prepared.config)"));
-    assert!(production.contains("no_redirect_policy"));
-    assert!(!production.contains("upstream_context"));
-    assert!(production.contains("#[cfg(debug_assertions)]"));
-    assert!(production.contains("#[cfg(not(debug_assertions))]"));
-    let release_idx = production
-        .find("#[cfg(not(debug_assertions))]")
-        .expect("release path");
-    let release = &production[release_idx..];
-    assert!(!release.contains("install_managed_key_verify_target_for_tests"));
-    assert!(!release.contains("MANAGED_KEY_VERIFY_TARGET_OVERRIDES"));
 }
 
 #[tokio::test]

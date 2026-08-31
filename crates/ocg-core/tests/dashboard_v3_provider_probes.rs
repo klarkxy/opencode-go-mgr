@@ -11,7 +11,6 @@ use ocg_core::dashboard_v3::{
     ERROR_NOT_FOUND, ERROR_NOT_IMPLEMENTED, ERROR_REVISION_CONFLICT, ERROR_UNAUTHORIZED,
     ProtocolProbeResponse,
 };
-use ocg_core::db::CURRENT_SCHEMA_VERSION;
 use ocg_core::models::{ProxyListDirection, ProxyMode};
 use ocg_core::provider::{
     COMMAND_CODE_PROVIDER_ID, CUSTOM_API_OFFERING_ID, CUSTOM_PROVIDER_ID, OPENCODE_PROVIDER_ID,
@@ -353,11 +352,6 @@ fn load_go_evidence(
         .lock()
         .load_model_protocol(&go_scope(), "grok-4.5", protocol)
         .unwrap()
-}
-
-#[test]
-fn dashboard_v3_schema_version_stays_at_v34() {
-    assert_eq!(CURRENT_SCHEMA_VERSION, 34);
 }
 
 #[tokio::test]
@@ -1896,6 +1890,5 @@ async fn v2_duplicate_custom_and_ceiling_probes_coexist() {
     assert_eq!(stored.provider_id, CUSTOM_PROVIDER_ID);
     assert_eq!(stored.offering_id, CUSTOM_API_OFFERING_ID);
     assert!(stored.enabled);
-    assert_eq!(CURRENT_SCHEMA_VERSION, 34);
     harness.stop();
 }

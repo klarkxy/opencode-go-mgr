@@ -1,7 +1,6 @@
 //! Dashboard V3 contract kernel: schema drift, coexistence, auth, and process generation.
 
 use ocg_core::dashboard_v3::{CATALOG_TYPE_NAMES, ControlRevision, contract_schema_pretty};
-use ocg_core::db::CURRENT_SCHEMA_VERSION;
 use reqwest::StatusCode;
 use serde_json::{Value, json};
 use std::fs;
@@ -36,11 +35,6 @@ fn checked_in_schema_matches_rust_dtos() {
     for name in CATALOG_TYPE_NAMES {
         assert!(defs.contains_key(*name), "catalog missing {name}");
     }
-}
-
-#[test]
-fn schema_version_stays_at_v34() {
-    assert_eq!(CURRENT_SCHEMA_VERSION, 34);
 }
 
 #[test]

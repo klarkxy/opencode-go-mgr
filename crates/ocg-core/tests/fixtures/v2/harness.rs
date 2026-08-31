@@ -50,7 +50,6 @@ pub(crate) const SUCCESS_CHAT_BODY: &str = r#"{"id":"ok","object":"chat.completi
 pub(crate) const MIXED_UPSTREAM_MODELS_BODY: &str = r#"{"object":"list","data":[{"id":"deepseek-v4-flash"},{"id":"deepseek/deepseek-v4-flash"},{"id":"vendor-raw-not-an-alias"},{"id":"minimax-m2.7"},{"id":"grok-4.5"}]}"#;
 
 pub(crate) const CATALOG_CONTRACT: &str = include_str!("catalog_contract.json");
-pub(crate) const ALIAS_CONTRACT: &str = include_str!("alias_contract.json");
 
 const CHAT_STREAM_HEAD: &str = "data: {\"id\":\"chat-stream\",\"model\":\"deepseek-v4-flash\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"ok\"},\"finish_reason\":null}]}\n\n";
 
@@ -63,10 +62,6 @@ pub(crate) fn loopback_client() -> reqwest::Client {
 
 pub(crate) fn catalog_contract() -> Value {
     serde_json::from_str(CATALOG_CONTRACT).expect("catalog contract fixture")
-}
-
-pub(crate) fn alias_contract() -> Value {
-    serde_json::from_str(ALIAS_CONTRACT).expect("alias contract fixture")
 }
 
 pub(crate) struct V2Harness {

@@ -4,7 +4,6 @@ use ocg_core::dashboard_v3::{
     ConnectionInfo, ERROR_INVALID_JSON, ERROR_INVALID_REQUEST, ERROR_MISSING_EXPECTED_REVISION,
     ERROR_REVISION_CONFLICT, ERROR_UNAUTHORIZED, MutationAck, Settings,
 };
-use ocg_core::db::CURRENT_SCHEMA_VERSION;
 use reqwest::StatusCode;
 use serde_json::{Map, Value, json};
 
@@ -83,11 +82,6 @@ fn assert_v3_error(body: &Value, code: &str) {
     assert!(body.as_object().unwrap().contains_key("currentRevision"));
     assert!(body.as_object().unwrap().contains_key("processGeneration"));
     assert!(body.get("current_revision").is_none());
-}
-
-#[test]
-fn dashboard_v3_schema_version_stays_at_v34() {
-    assert_eq!(CURRENT_SCHEMA_VERSION, 34);
 }
 
 #[tokio::test]

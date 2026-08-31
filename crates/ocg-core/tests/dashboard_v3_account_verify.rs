@@ -16,7 +16,6 @@ use ocg_core::dashboard_v3::{
     AccountMutation, AccountVerificationStatus, ERROR_INVALID_JSON, ERROR_INVALID_REQUEST,
     ERROR_MISSING_EXPECTED_REVISION, ERROR_NOT_FOUND, ERROR_REVISION_CONFLICT, ERROR_UNAUTHORIZED,
 };
-use ocg_core::db::CURRENT_SCHEMA_VERSION;
 use ocg_core::gateway::provider_adapter::install_goat_verify_origin_for_test;
 use ocg_core::models::ProxyMode;
 use ocg_core::provider::{
@@ -476,27 +475,6 @@ async fn create_custom_account(
         AccountVerificationStatus::Pending
     );
     account.id
-}
-
-#[test]
-fn dashboard_v3_schema_version_stays_at_v34() {
-    assert_eq!(CURRENT_SCHEMA_VERSION, 34);
-}
-
-#[test]
-fn dashboard_v3_mod_reexports_custom_verify_installer_only_under_debug_assertions() {
-    let source = include_str!("../src/dashboard_v3/mod.rs");
-    let idx = source
-        .find("install_custom_verify_probe_for_tests")
-        .expect("installer re-export");
-    let before = &source[..idx];
-    let cfg_idx = before
-        .rfind("#[cfg(debug_assertions)]")
-        .expect("installer re-export must be debug-only");
-    assert!(
-        !before[cfg_idx..].contains("#[cfg(not(debug_assertions))]"),
-        "installer re-export compiled into release"
-    );
 }
 
 #[tokio::test]

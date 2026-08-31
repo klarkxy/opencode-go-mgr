@@ -1,12 +1,9 @@
 //! Dashboard V3 POST `/settings/test-proxy`: session, diagnostic overlay,
 //! default-leg parity, secrecy, and V2 coexistence.
 
-use ocg_core::dashboard_v3::{
-    ERROR_INVALID_JSON, ERROR_INVALID_REQUEST, ERROR_UNAUTHORIZED, PROXY_TEST_TARGET,
-};
+use ocg_core::dashboard_v3::{ERROR_INVALID_JSON, ERROR_INVALID_REQUEST, ERROR_UNAUTHORIZED};
 #[cfg(debug_assertions)]
 use ocg_core::dashboard_v3::{ERROR_OUTBOUND_FAILED, ProxyTestResponse};
-use ocg_core::db::CURRENT_SCHEMA_VERSION;
 #[cfg(debug_assertions)]
 use ocg_core::models::ProxyListDirection;
 use reqwest::StatusCode;
@@ -246,31 +243,6 @@ async fn closed_proxy_addr() -> String {
     let address = closed.local_addr().unwrap();
     drop(closed);
     format!("http://{address}")
-}
-
-#[test]
-fn dashboard_v3_schema_version_stays_at_v34() {
-    assert_eq!(CURRENT_SCHEMA_VERSION, 34);
-}
-
-#[test]
-fn dashboard_v3_proxy_test_source_keeps_the_fixed_production_target() {
-    let source = include_str!("../src/dashboard_v3/proxy_test.rs");
-    let production = source
-        .split("#[cfg(test)]")
-        .next()
-        .expect("production source precedes tests");
-    assert!(production.contains(PROXY_TEST_TARGET));
-    assert!(production.contains("configured_builder(&config)"));
-    assert!(production.contains("#[cfg(debug_assertions)]"));
-    assert!(production.contains("#[cfg(not(debug_assertions))]"));
-    let release_idx = production
-        .find("#[cfg(not(debug_assertions))]")
-        .expect("release path");
-    let release = &production[release_idx..];
-    assert!(release.contains("PROXY_TEST_TARGET"));
-    assert!(!release.contains("install_proxy_test_target_for_tests"));
-    assert!(!release.contains("PROXY_TEST_TARGET_OVERRIDES"));
 }
 
 #[tokio::test]

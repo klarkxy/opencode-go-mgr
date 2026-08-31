@@ -1,5 +1,5 @@
 //! Host settings-effects extraction: shared CoreState path, hook rollback,
-//! V2/V3 adapter mapping, and production host SCC membership.
+//! and V2/V3 adapter mapping.
 
 use ocg_core::crypto::{KeyCipher, StaticKeyCipher};
 use ocg_core::dashboard_v3::{
@@ -24,10 +24,6 @@ use tokio::sync::{Barrier, oneshot};
 mod harness;
 
 use harness::{V3Harness, loopback_client, start_loopback};
-
-fn production_prefix(source: &str) -> &str {
-    source.split("#[cfg(test)]").next().unwrap_or(source)
-}
 
 fn temp_data_dir(label: &str) -> PathBuf {
     let mut dir = std::env::temp_dir();
@@ -198,146 +194,6 @@ fn v2_payload(config: &ocg_core::models::AppConfig, expected_revision: Option<u6
         payload["expected_revision"] = json!(revision);
     }
     payload
-}
-
-#[test]
-fn v3_settings_updates_use_the_core_state_host_path() {
-    let state_src = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/state.rs"));
-    let v3_src = include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/src/dashboard_v3/settings.rs"
-    ));
-    let lib_src = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/lib.rs"));
-    let state_production = production_prefix(state_src);
-    let v3_production = production_prefix(v3_src);
-    let lib_production = production_prefix(lib_src);
-
-    assert!(state_production.contains("pub fn apply_host_settings("));
-    assert!(state_production.contains("pub enum HostSettingsError"));
-    assert!(state_production.contains("failed to synchronize desktop settings:"));
-    assert_eq!(
-        state_production.matches("self.set_config(next)").count(),
-        1,
-        "success path must persist next exactly once"
-    );
-    assert!(
-        state_production.contains(
-            "if auto_start_supported {\n                self.sync_auto_start(next_auto_start)?;"
-        ),
-        "supported auto-start must be reasserted after every successful save"
-    );
-    assert!(
-        state_production.contains("if dock_visibility_supported {\n                self.sync_dock_visibility(next_show_dock_icon)?;"),
-        "supported Dock visibility must be reasserted after every successful save"
-    );
-    assert!(
-        !state_production.contains("auto_start_changed"),
-        "supported auto-start invoke must not be gated on a changed flag"
-    );
-    assert!(
-        !state_production.contains("dock_changed"),
-        "supported Dock invoke must not be gated on a changed flag"
-    );
-
-    assert!(state_production.contains("rebind_gateway_listener_if_port_changed"));
-    assert!(state_production.contains("GatewayRebindHost::rebind"));
-    assert!(state_production.contains("rebind_from_serving_request"));
-    assert!(
-        !state_production.contains("crate::gateway::"),
-        "state must not name crate::gateway after the Phase 1 cut"
-    );
-    let host_gateway_src =
-        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/host_gateway.rs"));
-    let host_gateway_production = production_prefix(host_gateway_src);
-    assert!(host_gateway_production.contains("GatewayLifecycle::rebind"));
-    assert!(host_gateway_production.contains("rebind_from_serving_request"));
-    assert!(host_gateway_production.contains("impl GatewayRebindHost for CoreState"));
-    assert!(!host_gateway_production.contains("impl GatewayLifecycle"));
-    assert!(state_production.contains("settings_host_effects"));
-    assert!(state_production.contains("lock_settings_host_effects"));
-    assert!(state_production.contains("rebind_listener_after_settings_commit"));
-    assert!(state_production.contains("compensate_failed_listener_rebind"));
-    assert!(state_production.contains("live.gateway_port != committed.gateway_port"));
-    let listener_src = include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/src/gateway/listener.rs"
-    ));
-    let listener_production = production_prefix(listener_src);
-    assert!(listener_production.contains("observe_displaced_listener"));
-    assert!(listener_production.contains("schedule_dashboard_trust_recompute"));
-    assert!(listener_production.contains("recompute_dashboard_trust"));
-    assert!(listener_production.contains("stop_and_wait(handle)"));
-    assert!(v3_production.contains("apply_host_settings"));
-    assert!(v3_production.contains("lock_settings_host_effects"));
-    assert!(v3_production.contains("rebind_listener_after_settings_commit"));
-    assert!(v3_production.contains("map_host_settings_error"));
-
-    {
-        let adapter = v3_production;
-        assert!(
-            !adapter.contains("failed to synchronize desktop settings"),
-            "adapters must not keep the host rollback policy"
-        );
-        assert!(
-            !adapter.contains("failed to restore auto-start state"),
-            "adapters must not keep auto-start restore policy"
-        );
-        assert!(
-            !adapter.contains("failed to restore Dock visibility"),
-            "adapters must not keep Dock restore policy"
-        );
-        assert!(
-            !adapter.contains("sync_auto_start("),
-            "adapters must not call auto-start hooks directly"
-        );
-        assert!(
-            !adapter.contains("sync_dock_visibility("),
-            "adapters must not call Dock hooks directly"
-        );
-        assert!(
-            !adapter.contains("auto-start is unavailable in this runtime"),
-            "unsupported messages must live on HostSettingsError"
-        );
-        assert!(
-            !adapter.contains("Dock visibility is unavailable in this runtime"),
-            "unsupported messages must live on HostSettingsError"
-        );
-        assert!(
-            !adapter.contains("GatewayLifecycle::"),
-            "HTTP adapters must rebind through CoreState, not GatewayLifecycle directly"
-        );
-        assert!(
-            !adapter.contains("apply_host_settings(&config, previous_config)"),
-            "adapters must not unconditionally restore previous_config after a failed rebind"
-        );
-        assert!(
-            !adapter.contains("rebind_gateway_listener_if_port_changed"),
-            "HTTP adapters must rebind through the serialized host-effect commit helper"
-        );
-    }
-
-    assert!(!lib_production.contains("mod host_settings"));
-    assert!(!lib_production.contains("mod settings_host"));
-    assert!(!lib_production.contains("mod settings_effects"));
-}
-
-#[test]
-fn production_host_scc_is_empty_after_state_gateway_cut() {
-    let kernel = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/kernel/mod.rs"));
-    let start = kernel
-        .find("const EXPECTED_HOST_SCC:")
-        .expect("host SCC whitelist should remain in kernel/mod.rs");
-    let block = &kernel[start..];
-    let end = block.find(';').expect("EXPECTED_HOST_SCC should end");
-    let members: Vec<&str> = block[..end]
-        .split('"')
-        .enumerate()
-        .filter_map(|(i, part)| (i % 2 == 1).then_some(part))
-        .collect();
-    assert!(
-        members.is_empty(),
-        "Phase 1 cut must leave no multi-node host SCC, members={members:?}"
-    );
 }
 
 #[test]

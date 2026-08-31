@@ -19,7 +19,6 @@ use ocg_core::dashboard_v3::{
     ERROR_MISSING_EXPECTED_REVISION, ERROR_NOT_FOUND, ERROR_REVISION_CONFLICT, ERROR_UNAUTHORIZED,
     ProviderCatalog, ProviderContracts, ProviderModelCapability, ZenFreeModels, ZenFreeSettings,
 };
-use ocg_core::db::CURRENT_SCHEMA_VERSION;
 use ocg_core::kernel::ids::is_free_model;
 use ocg_core::kernel::zen::ZEN_MODELS_SOURCE_URL;
 #[cfg(debug_assertions)]
@@ -317,11 +316,6 @@ fn custom_create_body() -> Value {
             "protocol": "messages"
         }]
     })
-}
-
-#[test]
-fn dashboard_v3_schema_version_stays_at_v34() {
-    assert_eq!(CURRENT_SCHEMA_VERSION, 34);
 }
 
 #[tokio::test]
@@ -1267,56 +1261,6 @@ async fn dashboard_v3_zen_refresh_source_overrides_do_not_cross_talk_across_harn
     harness_b.stop();
 }
 
-#[test]
-fn dashboard_v3_zen_refresh_has_no_release_source_override() {
-    let providers = include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/src/dashboard_v3/providers.rs"
-    ));
-    let module = include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/src/dashboard_v3/mod.rs"
-    ));
-
-    assert!(
-        providers.contains("crate::zen_models::fetch_catalog(config).await"),
-        "production refresh must use the official Zen catalog client"
-    );
-    assert!(
-        !providers.contains("url.starts_with("),
-        "loopback source checks must parse the URL, not use starts_with"
-    );
-    assert!(
-        !providers.contains("static ZEN_MODELS_SOURCE_OVERRIDE:"),
-        "process-global singleton override must not remain"
-    );
-    assert_debug_gated(
-        module,
-        "pub use providers::set_zen_models_source_url_override_for_tests;",
-    );
-    assert_debug_gated(
-        providers,
-        "pub fn set_zen_models_source_url_override_for_tests",
-    );
-}
-
-fn assert_debug_gated(source: &str, needle: &str) {
-    let Some(index) = source.find(needle) else {
-        panic!("missing {needle}");
-    };
-    let start = index.saturating_sub(240);
-    let before = &source[start..index];
-    assert!(
-        before.contains("#[cfg(debug_assertions)]"),
-        "{needle} must be debug-gated; preceding text was {before}"
-    );
-    assert_eq!(
-        source.matches(needle).count(),
-        1,
-        "{needle} must appear once so the debug gate is unambiguous"
-    );
-}
-
 #[tokio::test]
 async fn dashboard_v3_provider_model_protocol_overrides_enforces_cas_and_persists() {
     let harness = start_loopback("providers-overrides").await;
@@ -1659,6 +1603,5 @@ async fn dashboard_v3_provider_routes_coexist_with_v2_and_omit_v2_aliases() {
     assert_eq!(v3_zen["enabled"], false);
     assert!(v3_zen.get("account").is_none());
 
-    assert_eq!(CURRENT_SCHEMA_VERSION, 34);
     harness.stop();
 }

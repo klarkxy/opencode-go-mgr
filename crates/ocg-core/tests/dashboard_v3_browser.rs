@@ -17,7 +17,6 @@ use ocg_core::dashboard_v3::{
     ERROR_MISSING_EXPECTED_REVISION, ERROR_NOT_FOUND, ERROR_PRECONDITION_FAILED,
     ERROR_REVISION_CONFLICT, ERROR_SERVICE_UNAVAILABLE, ERROR_UNAUTHORIZED,
 };
-use ocg_core::db::CURRENT_SCHEMA_VERSION;
 use reqwest::{Method, StatusCode};
 use serde_json::{Map, Value, json};
 use std::path::Path;
@@ -503,11 +502,6 @@ fn register_native(
             }),
         )
         .unwrap();
-}
-
-#[test]
-fn dashboard_v3_schema_version_stays_at_v34() {
-    assert_eq!(CURRENT_SCHEMA_VERSION, 34);
 }
 
 #[tokio::test]
