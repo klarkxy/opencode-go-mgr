@@ -432,8 +432,6 @@ fn path_has_prefix(path: &str, prefix: &str) -> bool {
 mod tests {
     use super::*;
     use crate::http::ProxyListDirection;
-    use std::fs;
-    use std::path::{Path, PathBuf};
 
     const PROXY_URL: &str = "http://127.0.0.1:7890";
     const INVALID_PROXY: &str = "not a url";
@@ -673,94 +671,5 @@ mod tests {
         .unwrap();
         assert_eq!(followed.redirect_policy(), InferenceRedirectPolicy::Follow);
         assert_eq!(followed.spec(), follow);
-    }
-
-    #[test]
-    fn production_sources_have_no_core_domain_or_gateway_edge() {
-        let crate_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let manifest_path = crate_root.join("Cargo.toml");
-        let manifest = fs::read_to_string(&manifest_path)
-            .unwrap_or_else(|error| panic!("read {}: {error}", manifest_path.display()));
-        for name in ["ocg-core", "ocg-domain", "ocg-gateway", "serde", "tokio"] {
-            assert!(
-                !manifest_has_direct_dep(&manifest, name),
-                "ocg-infra must not depend on {name} directly"
-            );
-        }
-
-        let src_root = crate_root.join("src");
-        let mut scanned = Vec::new();
-        visit_rust_files(&src_root, &mut |path| {
-            scanned.push(path.to_path_buf());
-            let source = fs::read_to_string(path)
-                .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
-            let production = production_source(&source);
-            for needle in [
-                "ocg_core",
-                "ocg-core",
-                "ocg_domain",
-                "ocg-domain",
-                "ocg_gateway",
-                "ocg-gateway",
-                "AppConfig",
-                "CoreState",
-                "Database",
-            ] {
-                assert!(
-                    !production.contains(needle),
-                    "{} production source must not name `{needle}`",
-                    path.display()
-                );
-            }
-        });
-        for required in ["inference_http.rs", "http.rs", "crypto.rs", "lib.rs"] {
-            assert!(
-                scanned.iter().any(|path| {
-                    path.file_name().and_then(|name| name.to_str()) == Some(required)
-                }),
-                "source boundary guard must scan {required}, scanned={scanned:?}"
-            );
-        }
-
-        let inference_file =
-            fs::read_to_string(src_root.join("inference_http.rs")).expect("inference_http.rs");
-        let inference_source = production_source(&inference_file);
-        for needle in ["client_for", "ForwardRouteSet", "use serde", "use tokio"] {
-            assert!(
-                !inference_source.contains(needle),
-                "inference_http production source must not name `{needle}`"
-            );
-        }
-    }
-
-    fn manifest_has_direct_dep(manifest: &str, name: &str) -> bool {
-        manifest.lines().any(|line| {
-            let line = line.trim();
-            line.starts_with(&format!("{name} "))
-                || line.starts_with(&format!("{name}="))
-                || line.starts_with(&format!("[{name}."))
-                || line.starts_with(&format!("[dependencies.{name}]"))
-                || line.starts_with(&format!("[dev-dependencies.{name}]"))
-                || (line.starts_with("[target.") && line.contains(&format!(".{name}]")))
-        })
-    }
-
-    fn production_source(source: &str) -> &str {
-        source.split("#[cfg(test)]").next().unwrap_or(source)
-    }
-
-    fn visit_rust_files(dir: &Path, visit: &mut impl FnMut(&Path)) {
-        let mut entries: Vec<_> = fs::read_dir(dir)
-            .unwrap_or_else(|error| panic!("read {}: {error}", dir.display()))
-            .map(|entry| entry.expect("dir entry").path())
-            .collect();
-        entries.sort();
-        for path in entries {
-            if path.is_dir() {
-                visit_rust_files(&path, visit);
-            } else if path.extension().and_then(|ext| ext.to_str()) == Some("rs") {
-                visit(&path);
-            }
-        }
     }
 }

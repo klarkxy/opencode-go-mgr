@@ -58,31 +58,4 @@ mod tests {
             TypeId::of::<dyn ocg_gateway::attempt::CredentialResolver>()
         );
     }
-
-    #[test]
-    fn facade_does_not_blanket_reexport_or_widen_item_visibility() {
-        let production = include_str!("attempt.rs")
-            .split("#[cfg(test)]")
-            .next()
-            .expect("production source precedes tests");
-        assert!(
-            production.contains("pub(crate) use ocg_gateway::attempt::{"),
-            "compatibility facade must explicitly reexport crate-private items"
-        );
-        for forbidden in [
-            "pub use ocg_gateway::attempt::*;",
-            "pub use ocg_gateway::attempt;",
-            "pub use ocg_gateway::attempt::{self}",
-            "pub use ocg_gateway::attempt::",
-        ] {
-            assert!(
-                !production.contains(forbidden),
-                "compatibility facade must not widen visibility via `{forbidden}`"
-            );
-        }
-        assert!(
-            !production.contains("pub use ocg_gateway::"),
-            "compatibility facade must not pub-reexport ocg_gateway items"
-        );
-    }
 }

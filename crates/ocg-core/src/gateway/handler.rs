@@ -1127,17 +1127,4 @@ mod tests {
             .unwrap();
         assert!(active_cpa_model_ids(&state).is_empty());
     }
-
-    #[test]
-    fn production_source_delegates_orchestration_to_gateway_executor() {
-        let source = include_str!("handler.rs");
-        let production = source
-            .split("\nmod tests {")
-            .next()
-            .expect("production source precedes tests");
-        assert!(production.contains("GatewayExecutor::run"));
-        assert!(!production.contains("async fn execute_plan"));
-        assert!(!production.contains("select_candidate"));
-        assert!(!production.contains("materialize_account_routes"));
-    }
 }

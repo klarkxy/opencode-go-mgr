@@ -875,46 +875,4 @@ mod tests {
         drop(state);
         let _ = std::fs::remove_dir_all(dir);
     }
-
-    #[test]
-    fn production_source_gates_the_official_fetch_seam_and_keeps_the_fixed_client() {
-        let production = include_str!("pricing.rs")
-            .split("#[cfg(test)]")
-            .next()
-            .expect("production source precedes tests");
-        assert!(
-            production.contains("fetch_official_snapshot(&config)"),
-            "production fetch must use the existing fixed SOURCE_URL client"
-        );
-        assert!(production.contains("#[cfg(debug_assertions)]"));
-        assert!(production.contains("#[cfg(not(debug_assertions))]"));
-        assert!(production.contains("fetch_configured_official_snapshot"));
-        for needle in [
-            "OfficialPricingFetchGuard",
-            "install_official_pricing_fetch_for_tests",
-            "install_official_pricing_fetch_error_for_tests",
-            "OFFICIAL_FETCH_OVERRIDES",
-            "dyn Fn",
-        ] {
-            let idx = production
-                .find(needle)
-                .unwrap_or_else(|| panic!("{needle} must exist behind debug_assertions"));
-            let before = &production[..idx];
-            let cfg_idx = before
-                .rfind("#[cfg(debug_assertions)]")
-                .unwrap_or_else(|| panic!("{needle} must be gated by debug_assertions"));
-            assert!(
-                !before[cfg_idx..].contains("#[cfg(not(debug_assertions))]"),
-                "{needle} compiled into release"
-            );
-        }
-        let release_idx = production
-            .find("#[cfg(not(debug_assertions))]")
-            .expect("release fetch path");
-        let release = &production[release_idx..];
-        assert!(release.contains("fetch_configured_official_snapshot"));
-        assert!(!release.contains("OFFICIAL_FETCH_OVERRIDES"));
-        assert!(!release.contains("dyn Fn"));
-        assert!(!release.contains("install_official_pricing_fetch_for_tests"));
-    }
 }

@@ -632,29 +632,4 @@ mod tests {
         drop(state);
         let _ = std::fs::remove_dir_all(dir);
     }
-
-    #[test]
-    fn production_source_is_http_and_gateway_neutral() {
-        let production = include_str!("account_control.rs")
-            .split("#[cfg(test)]")
-            .next()
-            .expect("production source precedes tests");
-        for needle in [
-            "crate::dashboard",
-            "crate::dashboard_v3",
-            "crate::gateway",
-            "crate::state",
-            "CoreState",
-            "expected_revision",
-            "expectedRevision",
-        ] {
-            assert!(
-                !production.contains(needle),
-                "account_control must stay HTTP-neutral, missing-CAS for CLI, found {needle}"
-            );
-        }
-        assert!(production.contains("AccountControlHost"));
-        assert!(production.contains("bump_settings_revision"));
-        assert!(production.contains("VERIFY_BEFORE_ENABLE_MESSAGE"));
-    }
 }

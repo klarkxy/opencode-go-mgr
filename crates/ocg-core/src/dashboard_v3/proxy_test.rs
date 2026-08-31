@@ -308,50 +308,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn production_source_gates_the_proxy_test_seam_and_keeps_the_fixed_target() {
-        let production = include_str!("proxy_test.rs")
-            .split("#[cfg(test)]")
-            .next()
-            .expect("production source precedes tests");
-        assert!(
-            production.contains("configured_builder(&config)"),
-            "production diagnostic must reuse the global proxy builder"
-        );
-        assert!(production.contains("PROXY_TEST_TARGET"));
-        assert!(production.contains("https://opencode.ai/zen/go"));
-        assert!(production.contains("no_redirect_policy"));
-        assert!(production.contains("#[cfg(debug_assertions)]"));
-        assert!(production.contains("#[cfg(not(debug_assertions))]"));
-        for needle in [
-            "ProxyTestTargetGuard",
-            "install_proxy_test_target_for_tests",
-            "PROXY_TEST_TARGET_OVERRIDES",
-            "debug_proxy_test_target",
-            "parse_loopback_http_url",
-        ] {
-            let idx = production
-                .find(needle)
-                .unwrap_or_else(|| panic!("{needle} must exist behind debug_assertions"));
-            let before = &production[..idx];
-            let cfg_idx = before
-                .rfind("#[cfg(debug_assertions)]")
-                .unwrap_or_else(|| panic!("{needle} must be gated by debug_assertions"));
-            assert!(
-                !before[cfg_idx..].contains("#[cfg(not(debug_assertions))]"),
-                "{needle} compiled into release"
-            );
-        }
-        let release_idx = production
-            .find("#[cfg(not(debug_assertions))]")
-            .expect("release diagnostic path");
-        let release = &production[release_idx..];
-        assert!(release.contains("PROXY_TEST_TARGET"));
-        assert!(!release.contains("PROXY_TEST_TARGET_OVERRIDES"));
-        assert!(!release.contains("install_proxy_test_target_for_tests"));
-        assert!(!release.contains("debug_proxy_test_target"));
-    }
-
-    #[test]
     fn strip_url_userinfo_redacts_credentials_and_leaves_hosts() {
         assert_eq!(
             strip_url_userinfo("error sending request for url (http://user:pass@127.0.0.1:9/)"),

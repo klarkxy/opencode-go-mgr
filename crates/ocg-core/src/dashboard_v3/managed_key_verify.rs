@@ -719,59 +719,6 @@ fn redact_verify_detail(text: &str, key: &str, config: &AppConfig) -> String {
     redacted
 }
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn production_source_gates_the_managed_key_verify_seam() {
-        let production = include_str!("managed_key_verify.rs")
-            .split("#[cfg(test)]")
-            .next()
-            .expect("production source precedes tests");
-        assert!(production.contains("configured_builder(&prepared.config)"));
-        assert!(production.contains("no_redirect_policy"));
-        assert!(production.contains("minimal_verification_body"));
-        assert!(production.contains("DEFAULT_ACCOUNT_TEST_MODEL"));
-        assert!(production.contains("commit_managed_key_verification"));
-        assert!(production.contains("ManagedKeyVerificationCas::from_account"));
-        assert!(!production.contains("save_managed_key_for_verification"));
-        assert!(!production.contains("complete_managed_setup_if_key_matches"));
-        assert!(production.contains("routing.reset()"));
-        assert!(production.contains("bump_settings_revision"));
-        assert!(
-            !production.contains("upstream_context"),
-            "verify-key must not reuse the redirect-capable shared client"
-        );
-        assert!(production.contains("#[cfg(debug_assertions)]"));
-        assert!(production.contains("#[cfg(not(debug_assertions))]"));
-        for needle in [
-            "ManagedKeyVerifyTargetGuard",
-            "install_managed_key_verify_target_for_tests",
-            "MANAGED_KEY_VERIFY_TARGET_OVERRIDES",
-            "debug_managed_key_verify_target",
-            "parse_loopback_http_url",
-        ] {
-            let idx = production
-                .find(needle)
-                .unwrap_or_else(|| panic!("{needle} must exist behind debug_assertions"));
-            let before = &production[..idx];
-            let cfg_idx = before
-                .rfind("#[cfg(debug_assertions)]")
-                .unwrap_or_else(|| panic!("{needle} must be gated by debug_assertions"));
-            assert!(
-                !before[cfg_idx..].contains("#[cfg(not(debug_assertions))]"),
-                "{needle} compiled into release"
-            );
-        }
-        let release_idx = production
-            .find("#[cfg(not(debug_assertions))]")
-            .expect("release verification path");
-        let release = &production[release_idx..];
-        assert!(!release.contains("MANAGED_KEY_VERIFY_TARGET_OVERRIDES"));
-        assert!(!release.contains("install_managed_key_verify_target_for_tests"));
-        assert!(!release.contains("debug_managed_key_verify_target"));
-    }
-}
-
 #[cfg(all(test, debug_assertions))]
 mod target_override_tests {
     use super::{

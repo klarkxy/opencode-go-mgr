@@ -2814,10 +2814,8 @@ dependencies = [
  "serde_json",
  "sha1",
  "sha2",
- "syn 2.0.118",
  "tokio",
  "tokio-tungstenite",
- "toml 0.9.12+spec-1.1.0",
  "tower-http",
  "uuid",
  "windows",
@@ -2841,8 +2839,6 @@ dependencies = [
  "base64 0.22.1",
  "ocg-domain",
  "serde_json",
- "syn 2.0.118",
- "toml 0.9.12+spec-1.1.0",
 ]
 
 [[package]]

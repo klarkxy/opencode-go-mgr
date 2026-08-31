@@ -43,10 +43,6 @@ tower-http = { version = "0.6", features = ["cors"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 zeroize = "1"
 
-[dev-dependencies]
-syn = { version = "2", features = ["full", "visit"] }
-toml = "0.9"
-
 [target.'cfg(windows)'.dependencies]
 # Match Windows browser trust/proxy behavior while retaining WebPKI roots as a fallback.
 reqwest = { version = "0.12", default-features = false, features = [

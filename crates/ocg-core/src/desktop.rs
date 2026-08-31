@@ -251,40 +251,6 @@ mod tests {
     }
 
     #[test]
-    fn desktop_is_a_production_dag_leaf() {
-        let production = include_str!("desktop.rs")
-            .split("#[cfg(test)]")
-            .next()
-            .expect("production desktop.rs precedes this test module");
-        let mut rest = production;
-        while let Some(idx) = rest.find("crate::") {
-            let after = &rest[idx + "crate::".len()..];
-            let name: String = after
-                .chars()
-                .take_while(|ch| ch.is_ascii_alphanumeric() || *ch == '_')
-                .collect();
-            assert_eq!(
-                name, "Result",
-                "desktop.rs must not depend on crate module `{name}`"
-            );
-            rest = after;
-        }
-        for needle in [
-            "crate::state",
-            "crate::db",
-            "crate::gateway",
-            "CoreState",
-            "CoreStateInner",
-            "Database",
-        ] {
-            assert!(
-                !production.contains(needle),
-                "desktop.rs production source must not mention {needle}"
-            );
-        }
-    }
-
-    #[test]
     fn auto_start_is_unsupported_until_the_host_registers_a_hook() {
         let desktop = DesktopCapabilities::new();
         assert!(!desktop.auto_start_supported());

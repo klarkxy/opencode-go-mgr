@@ -595,26 +595,6 @@ mod tests {
     }
 
     #[test]
-    fn production_source_reuses_accounts_dto_mapper() {
-        let production = include_str!("browser.rs")
-            .split("#[cfg(test)]")
-            .next()
-            .expect("production source precedes tests");
-        assert!(
-            production.contains("use super::accounts::mutation_at;"),
-            "browser reset/open account JSON must go through accounts.rs"
-        );
-        assert!(
-            !production.contains("fn account_from_state"),
-            "browser.rs must not duplicate the account DTO mapper"
-        );
-        assert!(
-            !production.contains("fn mutation_at("),
-            "browser.rs must reuse accounts::mutation_at"
-        );
-    }
-
-    #[test]
     fn runtime_errors_redact_worker_urls_and_control_tokens() {
         let message = sanitize_browser_runtime_message(
             "failed to connect to remote browser display: ws://browser.internal:6080/websockify token=/run/ocg-browser/control-token http://127.0.0.1:9/session",

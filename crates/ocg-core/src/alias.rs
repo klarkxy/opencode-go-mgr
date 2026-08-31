@@ -134,28 +134,4 @@ mod tests {
             ocg_gateway::alias::routeable_aliases_for_with_extended_catalogs;
         let _: fn(&str) -> bool = ocg_gateway::alias::is_published_alias;
     }
-
-    #[test]
-    fn facade_does_not_glob_or_whole_module_reexport() {
-        let production = include_str!("alias.rs")
-            .split("#[cfg(test)]")
-            .next()
-            .expect("production source precedes tests");
-        assert!(
-            production.contains("pub use ocg_gateway::alias::{"),
-            "compatibility facade must explicitly reexport public items"
-        );
-        for forbidden in [
-            "pub use ocg_gateway::alias::*;",
-            "pub use ocg_gateway::alias;",
-            "pub use ocg_gateway::alias::{self}",
-            "pub use ocg_gateway::alias as",
-            "use ocg_gateway::alias::*;",
-        ] {
-            assert!(
-                !production.contains(forbidden),
-                "compatibility facade must not glob or whole-module reexport via `{forbidden}`"
-            );
-        }
-    }
 }

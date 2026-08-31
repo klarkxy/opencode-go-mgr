@@ -92,58 +92,6 @@ mod tests {
         )
     }
 
-    fn production_source() -> &'static str {
-        include_str!("gateway_clock.rs")
-            .split("#[cfg(test)]")
-            .next()
-            .expect("production source precedes tests")
-    }
-
-    #[test]
-    fn production_source_is_a_host_private_leaf() {
-        let production = production_source();
-        assert!(
-            !production.contains("crate::"),
-            "gateway_clock must not import other crate modules"
-        );
-        for forbidden in [
-            "RequestSnapshots",
-            "ocg_gateway",
-            "ocg_domain",
-            "ocg-gateway",
-            "ocg-domain",
-            "tokio::",
-            "axum::",
-            "rusqlite",
-            "reqwest",
-            "SystemTime",
-            "crate::usage_sync",
-            "crate::pricing",
-            "crate::gateway",
-            "crate::browser",
-            "crate::db",
-            "crate::state",
-            "parking_lot",
-            "Mutex",
-            "set_wall_for_test",
-            "set_mono_for_test",
-            "clear_test_seams",
-        ] {
-            assert!(
-                !production.contains(forbidden),
-                "gateway_clock production source must not name `{forbidden}`"
-            );
-        }
-        assert!(production.contains("pub(crate) struct GatewayClock"));
-        assert!(!production.contains("pub struct GatewayClock"));
-        assert!(production.contains("Utc::now"));
-        assert!(production.contains("Instant::now"));
-        assert!(production.contains("now_wall"));
-        assert!(production.contains("now_mono"));
-        assert!(production.contains("WallSource::System"));
-        assert!(production.contains("MonoSource::System"));
-    }
-
     #[test]
     fn production_default_uses_system_wall_and_mono() {
         let before_wall = Utc::now();

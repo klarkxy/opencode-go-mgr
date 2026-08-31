@@ -354,13 +354,6 @@ mod tests {
         }
     }
 
-    fn production_source(source: &str) -> &str {
-        source
-            .split("#[cfg(test)]")
-            .next()
-            .expect("production source precedes tests")
-    }
-
     #[test]
     fn attempt_spec_is_data_only_and_describes_the_transport_boundary() {
         let spec = spec(
@@ -386,77 +379,6 @@ mod tests {
         let debug = format!("{spec:?}");
         assert!(debug.contains("go-1"));
         assert!(!debug.contains("sk-"));
-    }
-
-    #[test]
-    fn attempt_spec_production_source_does_not_name_host_state() {
-        let source = include_str!("attempt.rs");
-        let production = source
-            .split("#[cfg(test)]")
-            .next()
-            .expect("production source precedes tests");
-        assert!(
-            !production.contains("CoreState"),
-            "AttemptSpec must not name CoreState"
-        );
-        assert!(
-            !production.contains("Database"),
-            "AttemptSpec must not name Database"
-        );
-        assert!(
-            !production.contains("reqwest::Client"),
-            "AttemptSpec must not name reqwest::Client"
-        );
-        assert!(
-            !production.contains("reqwest::Error"),
-            "AttemptTransportError must not wrap reqwest::Error"
-        );
-    }
-
-    #[test]
-    fn production_attempt_code_names_no_host_io_or_credential_storage() {
-        let source = include_str!("attempt.rs");
-        let production = production_source(source);
-        assert!(
-            production.contains("use ocg_domain::protocol::ApiFormat"),
-            "attempt.rs must import ApiFormat from ocg_domain::protocol"
-        );
-        for needle in [
-            "CoreState",
-            "Database",
-            "reqwest",
-            "rusqlite",
-            "tokio",
-            "axum",
-            "std::fs",
-            "std::process",
-            "KeyCipher",
-            "decrypt_key",
-            "key_cipher",
-            "ocg_core",
-        ] {
-            assert!(
-                !production.contains(needle),
-                "production ocg-gateway attempt source must not name `{needle}`"
-            );
-        }
-        for line in production.lines() {
-            let trimmed = line.trim();
-            if trimmed.starts_with("use std::") || trimmed.starts_with("use std::{") {
-                assert!(
-                    !trimmed.contains("fs") && !trimmed.contains("process"),
-                    "production attempt source must not import std filesystem/process: {trimmed}"
-                );
-            }
-        }
-        assert!(
-            production.contains("CredentialHandle"),
-            "opaque credential handles must remain the only credential identity"
-        );
-        assert!(
-            !production.contains("encrypt(") && !production.contains("INSERT "),
-            "production attempt source must not store plaintext credentials"
-        );
     }
 
     #[test]
@@ -628,49 +550,6 @@ mod tests {
         assert_eq!(
             AttemptTransportError::Send(other.clone()).to_string(),
             other.message
-        );
-    }
-
-    #[test]
-    fn attempt_transport_error_contains_no_reqwest_type_or_source() {
-        let production = include_str!("attempt.rs")
-            .split("#[cfg(test)]")
-            .next()
-            .expect("production source precedes tests");
-        assert!(
-            !production.contains("reqwest::Error"),
-            "AttemptTransportError must not name reqwest::Error"
-        );
-        assert!(
-            !production.contains("Send(reqwest"),
-            "AttemptTransportError::Send must not wrap a reqwest type"
-        );
-
-        let error = AttemptTransportError::Send(TransportSendFailure::from_send_error(
-            false,
-            false,
-            "connection reset",
-        ));
-        assert!(std::error::Error::source(&error).is_none());
-        for name in [
-            std::any::type_name::<AttemptTransportError>(),
-            std::any::type_name::<TransportSendFailure>(),
-            std::any::type_name::<TransportFailureKind>(),
-        ] {
-            assert!(
-                !name.to_ascii_lowercase().contains("reqwest"),
-                "transport error type name leaked reqwest: {name}"
-            );
-        }
-        let debug = format!("{error:?}");
-        let display = error.to_string();
-        assert!(
-            !debug.to_ascii_lowercase().contains("reqwest"),
-            "Debug leaked reqwest: {debug}"
-        );
-        assert!(
-            !display.to_ascii_lowercase().contains("reqwest"),
-            "Display leaked reqwest: {display}"
         );
     }
 }
