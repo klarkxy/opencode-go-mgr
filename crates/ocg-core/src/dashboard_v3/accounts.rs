@@ -383,6 +383,12 @@ fn update_account_locked(
     let _settings_update = state.settings_update.lock();
     check_expectation(state, &input.expectation)?;
     let existing = load_model_account(state, id)?;
+    if existing.id == crate::provider::CPA_ACCOUNT_ID {
+        return Err(V3ApiError::invalid_request_at(
+            state,
+            "CPA Subscription Pool settings must use the external-integration endpoint",
+        ));
+    }
     if existing.is_zen_free() {
         return Err(V3ApiError::invalid_request_at(
             state,

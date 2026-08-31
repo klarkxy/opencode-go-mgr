@@ -41,12 +41,32 @@ docker compose ps
 | `OCG_PORT` | Compose | 宿主机回环端口；容器内仍监听 `9042`。 |
 | `OCG_ADMIN_USERNAME` + `OCG_ADMIN_PASSWORD` | 首次启动 | 可选管理员引导；必须同时设置或都不设置。 |
 | `OCG_CLIENT_ROOT_URL` | 运行时 | 只读覆盖外部客户端根地址。 |
+| `OCG_CPA_BASE_URL` | Compose CPA profile | 只读 CPA 并列服务地址；保持 `http://cpa:8317`。 |
+| `CPA_MANAGEMENT_PASSWORD` | Compose CPA profile | CPA Management API 密码；只保存在部署用 `.env`。 |
 | `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` / `NO_PROXY` | 运行时 | “自动（系统 / 环境）”出站代理模式使用的标准代理变量。 |
 | `OCG_MANAGER_ENCRYPTION_KEY` | 恢复时 | 原部署曾显式使用的混淆密钥。 |
 | `NPM_REGISTRY` + `CARGO_REGISTRY` | 源码构建 | 仅 `--build` 使用的依赖注册表。 |
 
 大多数部署只跑主服务；只有需要在无头主机上做托管注册或官网登录时，
 才加浏览器 Sidecar。
+
+## 可选本机 CPA
+
+CPA 是可选的**本机**订阅运行时并列服务，不是 OCG 的供应商或套餐，默认关闭。启用前先在 Compose 文件旁复制模板，并设置独立的 CPA 推理 Key：
+
+```bash
+cp cpa-config.example.yaml cpa-config.yaml
+# PowerShell: Copy-Item cpa-config.example.yaml cpa-config.yaml
+# 编辑 cpa-config.yaml 与 .env：设置 api-keys 和 CPA_MANAGEMENT_PASSWORD。
+docker compose --profile cpa up -d
+docker compose --profile cpa ps
+```
+
+镜像固定为 `eceasy/cli-proxy-api:v7.2.145`，有意不使用 `latest`。CPA 推理端口 `8317` 只发布到私有 `cpa-private` bridge，OCG 通过 `http://cpa:8317` 访问。宿主机只暴露 CPA 的 OAuth 回调端口 `1455`、`54545` 与 `51121`，且都绑定 `127.0.0.1`。不要添加公开的 `8317` 映射、Docker socket 挂载或远程 CPA URL。
+
+CPA 把 OAuth 数据保存在 `cpa-auth` 卷的 `/root/.cli-proxy-api`；OCG 不读取或复制这些文件。`cpa-auth` 必须与 `ocg-data`、`ocg-browser-profiles` 分开备份；恢复它还需要对应的 CPA 配置和 Key。`docker compose down` 保留三个命名卷，`docker compose down -v` 会永久删除它们。
+
+容器运行后打开 **外部接入 → CPA**，填入与 `cpa-config.yaml` 相同的 CPA 推理 Key 和 Management password，运行应用级检测，再在 CPA 内完成 OAuth。OCG 容器不会替你启动、停止、升级或 health-check CPA。
 
 ## 可选远程浏览器
 
@@ -141,6 +161,7 @@ docker compose config --quiet
 docker compose ps
 docker compose logs --tail=100 -f ocg-manager
 docker compose --profile browser logs --tail=100 -f browser
+docker compose --profile cpa logs --tail=100 -f cpa
 curl --fail http://127.0.0.1:9042/dashboard/
 ```
 

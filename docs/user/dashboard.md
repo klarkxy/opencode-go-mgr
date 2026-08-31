@@ -2,7 +2,7 @@
 
 # The Dashboard
 
-The dashboard is the gateway's own single-page Vue 3 interface: **Dashboard**, **Access Keys**, **Accounts**, **Providers**, **Applications**, **Logs**, and **Settings** live in the left rail (or the horizontal app menu below 1024px), with theme and language switches and a sign-out button in the header. It speaks ten languages — 简体中文, 繁體中文, English, 日本語, 한국어, Español, Français, Deutsch, Português (Brasil), and Русский — with 简体中文 as the default. Your choice persists in `localStorage` under `ocg-manager.locale`; when persistence is unavailable, the in-memory locale still works for the session. The dashboard does not judge private browsing.
+The dashboard is the gateway's own single-page Vue 3 interface. **Dashboard**, **Access Keys**, **Accounts**, **Providers**, **Applications**, **Logs**, and **Settings** are its seven fixed core views in the left rail (or horizontal menu below 1024px). A divider below Settings starts the optional static **External Integrations** group; CPA is its first local-only entry, not a Provider or Plan. Theme and language switches and a sign-out button live in the header. It speaks ten languages — 简体中文, 繁體中文, English, 日本語, 한국어, Español, Français, Deutsch, Português (Brasil), and Русский — with 简体中文 as the default. Your choice persists in `localStorage` under `ocg-manager.locale`; when persistence is unavailable, the in-memory locale still works for the session. The dashboard does not judge private browsing.
 
 ## Dashboard V3
 

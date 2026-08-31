@@ -27,10 +27,11 @@
 
 use ocg_domain::ids::{
     ANONYMOUS_FREE_OFFERING_ID, COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_ALIAS,
-    COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM, COMMAND_CODE_PROVIDER_ID, CUSTOM_API_OFFERING_ID,
-    CUSTOM_PROVIDER_ID, GO_OFFERING_ID, GOAT_OFFERING_ID, KIMI_CN_OFFERING_ID, KIMI_PROVIDER_ID,
-    MINIMAX_CN_OFFERING_ID, MINIMAX_PROVIDER_ID, OPENCODE_PROVIDER_ID,
-    OPENCODE_ZEN_FREE_PROVIDER_ID, custom_model_id_matches, is_free_model, looks_raw_shaped,
+    COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM, COMMAND_CODE_PROVIDER_ID, CPA_OFFERING_ID,
+    CPA_PROVIDER_ID, CUSTOM_API_OFFERING_ID, CUSTOM_PROVIDER_ID, GO_OFFERING_ID, GOAT_OFFERING_ID,
+    KIMI_CN_OFFERING_ID, KIMI_PROVIDER_ID, MINIMAX_CN_OFFERING_ID, MINIMAX_PROVIDER_ID,
+    OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID, custom_model_id_matches, is_free_model,
+    looks_raw_shaped,
 };
 use ocg_domain::protocol::supported_model_ids;
 use ocg_domain::provider::is_custom_api;
@@ -75,6 +76,22 @@ pub struct ProviderMapping {
     pub routeable: bool,
 }
 
+/// Borrowed runtime catalog inputs used to overlay the sealed Alias registry.
+///
+/// Callers pass one value instead of extending resolver signatures whenever a
+/// new static adapter contributes a catalog. The registry remains code-owned;
+/// this is data input, not a plugin or dynamic Alias authority.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RuntimeCatalogs<'a> {
+    pub go: &'a [String],
+    pub zen_free: &'a [String],
+    pub custom: &'a [String],
+    pub command_code: &'a [String],
+    pub minimax: &'a [String],
+    pub kimi: &'a [String],
+    pub cpa: &'a [String],
+}
+
 impl ProviderMapping {
     pub fn is_opencode_go(&self) -> bool {
         self.provider_id == OPENCODE_PROVIDER_ID && self.offering_id == GO_OFFERING_ID
@@ -99,6 +116,10 @@ impl ProviderMapping {
 
     pub fn is_kimi_cn(&self) -> bool {
         self.provider_id == KIMI_PROVIDER_ID && self.offering_id == KIMI_CN_OFFERING_ID
+    }
+
+    pub fn is_cpa(&self) -> bool {
+        self.provider_id == CPA_PROVIDER_ID && self.offering_id == CPA_OFFERING_ID
     }
 }
 
@@ -244,26 +265,22 @@ fn build_registry(zen_free_models: &[String]) -> Registry {
     registry
 }
 
-fn build_extended_registry(
-    zen_free_models: &[String],
-    goat_model_ids: &[String],
-    minimax_model_ids: &[String],
-    kimi_model_ids: &[String],
-) -> Registry {
-    let mut registry = build_registry(zen_free_models);
+fn build_runtime_registry(catalogs: RuntimeCatalogs<'_>) -> Registry {
+    let mut registry = build_registry(catalogs.zen_free);
     insert_sealed_catalog(
         &mut registry,
-        minimax_model_ids,
+        catalogs.minimax,
         minimax_mapping,
         minimax_catalog_alias,
     );
     insert_sealed_catalog(
         &mut registry,
-        kimi_model_ids,
+        catalogs.kimi,
         kimi_mapping,
         kimi_catalog_alias,
     );
-    insert_goat_catalog(&mut registry, goat_model_ids);
+    insert_goat_catalog(&mut registry, catalogs.command_code);
+    insert_cpa_catalog(&mut registry, catalogs.cpa);
     registry
 }
 
@@ -297,6 +314,19 @@ fn insert_sealed_catalog(
         insert_raw_mapping(registry, provider_mapping.clone());
         if let Some(alias) = alias_for_model(model_id) {
             insert_mapping(registry, alias, provider_mapping);
+        }
+    }
+}
+
+/// CPA catalog rows may join only an already code-owned Alias. Every row also
+/// keeps its exact upstream raw pin; CPA never authors arbitrary aliases.
+fn insert_cpa_catalog(registry: &mut Registry, model_ids: &[String]) {
+    for model_id in model_ids {
+        let mapping = cpa_mapping(model_id);
+        let alias = code_owned_alias(registry, model_id);
+        insert_raw_mapping(registry, mapping.clone());
+        if let Some(alias) = alias {
+            insert_mapping(registry, &alias, mapping);
         }
     }
 }
@@ -404,6 +434,15 @@ fn kimi_mapping(upstream_model: &str) -> ProviderMapping {
     ProviderMapping {
         provider_id: KIMI_PROVIDER_ID,
         offering_id: KIMI_CN_OFFERING_ID,
+        upstream_model: upstream_model.to_string(),
+        routeable: true,
+    }
+}
+
+fn cpa_mapping(upstream_model: &str) -> ProviderMapping {
+    ProviderMapping {
+        provider_id: CPA_PROVIDER_ID,
+        offering_id: CPA_OFFERING_ID,
         upstream_model: upstream_model.to_string(),
         routeable: true,
     }
@@ -622,20 +661,38 @@ pub fn resolve_with_extended_catalogs(
     minimax_model_ids: &[String],
     kimi_model_ids: &[String],
 ) -> Result<ResolvedModel, ResolveError> {
-    let registry = build_extended_registry(
-        zen_free_models,
-        goat_model_ids,
-        minimax_model_ids,
-        kimi_model_ids,
-    );
+    resolve_with_runtime_catalogs(
+        requested,
+        RuntimeCatalogs {
+            go: go_model_ids,
+            zen_free: zen_free_models,
+            custom: custom_model_ids,
+            command_code: goat_model_ids,
+            minimax: minimax_model_ids,
+            kimi: kimi_model_ids,
+            cpa: &[],
+        },
+    )
+}
+
+/// Resolve one client model against all runtime catalog inputs.
+///
+/// Catalog rows may activate code-owned aliases or exact raw pins, but they do
+/// not become a dynamic Alias registry and cannot bypass ambiguity checks.
+pub fn resolve_with_runtime_catalogs(
+    requested: &str,
+    catalogs: RuntimeCatalogs<'_>,
+) -> Result<ResolvedModel, ResolveError> {
+    let registry = build_runtime_registry(catalogs);
     let go_resolved = match resolve_in(&registry, requested) {
-        Ok(resolved) => overlay_go_catalog(resolved, go_model_ids),
-        Err(ResolveError::Unknown { requested }) => overlay_unknown_go(requested, go_model_ids),
+        Ok(resolved) => overlay_go_catalog(resolved, catalogs.go),
+        Err(ResolveError::Unknown { requested }) => overlay_unknown_go(requested, catalogs.go),
         other => other,
     };
     let custom_resolved = match go_resolved {
-        Ok(resolved) => overlay_custom_catalog(resolved, custom_model_ids),
-        Err(ResolveError::Unknown { requested }) => match custom_model_ids
+        Ok(resolved) => overlay_custom_catalog(resolved, catalogs.custom),
+        Err(ResolveError::Unknown { requested }) => match catalogs
+            .custom
             .iter()
             .find(|id| custom_model_id_matches(id, &requested))
         {
@@ -649,9 +706,9 @@ pub fn resolve_with_extended_catalogs(
         other => other,
     };
     match custom_resolved {
-        Ok(resolved) => overlay_goat_catalog(resolved, goat_model_ids, &registry),
+        Ok(resolved) => overlay_goat_catalog(resolved, catalogs.command_code, &registry),
         Err(ResolveError::Unknown { requested }) => {
-            overlay_unknown_goat(requested, goat_model_ids, &registry)
+            overlay_unknown_goat(requested, catalogs.command_code, &registry)
         }
         other => other,
     }
@@ -1022,13 +1079,23 @@ pub fn published_routeable_aliases_with_extended_catalogs(
     minimax_model_ids: &[String],
     kimi_model_ids: &[String],
 ) -> Vec<PublishedAlias> {
-    let _ = go_model_ids;
-    published_routeable_in(&build_extended_registry(
-        zen_free_models,
-        goat_model_ids,
-        minimax_model_ids,
-        kimi_model_ids,
-    ))
+    published_routeable_aliases_with_runtime_catalogs(RuntimeCatalogs {
+        go: go_model_ids,
+        zen_free: zen_free_models,
+        custom: &[],
+        command_code: goat_model_ids,
+        minimax: minimax_model_ids,
+        kimi: kimi_model_ids,
+        cpa: &[],
+    })
+}
+
+/// Published code-owned aliases after applying all runtime catalogs. Exact
+/// raw-only rows remain outside this Alias-only list.
+pub fn published_routeable_aliases_with_runtime_catalogs(
+    catalogs: RuntimeCatalogs<'_>,
+) -> Vec<PublishedAlias> {
+    published_routeable_in(&build_runtime_registry(catalogs))
 }
 
 fn go_catalog_alias(model_id: &str) -> String {
@@ -1061,12 +1128,32 @@ fn command_catalog_alias(model_id: &str) -> Option<&'static str> {
 }
 
 fn is_code_owned_alias(registry: &Registry, alias: &str) -> bool {
-    registry.aliases.contains_key(&alias.to_ascii_lowercase())
-        || MINIMAX_CN_ALIASES
-            .iter()
-            .chain(KIMI_CN_ALIASES)
-            .chain(COMMAND_CODE_GOAT_ALIASES)
-            .any(|(_, owned_alias)| owned_alias.eq_ignore_ascii_case(alias))
+    code_owned_alias(registry, alias).is_some()
+}
+
+/// Canonical spelling for a code-owned client alias. This remains an alias
+/// authority check, not catalog-name normalization: CPA rows such as
+/// `MiniMax-M3` stay exact raw pins unless CPA itself exposes `minimax-m3`.
+fn code_owned_alias(registry: &Registry, candidate: &str) -> Option<String> {
+    let candidate = candidate.trim();
+    if looks_raw_shaped(candidate) {
+        return None;
+    }
+    registry
+        .aliases
+        .get(&candidate.to_ascii_lowercase())
+        .map(|entry| entry.alias.clone())
+        .or_else(|| {
+            MINIMAX_CN_ALIASES
+                .iter()
+                .chain(KIMI_CN_ALIASES)
+                .chain(COMMAND_CODE_GOAT_ALIASES)
+                .find_map(|(_, alias)| {
+                    alias
+                        .eq_ignore_ascii_case(candidate)
+                        .then(|| (*alias).to_string())
+                })
+        })
 }
 
 fn command_alias_for_catalog(upstream_model: &str, registry: &Registry) -> String {
@@ -1152,6 +1239,12 @@ pub fn canonical_alias_for_provider_model(
     String::new()
 }
 
+/// Canonical client Alias for a CPA catalog row, if and only if the row is
+/// already a code-owned alias. Other CPA rows are exact raw pins.
+pub fn canonical_alias_for_cpa_model(upstream_model: &str) -> String {
+    code_owned_alias(registry(), upstream_model).unwrap_or_default()
+}
+
 fn published_routeable_in(registry: &Registry) -> Vec<PublishedAlias> {
     registry
         .aliases
@@ -1212,16 +1305,29 @@ pub fn routeable_aliases_for_with_extended_catalogs(
     minimax_model_ids: &[String],
     kimi_model_ids: &[String],
 ) -> Vec<String> {
-    routeable_aliases_for_in(
-        &build_extended_registry(
-            zen_free_models,
-            goat_model_ids,
-            minimax_model_ids,
-            kimi_model_ids,
-        ),
+    routeable_aliases_for_with_runtime_catalogs(
         provider_id,
         offering_id,
+        RuntimeCatalogs {
+            go: &[],
+            zen_free: zen_free_models,
+            custom: &[],
+            command_code: goat_model_ids,
+            minimax: minimax_model_ids,
+            kimi: kimi_model_ids,
+            cpa: &[],
+        },
     )
+}
+
+/// Routeable aliases for one sealed offering after applying all runtime
+/// catalogs.
+pub fn routeable_aliases_for_with_runtime_catalogs(
+    provider_id: &str,
+    offering_id: &str,
+    catalogs: RuntimeCatalogs<'_>,
+) -> Vec<String> {
+    routeable_aliases_for_in(&build_runtime_registry(catalogs), provider_id, offering_id)
 }
 
 pub fn is_published_alias(name: &str) -> bool {
@@ -1236,11 +1342,16 @@ type ResolveCatalogs =
 type RouteableWithZen = fn(&str, &str, &[String]) -> Vec<String>;
 type RouteableProviderExtendedCatalogs =
     fn(&str, &str, &[String], &[String], &[String], &[String]) -> Vec<String>;
+type ResolveRuntimeCatalogs =
+    for<'a> fn(&str, RuntimeCatalogs<'a>) -> Result<ResolvedModel, ResolveError>;
+type PublishRuntimeCatalogs = for<'a> fn(RuntimeCatalogs<'a>) -> Vec<PublishedAlias>;
+type RouteableRuntimeCatalogs = for<'a> fn(&str, &str, RuntimeCatalogs<'a>) -> Vec<String>;
 
 const _: ResolveName = resolve;
 const _: ResolveCustom = resolve_with_custom;
 const _: ResolveProviderModels = resolve_with_provider_models;
 const _: ResolveCatalogs = resolve_with_catalogs;
+const _: ResolveRuntimeCatalogs = resolve_with_runtime_catalogs;
 const _: fn() -> Vec<String> = published_aliases;
 const _: fn() -> Vec<PublishedAlias> = published_routeable_aliases;
 const _: fn(&[String]) -> Vec<PublishedAlias> = published_routeable_aliases_with_zen;
@@ -1249,6 +1360,9 @@ const _: fn(&[String], &[String]) -> Vec<PublishedAlias> =
 const _: fn(&str, &str) -> Vec<String> = routeable_aliases_for;
 const _: RouteableWithZen = routeable_aliases_for_with_zen;
 const _: RouteableProviderExtendedCatalogs = routeable_aliases_for_with_extended_catalogs;
+const _: PublishRuntimeCatalogs = published_routeable_aliases_with_runtime_catalogs;
+const _: RouteableRuntimeCatalogs = routeable_aliases_for_with_runtime_catalogs;
+const _: fn(&str) -> String = canonical_alias_for_cpa_model;
 const _: fn(&str) -> bool = is_published_alias;
 
 #[cfg(test)]
@@ -2390,5 +2504,61 @@ mod tests {
             resolve_with_extended_catalogs("vendor/shared", &[], &[], &[], &[], &shared, &shared)
                 .unwrap_err();
         assert_eq!(error.code(), Some(AMBIGUOUS_MODEL_ID));
+    }
+
+    #[test]
+    fn cpa_catalog_joins_code_owned_aliases_and_keeps_raw_ids_exact_and_fail_closed() {
+        let cpa = vec![
+            "GLM-5.2".to_string(),
+            "cpa-raw-model".to_string(),
+            "vendor/cpa-raw".to_string(),
+        ];
+        let catalogs = RuntimeCatalogs {
+            cpa: &cpa,
+            ..RuntimeCatalogs::default()
+        };
+        match resolve_with_runtime_catalogs("glm-5.2", catalogs).unwrap() {
+            ResolvedModel::Alias {
+                alias, mappings, ..
+            } => {
+                assert_eq!(alias, "glm-5.2");
+                assert!(mappings.iter().any(|mapping| {
+                    mapping.is_cpa() && mapping.upstream_model == "GLM-5.2" && mapping.routeable
+                }));
+            }
+            other => panic!("CPA code-owned Alias must join, got {other:?}"),
+        }
+        for raw in ["cpa-raw-model", "vendor/cpa-raw"] {
+            match resolve_with_runtime_catalogs(raw, catalogs).unwrap() {
+                ResolvedModel::PinnedRaw { mapping, .. } => {
+                    assert!(mapping.is_cpa());
+                    assert_eq!(mapping.upstream_model, raw);
+                }
+                other => panic!("CPA unknown catalog id must remain raw, got {other:?}"),
+            }
+        }
+        assert_eq!(canonical_alias_for_cpa_model("GLM-5.2"), "glm-5.2");
+        assert_eq!(canonical_alias_for_cpa_model("vendor/cpa-raw"), "");
+
+        let published = published_routeable_aliases_with_runtime_catalogs(catalogs);
+        assert!(published.iter().any(|item| item.alias == "glm-5.2"));
+        assert!(!published.iter().any(|item| item.alias == "cpa-raw-model"));
+        assert!(!published.iter().any(|item| item.alias == "vendor/cpa-raw"));
+        assert_eq!(
+            routeable_aliases_for_with_runtime_catalogs(CPA_PROVIDER_ID, CPA_OFFERING_ID, catalogs,),
+            ["glm-5.2"]
+        );
+
+        let shared = vec!["vendor/shared".to_string()];
+        let conflict = resolve_with_runtime_catalogs(
+            "vendor/shared",
+            RuntimeCatalogs {
+                go: &shared,
+                cpa: &shared,
+                ..RuntimeCatalogs::default()
+            },
+        )
+        .unwrap_err();
+        assert_eq!(conflict.code(), Some(AMBIGUOUS_MODEL_ID));
     }
 }

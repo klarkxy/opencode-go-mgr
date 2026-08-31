@@ -428,6 +428,7 @@ jobs:
           mkdir release
           find artifacts -type f ! -name SHA256SUMS -exec cp {} release/ \;
           cp compose.example.yaml release/
+          cp cpa-config.example.yaml release/
           node scripts/generate-updater-manifest.mjs \
             --release-dir release \
             --tag "$GITHUB_REF_NAME" \

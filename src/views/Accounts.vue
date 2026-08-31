@@ -464,7 +464,9 @@ const statusFilterOptions = computed(() => [
 
 
 function handleMenuSelect(key: string | number, accountId: string) {
-  if (key === "open-console") {
+  if (key === "open-cpa") {
+    openCpa();
+  } else if (key === "open-console") {
     void openAccountBrowser(accountId, "console");
   } else if (key === "continue-setup") {
     openManagedWizard(accountId);
@@ -495,6 +497,14 @@ function handleMenuSelect(key: string | number, accountId: string) {
       onPositiveClick: () => deleteAccount(accountId),
     });
   }
+}
+
+function openCpa(): void {
+  const url = new URL(window.location.href);
+  url.searchParams.set("view", "cpa");
+  url.searchParams.delete("account_id");
+  window.history.pushState(null, "", url);
+  window.dispatchEvent(new PopStateEvent("popstate"));
 }
 
 function openAddModal(): void {

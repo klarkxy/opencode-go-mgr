@@ -1,17 +1,32 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  APP_NAVIGATION,
+  APP_NAVIGATION_GROUPS,
+  CORE_APP_NAVIGATION,
+  EXTERNAL_APP_NAVIGATION,
   applyAppViewSearchParams,
   isLegacyPricingView,
   readProviderScopeQuery,
   resolveAppViewKey,
 } from "./app-navigation.ts";
 
+test("navigation metadata keeps the fixed core order and CPA external group", () => {
+  assert.deepEqual(
+    CORE_APP_NAVIGATION.map(({ key }) => key),
+    ["dashboard", "keys", "accounts", "providers", "apps", "logs", "settings"],
+  );
+  assert.deepEqual(EXTERNAL_APP_NAVIGATION.map(({ key }) => key), ["cpa"]);
+  assert.equal(APP_NAVIGATION_GROUPS.external.label, "外部接入");
+  assert.equal(APP_NAVIGATION.find(({ key }) => key === "cpa")?.label, "CPA");
+});
+
 test("legacy pricing view keys resolve to providers without inventing a second entry", () => {
   assert.equal(isLegacyPricingView("pricing"), true);
   assert.equal(resolveAppViewKey("pricing"), "providers");
   assert.equal(resolveAppViewKey("providers"), "providers");
   assert.equal(resolveAppViewKey("accounts"), "accounts");
+  assert.equal(resolveAppViewKey("cpa"), "cpa");
   assert.equal(resolveAppViewKey("not-a-view"), "dashboard");
 });
 

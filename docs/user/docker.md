@@ -44,12 +44,46 @@ Image tags move; decide how pinned you want to be.
 | `OCG_PORT` | Compose | Host loopback port; the container still listens on `9042`. |
 | `OCG_ADMIN_USERNAME` + `OCG_ADMIN_PASSWORD` | First start | Optional administrator bootstrap; both or neither. |
 | `OCG_CLIENT_ROOT_URL` | Runtime | Read-only external client root override. |
+| `OCG_CPA_BASE_URL` | Compose CPA profile | Read-only CPA sibling URL; leave at `http://cpa:8317`. |
+| `CPA_MANAGEMENT_PASSWORD` | Compose CPA profile | CPA Management API password; keep only in the deployment's `.env`. |
 | `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` / `NO_PROXY` | Runtime | Standard proxy variables used by `Automatic (system / environment)` outbound proxy mode. |
 | `OCG_MANAGER_ENCRYPTION_KEY` | Runtime restore | Original explicit obfuscation key, when one was used. |
 | `NPM_REGISTRY` + `CARGO_REGISTRY` | Source build | Dependency registries used only by `--build`. |
 
 Most deployments need only the main service. Add the browser sidecar only
 when you need managed onboarding or website login on a headless host.
+
+## Optional Local CPA
+
+CPA is an optional **local** subscription-runtime sibling, not an OCG
+Provider or Plan. It is off by default. Before enabling it, copy the included
+template next to your Compose file and set a distinct CPA inference key:
+
+```bash
+cp cpa-config.example.yaml cpa-config.yaml
+# PowerShell: Copy-Item cpa-config.example.yaml cpa-config.yaml
+# Edit cpa-config.yaml and .env: set api-keys and CPA_MANAGEMENT_PASSWORD.
+docker compose --profile cpa up -d
+docker compose --profile cpa ps
+```
+
+The fixed image is `eceasy/cli-proxy-api:v7.2.145`; it deliberately does not
+use `latest`. CPA's inference port `8317` is published only to the private
+`cpa-private` bridge, where OCG reaches `http://cpa:8317`. The only host ports
+are CPA's OAuth callback ports `1455`, `54545`, and `51121`, each bound to
+`127.0.0.1`. Do not add a public `8317` mapping, Docker socket mount, or a
+remote CPA URL.
+
+CPA keeps OAuth data in the `cpa-auth` volume at `/root/.cli-proxy-api`. OCG
+does not read or copy those files. Back up `cpa-auth` separately from
+`ocg-data` and `ocg-browser-profiles`; restoring it requires the matching CPA
+configuration and keys. `docker compose down` preserves all three named
+volumes, while `docker compose down -v` permanently deletes them.
+
+Open **External Integrations → CPA** after the container is running. Save the
+same CPA inference key from `cpa-config.yaml` and the Management password, run
+the application-level test, and perform OAuth inside CPA. The OCG container
+does not start, stop, upgrade, or health-check CPA on your behalf.
 
 ## Optional Remote Browser
 
@@ -163,6 +197,7 @@ docker compose config --quiet
 docker compose ps
 docker compose logs --tail=100 -f ocg-manager
 docker compose --profile browser logs --tail=100 -f browser
+docker compose --profile cpa logs --tail=100 -f cpa
 curl --fail http://127.0.0.1:9042/dashboard/
 ```
 

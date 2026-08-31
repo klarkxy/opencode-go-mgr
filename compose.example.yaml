@@ -20,6 +20,9 @@ services:
       - OCG_BROWSER_WORKER_URL=${OCG_BROWSER_WORKER_URL:-http://browser:9080}
       - OCG_BROWSER_CONTROL_TOKEN_FILE=/run/ocg-browser/control-token
       - OCG_BROWSER_PROFILES_DIR=/browser-profiles
+      # Docker CPA is always the optional sibling service, never an arbitrary
+      # remote endpoint. The Dashboard treats this value as read-only.
+      - OCG_CPA_BASE_URL=${OCG_CPA_BASE_URL:-http://cpa:8317}
     ports:
       - "127.0.0.1:${OCG_PORT:-9042}:9042"
     volumes:
@@ -36,6 +39,27 @@ services:
     networks:
       - default
       - browser-private
+      - cpa-private
+
+  # Optional local CPA sibling. Before starting it, copy the included
+  # cpa-config.example.yaml to cpa-config.yaml and set its inference key.
+  cpa:
+    profiles: ["cpa"]
+    image: eceasy/cli-proxy-api:v7.2.145
+    restart: unless-stopped
+    environment:
+      - MANAGEMENT_PASSWORD=${CPA_MANAGEMENT_PASSWORD:-}
+    expose:
+      - "8317"
+    ports:
+      - "127.0.0.1:1455:1455"
+      - "127.0.0.1:54545:54545"
+      - "127.0.0.1:51121:51121"
+    volumes:
+      - cpa-auth:/root/.cli-proxy-api
+      - ./cpa-config.yaml:/CLIProxyAPI/config.yaml:ro
+    networks:
+      - cpa-private
 
   # Optional remote browser. Start it with:
   #   docker compose --profile browser up -d
@@ -76,8 +100,12 @@ volumes:
   # Browser profiles contain long-lived cookies and are sensitive backup data.
   ocg-browser-profiles:
   ocg-browser-runtime:
+  # CPA OAuth auth files. Back up separately; OCG never reads their contents.
+  cpa-auth:
 
 networks:
   # Project-scoped bridge: browser control/VNC stay unpublished while Chromium
   # retains outbound HTTPS access for Google and OpenCode.
   browser-private: {}
+  # Project-scoped bridge for OCG Manager and the optional CPA sibling.
+  cpa-private: {}

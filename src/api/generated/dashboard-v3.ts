@@ -141,7 +141,22 @@ export type DashboardApiV3 =
   | ApplicationConnectorPreviewRequest
   | ApplicationConnectorPreview
   | ApplicationConnectorCommitRequest
-  | ApplicationConnectorCommitResult;
+  | ApplicationConnectorCommitResult
+  | CpaIntegration
+  | CpaIntegrationUpdate
+  | CpaTestRequest
+  | CpaConnectionReport
+  | CpaModels
+  | CpaAccounts
+  | CpaAccount
+  | CpaAccountStatusUpdate
+  | CpaAccountDelete
+  | CpaQuotaReset
+  | CpaOAuthProvider
+  | CpaOAuthStartRequest
+  | CpaOAuthStart
+  | CpaOAuthStatus
+  | CpaOAuthSessionDelete;
 /**
  * Which listed models take the list-mode exception leg.
  */
@@ -249,6 +264,7 @@ export type ApplicationConnectorAction = "connect" | "restore";
  */
 export type ApplicationConnectorStatus =
   "unsupported_runtime" | "not_detected" | "manual_only" | "ready" | "connected" | "conflict" | "partial";
+export type CpaOAuthProvider = "codex" | "anthropic" | "antigravity" | "kimi" | "xai";
 
 /**
  * Live CAS token, process generation, and pricing snapshot id.
@@ -789,7 +805,7 @@ export interface CapabilitySummary {
   availability: string;
 }
 /**
- * One built-in provider scope.
+ * One built-in Provider/Offering contract scope.
  */
 export interface ProviderContractGroup {
   card: CardCapabilitySummary;
@@ -1762,4 +1778,161 @@ export interface ApplicationConnectorCommitResult {
   connector: ApplicationConnectorItem;
   processGeneration: number;
   revision: number;
+}
+/**
+ * Secret-free singleton configuration for the local CPA external integration.
+ */
+export interface CpaIntegration {
+  accountId: string | null;
+  baseUrl: string;
+  baseUrlReadOnly: boolean;
+  configured: boolean;
+  enabled: boolean;
+  inferenceKeyConfigured: boolean;
+  managementKeyConfigured: boolean;
+  modelCount: number;
+  modelsRefreshedAt: string | null;
+  processGeneration: number;
+  revision: number;
+}
+/**
+ * PUT CPA configuration. Secret fields are write-only; omission preserves
+ * their existing encrypted values.
+ */
+export interface CpaIntegrationUpdate {
+  baseUrl?: string | null;
+  enabled?: boolean | null;
+  expectedRevision: number;
+  inferenceKey?: string | null;
+  managementKey?: string | null;
+  processGeneration: number;
+}
+/**
+ * Operational connection test. Optional write-only values allow testing a
+ * first-time configuration without persisting it.
+ */
+export interface CpaTestRequest {
+  baseUrl?: string | null;
+  inferenceKey?: string | null;
+  managementKey?: string | null;
+}
+export interface CpaConnectionReport {
+  buildDate: string | null;
+  commit: string | null;
+  inferenceError: string | null;
+  inferenceReady: boolean;
+  managementError: string | null;
+  managementReady: boolean;
+  modelCount: number;
+  processGeneration: number;
+  reachable: boolean;
+  revision: number;
+  version: string | null;
+}
+export interface CpaModels {
+  models: string[];
+  processGeneration: number;
+  refreshedAt: string | null;
+  revision: number;
+}
+export interface CpaAccounts {
+  accounts: CpaAccount[];
+  processGeneration: number;
+  revision: number;
+  version: string;
+}
+export interface CpaAccount {
+  authIndex: string | null;
+  disabled: boolean;
+  email: string | null;
+  label: string | null;
+  mutable: boolean;
+  name: string;
+  provider: string;
+  quota: any;
+  runtimeOnly: boolean;
+  status: string | null;
+  statusMessage: string | null;
+  unavailable: boolean;
+}
+/**
+ * Required process-scoped mutation precondition.
+ *
+ * Both fields travel at the top level of every mutation request. The random
+ * process generation prevents a revision captured before restart from being
+ * accepted by a fresh process whose in-memory counter reused the same value.
+ */
+export interface CpaAccountStatusUpdate {
+  authIndex: string;
+  disabled: boolean;
+  expectedRevision: number;
+  name: string;
+  processGeneration: number;
+}
+/**
+ * Required process-scoped mutation precondition.
+ *
+ * Both fields travel at the top level of every mutation request. The random
+ * process generation prevents a revision captured before restart from being
+ * accepted by a fresh process whose in-memory counter reused the same value.
+ */
+export interface CpaAccountDelete {
+  authIndex: string;
+  expectedRevision: number;
+  name: string;
+  processGeneration: number;
+}
+/**
+ * Required process-scoped mutation precondition.
+ *
+ * Both fields travel at the top level of every mutation request. The random
+ * process generation prevents a revision captured before restart from being
+ * accepted by a fresh process whose in-memory counter reused the same value.
+ */
+export interface CpaQuotaReset {
+  authIndex: string;
+  expectedRevision: number;
+  name: string;
+  processGeneration: number;
+}
+/**
+ * Required process-scoped mutation precondition.
+ *
+ * Both fields travel at the top level of every mutation request. The random
+ * process generation prevents a revision captured before restart from being
+ * accepted by a fresh process whose in-memory counter reused the same value.
+ */
+export interface CpaOAuthStartRequest {
+  expectedRevision: number;
+  processGeneration: number;
+  provider: CpaOAuthProvider;
+}
+export interface CpaOAuthStart {
+  expiresIn: number | null;
+  flow: string;
+  processGeneration: number;
+  provider: CpaOAuthProvider;
+  revision: number;
+  state: string;
+  url: string;
+  userCode: string | null;
+}
+export interface CpaOAuthStatus {
+  error: string | null;
+  processGeneration: number;
+  revision: number;
+  state: string;
+  status: string;
+}
+/**
+ * Required process-scoped mutation precondition.
+ *
+ * Both fields travel at the top level of every mutation request. The random
+ * process generation prevents a revision captured before restart from being
+ * accepted by a fresh process whose in-memory counter reused the same value.
+ */
+export interface CpaOAuthSessionDelete {
+  expectedRevision: number;
+  processGeneration: number;
+  state: string;
 }

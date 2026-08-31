@@ -10,10 +10,10 @@ import type {
 } from "../api/providers.ts";
 import {
   accountContractSummary,
-  accountProviderScope,
   applyModelContractToResponse,
   catalogRefreshSupported,
   enabledProtocols,
+  findAccountScopeView,
   flattenProviderScopes,
   isSafeSourceUrl,
   normalizeProviderContractsResponse,
@@ -221,25 +221,47 @@ function account(overrides: Partial<Account> = {}): Account {
   };
 }
 
-test("scope keys round-trip and distinguish Custom endpoints from shared providers", () => {
+test("scope keys round-trip and accounts match backend-owned exact scopes", () => {
   assert.equal(providerScopeKey("provider", "command-code"), "provider:command-code");
   assert.deepEqual(parseProviderScopeKey("custom_endpoint:abc"), {
     scope_kind: "custom_endpoint",
     scope_id: "abc",
   });
   assert.equal(parseProviderScopeKey("nope"), null);
-  assert.deepEqual(accountProviderScope(account()), {
-    scope_kind: "provider",
-    scope_id: "opencode",
-  });
-  assert.deepEqual(accountProviderScope(account({
+  const scopes = flattenProviderScopes(normalizeProviderContractsResponse(contracts()));
+  assert.equal(findAccountScopeView(scopes, account())?.scope_id, "opencode");
+  assert.equal(findAccountScopeView(scopes, account({
     id: "c1",
     provider_id: "custom",
     offering_id: "api",
-  })), {
-    scope_kind: "custom_endpoint",
-    scope_id: "c1",
-  });
+  })), undefined);
+  assert.equal(findAccountScopeView(scopes, account({
+    id: "custom-1",
+    provider_id: "custom",
+    offering_id: "api",
+  }))?.scope_id, "custom-1");
+});
+
+test("account scope matching distinguishes offerings under one provider", () => {
+  const scopes = flattenProviderScopes(normalizeProviderContractsResponse(contracts({
+    providers: [
+      providerGroup(),
+      providerGroup({
+        scope_id: "opencode-go-plus",
+        offerings: [{
+          offering_id: "go-plus",
+          display_name: "OpenCode Go Plus",
+          routable: true,
+          accounts: [{ id: "plus-1", name: "Plus 1", enabled: true, verification_status: "not_required" }],
+        }],
+      }),
+    ],
+  })));
+  assert.equal(findAccountScopeView(scopes, account({
+    id: "plus-1",
+    provider_id: "opencode",
+    offering_id: "go-plus",
+  }))?.scope_id, "opencode-go-plus");
 });
 
 test("flatten keeps built-in providers grouped and Custom endpoints unflattened", () => {

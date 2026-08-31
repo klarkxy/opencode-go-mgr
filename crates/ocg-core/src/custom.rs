@@ -875,9 +875,9 @@ mod tests {
     #[test]
     fn custom_runtime_identity_is_configurable_http_not_a_base_class() {
         use crate::provider::{
-            ANONYMOUS_FREE_OFFERING_ID, COMMAND_CODE_PROVIDER_ID, ConfigurableHttpAdapter,
-            GO_OFFERING_ID, GOAT_OFFERING_ID, OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID,
-            ProviderAdapterKind, VerificationAdapter, builtin_plan,
+            ANONYMOUS_FREE_OFFERING_ID, COMMAND_CODE_PROVIDER_ID, GO_OFFERING_ID, GOAT_OFFERING_ID,
+            OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID, ProviderAdapterKind,
+            ProviderRegistry, builtin_plan,
         };
         assert_eq!(
             ProviderAdapterKind::from_offering(CUSTOM_PROVIDER_ID, CUSTOM_API_OFFERING_ID),
@@ -910,7 +910,9 @@ mod tests {
         };
         assert!(runtime.eligible());
         let plan = builtin_plan(CUSTOM_PROVIDER_ID, CUSTOM_API_OFFERING_ID).unwrap();
-        let verification = ConfigurableHttpAdapter::verification(plan);
+        let verification = ProviderRegistry::get(CUSTOM_PROVIDER_ID, CUSTOM_API_OFFERING_ID)
+            .expect("Custom API has a sealed descriptor")
+            .verification;
         assert!(verification.never_auto_enable);
         assert!(verification.probe_first_declared_model);
         assert!(!verification.uses_get_models);

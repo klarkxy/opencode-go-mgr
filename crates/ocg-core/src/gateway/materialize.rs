@@ -73,6 +73,15 @@ pub(crate) fn diagnostic_forced_upstream(
     resolved: &ResolvedModel,
     client: ApiFormat,
 ) -> Option<ApiFormat> {
+    if let ResolvedModel::PinnedRaw { mapping, .. } = resolved
+        && mapping_adapter_kind(mapping) == Some(ProviderAdapterKind::Cpa)
+    {
+        return Some(
+            crate::kernel::protocol::model_protocol(&mapping.upstream_model)
+                .map(|profile| profile.preferred)
+                .unwrap_or(ApiFormat::ChatCompletions),
+        );
+    }
     let preserve_client = match resolved {
         ResolvedModel::PinnedRaw { mapping, .. } => {
             mapping_is_configurable_http(mapping) || mapping_is_command_code_goat(mapping)
@@ -196,6 +205,7 @@ pub(crate) fn materialize_account_routes(
     free_available: bool,
     custom_runtimes: &std::collections::HashMap<String, CustomAccountRuntime>,
     goat_runtimes: &std::collections::HashMap<String, GoatAccountRuntime>,
+    cpa_base_url: Option<&str>,
     contracts: &EffectiveContractSet,
 ) -> Result<MaterializedRouteSet, ProtocolError> {
     match resolved {
@@ -210,6 +220,7 @@ pub(crate) fn materialize_account_routes(
                 resolved_alias_from_model(resolved),
                 None,
                 false,
+                cpa_base_url,
                 contracts,
             )?;
             collect_mapping_plans(
@@ -256,6 +267,7 @@ pub(crate) fn materialize_account_routes(
                     resolved_alias.clone(),
                     None,
                     false,
+                    cpa_base_url,
                     contracts,
                 ) {
                     Ok(plan) => plans.push(MappingPlan {
@@ -309,6 +321,7 @@ fn materialize_mapping_plan(
     resolved_alias: Option<String>,
     original_model: Option<String>,
     allow_go_fallback: bool,
+    cpa_base_url: Option<&str>,
     contracts: &EffectiveContractSet,
 ) -> Result<RequestPlan, ProtocolError> {
     let adapter_kind = mapping_adapter_kind(mapping);
@@ -329,6 +342,12 @@ fn materialize_mapping_plan(
     };
     let forced_upstream = if adapter_kind == Some(ProviderAdapterKind::ConfigurableHttp) {
         Some(parsed.client)
+    } else if adapter_kind == Some(ProviderAdapterKind::Cpa) {
+        Some(
+            crate::kernel::protocol::model_protocol(&model)
+                .map(|profile| profile.preferred)
+                .unwrap_or(ApiFormat::ChatCompletions),
+        )
     } else if adapter_kind == Some(ProviderAdapterKind::CommandCodeGoat) {
         Some(
             contracts
@@ -342,7 +361,7 @@ fn materialize_mapping_plan(
                 .map_err(|error| ProtocolError::new(error.message))?,
         )
     };
-    materialize_channel_plan(
+    let mut plan = materialize_channel_plan(
         config,
         parsed,
         client_model,
@@ -353,7 +372,15 @@ fn materialize_mapping_plan(
         allow_go_fallback,
         forced_upstream,
         None,
-    )
+    )?;
+    if adapter_kind == Some(ProviderAdapterKind::Cpa) {
+        plan.upstream_base_override = Some(
+            cpa_base_url
+                .ok_or_else(|| ProtocolError::new("CPA is not configured"))?
+                .to_string(),
+        );
+    }
+    Ok(plan)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -582,11 +609,11 @@ mod tests {
     };
     use crate::provider::{
         ANONYMOUS_FREE_OFFERING_ID, COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_ALIAS,
-        COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM, COMMAND_CODE_PROVIDER_ID,
-        CUSTOM_API_OFFERING_ID, CUSTOM_PROVIDER_ID, ConnectionVerificationStatus, CredentialKind,
-        GO_OFFERING_ID, GOAT_OFFERING_ID, OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID,
-        ProviderAdapterKind, QuotaScope, UpstreamProtocolKind, ZEN_FREE_ACCOUNT_ID,
-        ZEN_FREE_ACCOUNT_NAME,
+        COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM, COMMAND_CODE_PROVIDER_ID, CPA_ACCOUNT_ID,
+        CPA_OFFERING_ID, CPA_PROVIDER_ID, CUSTOM_API_OFFERING_ID, CUSTOM_PROVIDER_ID,
+        ConnectionVerificationStatus, CredentialKind, GO_OFFERING_ID, GOAT_OFFERING_ID,
+        OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID, ProviderAdapterKind, QuotaScope,
+        UpstreamProtocolKind, ZEN_FREE_ACCOUNT_ID, ZEN_FREE_ACCOUNT_NAME,
     };
     use chrono::Utc;
     use serde_json::json;
@@ -660,6 +687,16 @@ mod tests {
         );
         item.name = ZEN_FREE_ACCOUNT_NAME.into();
         item
+    }
+
+    fn cpa_account() -> Account {
+        account(
+            CPA_ACCOUNT_ID,
+            CPA_PROVIDER_ID,
+            CPA_OFFERING_ID,
+            CredentialKind::ApiKey,
+            QuotaScope::Key,
+        )
     }
 
     fn goat_runtime(id: &str, _models: &[&str]) -> GoatAccountRuntime {
@@ -780,6 +817,7 @@ mod tests {
             free_available,
             &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
+            None,
             contracts,
         )
         .unwrap()
@@ -804,6 +842,43 @@ mod tests {
         assert_eq!(identity.requested_model, "glm-5.2");
         assert_eq!(identity.resolved_alias.as_deref(), Some("glm-5.2"));
         assert_eq!(identity.upstream_model, "glm-5.2");
+    }
+
+    #[test]
+    fn unknown_cpa_raw_model_defaults_to_chat_and_uses_local_base() {
+        let model = "vendor/cpa-new-model";
+        let cpa_models = vec![model.to_string()];
+        let resolved = alias::resolve_with_runtime_catalogs(
+            model,
+            alias::RuntimeCatalogs {
+                cpa: &cpa_models,
+                ..alias::RuntimeCatalogs::default()
+            },
+        )
+        .unwrap();
+        let body = chat_body(model);
+        let parsed = parse_client_request(ApiFormat::ChatCompletions, body.clone()).unwrap();
+        let set = materialize_account_routes(
+            &[cpa_account()],
+            &AppConfig::default(),
+            &parsed,
+            &resolved,
+            model,
+            model,
+            &body,
+            true,
+            &std::collections::HashMap::new(),
+            &std::collections::HashMap::new(),
+            Some(crate::cpa::DEFAULT_CPA_BASE_URL),
+            &static_contracts(),
+        )
+        .unwrap();
+        assert_eq!(set.routes.len(), 1);
+        assert_eq!(set.routes[0].plan.upstream, ApiFormat::ChatCompletions);
+        assert_eq!(
+            set.routes[0].plan.upstream_base_override.as_deref(),
+            Some(crate::cpa::DEFAULT_CPA_BASE_URL)
+        );
     }
 
     #[test]
@@ -880,6 +955,7 @@ mod tests {
             true,
             &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
+            None,
             &static_contracts(),
         )
         .unwrap();
@@ -933,6 +1009,7 @@ mod tests {
             true,
             &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
+            None,
             &static_contracts(),
         )
         .unwrap();
@@ -970,6 +1047,7 @@ mod tests {
             true,
             &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
+            None,
             &goat_contracts(&[COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM]),
         )
         .unwrap();
@@ -1044,6 +1122,7 @@ mod tests {
                 "goat-loop-raw",
                 &[COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM],
             ),
+            None,
             &goat_contracts(&[COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM]),
         )
         .unwrap();
@@ -1092,6 +1171,7 @@ mod tests {
             true,
             &std::collections::HashMap::new(),
             &runtimes,
+            None,
             &goat_contracts(&["claude-sonnet-4-6"]),
         )
         .unwrap();
@@ -1353,6 +1433,7 @@ mod tests {
             false,
             &runtimes,
             &std::collections::HashMap::new(),
+            None,
             &contracts,
         )
         .expect("native Responses structured output must not be rejected via Chat conversion");
@@ -1395,6 +1476,7 @@ mod tests {
             false,
             &runtimes,
             &std::collections::HashMap::new(),
+            None,
             &contracts,
         )
         .expect("native Messages structured output must not be rejected via Chat conversion");
@@ -1434,6 +1516,7 @@ mod tests {
                 false,
                 &runtimes,
                 &std::collections::HashMap::new(),
+                None,
                 &contracts,
             )
             .expect("single-protocol account must convert supported client formats");
@@ -1506,6 +1589,7 @@ mod tests {
             false,
             &runtimes,
             &std::collections::HashMap::new(),
+            None,
             &static_contracts(),
         )
         .expect("missing custom contract must fail closed without a protocol error for mixed resolution");
@@ -1535,6 +1619,7 @@ mod tests {
             false,
             &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
+            None,
             &static_contracts(),
         )
         .unwrap();
@@ -1574,6 +1659,7 @@ mod tests {
             false,
             &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
+            None,
             &contracts,
         )
         .unwrap();

@@ -8,7 +8,7 @@
 
 锁顺序：(1) `settings_update`，(2) `db`，(3) `config`，(4) `http_client`， (5) `gateway`，(6) `pricing`，(7) `zen_free_models`，(8) `provider_contracts`，(9) `routing`，(10) `credential_snapshot`。反向获取会造成死锁；持有 `routing` 锁时不应执行 DB 或网络 I/O。异步闸口：设置写同时重绑时， `settings_host_effects`（持久化 → 监听器重绑 → 补偿）先于 `gateway_lifecycle`。这些 await 期间应释放 `parking_lot` 锁。
 
-两层凭证共用一张 `access_keys` 表（schema v32）和一份鉴权快照：
+两层凭证共用一张 `access_keys` 表（当前 schema v34）和一份鉴权快照：
 
 - 主 Key：固定 id `00000000-0000-0000-0000-000000000001`，显示名 `"Primary"`。始终启用，没有删除入口。公开 `AppConfig` 与面板 API 仍暴露 `gateway_key`；v27 之后经消毒的 config JSON **不再** 是该值的数据库权威。
 - 子 Key：非主行，活跃上限 64，软删保留身份/名称并清除明文。只经 `/dashboard/api/v3/keys*` 生命周期 API 变更。CLI 没有子 Key 命令。
@@ -57,7 +57,7 @@ Profile 删除先停浏览器，校验账号 ID 防目录穿越，再把新旧 P
 
 ## 持久化
 
-`crates/ocg-core/src/db.rs` 定义 SQLite schema、迁移与查询。当前 schema 是 **v32**。`provider_contracts.rs` 负责供应商合约范围、按模型/按协议覆盖、effective 合约推导与模型协议证据。 `models.rs` 定义共享 serde 类型和 `AppConfig`。Key 混淆在 `ocg-infra::crypto`（门面 `ocg_core::crypto`）：这是轻量混淆，不是 KMS。 Windows 桌面使用 `MachineBoundCipher`；CLI/Docker 使用来自 `OCG_MANAGER_ENCRYPTION_KEY` 或 `<data-dir>/.encryption-key` 的 `StaticKeyCipher`。生产宿主必须调用 `Database::open_with_cipher`，让 v27 密文探测使用已经解析的 cipher。账号 `key_cipher` / `password_cipher` 就地校验，**不会重新加密**。比本构建支持的更新 schema 会 fail closed。
+`crates/ocg-core/src/db.rs` 定义 SQLite schema、迁移与查询。当前 schema 是 **v34**。`provider_contracts.rs` 负责供应商合约范围、按模型/按协议覆盖、effective 合约推导与模型协议证据。 `models.rs` 定义共享 serde 类型和 `AppConfig`。Key 混淆在 `ocg-infra::crypto`（门面 `ocg_core::crypto`）：这是轻量混淆，不是 KMS。 Windows 桌面使用 `MachineBoundCipher`；CLI/Docker 使用来自 `OCG_MANAGER_ENCRYPTION_KEY` 或 `<data-dir>/.encryption-key` 的 `StaticKeyCipher`。生产宿主必须调用 `Database::open_with_cipher`，让 v27 密文探测使用已经解析的 cipher。账号 `key_cipher` / `password_cipher` 就地校验，**不会重新加密**。比本构建支持的更新 schema 会 fail closed。
 
 升级路径上历史版本仍然重要：
 

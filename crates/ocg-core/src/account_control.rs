@@ -11,8 +11,8 @@ use crate::models::{
     Account, AccountSetupStep, AccountType, AccountUpdate, normalize_account_notes,
 };
 use crate::provider::{
-    ConnectionVerificationStatus, GO_OFFERING_ID, OPENCODE_PROVIDER_ID, VerificationPolicy,
-    ZEN_FREE_ACCOUNT_ID,
+    CPA_ACCOUNT_ID, ConnectionVerificationStatus, GO_OFFERING_ID, OPENCODE_PROVIDER_ID,
+    VerificationPolicy, ZEN_FREE_ACCOUNT_ID,
 };
 use chrono::Utc;
 use std::fmt;
@@ -23,6 +23,7 @@ use std::path::PathBuf;
 const ZEN_FREE_MUTATION_MESSAGE: &str =
     "Zen Free settings must use the dedicated provider-settings endpoint";
 const ZEN_FREE_DELETE_MESSAGE: &str = "Zen Free is a built-in singleton and cannot be deleted";
+const CPA_DELETE_MESSAGE: &str = "CPA Subscription Pool is an external-integration singleton and cannot be deleted as an account";
 const SETUP_INCOMPLETE_MESSAGE: &str = "account setup is not complete and cannot be enabled";
 const VERIFY_BEFORE_ENABLE_MESSAGE: &str = "verify the account connection before enabling it";
 
@@ -300,7 +301,7 @@ pub async fn delete_account(
 ) -> Result<u64, AccountControlError> {
     host.with_settings_update(|| {
         check_cas(host, cas)?;
-        reject_zen_free_delete(id)?;
+        reject_singleton_delete(id)?;
         host.recover_browser_profiles_for_account(id)
             .map_err(AccountControlError::Internal)?;
         load_account(host, id)?;
@@ -320,7 +321,7 @@ fn delete_account_persist(
     cas: Option<(u64, u64)>,
 ) -> Result<u64, AccountControlError> {
     check_cas(host, cas)?;
-    reject_zen_free_delete(id)?;
+    reject_singleton_delete(id)?;
     let account = load_account(host, id)?;
     let staged = StagedBrowserProfiles::stage(
         &host.data_dir(),
@@ -414,9 +415,11 @@ fn check_cas(
     }
 }
 
-fn reject_zen_free_delete(id: &str) -> Result<(), AccountControlError> {
+fn reject_singleton_delete(id: &str) -> Result<(), AccountControlError> {
     if id == ZEN_FREE_ACCOUNT_ID {
         Err(AccountControlError::Invalid(ZEN_FREE_DELETE_MESSAGE.into()))
+    } else if id == CPA_ACCOUNT_ID {
+        Err(AccountControlError::Invalid(CPA_DELETE_MESSAGE.into()))
     } else {
         Ok(())
     }

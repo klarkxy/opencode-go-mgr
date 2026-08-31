@@ -56,6 +56,9 @@ pub enum ProxyRoutingModel {
     /// Process-wide default-leg client with redirects disabled (GOAT loopback).
     /// Restricted URL. Forwards harmless client headers.
     ProcessWideNoRedirect,
+    /// User-operated local external integration. Direct connection only,
+    /// redirects disabled, and client headers isolated.
+    LocalExternalIntegration,
     /// Custom trusted-admin isolated client: process-wide proxy, no redirects,
     /// no client-header forwarding, administrator-trusted URL.
     IsolatedTrustedAdmin,
@@ -122,7 +125,17 @@ impl AttemptSpec {
     }
 
     pub fn isolates_client_headers(&self) -> bool {
-        matches!(self.proxy_routing, ProxyRoutingModel::IsolatedTrustedAdmin)
+        matches!(
+            self.proxy_routing,
+            ProxyRoutingModel::IsolatedTrustedAdmin | ProxyRoutingModel::LocalExternalIntegration
+        )
+    }
+
+    pub fn is_local_external_integration(&self) -> bool {
+        matches!(
+            self.proxy_routing,
+            ProxyRoutingModel::LocalExternalIntegration
+        )
     }
 
     /// Wire auth after OpenCode protocol-default mapping. Messages uses

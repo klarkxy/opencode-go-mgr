@@ -272,8 +272,8 @@ fn mutated_official(harness: &V3Harness) -> ocg_core::kernel::pricing::PricingSn
 }
 
 #[test]
-fn dashboard_v3_schema_version_stays_at_v33() {
-    assert_eq!(CURRENT_SCHEMA_VERSION, 33);
+fn dashboard_v3_schema_version_stays_at_v34() {
+    assert_eq!(CURRENT_SCHEMA_VERSION, 34);
 }
 
 #[tokio::test]

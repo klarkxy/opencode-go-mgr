@@ -207,6 +207,7 @@
                 :resolved-theme="resolvedTheme"
                 @update:theme-name="themeName = $event"
               />
+              <Cpa v-else-if="activeKey === 'cpa'" />
             </KeepAlive>
           </main>
         </n-layout>
@@ -239,9 +240,10 @@ import {
   darkTheme,
   useOsTheme,
 } from "naive-ui";
-import type { DropdownMenuProps, DropdownOption } from "naive-ui";
+import type { DropdownMenuProps, DropdownOption, MenuOption } from "naive-ui";
 import {
   AppstoreOutlined,
+  ApiOutlined,
   BgColorsOutlined,
   CheckOutlined,
   DashboardOutlined,
@@ -274,25 +276,19 @@ import {
 import type { ThemeName } from "./theme";
 import { userFacingError } from "./utils/errors.ts";
 import {
+  APP_NAVIGATION,
+  APP_NAVIGATION_GROUPS,
+  CORE_APP_NAVIGATION,
+  EXTERNAL_APP_NAVIGATION,
   applyAppViewSearchParams,
   isLegacyPricingView,
   resolveAppViewKey,
+  type AppNavigationItem,
   type AppViewKey,
   type ProviderScopeQuery,
 } from "./views/app-navigation.ts";
 
 type ViewKey = AppViewKey;
-
-const viewConfig: Record<ViewKey, MessageKey> = {
-  dashboard: "仪表盘",
-  keys: "接入 Key",
-  accounts: "账号",
-  apps: "应用",
-  providers: "供应商",
-  logs: "日志",
-  settings: "设置",
-  browser: "远程浏览器",
-};
 
 const Dashboard = defineAsyncComponent(() => import("./views/Dashboard.vue"));
 const Keys = defineAsyncComponent(() => import("./views/Keys.vue"));
@@ -301,6 +297,7 @@ const Applications = defineAsyncComponent(() => import("./views/Applications.vue
 const Providers = defineAsyncComponent(() => import("./views/Providers.vue"));
 const Logs = defineAsyncComponent(() => import("./views/Logs.vue"));
 const Settings = defineAsyncComponent(() => import("./views/Settings.vue"));
+const Cpa = defineAsyncComponent(() => import("./views/Cpa.vue"));
 const BrowserSession = defineAsyncComponent(() => import("./views/BrowserSession.vue"));
 
 const osTheme = useOsTheme();
@@ -344,23 +341,58 @@ function renderIcon(icon: Component) {
   return () => h(icon);
 }
 
-const menuOptions = computed(() => [
-  { label: t("仪表盘"), key: "dashboard", icon: renderIcon(DashboardOutlined) },
-  { label: t("接入 Key"), key: "keys", icon: renderIcon(KeyOutlined) },
-  { label: t("账号"), key: "accounts", icon: renderIcon(TeamOutlined) },
-  { label: t("供应商"), key: "providers", icon: renderIcon(CloudServerOutlined) },
-  { label: t("应用"), key: "apps", icon: renderIcon(AppstoreOutlined) },
-  { label: t("日志"), key: "logs", icon: renderIcon(FileTextOutlined) },
-  { label: t("设置"), key: "settings", icon: renderIcon(SettingOutlined) },
-]);
-const mobileMenuOptions = computed<DropdownOption[]>(() => menuOptions.value.map((option) => ({
-  ...option,
-  props: {
-    role: "menuitemradio",
-    "aria-checked": option.key === activeKey.value ? "true" : "false",
+const navigationIcons: Record<AppNavigationItem["icon"], Component> = {
+  dashboard: DashboardOutlined,
+  keys: KeyOutlined,
+  accounts: TeamOutlined,
+  providers: CloudServerOutlined,
+  apps: AppstoreOutlined,
+  logs: FileTextOutlined,
+  settings: SettingOutlined,
+  cpa: ApiOutlined,
+};
+
+function menuOption(item: AppNavigationItem): MenuOption {
+  return {
+    label: t(item.label),
+    key: item.key,
+    icon: renderIcon(navigationIcons[item.icon]),
+  };
+}
+
+function mobileMenuOption(item: AppNavigationItem): DropdownOption {
+  return {
+    ...menuOption(item),
+    props: {
+      role: "menuitemradio",
+      "aria-checked": item.key === activeKey.value ? "true" : "false",
+    },
+  };
+}
+
+const menuOptions = computed<MenuOption[]>(() => [
+  ...CORE_APP_NAVIGATION.map(menuOption),
+  { type: "divider", key: "external-integrations-divider" },
+  {
+    type: "group",
+    key: "external-integrations",
+    label: t(APP_NAVIGATION_GROUPS.external.label),
+    children: EXTERNAL_APP_NAVIGATION.map(menuOption),
   },
-})));
-const currentTitle = computed(() => t(viewConfig[activeKey.value]));
+]);
+const mobileMenuOptions = computed<DropdownOption[]>(() => [
+  ...CORE_APP_NAVIGATION.map(mobileMenuOption),
+  { type: "divider", key: "mobile-external-integrations-divider" },
+  {
+    label: t(APP_NAVIGATION_GROUPS.external.label),
+    key: "mobile-external-integrations-label",
+    disabled: true,
+  },
+  ...EXTERNAL_APP_NAVIGATION.map(mobileMenuOption),
+]);
+const currentTitle = computed(() => t(
+  APP_NAVIGATION.find(({ key }) => key === activeKey.value)?.label ?? "远程浏览器",
+));
 const themeNames = new Set<ThemeName>(THEME_OPTIONS.map(({ value }) => value));
 const themeLabel = computed(() => {
   const selected = t((THEME_OPTIONS.find(({ value }) => value === themeName.value)?.label ?? "默认") as MessageKey);

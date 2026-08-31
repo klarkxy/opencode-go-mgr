@@ -11,11 +11,12 @@ Under the hood it is a static Provider Registry plus a handful of
 capability-specific adapters. Custom API is a Configurable HTTP adapter, not a base class
 everyone inherits from. Scopes are split like this:
 
-- `Provider(provider_id)` for built-ins.
+- `Provider(contract_scope_id)` for one exact built-in Provider/Offering
+  contract. Existing scope IDs keep their historical Provider-shaped values.
 - `CustomEndpoint(account_id)` scopes keep Custom mappings account-owned and
   never editable from this page.
 
-The left rail lists the built-in Provider scopes. The main pane has three tabs:
+The left rail lists the built-in Provider/Offering contract scopes. The main pane has three tabs:
 **Model catalog**, **Pricing**, and **Alias**. The old catalog and
 model-contract views are merged into one matrix on the Model catalog tab.
 

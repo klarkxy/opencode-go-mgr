@@ -268,6 +268,9 @@ mod tests {
                 ProviderAdapterKind::ZenFree => {
                     assert!(capability.is_none());
                 }
+                ProviderAdapterKind::Cpa => {
+                    assert!(capability.is_none());
+                }
                 ProviderAdapterKind::ConfigurableHttp => {
                     assert!(capability.is_none());
                 }
@@ -276,24 +279,25 @@ mod tests {
     }
 
     #[test]
-    fn usage_capability_delegates_through_composed_usage_adapter() {
+    fn usage_capability_delegates_through_provider_descriptor() {
         use crate::provider::{
             ANONYMOUS_FREE_OFFERING_ID, COMMAND_CODE_PROVIDER_ID, CUSTOM_API_OFFERING_ID,
-            CUSTOM_PROVIDER_ID, CommandCodeGoatAdapter, ConfigurableHttpAdapter, GO_OFFERING_ID,
-            GOAT_OFFERING_ID, OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID,
-            OpenCodeGoAdapter, UsageAdapter, ZenFreeAdapter, builtin_plan,
+            CUSTOM_PROVIDER_ID, GO_OFFERING_ID, GOAT_OFFERING_ID, OPENCODE_PROVIDER_ID,
+            OPENCODE_ZEN_FREE_PROVIDER_ID, ProviderRegistry,
         };
 
-        let go_plan = builtin_plan(OPENCODE_PROVIDER_ID, GO_OFFERING_ID).unwrap();
-        let go_usage = OpenCodeGoAdapter::usage(go_plan);
+        let go_usage = ProviderRegistry::get(OPENCODE_PROVIDER_ID, GO_OFFERING_ID)
+            .unwrap()
+            .usage;
         let go = provider_usage_capability(OPENCODE_PROVIDER_ID, GO_OFFERING_ID).unwrap();
         assert_eq!(go.endpoint, go_usage.endpoint);
         assert_eq!(go.automatic_sync, go_usage.automatic_sync);
         assert_eq!(go.authoritative_for_quota, go_usage.authoritative_for_quota);
         assert!(go_usage.publishes_capability);
 
-        let goat_plan = builtin_plan(COMMAND_CODE_PROVIDER_ID, GOAT_OFFERING_ID).unwrap();
-        let goat_usage = CommandCodeGoatAdapter::usage(goat_plan);
+        let goat_usage = ProviderRegistry::get(COMMAND_CODE_PROVIDER_ID, GOAT_OFFERING_ID)
+            .unwrap()
+            .usage;
         assert!(!goat_usage.experimental);
         assert!(goat_usage.publishes_capability);
         assert!(!goat_usage.automatic_sync);
@@ -301,9 +305,10 @@ mod tests {
         assert_eq!(goat.evidence, ProviderUsageEvidence::Unavailable);
         assert!(!goat.automatic_sync);
 
-        let zen_plan =
-            builtin_plan(OPENCODE_ZEN_FREE_PROVIDER_ID, ANONYMOUS_FREE_OFFERING_ID).unwrap();
-        let zen_usage = ZenFreeAdapter::usage(zen_plan);
+        let zen_usage =
+            ProviderRegistry::get(OPENCODE_ZEN_FREE_PROVIDER_ID, ANONYMOUS_FREE_OFFERING_ID)
+                .unwrap()
+                .usage;
         assert!(!zen_usage.publishes_capability);
         assert!(!zen_usage.authoritative_for_quota);
         assert!(
@@ -311,8 +316,12 @@ mod tests {
                 .is_none()
         );
 
-        let custom_plan = builtin_plan(CUSTOM_PROVIDER_ID, CUSTOM_API_OFFERING_ID).unwrap();
-        assert!(!ConfigurableHttpAdapter::usage(custom_plan).publishes_capability);
+        assert!(
+            !ProviderRegistry::get(CUSTOM_PROVIDER_ID, CUSTOM_API_OFFERING_ID)
+                .unwrap()
+                .usage
+                .publishes_capability
+        );
     }
 
     #[tokio::test]

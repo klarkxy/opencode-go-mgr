@@ -35,6 +35,22 @@ pub struct Database {
     conn: Connection,
 }
 
+/// Local configuration for the one code-owned CPA external integration.
+/// Both credential values stay encrypted outside the short-lived V3 write path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CpaIntegrationRecord {
+    pub account_id: String,
+    pub base_url: String,
+    pub management_key_cipher: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CpaCatalogRecord {
+    pub models: Vec<String>,
+    pub refreshed_at: Option<DateTime<Utc>>,
+    pub source_url: String,
+}
+
 /// One fully validated account definition ready for an atomic migration import.
 /// Plaintext credentials never enter this type; callers must encrypt them with
 /// the destination `CoreState` cipher before acquiring the database mutex.
@@ -87,7 +103,7 @@ pub const PRE_V23_BACKUP_FILE_PREFIX: &str = "data.sqlite.pre-v23.";
 /// v26 and before any v27 write. Not created for a brand-new empty database.
 pub const PRE_V3_BACKUP_FILE_PREFIX: &str = "data.sqlite.pre-v3.";
 /// Highest schema this binary can open or migrate. Newer databases fail closed.
-pub const CURRENT_SCHEMA_VERSION: i32 = 33;
+pub const CURRENT_SCHEMA_VERSION: i32 = 34;
 pub const V27_SCHEMA_VERSION: i32 = 27;
 /// Schema the v27 rewrite expects as its committed source. Historical databases
 /// always migrate through this version first.
@@ -1697,6 +1713,34 @@ fn migrate_to_v33(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// v34: one local CPA configuration row. The inference credential, enablement,
+/// and ordering remain on the reserved singleton account; the model snapshot
+/// remains in `provider_model_catalogs`.
+fn migrate_to_v34(conn: &Connection) -> Result<()> {
+    let version = schema_version_on(conn)?;
+    if version >= 34 {
+        return Ok(());
+    }
+    anyhow::ensure!(
+        version == 33,
+        "v34 requires a canonical schema v33 source, found {version}"
+    );
+    let tx = conn.unchecked_transaction()?;
+    tx.execute_batch(
+        "CREATE TABLE IF NOT EXISTS cpa_integration (
+             id TEXT PRIMARY KEY CHECK (id = 'cpa'),
+             account_id TEXT NOT NULL UNIQUE,
+             base_url TEXT NOT NULL,
+             management_key_cipher TEXT NOT NULL,
+             updated_at TEXT NOT NULL,
+             FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+         );
+         INSERT OR REPLACE INTO schema_version (version) VALUES (34);",
+    )?;
+    tx.commit()?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod v27_test_hooks {
     use super::V27MigrationFault;
@@ -2437,6 +2481,7 @@ impl Database {
         migrate_to_v31(&db.conn)?;
         migrate_to_v32(&db.conn)?;
         migrate_to_v33(&db.conn)?;
+        migrate_to_v34(&db.conn)?;
         Ok(db)
     }
 
@@ -3997,10 +4042,13 @@ impl Database {
             params![scope.kind_str(), scope.id()],
         )?;
         for model_id in current_models {
-            let adapter = crate::provider_contracts::adapter_kind_for_provider_scope(scope.id())
+            let descriptor = crate::provider_contracts::provider_scope_descriptor(scope.id())
                 .expect("validated built-in snapshot provider");
-            let static_protocols =
-                crate::provider_contracts::static_verified_protocols(adapter, model_id, &[]);
+            let static_protocols = crate::provider_contracts::static_verified_protocols(
+                descriptor.kind,
+                model_id,
+                &[],
+            );
             for protocol in [
                 UpstreamProtocolKind::ChatCompletions,
                 UpstreamProtocolKind::Responses,
@@ -4587,6 +4635,205 @@ impl Database {
             }
         }
         tx.commit()?;
+        Ok(())
+    }
+
+    pub fn cpa_integration(&self) -> Result<Option<CpaIntegrationRecord>> {
+        self.conn
+            .query_row(
+                "SELECT account_id, base_url, management_key_cipher
+                   FROM cpa_integration WHERE id = 'cpa'",
+                [],
+                |row| {
+                    Ok(CpaIntegrationRecord {
+                        account_id: row.get(0)?,
+                        base_url: row.get(1)?,
+                        management_key_cipher: row.get(2)?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    /// Atomically creates or updates the one CPA route account and its local
+    /// Management connection. Callers pass ciphertext only.
+    pub fn upsert_cpa_integration(
+        &self,
+        account: &Account,
+        base_url: &str,
+        management_key_cipher: &str,
+    ) -> Result<()> {
+        anyhow::ensure!(
+            account.id == CPA_ACCOUNT_ID,
+            "invalid CPA singleton account id"
+        );
+        anyhow::ensure!(
+            account.provider_id == CPA_PROVIDER_ID && account.offering_id == CPA_OFFERING_ID,
+            "invalid CPA singleton binding"
+        );
+        let plan = builtin_plan(CPA_PROVIDER_ID, CPA_OFFERING_ID)
+            .ok_or_else(|| anyhow::anyhow!("CPA provider offering is not registered"))?;
+        validate_account_binding(
+            &account.id,
+            &account.provider_id,
+            &account.offering_id,
+            account.credential_kind,
+            account.quota_scope,
+        )?;
+        let tx = self.conn.unchecked_transaction()?;
+        let exists = tx
+            .query_row(
+                "SELECT 1 FROM accounts WHERE id = ?1",
+                [CPA_ACCOUNT_ID],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some();
+        if exists {
+            tx.execute(
+                "UPDATE accounts
+                    SET name = ?2,
+                        auth_error = CASE WHEN key_cipher <> ?3 THEN NULL ELSE auth_error END,
+                        key_cipher = ?3, enabled = ?4,
+                        account_type = ?5, setup_step = ?6, updated_at = ?7,
+                        provider_id = ?8, offering_id = ?9,
+                        credential_kind = ?10, quota_scope = ?11,
+                        verification_status = 'not_required',
+                        connection_verified_at = NULL, verification_error = NULL
+                  WHERE id = ?1",
+                params![
+                    account.id,
+                    account.name,
+                    account.key_cipher,
+                    account.enabled as i32,
+                    account.account_type.as_str(),
+                    account.setup_step.as_str(),
+                    account.updated_at.to_rfc3339(),
+                    account.provider_id,
+                    account.offering_id,
+                    account.credential_kind.as_str(),
+                    account.quota_scope.as_str(),
+                ],
+            )?;
+        } else {
+            let purchase_date = local_today();
+            insert_account_row(
+                &tx,
+                account,
+                &purchase_date,
+                default_verification_status(plan),
+            )?;
+        }
+        tx.execute(
+            "INSERT INTO cpa_integration
+                 (id, account_id, base_url, management_key_cipher, updated_at)
+             VALUES ('cpa', ?1, ?2, ?3, ?4)
+             ON CONFLICT(id) DO UPDATE SET
+                 account_id = excluded.account_id,
+                 base_url = excluded.base_url,
+                 management_key_cipher = excluded.management_key_cipher,
+                 updated_at = excluded.updated_at",
+            params![
+                CPA_ACCOUNT_ID,
+                base_url,
+                management_key_cipher,
+                Utc::now().to_rfc3339(),
+            ],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Removes only OCG-owned CPA state. CPA auth files remain owned by CPA.
+    pub fn delete_cpa_integration(&self) -> Result<()> {
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute("DELETE FROM cpa_integration WHERE id = 'cpa'", [])?;
+        tx.execute(
+            "DELETE FROM provider_model_catalogs WHERE provider_id = ?1 AND offering_id = ?2",
+            params![CPA_PROVIDER_ID, CPA_OFFERING_ID],
+        )?;
+        tx.execute(
+            "DELETE FROM provider_contract_model_protocol_overrides
+              WHERE scope_kind = 'provider' AND scope_id = ?1",
+            [CPA_PROVIDER_ID],
+        )?;
+        tx.execute(
+            "DELETE FROM provider_contract_model_protocols
+              WHERE scope_kind = 'provider' AND scope_id = ?1",
+            [CPA_PROVIDER_ID],
+        )?;
+        tx.execute(
+            "DELETE FROM provider_contract_scopes
+              WHERE scope_kind = 'provider' AND scope_id = ?1",
+            [CPA_PROVIDER_ID],
+        )?;
+        tx.execute("DELETE FROM accounts WHERE id = ?1", [CPA_ACCOUNT_ID])?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn cpa_model_catalog(&self) -> Result<Option<CpaCatalogRecord>> {
+        self.conn
+            .query_row(
+                "SELECT models_json, refreshed_at, source_url
+                   FROM provider_model_catalogs
+                  WHERE provider_id = ?1 AND offering_id = ?2",
+                params![CPA_PROVIDER_ID, CPA_OFFERING_ID],
+                |row| {
+                    let models_json: String = row.get(0)?;
+                    let refreshed_at: Option<String> = row.get(1)?;
+                    let models = serde_json::from_str(&models_json).map_err(|error| {
+                        rusqlite::Error::FromSqlConversionFailure(0, Type::Text, Box::new(error))
+                    })?;
+                    let refreshed_at = refreshed_at
+                        .map(|value| {
+                            DateTime::parse_from_rfc3339(&value)
+                                .map(|value| value.with_timezone(&Utc))
+                                .map_err(|error| {
+                                    rusqlite::Error::FromSqlConversionFailure(
+                                        1,
+                                        Type::Text,
+                                        Box::new(error),
+                                    )
+                                })
+                        })
+                        .transpose()?;
+                    Ok(CpaCatalogRecord {
+                        models,
+                        refreshed_at,
+                        source_url: row.get(2)?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    pub fn replace_cpa_model_catalog(
+        &self,
+        models: &[String],
+        source_url: &str,
+        refreshed_at: DateTime<Utc>,
+    ) -> Result<()> {
+        anyhow::ensure!(!models.is_empty(), "CPA model catalog cannot be empty");
+        let models_json = serde_json::to_string(models)?;
+        self.conn.execute(
+            "INSERT INTO provider_model_catalogs
+                 (provider_id, offering_id, models_json, refreshed_at, source_url)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(provider_id, offering_id) DO UPDATE SET
+                 models_json = excluded.models_json,
+                 refreshed_at = excluded.refreshed_at,
+                 source_url = excluded.source_url",
+            params![
+                CPA_PROVIDER_ID,
+                CPA_OFFERING_ID,
+                models_json,
+                refreshed_at.to_rfc3339(),
+                source_url,
+            ],
+        )?;
         Ok(())
     }
 
@@ -14382,6 +14629,104 @@ mod tests {
         }
 
         drop(migrated);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn v33_to_v34_adds_empty_cpa_singleton_configuration_table() {
+        let dir = temp_data_dir("v33-v34-cpa");
+        let db = Database::open(dir.clone()).unwrap();
+        drop(db);
+        let conn = Connection::open(dir.join("data.sqlite")).unwrap();
+        conn.execute_batch(
+            "DROP TABLE cpa_integration;
+             DELETE FROM schema_version;
+             INSERT INTO schema_version (version) VALUES (33);",
+        )
+        .unwrap();
+        drop(conn);
+
+        let migrated = Database::open(dir.clone()).unwrap();
+        assert_eq!(migrated.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
+        assert!(table_exists(&migrated.conn, "cpa_integration").unwrap());
+        assert!(migrated.cpa_integration().unwrap().is_none());
+        drop(migrated);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn cpa_singleton_upsert_catalog_and_disconnect_are_idempotent_and_atomic() {
+        let dir = temp_data_dir("cpa-singleton-lifecycle");
+        let db = open_with_host_cipher(dir.clone()).unwrap();
+        let now = Utc::now();
+        let mut cpa_account = account(CPA_ACCOUNT_ID);
+        cpa_account.provider_id = CPA_PROVIDER_ID.to_string();
+        cpa_account.offering_id = CPA_OFFERING_ID.to_string();
+        cpa_account.credential_kind = CredentialKind::ApiKey;
+        cpa_account.quota_scope = QuotaScope::Key;
+        cpa_account.name = CPA_ACCOUNT_NAME.to_string();
+        cpa_account.key_cipher = test_host_cipher().encrypt("cpa-inference").unwrap();
+        cpa_account.enabled = false;
+        cpa_account.account_type = AccountType::Key;
+        cpa_account.setup_step = AccountSetupStep::Ready;
+        cpa_account.created_at = now;
+        cpa_account.updated_at = now;
+        let management_cipher = test_host_cipher().encrypt("cpa-management").unwrap();
+
+        db.upsert_cpa_integration(&cpa_account, "http://127.0.0.1:8317", &management_cipher)
+            .unwrap();
+        cpa_account.enabled = true;
+        db.upsert_cpa_integration(&cpa_account, "http://127.0.0.1:9317", &management_cipher)
+            .unwrap();
+        let record = db.cpa_integration().unwrap().unwrap();
+        assert_eq!(record.account_id, CPA_ACCOUNT_ID);
+        assert_eq!(record.base_url, "http://127.0.0.1:9317");
+        assert_eq!(record.management_key_cipher, management_cipher);
+        assert!(db.get_account(CPA_ACCOUNT_ID).unwrap().unwrap().enabled);
+
+        db.conn
+            .execute(
+                "UPDATE accounts SET auth_error = '401' WHERE id = ?1",
+                [CPA_ACCOUNT_ID],
+            )
+            .unwrap();
+        db.upsert_cpa_integration(&cpa_account, "http://127.0.0.1:9317", &management_cipher)
+            .unwrap();
+        assert_eq!(
+            db.get_account(CPA_ACCOUNT_ID)
+                .unwrap()
+                .unwrap()
+                .auth_error
+                .as_deref(),
+            Some("401"),
+            "saving the same inference cipher must preserve an existing breaker"
+        );
+        cpa_account.key_cipher = test_host_cipher().encrypt("cpa-inference-fixed").unwrap();
+        db.upsert_cpa_integration(&cpa_account, "http://127.0.0.1:9317", &management_cipher)
+            .unwrap();
+        assert!(
+            db.get_account(CPA_ACCOUNT_ID)
+                .unwrap()
+                .unwrap()
+                .auth_error
+                .is_none(),
+            "replacing the inference cipher must clear the stale 401 breaker"
+        );
+
+        db.replace_cpa_model_catalog(
+            &["gpt-5.6-sol".into(), "unknown-cpa-model".into()],
+            "http://127.0.0.1:9317",
+            now,
+        )
+        .unwrap();
+        assert_eq!(db.cpa_model_catalog().unwrap().unwrap().models.len(), 2);
+
+        db.delete_cpa_integration().unwrap();
+        db.delete_cpa_integration().unwrap();
+        assert!(db.cpa_integration().unwrap().is_none());
+        assert!(db.cpa_model_catalog().unwrap().is_none());
+        assert!(db.get_account(CPA_ACCOUNT_ID).unwrap().is_none());
+        drop(db);
         fs::remove_dir_all(dir).unwrap();
     }
 

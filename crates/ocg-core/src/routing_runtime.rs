@@ -297,6 +297,7 @@ pub(crate) fn account_channel(account: &Account) -> Option<UpstreamChannel> {
         | ProviderAdapterKind::CommandCodeGoat
         | ProviderAdapterKind::MiniMaxCn
         | ProviderAdapterKind::KimiCn
+        | ProviderAdapterKind::Cpa
         | ProviderAdapterKind::ConfigurableHttp => Some(UpstreamChannel::Go),
         ProviderAdapterKind::ZenFree => Some(UpstreamChannel::Free),
     }

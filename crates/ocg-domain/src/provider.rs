@@ -9,10 +9,10 @@ use crate::catalog::{
     UpstreamProtocolKind,
 };
 use crate::ids::{
-    ANONYMOUS_FREE_OFFERING_ID, COMMAND_CODE_PROVIDER_ID, CUSTOM_API_OFFERING_ID,
-    CUSTOM_PROVIDER_ID, GO_OFFERING_ID, GOAT_OFFERING_ID, KIMI_CN_OFFERING_ID, KIMI_PROVIDER_ID,
-    MINIMAX_CN_OFFERING_ID, MINIMAX_PROVIDER_ID, OPENCODE_PROVIDER_ID,
-    OPENCODE_ZEN_FREE_PROVIDER_ID, ZEN_FREE_ACCOUNT_ID,
+    ANONYMOUS_FREE_OFFERING_ID, COMMAND_CODE_PROVIDER_ID, CPA_ACCOUNT_ID, CPA_OFFERING_ID,
+    CPA_PROVIDER_ID, CUSTOM_API_OFFERING_ID, CUSTOM_PROVIDER_ID, GO_OFFERING_ID, GOAT_OFFERING_ID,
+    KIMI_CN_OFFERING_ID, KIMI_PROVIDER_ID, MINIMAX_CN_OFFERING_ID, MINIMAX_PROVIDER_ID,
+    OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID, ZEN_FREE_ACCOUNT_ID,
 };
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -127,6 +127,21 @@ pub enum CreationAvailability {
     Unavailable,
 }
 
+/// Product location for a sealed offering. Registry validation applies to both
+/// surfaces; callers use this marker to keep external integrations out of the
+/// Providers catalog and generic Add Account flow.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProviderProductSurface {
+    Provider,
+    ExternalIntegration,
+}
+
+impl ProviderProductSurface {
+    pub const fn is_external_integration(self) -> bool {
+        matches!(self, Self::ExternalIntegration)
+    }
+}
+
 impl CreationAvailability {
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -222,8 +237,12 @@ pub struct PlanFormField {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BuiltinPlan {
     pub offering: BuiltinOffering,
+    /// Stable identifier for the persisted Provider-contract scope. External
+    /// integrations and account-configured Custom API intentionally have none.
+    pub contract_scope_id: Option<&'static str>,
     pub display_name: &'static str,
     pub display_family: &'static str,
+    pub product_surface: ProviderProductSurface,
     pub creation_availability: CreationAvailability,
     pub creation_unavailable_reason: Option<&'static str>,
     pub verification_policy: VerificationPolicy,
@@ -332,11 +351,13 @@ const fn key_offering(provider_id: &'static str, offering_id: &'static str) -> B
     }
 }
 
-pub const BUILTIN_PLANS: [BuiltinPlan; 6] = [
+pub const BUILTIN_PLANS: [BuiltinPlan; 7] = [
     BuiltinPlan {
         offering: key_offering(OPENCODE_PROVIDER_ID, GO_OFFERING_ID),
+        contract_scope_id: Some(OPENCODE_PROVIDER_ID),
         display_name: "OpenCode Go",
         display_family: "OpenCode",
+        product_surface: ProviderProductSurface::Provider,
         creation_availability: CreationAvailability::Available,
         creation_unavailable_reason: None,
         verification_policy: VerificationPolicy::NotRequired,
@@ -361,8 +382,10 @@ pub const BUILTIN_PLANS: [BuiltinPlan; 6] = [
             quota_scope: QuotaScope::EgressIp,
             singleton_account_id: Some(ZEN_FREE_ACCOUNT_ID),
         },
+        contract_scope_id: Some(OPENCODE_ZEN_FREE_PROVIDER_ID),
         display_name: "OpenCode Zen Free",
         display_family: "OpenCode",
+        product_surface: ProviderProductSurface::Provider,
         creation_availability: CreationAvailability::Unavailable,
         creation_unavailable_reason: Some(
             "Zen Free is a built-in singleton and cannot be created through the generic account API",
@@ -383,8 +406,10 @@ pub const BUILTIN_PLANS: [BuiltinPlan; 6] = [
     },
     BuiltinPlan {
         offering: key_offering(COMMAND_CODE_PROVIDER_ID, GOAT_OFFERING_ID),
+        contract_scope_id: Some(COMMAND_CODE_PROVIDER_ID),
         display_name: "Command Code GOAT",
         display_family: "Command Code",
+        product_surface: ProviderProductSurface::Provider,
         creation_availability: CreationAvailability::Available,
         creation_unavailable_reason: None,
         verification_policy: VerificationPolicy::NotRequired,
@@ -403,8 +428,10 @@ pub const BUILTIN_PLANS: [BuiltinPlan; 6] = [
     },
     BuiltinPlan {
         offering: key_offering(MINIMAX_PROVIDER_ID, MINIMAX_CN_OFFERING_ID),
+        contract_scope_id: Some(MINIMAX_PROVIDER_ID),
         display_name: "MiniMax CN Token Plan",
         display_family: "MiniMax",
+        product_surface: ProviderProductSurface::Provider,
         creation_availability: CreationAvailability::Available,
         creation_unavailable_reason: None,
         verification_policy: VerificationPolicy::NotRequired,
@@ -423,8 +450,10 @@ pub const BUILTIN_PLANS: [BuiltinPlan; 6] = [
     },
     BuiltinPlan {
         offering: key_offering(KIMI_PROVIDER_ID, KIMI_CN_OFFERING_ID),
+        contract_scope_id: Some(KIMI_PROVIDER_ID),
         display_name: "Kimi Code CN",
         display_family: "Kimi",
+        product_surface: ProviderProductSurface::Provider,
         creation_availability: CreationAvailability::Available,
         creation_unavailable_reason: None,
         verification_policy: VerificationPolicy::NotRequired,
@@ -443,8 +472,10 @@ pub const BUILTIN_PLANS: [BuiltinPlan; 6] = [
     },
     BuiltinPlan {
         offering: key_offering(CUSTOM_PROVIDER_ID, CUSTOM_API_OFFERING_ID),
+        contract_scope_id: None,
         display_name: "Custom API",
         display_family: "Custom",
+        product_surface: ProviderProductSurface::Provider,
         creation_availability: CreationAvailability::Available,
         creation_unavailable_reason: None,
         verification_policy: VerificationPolicy::Required,
@@ -461,15 +492,46 @@ pub const BUILTIN_PLANS: [BuiltinPlan; 6] = [
         upstream_protocols: &CUSTOM_PROTOCOLS,
         form_fields: &CUSTOM_FORM_FIELDS,
     },
+    BuiltinPlan {
+        offering: BuiltinOffering {
+            provider_id: CPA_PROVIDER_ID,
+            offering_id: CPA_OFFERING_ID,
+            credential_kind: CredentialKind::ApiKey,
+            quota_scope: QuotaScope::Key,
+            singleton_account_id: Some(CPA_ACCOUNT_ID),
+        },
+        contract_scope_id: None,
+        display_name: "CPA Subscription Pool",
+        display_family: "CPA",
+        product_surface: ProviderProductSurface::ExternalIntegration,
+        creation_availability: CreationAvailability::Unavailable,
+        creation_unavailable_reason: Some(
+            "CPA is a local external integration and cannot be created through the generic account API",
+        ),
+        verification_policy: VerificationPolicy::Required,
+        verification_runtime_availability: "external_integration",
+        routable: true,
+        managed_registration: false,
+        pricing_availability: "unpriced",
+        usage_availability: "unavailable",
+        manual_usage_calibration: false,
+        quota_unit: "request",
+        model_source: "cpa_persisted_snapshot",
+        key_prefix: None,
+        auth_schemes: &BEARER_AUTH,
+        upstream_protocols: &CUSTOM_PROTOCOLS,
+        form_fields: &[],
+    },
 ];
 
-pub const BUILTIN_OFFERINGS: [BuiltinOffering; 6] = [
+pub const BUILTIN_OFFERINGS: [BuiltinOffering; 7] = [
     BUILTIN_PLANS[0].offering,
     BUILTIN_PLANS[1].offering,
     BUILTIN_PLANS[2].offering,
     BUILTIN_PLANS[3].offering,
     BUILTIN_PLANS[4].offering,
     BUILTIN_PLANS[5].offering,
+    BUILTIN_PLANS[6].offering,
 ];
 
 pub fn default_provider_id() -> String {
@@ -509,16 +571,18 @@ pub enum ProviderAdapterKind {
     MiniMaxCn,
     KimiCn,
     ConfigurableHttp,
+    Cpa,
 }
 
 impl ProviderAdapterKind {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::OpenCodeGo,
         Self::ZenFree,
         Self::CommandCodeGoat,
         Self::MiniMaxCn,
         Self::KimiCn,
         Self::ConfigurableHttp,
+        Self::Cpa,
     ];
 
     pub fn from_offering(provider_id: &str, offering_id: &str) -> Option<Self> {
@@ -529,6 +593,7 @@ impl ProviderAdapterKind {
             (MINIMAX_PROVIDER_ID, MINIMAX_CN_OFFERING_ID) => Some(Self::MiniMaxCn),
             (KIMI_PROVIDER_ID, KIMI_CN_OFFERING_ID) => Some(Self::KimiCn),
             (CUSTOM_PROVIDER_ID, CUSTOM_API_OFFERING_ID) => Some(Self::ConfigurableHttp),
+            (CPA_PROVIDER_ID, CPA_OFFERING_ID) => Some(Self::Cpa),
             _ => None,
         }
     }
@@ -541,67 +606,22 @@ impl ProviderAdapterKind {
             Self::MiniMaxCn => "minimax_cn",
             Self::KimiCn => "kimi_cn",
             Self::ConfigurableHttp => "configurable_http",
+            Self::Cpa => "cpa",
         }
     }
 
-    /// Built-in provider id that owns this adapter's shared contract scope.
-    /// Configurable HTTP is per-endpoint and has no provider scope.
-    pub const fn provider_scope_id(self) -> Option<&'static str> {
+    pub const fn product_surface(self) -> ProviderProductSurface {
         match self {
-            Self::OpenCodeGo => Some(OPENCODE_PROVIDER_ID),
-            Self::ZenFree => Some(OPENCODE_ZEN_FREE_PROVIDER_ID),
-            Self::CommandCodeGoat => Some(COMMAND_CODE_PROVIDER_ID),
-            Self::MiniMaxCn => Some(MINIMAX_PROVIDER_ID),
-            Self::KimiCn => Some(KIMI_PROVIDER_ID),
-            Self::ConfigurableHttp => None,
-        }
-    }
-
-    pub const fn catalog_refresh_supported(self) -> bool {
-        match self {
+            Self::Cpa => ProviderProductSurface::ExternalIntegration,
             Self::OpenCodeGo
             | Self::ZenFree
             | Self::CommandCodeGoat
             | Self::MiniMaxCn
-            | Self::KimiCn => true,
-            Self::ConfigurableHttp => false,
-        }
-    }
-
-    pub const fn protocol_probe_supported(self) -> bool {
-        match self {
-            Self::OpenCodeGo | Self::ZenFree | Self::ConfigurableHttp => true,
-            Self::CommandCodeGoat | Self::MiniMaxCn | Self::KimiCn => false,
+            | Self::KimiCn
+            | Self::ConfigurableHttp => ProviderProductSurface::Provider,
         }
     }
 }
-
-/// Zero-sized OpenCode Go adapter identity. Capability records are composed
-/// from the sealed contracts below; this type is not a plugin slot.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct OpenCodeGoAdapter;
-
-/// Zero-sized Zen Free adapter identity.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct ZenFreeAdapter;
-
-/// Zero-sized Command Code GOAT adapter identity. Production inference uses
-/// the official Provider API after explicit verification.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct CommandCodeGoatAdapter;
-
-/// Zero-sized MiniMax CN Token Plan adapter identity.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct MiniMaxCnAdapter;
-
-/// Zero-sized Kimi Code CN adapter identity.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct KimiCnAdapter;
-
-/// Zero-sized Configurable HTTP adapter identity (Custom API). Not a base class
-/// other adapters inherit from.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct ConfigurableHttpAdapter;
 
 pub fn is_command_code_goat(provider_id: &str, offering_id: &str) -> bool {
     matches!(
@@ -675,6 +695,13 @@ pub fn is_custom_api(provider_id: &str, offering_id: &str) -> bool {
     )
 }
 
+pub fn is_cpa_external_integration(provider_id: &str, offering_id: &str) -> bool {
+    matches!(
+        ProviderAdapterKind::from_offering(provider_id, offering_id),
+        Some(ProviderAdapterKind::Cpa)
+    )
+}
+
 /// Static code-owned registry of built-in provider offerings. Lookup is by
 /// `(provider_id, offering_id)`; unknown pairs fail closed.
 pub struct ProviderRegistry;
@@ -693,11 +720,9 @@ impl ProviderRegistry {
     }
 }
 
-/// Composed capability records selected from one concrete adapter.
-/// Built only through [`ProviderCapabilities::compose`] /
-/// [`ProviderAdapterKind::compose_capabilities`].
+/// Composed capability records selected by the sealed adapter kind.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ProviderCapabilities {
+struct ProviderCapabilities {
     pub model_catalog: ModelCatalogDescriptor,
     pub inference: InferenceRoutingDescriptor,
     pub protocol_probe: ProtocolProbeDescriptor,
@@ -714,6 +739,8 @@ pub struct ProviderDescriptor {
     pub kind: ProviderAdapterKind,
     pub provider_id: &'static str,
     pub offering_id: &'static str,
+    pub contract_scope_id: Option<&'static str>,
+    pub product_surface: ProviderProductSurface,
     pub model_catalog: ModelCatalogDescriptor,
     pub inference: InferenceRoutingDescriptor,
     pub protocol_probe: ProtocolProbeDescriptor,
@@ -725,7 +752,7 @@ pub struct ProviderDescriptor {
 
 impl ProviderDescriptor {
     fn from_plan(kind: ProviderAdapterKind, plan: BuiltinPlan) -> Self {
-        Self::from_capabilities(kind, plan, kind.compose_capabilities(plan))
+        Self::from_capabilities(kind, plan, kind.capabilities(plan))
     }
 
     fn from_capabilities(
@@ -737,6 +764,8 @@ impl ProviderDescriptor {
             kind,
             provider_id: plan.offering.provider_id,
             offering_id: plan.offering.offering_id,
+            contract_scope_id: plan.contract_scope_id,
+            product_surface: plan.product_surface,
             model_catalog: capabilities.model_catalog,
             inference: capabilities.inference,
             protocol_probe: capabilities.protocol_probe,
@@ -744,18 +773,6 @@ impl ProviderDescriptor {
             usage: capabilities.usage,
             pricing: capabilities.pricing,
             card_actions: capabilities.card_actions,
-        }
-    }
-
-    pub fn capabilities(self) -> ProviderCapabilities {
-        ProviderCapabilities {
-            model_catalog: self.model_catalog,
-            inference: self.inference,
-            protocol_probe: self.protocol_probe,
-            verification: self.verification,
-            usage: self.usage,
-            pricing: self.pricing,
-            card_actions: self.card_actions,
         }
     }
 }
@@ -791,6 +808,7 @@ pub enum InferenceOriginKind {
     DerivedZenBase,
     OfficialFixed,
     AccountConfigured,
+    LocalExternalIntegration,
     None,
 }
 
@@ -821,6 +839,7 @@ pub enum ProtocolMatrixKind {
     CommandCodeNative,
     FixedChatCompletions,
     AccountDeclaredProtocol,
+    FixedStandardProtocols,
 }
 
 /// Immutable adapter ceiling for explicit protocol probes. Distinct from
@@ -913,91 +932,18 @@ pub struct CardActionsDescriptor {
     pub catalog_refresh: bool,
 }
 
-mod sealed {
-    pub trait Sealed {}
-}
-
-impl sealed::Sealed for OpenCodeGoAdapter {}
-impl sealed::Sealed for ZenFreeAdapter {}
-impl sealed::Sealed for CommandCodeGoatAdapter {}
-impl sealed::Sealed for MiniMaxCnAdapter {}
-impl sealed::Sealed for KimiCnAdapter {}
-impl sealed::Sealed for ConfigurableHttpAdapter {}
-
-/// Static model-catalog capability contract. Sealed to the five concrete
-/// adapter identities; not a plugin slot or runtime registry.
-pub trait ModelCatalogAdapter: sealed::Sealed {
-    fn model_catalog(plan: BuiltinPlan) -> ModelCatalogDescriptor;
-}
-
-/// Static inference routing capability contract.
-pub trait InferenceAdapter: sealed::Sealed {
-    fn inference(plan: BuiltinPlan) -> InferenceRoutingDescriptor;
-}
-
-/// Static protocol-probe capability contract. Request paths must not trial
-/// billable inference.
-pub trait ProtocolProbeAdapter: sealed::Sealed {
-    fn protocol_probe(plan: BuiltinPlan) -> ProtocolProbeDescriptor;
-}
-
-/// Static connection-verification capability contract.
-pub trait VerificationAdapter: sealed::Sealed {
-    fn verification(plan: BuiltinPlan) -> VerificationDescriptor;
-}
-
-/// Static usage capability contract.
-pub trait UsageAdapter: sealed::Sealed {
-    fn usage(plan: BuiltinPlan) -> UsageDescriptor;
-}
-
-/// Static pricing capability contract.
-pub trait PricingAdapter: sealed::Sealed {
-    fn pricing(plan: BuiltinPlan) -> PricingDescriptor;
-}
-
-/// Static account-card capability contract.
-pub trait CardCapabilities: sealed::Sealed {
-    fn card_capabilities(plan: BuiltinPlan) -> CardActionsDescriptor;
-}
-
-impl ProviderCapabilities {
-    /// Compose the seven sealed contracts from one concrete adapter. This is
-    /// the only construction helper; callers must not re-match adapter kind
-    /// per capability.
-    pub fn compose<A>(_adapter: A, plan: BuiltinPlan) -> Self
-    where
-        A: ModelCatalogAdapter
-            + InferenceAdapter
-            + ProtocolProbeAdapter
-            + VerificationAdapter
-            + UsageAdapter
-            + PricingAdapter
-            + CardCapabilities,
-    {
-        Self {
-            model_catalog: A::model_catalog(plan),
-            inference: A::inference(plan),
-            protocol_probe: A::protocol_probe(plan),
-            verification: A::verification(plan),
-            usage: A::usage(plan),
-            pricing: A::pricing(plan),
-            card_actions: A::card_capabilities(plan),
-        }
-    }
-}
-
 impl ProviderAdapterKind {
-    /// Single registry-owned construction point. Adding a concrete adapter
-    /// means implementing the seven contracts and one arm here.
-    pub fn compose_capabilities(self, plan: BuiltinPlan) -> ProviderCapabilities {
+    /// Single sealed construction path for each adapter kind. This stays
+    /// private so callers consume the immutable [`ProviderDescriptor`].
+    fn capabilities(self, plan: BuiltinPlan) -> ProviderCapabilities {
         match self {
-            Self::OpenCodeGo => ProviderCapabilities::compose(OpenCodeGoAdapter, plan),
-            Self::ZenFree => ProviderCapabilities::compose(ZenFreeAdapter, plan),
-            Self::CommandCodeGoat => ProviderCapabilities::compose(CommandCodeGoatAdapter, plan),
-            Self::MiniMaxCn => ProviderCapabilities::compose(MiniMaxCnAdapter, plan),
-            Self::KimiCn => ProviderCapabilities::compose(KimiCnAdapter, plan),
-            Self::ConfigurableHttp => ProviderCapabilities::compose(ConfigurableHttpAdapter, plan),
+            Self::OpenCodeGo => open_code_go_capabilities(plan),
+            Self::ZenFree => zen_free_capabilities(plan),
+            Self::CommandCodeGoat => command_code_goat_capabilities(plan),
+            Self::MiniMaxCn => minimax_cn_capabilities(plan),
+            Self::KimiCn => kimi_cn_capabilities(plan),
+            Self::ConfigurableHttp => configurable_http_capabilities(plan),
+            Self::Cpa => cpa_capabilities(plan),
         }
     }
 }
@@ -1008,22 +954,17 @@ fn catalog_pricing(plan: BuiltinPlan) -> PricingDescriptor {
     }
 }
 
-impl ModelCatalogAdapter for OpenCodeGoAdapter {
-    fn model_catalog(plan: BuiltinPlan) -> ModelCatalogDescriptor {
-        ModelCatalogDescriptor {
+fn open_code_go_capabilities(plan: BuiltinPlan) -> ProviderCapabilities {
+    ProviderCapabilities {
+        model_catalog: ModelCatalogDescriptor {
             kind: ModelCatalogKind::BuiltinGoProtocolTable,
             catalog_source: plan.model_source,
             publishes_client_aliases: true,
             admin_explicit_refresh: true,
             overlays_declared_ids: false,
             snapshot_is_adapter_input_only: false,
-        }
-    }
-}
-
-impl InferenceAdapter for OpenCodeGoAdapter {
-    fn inference(plan: BuiltinPlan) -> InferenceRoutingDescriptor {
-        InferenceRoutingDescriptor {
+        },
+        inference: InferenceRoutingDescriptor {
             catalog_routable: plan.routable,
             production_inference: true,
             channel: Some(InferenceChannelKind::Go),
@@ -1033,38 +974,23 @@ impl InferenceAdapter for OpenCodeGoAdapter {
             follow_redirects: true,
             origin: InferenceOriginKind::ConfigUpstreamBase,
             loopback_test_seam_only: false,
-        }
-    }
-}
-
-impl ProtocolProbeAdapter for OpenCodeGoAdapter {
-    fn protocol_probe(_plan: BuiltinPlan) -> ProtocolProbeDescriptor {
-        ProtocolProbeDescriptor {
+        },
+        protocol_probe: ProtocolProbeDescriptor {
             request_path_may_trial: false,
             matrix: ProtocolMatrixKind::OpenCodeModelProtocols,
             unknown_zen_free_defaults_to_chat: false,
             fallback_priority: PROTOCOL_FALLBACK_CHAT_RESPONSES_MESSAGES,
             explicit_probe: true,
             structural_ceiling: StructuralProbeCeiling::OpenCodeConstructable,
-        }
-    }
-}
-
-impl VerificationAdapter for OpenCodeGoAdapter {
-    fn verification(plan: BuiltinPlan) -> VerificationDescriptor {
-        VerificationDescriptor {
+        },
+        verification: VerificationDescriptor {
             policy: plan.verification_policy,
             runtime_availability: plan.verification_runtime_availability,
             never_auto_enable: false,
             probe_first_declared_model: false,
             uses_get_models: false,
-        }
-    }
-}
-
-impl UsageAdapter for OpenCodeGoAdapter {
-    fn usage(plan: BuiltinPlan) -> UsageDescriptor {
-        UsageDescriptor {
+        },
+        usage: UsageDescriptor {
             catalog_availability: plan.usage_availability,
             contract: UsageContractKind::Authoritative,
             endpoint: Some(OPENCODE_GO_USAGE_URL),
@@ -1075,19 +1001,9 @@ impl UsageAdapter for OpenCodeGoAdapter {
             publishes_capability: true,
             manual_calibration: plan.manual_usage_calibration,
             egress_ip_shared_cooldown_window: false,
-        }
-    }
-}
-
-impl PricingAdapter for OpenCodeGoAdapter {
-    fn pricing(plan: BuiltinPlan) -> PricingDescriptor {
-        catalog_pricing(plan)
-    }
-}
-
-impl CardCapabilities for OpenCodeGoAdapter {
-    fn card_capabilities(plan: BuiltinPlan) -> CardActionsDescriptor {
-        CardActionsDescriptor {
+        },
+        pricing: catalog_pricing(plan),
+        card_actions: CardActionsDescriptor {
             persisted_enable_allowed: plan.routable,
             enable_requires_verification: false,
             managed_registration: plan.managed_registration,
@@ -1099,26 +1015,21 @@ impl CardCapabilities for OpenCodeGoAdapter {
             protocol_and_auth_immutable_after_create: false,
             protocol_probe: true,
             catalog_refresh: true,
-        }
+        },
     }
 }
 
-impl ModelCatalogAdapter for ZenFreeAdapter {
-    fn model_catalog(plan: BuiltinPlan) -> ModelCatalogDescriptor {
-        ModelCatalogDescriptor {
+fn zen_free_capabilities(plan: BuiltinPlan) -> ProviderCapabilities {
+    ProviderCapabilities {
+        model_catalog: ModelCatalogDescriptor {
             kind: ModelCatalogKind::ZenFreePersistedSnapshot,
             catalog_source: plan.model_source,
             publishes_client_aliases: true,
             admin_explicit_refresh: true,
             overlays_declared_ids: false,
             snapshot_is_adapter_input_only: false,
-        }
-    }
-}
-
-impl InferenceAdapter for ZenFreeAdapter {
-    fn inference(plan: BuiltinPlan) -> InferenceRoutingDescriptor {
-        InferenceRoutingDescriptor {
+        },
+        inference: InferenceRoutingDescriptor {
             catalog_routable: plan.routable,
             production_inference: true,
             channel: Some(InferenceChannelKind::Free),
@@ -1128,38 +1039,23 @@ impl InferenceAdapter for ZenFreeAdapter {
             follow_redirects: true,
             origin: InferenceOriginKind::DerivedZenBase,
             loopback_test_seam_only: false,
-        }
-    }
-}
-
-impl ProtocolProbeAdapter for ZenFreeAdapter {
-    fn protocol_probe(_plan: BuiltinPlan) -> ProtocolProbeDescriptor {
-        ProtocolProbeDescriptor {
+        },
+        protocol_probe: ProtocolProbeDescriptor {
             request_path_may_trial: false,
             matrix: ProtocolMatrixKind::OpenCodeModelProtocols,
             unknown_zen_free_defaults_to_chat: true,
             fallback_priority: PROTOCOL_FALLBACK_CHAT_RESPONSES_MESSAGES,
             explicit_probe: true,
             structural_ceiling: StructuralProbeCeiling::ZenFreeConstructable,
-        }
-    }
-}
-
-impl VerificationAdapter for ZenFreeAdapter {
-    fn verification(plan: BuiltinPlan) -> VerificationDescriptor {
-        VerificationDescriptor {
+        },
+        verification: VerificationDescriptor {
             policy: plan.verification_policy,
             runtime_availability: plan.verification_runtime_availability,
             never_auto_enable: false,
             probe_first_declared_model: false,
             uses_get_models: false,
-        }
-    }
-}
-
-impl UsageAdapter for ZenFreeAdapter {
-    fn usage(plan: BuiltinPlan) -> UsageDescriptor {
-        UsageDescriptor {
+        },
+        usage: UsageDescriptor {
             catalog_availability: plan.usage_availability,
             contract: UsageContractKind::Unavailable,
             endpoint: None,
@@ -1170,19 +1066,9 @@ impl UsageAdapter for ZenFreeAdapter {
             publishes_capability: false,
             manual_calibration: plan.manual_usage_calibration,
             egress_ip_shared_cooldown_window: true,
-        }
-    }
-}
-
-impl PricingAdapter for ZenFreeAdapter {
-    fn pricing(plan: BuiltinPlan) -> PricingDescriptor {
-        catalog_pricing(plan)
-    }
-}
-
-impl CardCapabilities for ZenFreeAdapter {
-    fn card_capabilities(plan: BuiltinPlan) -> CardActionsDescriptor {
-        CardActionsDescriptor {
+        },
+        pricing: catalog_pricing(plan),
+        card_actions: CardActionsDescriptor {
             persisted_enable_allowed: plan.routable,
             enable_requires_verification: false,
             managed_registration: plan.managed_registration,
@@ -1194,26 +1080,21 @@ impl CardCapabilities for ZenFreeAdapter {
             protocol_and_auth_immutable_after_create: false,
             protocol_probe: true,
             catalog_refresh: true,
-        }
+        },
     }
 }
 
-impl ModelCatalogAdapter for CommandCodeGoatAdapter {
-    fn model_catalog(plan: BuiltinPlan) -> ModelCatalogDescriptor {
-        ModelCatalogDescriptor {
+fn command_code_goat_capabilities(plan: BuiltinPlan) -> ProviderCapabilities {
+    ProviderCapabilities {
+        model_catalog: ModelCatalogDescriptor {
             kind: ModelCatalogKind::BuiltinCommandCodeProtocolTable,
             catalog_source: plan.model_source,
             publishes_client_aliases: true,
             admin_explicit_refresh: true,
             overlays_declared_ids: false,
             snapshot_is_adapter_input_only: false,
-        }
-    }
-}
-
-impl InferenceAdapter for CommandCodeGoatAdapter {
-    fn inference(plan: BuiltinPlan) -> InferenceRoutingDescriptor {
-        InferenceRoutingDescriptor {
+        },
+        inference: InferenceRoutingDescriptor {
             catalog_routable: plan.routable,
             production_inference: true,
             channel: Some(InferenceChannelKind::Go),
@@ -1223,38 +1104,23 @@ impl InferenceAdapter for CommandCodeGoatAdapter {
             follow_redirects: false,
             origin: InferenceOriginKind::OfficialFixed,
             loopback_test_seam_only: false,
-        }
-    }
-}
-
-impl ProtocolProbeAdapter for CommandCodeGoatAdapter {
-    fn protocol_probe(_plan: BuiltinPlan) -> ProtocolProbeDescriptor {
-        ProtocolProbeDescriptor {
+        },
+        protocol_probe: ProtocolProbeDescriptor {
             request_path_may_trial: false,
             matrix: ProtocolMatrixKind::CommandCodeNative,
             unknown_zen_free_defaults_to_chat: false,
             fallback_priority: PROTOCOL_FALLBACK_CHAT_MESSAGES,
             explicit_probe: false,
             structural_ceiling: StructuralProbeCeiling::Unavailable,
-        }
-    }
-}
-
-impl VerificationAdapter for CommandCodeGoatAdapter {
-    fn verification(plan: BuiltinPlan) -> VerificationDescriptor {
-        VerificationDescriptor {
+        },
+        verification: VerificationDescriptor {
             policy: plan.verification_policy,
             runtime_availability: plan.verification_runtime_availability,
             never_auto_enable: false,
             probe_first_declared_model: false,
             uses_get_models: false,
-        }
-    }
-}
-
-impl UsageAdapter for CommandCodeGoatAdapter {
-    fn usage(plan: BuiltinPlan) -> UsageDescriptor {
-        UsageDescriptor {
+        },
+        usage: UsageDescriptor {
             catalog_availability: plan.usage_availability,
             contract: UsageContractKind::LocalState,
             endpoint: None,
@@ -1265,19 +1131,9 @@ impl UsageAdapter for CommandCodeGoatAdapter {
             publishes_capability: true,
             manual_calibration: plan.manual_usage_calibration,
             egress_ip_shared_cooldown_window: false,
-        }
-    }
-}
-
-impl PricingAdapter for CommandCodeGoatAdapter {
-    fn pricing(plan: BuiltinPlan) -> PricingDescriptor {
-        catalog_pricing(plan)
-    }
-}
-
-impl CardCapabilities for CommandCodeGoatAdapter {
-    fn card_capabilities(plan: BuiltinPlan) -> CardActionsDescriptor {
-        CardActionsDescriptor {
+        },
+        pricing: catalog_pricing(plan),
+        card_actions: CardActionsDescriptor {
             persisted_enable_allowed: plan.routable,
             enable_requires_verification: false,
             managed_registration: plan.managed_registration,
@@ -1289,26 +1145,21 @@ impl CardCapabilities for CommandCodeGoatAdapter {
             protocol_and_auth_immutable_after_create: false,
             protocol_probe: false,
             catalog_refresh: true,
-        }
+        },
     }
 }
 
-impl ModelCatalogAdapter for MiniMaxCnAdapter {
-    fn model_catalog(plan: BuiltinPlan) -> ModelCatalogDescriptor {
-        ModelCatalogDescriptor {
+fn minimax_cn_capabilities(plan: BuiltinPlan) -> ProviderCapabilities {
+    ProviderCapabilities {
+        model_catalog: ModelCatalogDescriptor {
             kind: ModelCatalogKind::ProviderPersistedSnapshot,
             catalog_source: plan.model_source,
             publishes_client_aliases: true,
             admin_explicit_refresh: true,
             overlays_declared_ids: false,
             snapshot_is_adapter_input_only: false,
-        }
-    }
-}
-
-impl InferenceAdapter for MiniMaxCnAdapter {
-    fn inference(plan: BuiltinPlan) -> InferenceRoutingDescriptor {
-        InferenceRoutingDescriptor {
+        },
+        inference: InferenceRoutingDescriptor {
             catalog_routable: plan.routable,
             production_inference: true,
             channel: Some(InferenceChannelKind::Go),
@@ -1318,38 +1169,23 @@ impl InferenceAdapter for MiniMaxCnAdapter {
             follow_redirects: false,
             origin: InferenceOriginKind::OfficialFixed,
             loopback_test_seam_only: false,
-        }
-    }
-}
-
-impl ProtocolProbeAdapter for MiniMaxCnAdapter {
-    fn protocol_probe(_plan: BuiltinPlan) -> ProtocolProbeDescriptor {
-        ProtocolProbeDescriptor {
+        },
+        protocol_probe: ProtocolProbeDescriptor {
             request_path_may_trial: false,
             matrix: ProtocolMatrixKind::FixedChatCompletions,
             unknown_zen_free_defaults_to_chat: false,
             fallback_priority: &CHAT_PROTOCOLS,
             explicit_probe: false,
             structural_ceiling: StructuralProbeCeiling::Unavailable,
-        }
-    }
-}
-
-impl VerificationAdapter for MiniMaxCnAdapter {
-    fn verification(plan: BuiltinPlan) -> VerificationDescriptor {
-        VerificationDescriptor {
+        },
+        verification: VerificationDescriptor {
             policy: plan.verification_policy,
             runtime_availability: plan.verification_runtime_availability,
             never_auto_enable: false,
             probe_first_declared_model: false,
             uses_get_models: false,
-        }
-    }
-}
-
-impl UsageAdapter for MiniMaxCnAdapter {
-    fn usage(plan: BuiltinPlan) -> UsageDescriptor {
-        UsageDescriptor {
+        },
+        usage: UsageDescriptor {
             catalog_availability: plan.usage_availability,
             contract: UsageContractKind::Authoritative,
             endpoint: Some(MINIMAX_CN_USAGE_URL),
@@ -1360,19 +1196,9 @@ impl UsageAdapter for MiniMaxCnAdapter {
             publishes_capability: true,
             manual_calibration: false,
             egress_ip_shared_cooldown_window: false,
-        }
-    }
-}
-
-impl PricingAdapter for MiniMaxCnAdapter {
-    fn pricing(plan: BuiltinPlan) -> PricingDescriptor {
-        catalog_pricing(plan)
-    }
-}
-
-impl CardCapabilities for MiniMaxCnAdapter {
-    fn card_capabilities(plan: BuiltinPlan) -> CardActionsDescriptor {
-        CardActionsDescriptor {
+        },
+        pricing: catalog_pricing(plan),
+        card_actions: CardActionsDescriptor {
             persisted_enable_allowed: plan.routable,
             enable_requires_verification: false,
             managed_registration: false,
@@ -1384,26 +1210,21 @@ impl CardCapabilities for MiniMaxCnAdapter {
             protocol_and_auth_immutable_after_create: false,
             protocol_probe: false,
             catalog_refresh: true,
-        }
+        },
     }
 }
 
-impl ModelCatalogAdapter for KimiCnAdapter {
-    fn model_catalog(plan: BuiltinPlan) -> ModelCatalogDescriptor {
-        ModelCatalogDescriptor {
+fn kimi_cn_capabilities(plan: BuiltinPlan) -> ProviderCapabilities {
+    ProviderCapabilities {
+        model_catalog: ModelCatalogDescriptor {
             kind: ModelCatalogKind::ProviderPersistedSnapshot,
             catalog_source: plan.model_source,
             publishes_client_aliases: true,
             admin_explicit_refresh: true,
             overlays_declared_ids: false,
             snapshot_is_adapter_input_only: false,
-        }
-    }
-}
-
-impl InferenceAdapter for KimiCnAdapter {
-    fn inference(plan: BuiltinPlan) -> InferenceRoutingDescriptor {
-        InferenceRoutingDescriptor {
+        },
+        inference: InferenceRoutingDescriptor {
             catalog_routable: plan.routable,
             production_inference: true,
             channel: Some(InferenceChannelKind::Go),
@@ -1413,38 +1234,23 @@ impl InferenceAdapter for KimiCnAdapter {
             follow_redirects: false,
             origin: InferenceOriginKind::OfficialFixed,
             loopback_test_seam_only: false,
-        }
-    }
-}
-
-impl ProtocolProbeAdapter for KimiCnAdapter {
-    fn protocol_probe(_plan: BuiltinPlan) -> ProtocolProbeDescriptor {
-        ProtocolProbeDescriptor {
+        },
+        protocol_probe: ProtocolProbeDescriptor {
             request_path_may_trial: false,
             matrix: ProtocolMatrixKind::FixedChatCompletions,
             unknown_zen_free_defaults_to_chat: false,
             fallback_priority: &CHAT_PROTOCOLS,
             explicit_probe: false,
             structural_ceiling: StructuralProbeCeiling::Unavailable,
-        }
-    }
-}
-
-impl VerificationAdapter for KimiCnAdapter {
-    fn verification(plan: BuiltinPlan) -> VerificationDescriptor {
-        VerificationDescriptor {
+        },
+        verification: VerificationDescriptor {
             policy: plan.verification_policy,
             runtime_availability: plan.verification_runtime_availability,
             never_auto_enable: false,
             probe_first_declared_model: false,
             uses_get_models: false,
-        }
-    }
-}
-
-impl UsageAdapter for KimiCnAdapter {
-    fn usage(plan: BuiltinPlan) -> UsageDescriptor {
-        UsageDescriptor {
+        },
+        usage: UsageDescriptor {
             catalog_availability: plan.usage_availability,
             contract: UsageContractKind::Authoritative,
             endpoint: Some(KIMI_CN_USAGE_URL),
@@ -1455,19 +1261,9 @@ impl UsageAdapter for KimiCnAdapter {
             publishes_capability: true,
             manual_calibration: false,
             egress_ip_shared_cooldown_window: false,
-        }
-    }
-}
-
-impl PricingAdapter for KimiCnAdapter {
-    fn pricing(plan: BuiltinPlan) -> PricingDescriptor {
-        catalog_pricing(plan)
-    }
-}
-
-impl CardCapabilities for KimiCnAdapter {
-    fn card_capabilities(plan: BuiltinPlan) -> CardActionsDescriptor {
-        CardActionsDescriptor {
+        },
+        pricing: catalog_pricing(plan),
+        card_actions: CardActionsDescriptor {
             persisted_enable_allowed: plan.routable,
             enable_requires_verification: false,
             managed_registration: false,
@@ -1479,26 +1275,21 @@ impl CardCapabilities for KimiCnAdapter {
             protocol_and_auth_immutable_after_create: false,
             protocol_probe: false,
             catalog_refresh: true,
-        }
+        },
     }
 }
 
-impl ModelCatalogAdapter for ConfigurableHttpAdapter {
-    fn model_catalog(plan: BuiltinPlan) -> ModelCatalogDescriptor {
-        ModelCatalogDescriptor {
+fn configurable_http_capabilities(plan: BuiltinPlan) -> ProviderCapabilities {
+    ProviderCapabilities {
+        model_catalog: ModelCatalogDescriptor {
             kind: ModelCatalogKind::AccountDeclaredCapabilities,
             catalog_source: plan.model_source,
             publishes_client_aliases: false,
             admin_explicit_refresh: false,
             overlays_declared_ids: true,
             snapshot_is_adapter_input_only: false,
-        }
-    }
-}
-
-impl InferenceAdapter for ConfigurableHttpAdapter {
-    fn inference(plan: BuiltinPlan) -> InferenceRoutingDescriptor {
-        InferenceRoutingDescriptor {
+        },
+        inference: InferenceRoutingDescriptor {
             catalog_routable: plan.routable,
             production_inference: true,
             channel: Some(InferenceChannelKind::Go),
@@ -1508,38 +1299,23 @@ impl InferenceAdapter for ConfigurableHttpAdapter {
             follow_redirects: false,
             origin: InferenceOriginKind::AccountConfigured,
             loopback_test_seam_only: false,
-        }
-    }
-}
-
-impl ProtocolProbeAdapter for ConfigurableHttpAdapter {
-    fn protocol_probe(_plan: BuiltinPlan) -> ProtocolProbeDescriptor {
-        ProtocolProbeDescriptor {
+        },
+        protocol_probe: ProtocolProbeDescriptor {
             request_path_may_trial: false,
             matrix: ProtocolMatrixKind::AccountDeclaredProtocol,
             unknown_zen_free_defaults_to_chat: false,
             fallback_priority: PROTOCOL_FALLBACK_CHAT_RESPONSES_MESSAGES,
             explicit_probe: true,
             structural_ceiling: StructuralProbeCeiling::AccountDeclared,
-        }
-    }
-}
-
-impl VerificationAdapter for ConfigurableHttpAdapter {
-    fn verification(plan: BuiltinPlan) -> VerificationDescriptor {
-        VerificationDescriptor {
+        },
+        verification: VerificationDescriptor {
             policy: plan.verification_policy,
             runtime_availability: plan.verification_runtime_availability,
             never_auto_enable: true,
             probe_first_declared_model: true,
             uses_get_models: false,
-        }
-    }
-}
-
-impl UsageAdapter for ConfigurableHttpAdapter {
-    fn usage(plan: BuiltinPlan) -> UsageDescriptor {
-        UsageDescriptor {
+        },
+        usage: UsageDescriptor {
             catalog_availability: plan.usage_availability,
             contract: UsageContractKind::Unavailable,
             endpoint: None,
@@ -1550,19 +1326,9 @@ impl UsageAdapter for ConfigurableHttpAdapter {
             publishes_capability: false,
             manual_calibration: plan.manual_usage_calibration,
             egress_ip_shared_cooldown_window: false,
-        }
-    }
-}
-
-impl PricingAdapter for ConfigurableHttpAdapter {
-    fn pricing(plan: BuiltinPlan) -> PricingDescriptor {
-        catalog_pricing(plan)
-    }
-}
-
-impl CardCapabilities for ConfigurableHttpAdapter {
-    fn card_capabilities(plan: BuiltinPlan) -> CardActionsDescriptor {
-        CardActionsDescriptor {
+        },
+        pricing: catalog_pricing(plan),
+        card_actions: CardActionsDescriptor {
             persisted_enable_allowed: plan.routable,
             enable_requires_verification: false,
             managed_registration: plan.managed_registration,
@@ -1574,7 +1340,74 @@ impl CardCapabilities for ConfigurableHttpAdapter {
             protocol_and_auth_immutable_after_create: false,
             protocol_probe: true,
             catalog_refresh: false,
-        }
+        },
+    }
+}
+
+fn cpa_capabilities(plan: BuiltinPlan) -> ProviderCapabilities {
+    ProviderCapabilities {
+        model_catalog: ModelCatalogDescriptor {
+            kind: ModelCatalogKind::ProviderPersistedSnapshot,
+            catalog_source: plan.model_source,
+            publishes_client_aliases: true,
+            admin_explicit_refresh: true,
+            overlays_declared_ids: false,
+            snapshot_is_adapter_input_only: false,
+        },
+        inference: InferenceRoutingDescriptor {
+            catalog_routable: plan.routable,
+            production_inference: true,
+            // CPA participates in ordinary keyed account selection rather than
+            // the Zen egress-IP special channel.
+            channel: Some(InferenceChannelKind::Go),
+            credential_kind: plan.offering.credential_kind,
+            quota_scope: plan.offering.quota_scope,
+            auth: InferenceAuthDescriptor::Bearer,
+            follow_redirects: false,
+            origin: InferenceOriginKind::LocalExternalIntegration,
+            loopback_test_seam_only: false,
+        },
+        protocol_probe: ProtocolProbeDescriptor {
+            request_path_may_trial: false,
+            matrix: ProtocolMatrixKind::FixedStandardProtocols,
+            unknown_zen_free_defaults_to_chat: false,
+            fallback_priority: PROTOCOL_FALLBACK_CHAT_RESPONSES_MESSAGES,
+            explicit_probe: false,
+            structural_ceiling: StructuralProbeCeiling::Unavailable,
+        },
+        verification: VerificationDescriptor {
+            policy: plan.verification_policy,
+            runtime_availability: plan.verification_runtime_availability,
+            never_auto_enable: true,
+            probe_first_declared_model: false,
+            uses_get_models: true,
+        },
+        usage: UsageDescriptor {
+            catalog_availability: plan.usage_availability,
+            contract: UsageContractKind::Unavailable,
+            endpoint: None,
+            experimental: false,
+            automatic_sync: false,
+            authoritative_for_quota: false,
+            affects_inference_eligibility: false,
+            publishes_capability: false,
+            manual_calibration: false,
+            egress_ip_shared_cooldown_window: false,
+        },
+        pricing: catalog_pricing(plan),
+        card_actions: CardActionsDescriptor {
+            persisted_enable_allowed: plan.routable,
+            enable_requires_verification: false,
+            managed_registration: false,
+            fetch_zen_models: false,
+            discover_models: false,
+            usage_refresh: false,
+            manual_usage_calibration: false,
+            connection_verify: CardVerifyAction::NotApplicable,
+            protocol_and_auth_immutable_after_create: true,
+            protocol_probe: false,
+            catalog_refresh: true,
+        },
     }
 }
 
@@ -1696,9 +1529,13 @@ pub fn validate_account_binding(
         Some(singleton) if account_id != singleton => {
             Err(ProviderBindingError::SingletonAccountRequired(singleton))
         }
-        None if account_id == ZEN_FREE_ACCOUNT_ID => {
-            Err(ProviderBindingError::ReservedAccountId(ZEN_FREE_ACCOUNT_ID))
-        }
+        None if account_id == ZEN_FREE_ACCOUNT_ID || account_id == CPA_ACCOUNT_ID => Err(
+            ProviderBindingError::ReservedAccountId(if account_id == CPA_ACCOUNT_ID {
+                CPA_ACCOUNT_ID
+            } else {
+                ZEN_FREE_ACCOUNT_ID
+            }),
+        ),
         _ => Ok(()),
     }
 }
@@ -1808,8 +1645,9 @@ mod tests {
     };
     use crate::ids::{
         ANONYMOUS_FREE_OFFERING_ID, COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM,
-        COMMAND_CODE_PROVIDER_ID, CUSTOM_API_OFFERING_ID, CUSTOM_PROVIDER_ID, GO_OFFERING_ID,
-        GOAT_OFFERING_ID, OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID, ZEN_FREE_ACCOUNT_ID,
+        COMMAND_CODE_PROVIDER_ID, CPA_ACCOUNT_ID, CPA_OFFERING_ID, CPA_PROVIDER_ID,
+        CUSTOM_API_OFFERING_ID, CUSTOM_PROVIDER_ID, GO_OFFERING_ID, GOAT_OFFERING_ID,
+        OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID, ZEN_FREE_ACCOUNT_ID,
     };
 
     #[test]
@@ -1843,6 +1681,11 @@ mod tests {
         assert_eq!(free.credential_kind, CredentialKind::None);
         assert_eq!(free.quota_scope, QuotaScope::EgressIp);
         assert_eq!(free.singleton_account_id, Some(ZEN_FREE_ACCOUNT_ID));
+
+        let cpa = builtin_offering(CPA_PROVIDER_ID, CPA_OFFERING_ID).unwrap();
+        assert_eq!(cpa.credential_kind, CredentialKind::ApiKey);
+        assert_eq!(cpa.quota_scope, QuotaScope::Key);
+        assert_eq!(cpa.singleton_account_id, Some(CPA_ACCOUNT_ID));
     }
 
     #[test]
@@ -1888,6 +1731,26 @@ mod tests {
         );
         assert!(
             validate_account_binding(
+                CPA_ACCOUNT_ID,
+                CPA_PROVIDER_ID,
+                CPA_OFFERING_ID,
+                CredentialKind::ApiKey,
+                QuotaScope::Key,
+            )
+            .is_ok()
+        );
+        assert!(
+            validate_account_binding(
+                "account-1",
+                CPA_PROVIDER_ID,
+                CPA_OFFERING_ID,
+                CredentialKind::ApiKey,
+                QuotaScope::Key,
+            )
+            .is_err()
+        );
+        assert!(
+            validate_account_binding(
                 ZEN_FREE_ACCOUNT_ID,
                 OPENCODE_PROVIDER_ID,
                 GO_OFFERING_ID,
@@ -1910,7 +1773,7 @@ mod tests {
 
     #[test]
     fn catalog_hardcodes_plans_and_keeps_unverified_offerings_unroutable() {
-        assert_eq!(BUILTIN_PLANS.len(), 6);
+        assert_eq!(BUILTIN_PLANS.len(), 7);
         let goat = builtin_plan(COMMAND_CODE_PROVIDER_ID, GOAT_OFFERING_ID).unwrap();
         assert!(goat.routable);
         assert_eq!(goat.verification_policy, VerificationPolicy::NotRequired);
@@ -1954,6 +1817,27 @@ mod tests {
         assert!(plan_requires_custom_config(custom));
         assert!(is_custom_api(CUSTOM_PROVIDER_ID, CUSTOM_API_OFFERING_ID));
         assert!(!is_custom_api(OPENCODE_PROVIDER_ID, GO_OFFERING_ID));
+
+        let cpa = builtin_plan(CPA_PROVIDER_ID, CPA_OFFERING_ID).unwrap();
+        assert!(cpa.routable);
+        assert_eq!(
+            cpa.product_surface,
+            ProviderProductSurface::ExternalIntegration
+        );
+        assert!(cpa.product_surface.is_external_integration());
+        assert_eq!(cpa.creation_availability, CreationAvailability::Unavailable);
+        assert_eq!(cpa.offering.singleton_account_id, Some(CPA_ACCOUNT_ID));
+        assert_eq!(cpa.auth_schemes, &BEARER_AUTH);
+        assert_eq!(cpa.upstream_protocols, &CUSTOM_PROTOCOLS);
+        assert!(cpa.form_fields.is_empty());
+        assert!(is_cpa_external_integration(
+            CPA_PROVIDER_ID,
+            CPA_OFFERING_ID
+        ));
+        assert!(!is_cpa_external_integration(
+            OPENCODE_PROVIDER_ID,
+            GO_OFFERING_ID
+        ));
 
         let go = builtin_plan(OPENCODE_PROVIDER_ID, GO_OFFERING_ID).unwrap();
         assert!(go.routable);
@@ -2128,13 +2012,29 @@ mod tests {
             );
             assert_eq!(
                 descriptor.card_actions.catalog_refresh,
-                kind.catalog_refresh_supported()
+                matches!(
+                    kind,
+                    ProviderAdapterKind::OpenCodeGo
+                        | ProviderAdapterKind::ZenFree
+                        | ProviderAdapterKind::CommandCodeGoat
+                        | ProviderAdapterKind::MiniMaxCn
+                        | ProviderAdapterKind::KimiCn
+                        | ProviderAdapterKind::Cpa
+                )
             );
             assert_eq!(
                 descriptor.card_actions.protocol_probe,
-                kind.protocol_probe_supported()
+                matches!(
+                    kind,
+                    ProviderAdapterKind::OpenCodeGo
+                        | ProviderAdapterKind::ZenFree
+                        | ProviderAdapterKind::ConfigurableHttp
+                )
             );
-            assert!(!descriptor.verification.uses_get_models);
+            assert_eq!(
+                descriptor.verification.uses_get_models,
+                kind == ProviderAdapterKind::Cpa
+            );
             assert_eq!(
                 descriptor.usage.egress_ip_shared_cooldown_window,
                 kind == ProviderAdapterKind::ZenFree
@@ -2145,7 +2045,8 @@ mod tests {
                 | ProviderAdapterKind::CommandCodeGoat
                 | ProviderAdapterKind::MiniMaxCn
                 | ProviderAdapterKind::KimiCn
-                | ProviderAdapterKind::ConfigurableHttp => {
+                | ProviderAdapterKind::ConfigurableHttp
+                | ProviderAdapterKind::Cpa => {
                     assert!(descriptor.inference.production_inference);
                     assert!(descriptor.inference.catalog_routable);
                 }
@@ -2160,7 +2061,7 @@ mod tests {
         assert_eq!(seen.len(), ProviderAdapterKind::ALL.len());
         assert!(ProviderAdapterKind::from_offering("unknown", "unknown").is_none());
         assert!(ProviderRegistry::get("unknown", "unknown").is_none());
-        assert_eq!(ProviderAdapterKind::ALL.len(), 6);
+        assert_eq!(ProviderAdapterKind::ALL.len(), 7);
     }
 
     #[test]
@@ -2289,69 +2190,83 @@ mod tests {
             ProviderAdapterKind::from_offering(CUSTOM_PROVIDER_ID, CUSTOM_API_OFFERING_ID),
             Some(ProviderAdapterKind::ConfigurableHttp)
         );
+
+        let cpa = ProviderRegistry::get(CPA_PROVIDER_ID, CPA_OFFERING_ID).unwrap();
+        assert_eq!(cpa.kind, ProviderAdapterKind::Cpa);
+        assert_eq!(
+            cpa.product_surface,
+            ProviderProductSurface::ExternalIntegration
+        );
+        assert_eq!(cpa.inference.auth, InferenceAuthDescriptor::Bearer);
+        assert_eq!(
+            cpa.inference.origin,
+            InferenceOriginKind::LocalExternalIntegration
+        );
+        assert_eq!(
+            cpa.model_catalog.kind,
+            ModelCatalogKind::ProviderPersistedSnapshot
+        );
+        assert_eq!(
+            cpa.protocol_probe.matrix,
+            ProtocolMatrixKind::FixedStandardProtocols
+        );
+        assert!(!cpa.protocol_probe.explicit_probe);
+        assert_eq!(
+            cpa.protocol_probe.structural_ceiling,
+            StructuralProbeCeiling::Unavailable
+        );
+        assert!(cpa.verification.never_auto_enable);
+        assert!(cpa.verification.uses_get_models);
+        assert_eq!(cpa.usage.contract, UsageContractKind::Unavailable);
+        assert!(!cpa.usage.publishes_capability);
+        assert!(cpa.card_actions.catalog_refresh);
+        assert!(!cpa.card_actions.protocol_probe);
     }
 
     #[test]
-    fn composed_capability_contracts_delegate_from_concrete_adapters() {
-        fn compose<A>(adapter: A, plan: BuiltinPlan) -> ProviderCapabilities
-        where
-            A: ModelCatalogAdapter
-                + InferenceAdapter
-                + ProtocolProbeAdapter
-                + VerificationAdapter
-                + UsageAdapter
-                + PricingAdapter
-                + CardCapabilities,
-        {
-            ProviderCapabilities::compose(adapter, plan)
-        }
-
+    fn descriptor_capabilities_are_built_once_from_the_sealed_kind() {
         for plan in BUILTIN_PLANS {
             let kind = ProviderAdapterKind::from_offering(
                 plan.offering.provider_id,
                 plan.offering.offering_id,
             )
             .expect("every catalog plan has an adapter kind");
-            let from_adapter = match kind {
-                ProviderAdapterKind::OpenCodeGo => compose(OpenCodeGoAdapter, plan),
-                ProviderAdapterKind::ZenFree => compose(ZenFreeAdapter, plan),
-                ProviderAdapterKind::CommandCodeGoat => compose(CommandCodeGoatAdapter, plan),
-                ProviderAdapterKind::MiniMaxCn => compose(MiniMaxCnAdapter, plan),
-                ProviderAdapterKind::KimiCn => compose(KimiCnAdapter, plan),
-                ProviderAdapterKind::ConfigurableHttp => compose(ConfigurableHttpAdapter, plan),
-            };
             let descriptor =
                 ProviderRegistry::get(plan.offering.provider_id, plan.offering.offering_id)
                     .expect("every catalog plan has a composed descriptor");
-            assert_eq!(kind.compose_capabilities(plan), from_adapter);
-            assert_eq!(descriptor.capabilities(), from_adapter);
-            assert_eq!(descriptor.model_catalog, from_adapter.model_catalog);
-            assert_eq!(descriptor.inference, from_adapter.inference);
-            assert_eq!(descriptor.protocol_probe, from_adapter.protocol_probe);
-            assert_eq!(descriptor.verification, from_adapter.verification);
-            assert_eq!(descriptor.usage, from_adapter.usage);
-            assert_eq!(descriptor.pricing, from_adapter.pricing);
-            assert_eq!(descriptor.card_actions, from_adapter.card_actions);
+            assert_eq!(descriptor.kind, kind);
+            assert!(!descriptor.protocol_probe.request_path_may_trial);
+            assert!(!descriptor.protocol_probe.fallback_priority.is_empty());
+            assert_eq!(descriptor.inference.catalog_routable, plan.routable);
+            assert_eq!(descriptor.pricing.availability, plan.pricing_availability);
         }
+    }
 
-        let go_plan = builtin_plan(OPENCODE_PROVIDER_ID, GO_OFFERING_ID).unwrap();
-        assert_eq!(
-            OpenCodeGoAdapter::usage(go_plan).contract,
-            UsageContractKind::Authoritative
-        );
-        assert!(!OpenCodeGoAdapter::usage(go_plan).egress_ip_shared_cooldown_window);
-        let custom_plan = builtin_plan(CUSTOM_PROVIDER_ID, CUSTOM_API_OFFERING_ID).unwrap();
-        assert!(ConfigurableHttpAdapter::verification(custom_plan).probe_first_declared_model);
-        assert!(ConfigurableHttpAdapter::model_catalog(custom_plan).overlays_declared_ids);
-        assert!(!ConfigurableHttpAdapter::inference(custom_plan).follow_redirects);
-        let goat_plan = builtin_plan(COMMAND_CODE_PROVIDER_ID, GOAT_OFFERING_ID).unwrap();
-        assert!(CommandCodeGoatAdapter::inference(goat_plan).production_inference);
-        assert!(!CommandCodeGoatAdapter::verification(goat_plan).uses_get_models);
-        let zen_plan =
-            builtin_plan(OPENCODE_ZEN_FREE_PROVIDER_ID, ANONYMOUS_FREE_OFFERING_ID).unwrap();
-        assert!(ZenFreeAdapter::protocol_probe(zen_plan).unknown_zen_free_defaults_to_chat);
-        assert!(ZenFreeAdapter::usage(zen_plan).egress_ip_shared_cooldown_window);
-        assert!(ZenFreeAdapter::card_capabilities(zen_plan).fetch_zen_models);
+    #[test]
+    fn contract_scopes_are_unique_and_limited_to_ordinary_providers() {
+        let mut scopes = std::collections::HashSet::new();
+        for plan in BUILTIN_PLANS {
+            let descriptor =
+                ProviderRegistry::get(plan.offering.provider_id, plan.offering.offering_id)
+                    .expect("every built-in plan has a descriptor");
+            assert_eq!(descriptor.contract_scope_id, plan.contract_scope_id);
+            match plan.product_surface {
+                ProviderProductSurface::Provider
+                    if is_custom_api(plan.offering.provider_id, plan.offering.offering_id) =>
+                {
+                    assert_eq!(plan.contract_scope_id, None)
+                }
+                ProviderProductSurface::Provider => {
+                    let scope = plan.contract_scope_id.expect("ordinary Provider scope");
+                    assert!(!scope.is_empty());
+                    assert!(scopes.insert(scope), "duplicate contract scope `{scope}`");
+                    assert_eq!(scope, plan.offering.provider_id);
+                }
+                ProviderProductSurface::ExternalIntegration => {
+                    assert_eq!(plan.contract_scope_id, None)
+                }
+            }
+        }
     }
 
     #[test]

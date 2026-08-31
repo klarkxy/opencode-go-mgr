@@ -424,7 +424,7 @@ is no Tauri `invoke` path.
   account_control / gateway_keys / settings / ...
            |
            v
-  SQLite schema v32
+  SQLite schema v34
            ^
            |
   ocg-manager-cli  same services, no argv CAS
@@ -435,13 +435,13 @@ mutation. CAS details: [Dashboard API](dashboard-api.md).
 
 ## Persistence map
 
-Authoritative schema is v32. `sub_gateway_keys` exists only in pre-v27
+Authoritative schema is v34. `sub_gateway_keys` exists only in pre-v27
 databases and is dropped by the migration. GUI data dir is
 `%USERPROFILE%\.ocg-mgr` on Windows and `~/.ocg-mgr` elsewhere; CLI
 defaults to `~/.ocg-mgr-cli`.
 
 ```text
-  data.sqlite                         CURRENT_SCHEMA_VERSION = 32
+  data.sqlite                         CURRENT_SCHEMA_VERSION = 34
     access_keys                       Primary id PRIMARY_KEY_ID
                                       cannot disable/delete Primary
                                       64 active sub-key cap

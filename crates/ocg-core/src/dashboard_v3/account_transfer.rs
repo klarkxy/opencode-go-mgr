@@ -688,6 +688,9 @@ fn export_payload(state: &CoreState) -> Result<(PortablePayload, u64, u64), Tran
     let mut skipped = 0_u64;
     let mut zen_enabled = false;
     for (account, contract) in snapshots {
+        if account.id == crate::provider::CPA_ACCOUNT_ID {
+            continue;
+        }
         if account.is_zen_free() {
             zen_enabled = account.enabled;
             account_order.push(account.id);
@@ -1372,12 +1375,15 @@ fn persisted_contracts_from_portable(
     default_time: DateTime<Utc>,
 ) -> Result<PersistedContracts, String> {
     let mut persisted = PersistedContracts::default();
-    let mut provider_ids = HashSet::new();
+    let mut provider_scope_ids = HashSet::new();
     for contract in portable {
-        let provider_id = contract.provider_id.trim();
-        if provider_id.is_empty()
-            || !provider_ids.insert(provider_id.to_string())
-            || crate::provider_contracts::adapter_kind_for_provider_scope(provider_id).is_none()
+        // `provider_id` is the historical wire name for the opaque Provider
+        // contract scope id. Existing values remain unchanged; future
+        // Offerings may declare a distinct static scope id.
+        let scope_id = contract.provider_id.trim();
+        if scope_id.is_empty()
+            || !provider_scope_ids.insert(scope_id.to_string())
+            || crate::provider_contracts::provider_scope_descriptor(scope_id).is_none()
             || contract.catalog_models.len() > MAX_PROVIDER_MODELS
             || contract.evidence.len() > MAX_PROVIDER_MODELS * 3
             || contract.overrides.len() > MAX_PROVIDER_MODELS * 3
@@ -1397,7 +1403,7 @@ fn persisted_contracts_from_portable(
             }
             catalog_models.push(model.to_string());
         }
-        let scope = ContractScope::provider(provider_id);
+        let scope = ContractScope::provider(scope_id);
         let refreshed_at = contract
             .catalog_refreshed_at
             .as_deref()
@@ -1573,7 +1579,7 @@ fn current_account_ids(state: &CoreState) -> Result<HashSet<String>, V3ApiError>
         .list_accounts()
         .map_err(|_| V3ApiError::internal("failed to inspect existing account ids"))?
         .into_iter()
-        .filter(|account| !account.is_zen_free())
+        .filter(|account| !account.is_zen_free() && account.id != crate::provider::CPA_ACCOUNT_ID)
         .map(|account| account.id)
         .collect())
 }
@@ -1587,7 +1593,7 @@ fn current_logical_accounts(
         .list_accounts()
         .map_err(|_| V3ApiError::internal("failed to inspect existing accounts"))?
         .into_iter()
-        .filter(|account| !account.is_zen_free())
+        .filter(|account| !account.is_zen_free() && account.id != crate::provider::CPA_ACCOUNT_ID)
         .map(|account| logical_key(&account.provider_id, &account.offering_id, &account.name))
         .collect())
 }

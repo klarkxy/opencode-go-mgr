@@ -199,6 +199,13 @@ async fn forward_once(
             let client = crate::http_client::build_no_redirect_for_route(config, route)?;
             client.post(url)
         }
+        ProxyRoutingModel::LocalExternalIntegration => {
+            let client = crate::http_client::build_no_redirect_for_route(
+                config,
+                crate::http_client::RouteLabel::Direct,
+            )?;
+            client.post(url)
+        }
         ProxyRoutingModel::RequestEntrySnapshot => snapshot_client.post(url),
     };
     request = request.headers(headers).body(body);
@@ -604,7 +611,10 @@ async fn forward_request_impl(
         }
     };
     attempt_context.set_provider_route(account, &attempt_spec);
-    if attempt_spec.restricted_upstream_url() {
+    if attempt_spec.is_local_external_integration() {
+        crate::cpa::normalize_base_url(&attempt_spec.base_url, true)
+            .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+    } else if attempt_spec.restricted_upstream_url() {
         ensure_safe_upstream_base_url(&attempt_spec.base_url)?;
     }
     let resolver = HostCredentialResolver::new(state, account);
@@ -755,7 +765,7 @@ async fn forward_request_impl(
     let send_headers = if attempt_spec.isolates_client_headers() {
         let api_key = key
             .as_deref()
-            .ok_or_else(|| anyhow::anyhow!("Custom route requires a decrypted key"))?;
+            .ok_or_else(|| anyhow::anyhow!("isolated route requires a decrypted key"))?;
         let scheme = match attempt_spec.auth {
             UpstreamAuth::XApiKey => crate::provider::UpstreamAuthScheme::XApiKey,
             _ => crate::provider::UpstreamAuthScheme::Bearer,

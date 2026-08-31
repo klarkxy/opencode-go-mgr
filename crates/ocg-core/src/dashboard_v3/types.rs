@@ -179,6 +179,21 @@ pub const CATALOG_TYPE_NAMES: &[&str] = &[
     "ApplicationConnectorPreview",
     "ApplicationConnectorCommitRequest",
     "ApplicationConnectorCommitResult",
+    "CpaIntegration",
+    "CpaIntegrationUpdate",
+    "CpaTestRequest",
+    "CpaConnectionReport",
+    "CpaModels",
+    "CpaAccounts",
+    "CpaAccount",
+    "CpaAccountStatusUpdate",
+    "CpaAccountDelete",
+    "CpaQuotaReset",
+    "CpaOAuthProvider",
+    "CpaOAuthStartRequest",
+    "CpaOAuthStart",
+    "CpaOAuthStatus",
+    "CpaOAuthSessionDelete",
 ];
 
 pub const ERROR_UNAUTHORIZED: &str = "unauthorized";
@@ -1403,7 +1418,7 @@ pub struct ProviderContracts {
     pub pricing_revision: String,
 }
 
-/// One built-in provider scope.
+/// One built-in Provider/Offering contract scope.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 #[schemars(rename_all = "camelCase", deny_unknown_fields)]
@@ -2637,6 +2652,196 @@ pub struct UsageRefreshThrottleError {
     pub next_allowed_at: String,
 }
 
+/// Secret-free singleton configuration for the local CPA external integration.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CpaIntegration {
+    pub configured: bool,
+    pub base_url: String,
+    pub base_url_read_only: bool,
+    pub management_key_configured: bool,
+    pub inference_key_configured: bool,
+    pub enabled: bool,
+    pub account_id: Option<String>,
+    pub model_count: usize,
+    pub models_refreshed_at: Option<String>,
+    pub revision: u64,
+    pub process_generation: u64,
+}
+
+/// PUT CPA configuration. Secret fields are write-only; omission preserves
+/// their existing encrypted values.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[schemars(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CpaIntegrationUpdate {
+    #[serde(flatten)]
+    pub expectation: MutationExpectation,
+    #[serde(default)]
+    pub base_url: Option<String>,
+    #[serde(default)]
+    pub management_key: Option<String>,
+    #[serde(default)]
+    pub inference_key: Option<String>,
+    #[serde(default)]
+    pub enabled: Option<bool>,
+}
+
+/// Operational connection test. Optional write-only values allow testing a
+/// first-time configuration without persisting it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[schemars(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CpaTestRequest {
+    #[serde(default)]
+    pub base_url: Option<String>,
+    #[serde(default)]
+    pub management_key: Option<String>,
+    #[serde(default)]
+    pub inference_key: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CpaConnectionReport {
+    pub reachable: bool,
+    pub management_ready: bool,
+    pub inference_ready: bool,
+    pub version: Option<String>,
+    pub commit: Option<String>,
+    pub build_date: Option<String>,
+    pub model_count: usize,
+    pub management_error: Option<String>,
+    pub inference_error: Option<String>,
+    pub revision: u64,
+    pub process_generation: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CpaModels {
+    pub models: Vec<String>,
+    pub refreshed_at: Option<String>,
+    pub revision: u64,
+    pub process_generation: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CpaAccount {
+    pub name: String,
+    pub auth_index: Option<String>,
+    pub provider: String,
+    pub label: Option<String>,
+    pub status: Option<String>,
+    pub status_message: Option<String>,
+    pub disabled: bool,
+    pub unavailable: bool,
+    pub runtime_only: bool,
+    pub mutable: bool,
+    pub email: Option<String>,
+    pub quota: Option<Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CpaAccounts {
+    pub accounts: Vec<CpaAccount>,
+    pub version: String,
+    pub revision: u64,
+    pub process_generation: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[schemars(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CpaAccountStatusUpdate {
+    #[serde(flatten)]
+    pub expectation: MutationExpectation,
+    pub name: String,
+    pub auth_index: String,
+    pub disabled: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[schemars(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CpaAccountDelete {
+    #[serde(flatten)]
+    pub expectation: MutationExpectation,
+    pub name: String,
+    pub auth_index: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[schemars(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CpaQuotaReset {
+    #[serde(flatten)]
+    pub expectation: MutationExpectation,
+    pub name: String,
+    pub auth_index: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[schemars(rename_all = "snake_case")]
+pub enum CpaOAuthProvider {
+    Codex,
+    Anthropic,
+    Antigravity,
+    Kimi,
+    Xai,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[schemars(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CpaOAuthStartRequest {
+    #[serde(flatten)]
+    pub expectation: MutationExpectation,
+    pub provider: CpaOAuthProvider,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CpaOAuthStart {
+    pub provider: CpaOAuthProvider,
+    pub state: String,
+    pub url: String,
+    pub flow: String,
+    pub user_code: Option<String>,
+    pub expires_in: Option<u64>,
+    pub revision: u64,
+    pub process_generation: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CpaOAuthStatus {
+    pub state: String,
+    pub status: String,
+    pub error: Option<String>,
+    pub revision: u64,
+    pub process_generation: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[schemars(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CpaOAuthSessionDelete {
+    #[serde(flatten)]
+    pub expectation: MutationExpectation,
+    pub state: String,
+}
+
 /// Deterministic JSON Schema catalog for the checked-in V3 contract.
 ///
 /// Response types are generated with the serialize contract so `Option` fields
@@ -2738,6 +2943,14 @@ pub fn contract_schema() -> Value {
     include_type::<ApplicationConnectors>(&mut serialize);
     include_type::<ApplicationConnectorPreview>(&mut serialize);
     include_type::<ApplicationConnectorCommitResult>(&mut serialize);
+    include_type::<CpaIntegration>(&mut serialize);
+    include_type::<CpaConnectionReport>(&mut serialize);
+    include_type::<CpaModels>(&mut serialize);
+    include_type::<CpaAccounts>(&mut serialize);
+    include_type::<CpaAccount>(&mut serialize);
+    include_type::<CpaOAuthProvider>(&mut serialize);
+    include_type::<CpaOAuthStart>(&mut serialize);
+    include_type::<CpaOAuthStatus>(&mut serialize);
     let mut defs = serialize.take_definitions(true);
 
     let mut deserialize = SchemaSettings::draft2020_12().into_generator();
@@ -2785,6 +2998,13 @@ pub fn contract_schema() -> Value {
     include_type::<ProviderModelsRefreshUpdate>(&mut deserialize);
     include_type::<ApplicationConnectorPreviewRequest>(&mut deserialize);
     include_type::<ApplicationConnectorCommitRequest>(&mut deserialize);
+    include_type::<CpaIntegrationUpdate>(&mut deserialize);
+    include_type::<CpaTestRequest>(&mut deserialize);
+    include_type::<CpaAccountStatusUpdate>(&mut deserialize);
+    include_type::<CpaAccountDelete>(&mut deserialize);
+    include_type::<CpaQuotaReset>(&mut deserialize);
+    include_type::<CpaOAuthStartRequest>(&mut deserialize);
+    include_type::<CpaOAuthSessionDelete>(&mut deserialize);
     for (name, schema) in deserialize.take_definitions(true) {
         defs.entry(name).or_insert(schema);
     }
@@ -4612,6 +4832,23 @@ mod tests {
         "ApplicationConnectorCommitRequest",
         "ApplicationConnectorCommitResult",
     ];
+    const CPA_CATALOG_TYPES: &[&str] = &[
+        "CpaIntegration",
+        "CpaIntegrationUpdate",
+        "CpaTestRequest",
+        "CpaConnectionReport",
+        "CpaModels",
+        "CpaAccounts",
+        "CpaAccount",
+        "CpaAccountStatusUpdate",
+        "CpaAccountDelete",
+        "CpaQuotaReset",
+        "CpaOAuthProvider",
+        "CpaOAuthStartRequest",
+        "CpaOAuthStart",
+        "CpaOAuthStatus",
+        "CpaOAuthSessionDelete",
+    ];
 
     #[test]
     fn catalog_type_names_append_pricing_dtos_after_the_provider_prefix() {
@@ -4697,7 +4934,12 @@ mod tests {
             &CATALOG_TYPE_NAMES[account_transfer_end..application_connector_end],
             APPLICATION_CONNECTOR_CATALOG_TYPES
         );
-        assert_eq!(CATALOG_TYPE_NAMES.len(), application_connector_end);
+        let cpa_end = application_connector_end + CPA_CATALOG_TYPES.len();
+        assert_eq!(
+            &CATALOG_TYPE_NAMES[application_connector_end..cpa_end],
+            CPA_CATALOG_TYPES
+        );
+        assert_eq!(CATALOG_TYPE_NAMES.len(), cpa_end);
     }
 
     #[test]

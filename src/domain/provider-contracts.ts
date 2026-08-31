@@ -118,8 +118,7 @@ export function parseProviderScopeKey(key: string): ProviderScopeRef | null {
   return { scope_kind, scope_id };
 }
 
-/** One scope key for an account: Custom endpoints stay per-account; others share the provider id. */
-export function accountProviderScope(
+function fallbackAccountScopeRef(
   account: Pick<Account, "id" | "provider_id" | "offering_id">,
 ): ProviderScopeRef {
   const plan = planForAccount(account);
@@ -127,6 +126,24 @@ export function accountProviderScope(
     return { scope_kind: "custom_endpoint", scope_id: account.id };
   }
   return { scope_kind: "provider", scope_id: account.provider_id };
+}
+
+/** Match an account to the backend-owned exact contract scope. */
+export function findAccountScopeView(
+  scopes: readonly ProviderScopeView[],
+  account: Pick<Account, "id" | "provider_id" | "offering_id">,
+): ProviderScopeView | undefined {
+  const plan = planForAccount(account);
+  if (plan?.kind === "custom") {
+    return scopes.find((scope) => (
+      scope.scope_kind === "custom_endpoint" && scope.scope_id === account.id
+    ));
+  }
+  return scopes.find((scope) => (
+    scope.scope_kind === "provider"
+    && scope.provider_id === account.provider_id
+    && scope.offerings.some((offering) => offering.offering_id === account.offering_id)
+  ));
 }
 
 export function protocolDisplayName(protocol: ProviderProtocol): string {
@@ -500,9 +517,9 @@ export function accountContractSummary(
   catalog: readonly ProviderCatalogEntry[] | null | undefined = null,
 ): AccountContractSummary | null {
   if (response == null) return null;
-  const ref = accountProviderScope(account);
   const scopes = flattenProviderScopes(normalizeProviderContractsResponse(response), catalog);
-  const scope = findScopeView(scopes, ref);
+  const scope = findAccountScopeView(scopes, account);
+  const ref = scope ?? fallbackAccountScopeRef(account);
   const plan = findPlanDefinition(account.provider_id, account.offering_id);
   const fallbackLabel = scope?.label
     ?? (plan ? planFamilyLabel(plan, catalog) : account.name);

@@ -39,7 +39,7 @@
                    \                      /
                     \                    /
              +----------------+------------------+
-             |         SQLite schema v32         |
+             |         SQLite schema v34         |
              |  桌面  ~/.ocg-mgr                 |
              |  CLI   ~/.ocg-mgr-cli             |
              +-----------------------------------+
@@ -146,7 +146,7 @@ Zen Free 只有启用开关；不需要时直接关掉卡片。目录刷新在�
 
     AI 客户端 --Key--> 本节点 --账号凭据--> Plan
 
-    Key            access_keys（schema v32）
+    Key            access_keys（当前 schema v34）
                    主 Key + 可选子 Key（活跃上限 64）
     账号凭据       Go Key、Custom Key，或 Zen Free（无）
 ```

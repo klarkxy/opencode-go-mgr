@@ -36,7 +36,7 @@ const CLIENT_ROOT_URL_ENV: &str = "OCG_CLIENT_ROOT_URL";
 
 // Note: Mutex lock ordering is (1) settings_update, (2) db, (3) config,
 // (4) http_client, (5) gateway, (6) pricing, (7) zen_free_models,
-// (8) provider_contracts, (9) routing, (10) credential_snapshot.
+// (8) cpa_models, (9) provider_contracts, (10) routing, (11) credential_snapshot.
 // `activate_zen_free_model_catalog` acquires db → http_client →
 // zen_free_models → provider_contracts, then drops those before
 // `routing.reset()`. `reload_provider_contracts_locked` may already hold db
@@ -93,9 +93,13 @@ pub struct CoreStateInner {
     pricing: RwLock<Arc<PricingSnapshot>>,
     pub pricing_refresh: tokio::sync::Mutex<()>,
     zen_free_models: RwLock<Arc<crate::kernel::zen::ZenFreeModelCatalog>>,
+    cpa_models: RwLock<Arc<Vec<String>>>,
     pub zen_free_models_refresh: tokio::sync::Mutex<()>,
     pub provider_models_refresh: tokio::sync::Mutex<()>,
     pub provider_usage_refresh: tokio::sync::Mutex<()>,
+    /// Serializes typed operations against the one local CPA integration.
+    /// Network calls may hold this async gate but never the SQLite mutex.
+    pub cpa_operations: tokio::sync::Mutex<()>,
     provider_contracts: RwLock<Arc<crate::provider_contracts::EffectiveContractSet>>,
     pub routing: RoutingRuntime,
     pub browser: crate::browser::BrowserRuntime,
@@ -122,14 +126,22 @@ pub(crate) struct ImportedNodeRuntime {
 
 fn sealed_proxy_model_ids(
     contracts: &crate::provider_contracts::EffectiveContractSet,
+    cpa_models: &[String],
 ) -> Vec<String> {
     [
-        crate::kernel::ids::MINIMAX_PROVIDER_ID,
-        crate::kernel::ids::KIMI_PROVIDER_ID,
+        (
+            crate::kernel::ids::MINIMAX_PROVIDER_ID,
+            crate::kernel::ids::MINIMAX_CN_OFFERING_ID,
+        ),
+        (
+            crate::kernel::ids::KIMI_PROVIDER_ID,
+            crate::kernel::ids::KIMI_CN_OFFERING_ID,
+        ),
     ]
     .into_iter()
-    .filter_map(|provider_id| contracts.providers.get(provider_id))
+    .filter_map(|(provider_id, offering_id)| contracts.provider_offering(provider_id, offering_id))
     .flat_map(|contract| contract.catalog.models.iter().cloned())
+    .chain(cpa_models.iter().cloned())
     .collect()
 }
 
@@ -302,13 +314,17 @@ impl CoreStateInner {
             }
         };
         let zen_free_models = db.zen_free_model_catalog()?.unwrap_or_default();
+        let cpa_models = db
+            .cpa_model_catalog()?
+            .map(|catalog| catalog.models)
+            .unwrap_or_default();
         let custom_runtimes = db.list_custom_account_runtimes()?;
         let provider_contracts = crate::provider_contracts::build_effective_contracts(
             &zen_free_models,
             &custom_runtimes,
             db.load_persisted_contracts()?,
         );
-        let provider_models = sealed_proxy_model_ids(&provider_contracts);
+        let provider_models = sealed_proxy_model_ids(&provider_contracts, &cpa_models);
         let http_client = crate::http_client::build_route_set_with_provider_models(
             &config,
             &zen_free_models,
@@ -341,9 +357,11 @@ impl CoreStateInner {
             pricing: RwLock::new(Arc::new(pricing)),
             pricing_refresh: tokio::sync::Mutex::new(()),
             zen_free_models: RwLock::new(Arc::new(zen_free_models)),
+            cpa_models: RwLock::new(Arc::new(cpa_models)),
             zen_free_models_refresh: tokio::sync::Mutex::new(()),
             provider_models_refresh: tokio::sync::Mutex::new(()),
             provider_usage_refresh: tokio::sync::Mutex::new(()),
+            cpa_operations: tokio::sync::Mutex::new(()),
             provider_contracts: RwLock::new(Arc::new(provider_contracts)),
             routing: RoutingRuntime::new(),
             browser: crate::browser::BrowserRuntime::new(),
@@ -434,6 +452,60 @@ impl CoreStateInner {
         self.zen_free_models.read().clone()
     }
 
+    pub fn cpa_model_catalog(&self) -> Arc<Vec<String>> {
+        self.cpa_models.read().clone()
+    }
+
+    pub fn activate_cpa_model_catalog(
+        &self,
+        models: Vec<String>,
+        source_url: &str,
+        refreshed_at: chrono::DateTime<chrono::Utc>,
+    ) -> crate::Result<()> {
+        anyhow::ensure!(!models.is_empty(), "CPA model catalog cannot be empty");
+        let zen = self.zen_free_model_catalog();
+        let contracts = self.provider_contracts();
+        let provider_models = sealed_proxy_model_ids(&contracts, &models);
+        let route_set = crate::http_client::build_route_set_with_provider_models(
+            &self.config(),
+            &zen,
+            &provider_models,
+        )?;
+        {
+            let db = self.db.lock();
+            let mut http_client = self.http_client.lock();
+            let mut active = self.cpa_models.write();
+            db.replace_cpa_model_catalog(&models, source_url, refreshed_at)?;
+            *http_client = Arc::new(route_set);
+            *active = Arc::new(models);
+        }
+        self.routing.reset();
+        Ok(())
+    }
+
+    /// Atomically remove OCG-owned CPA configuration, singleton account, and
+    /// catalog snapshot. CPA auth files and OAuth state remain external.
+    pub fn disconnect_cpa_integration(&self) -> crate::Result<()> {
+        let zen = self.zen_free_model_catalog();
+        let contracts = self.provider_contracts();
+        let provider_models = sealed_proxy_model_ids(&contracts, &[]);
+        let route_set = crate::http_client::build_route_set_with_provider_models(
+            &self.config(),
+            &zen,
+            &provider_models,
+        )?;
+        {
+            let db = self.db.lock();
+            let mut http_client = self.http_client.lock();
+            let mut active = self.cpa_models.write();
+            db.delete_cpa_integration()?;
+            *http_client = Arc::new(route_set);
+            *active = Arc::new(Vec::new());
+        }
+        self.routing.reset();
+        Ok(())
+    }
+
     pub fn activate_zen_free_model_catalog(
         &self,
         catalog: crate::kernel::zen::ZenFreeModelCatalog,
@@ -446,7 +518,8 @@ impl CoreStateInner {
             .map(|contract| contract.catalog.models.clone())
             .unwrap_or_default();
         let contracts_snapshot = self.provider_contracts();
-        let provider_models = sealed_proxy_model_ids(&contracts_snapshot);
+        let cpa_models = self.cpa_model_catalog();
+        let provider_models = sealed_proxy_model_ids(&contracts_snapshot, &cpa_models);
         let route_set = crate::http_client::build_route_set_with_provider_models(
             &self.config(),
             &catalog,
@@ -499,7 +572,8 @@ impl CoreStateInner {
             &db.list_custom_account_runtimes()?,
             db.load_persisted_contracts()?,
         );
-        let provider_models = sealed_proxy_model_ids(&contracts);
+        let cpa_models = self.cpa_model_catalog();
+        let provider_models = sealed_proxy_model_ids(&contracts, &cpa_models);
         let route_set = crate::http_client::build_route_set_with_provider_models(
             &config,
             &zen,
@@ -534,7 +608,8 @@ impl CoreStateInner {
             &db.list_custom_account_runtimes()?,
             db.load_persisted_contracts()?,
         );
-        let provider_models = sealed_proxy_model_ids(&set);
+        let cpa_models = self.cpa_model_catalog();
+        let provider_models = sealed_proxy_model_ids(&set, &cpa_models);
         let route_set = crate::http_client::build_route_set_with_provider_models(
             &self.config(),
             &zen,
@@ -844,7 +919,8 @@ impl CoreStateInner {
         config.validate().map_err(anyhow::Error::msg)?;
         let zen_catalog = self.zen_free_model_catalog();
         let contracts = self.provider_contracts();
-        let provider_models = sealed_proxy_model_ids(&contracts);
+        let cpa_models = self.cpa_model_catalog();
+        let provider_models = sealed_proxy_model_ids(&contracts, &cpa_models);
         let http_client = crate::http_client::build_route_set_with_provider_models(
             &config,
             &zen_catalog,

@@ -35,10 +35,13 @@
         <div class="account-heading">
           <div class="account-name-row">
             <span class="account-name">{{ account.name }}</span>
-            <n-tag v-if="account.account_type === 'managed'" type="info" size="small" :bordered="false">
+            <n-tag v-if="isCpa" type="info" size="small" :bordered="false">
+              {{ t("CPA 订阅池") }}
+            </n-tag>
+            <n-tag v-else-if="account.account_type === 'managed'" type="info" size="small" :bordered="false">
               {{ t("托管注册") }}
             </n-tag>
-            <n-tag v-if="isZen" type="info" size="small" :bordered="false">
+            <n-tag v-else-if="isZen" type="info" size="small" :bordered="false">
               {{ t("免费通道") }}
             </n-tag>
             <n-tag
@@ -161,7 +164,7 @@
           </n-popover>
         </div>
 
-        <div class="account-action account-action--test">
+        <div v-if="!isCpa" class="account-action account-action--test">
           <n-tooltip trigger="hover">
             <template #trigger>
               <n-button
@@ -338,7 +341,7 @@ import {
   usageSyncCaption,
 } from "../domain/account-display.ts";
 import type { AccountMenuOption } from "../domain/account-display.ts";
-import { isOfficialCnPlanAccount, isZenFreeAccount } from "../domain/account-providers.ts";
+import { isCpaIntegrationAccount, isOfficialCnPlanAccount, isZenFreeAccount } from "../domain/account-providers.ts";
 import { isCustomApiAccount } from "../domain/custom-account.ts";
 import { accountPlanWarning, planLabel } from "../domain/plans.ts";
 import type { AccountUsageEdits, UsageLimitView } from "../domain/useAccountUsage.ts";
@@ -381,6 +384,7 @@ const emit = defineEmits<{
 }>();
 
 const isZen = computed(() => isZenFreeAccount(props.account));
+const isCpa = computed(() => isCpaIntegrationAccount(props.account));
 const isGo = computed(() => (
   props.account.provider_id === "opencode" && props.account.offering_id === "go"
 ));

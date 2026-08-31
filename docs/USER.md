@@ -16,8 +16,8 @@ This guide is for people running OCG Manager as a desktop app, a headless gatewa
 - [Install And First Run](user/install.md) — Windows, macOS, and Linux installers; the SmartScreen ritual included.
 - [Connect Your First Client](user/first-client.md) — Copy the Key and base URL, then prove it with one request.
 - [Upgrade, Backup, Restore, And Uninstall](user/upgrade-backup.md) — Updater channel, manual upgrade, backup, restore, and uninstall.
-- [The Dashboard](user/dashboard.md) — The seven views, i18n, and Connection Center.
-- [Application Guides And Model Capabilities](user/applications.md) — 17 client tutorials and the model capability table.
+- [The Dashboard](user/dashboard.md) — The seven core views, External Integrations group, i18n, and Connection Center.
+- [Application Guides And Model Capabilities](user/applications.md) — Client tutorials and the model capability table.
 - [Accounts](user/accounts.md) — Plans, credentials, ordering, quota behavior, and managed onboarding.
 - [Providers](user/providers.md) — Catalog, provider contracts, per-model protocol overrides, and probes.
 - [Logs And Settings](user/logs-settings.md) — Request logs, settings, proxy modes, and theme.
@@ -26,6 +26,7 @@ This guide is for people running OCG Manager as a desktop app, a headless gatewa
 - [Routing, Cost, And Failover](user/routing.md) — Selection order, sticky/round-robin, cost accounting, and failover.
 - [CLI](user/cli.md) — Headless CLI archive, data directory, and `serve` / `key` / `status`.
 - [Docker](user/docker.md) — GHCR image, Compose setup, browser sidecar, and source builds.
+- [External Integrations](user/external-integrations.md) — Local CPA setup, ownership boundaries, routing pool, and disconnect behavior.
 - [Data And Security](user/data-security.md) — Data locations, credential storage, and encryption boundaries.
 - [Limits](user/limits.md) — What is not implemented, on purpose or otherwise.
 - [Troubleshooting](user/troubleshooting.md) — Common first-run, auth, routing, and log problems.
@@ -33,7 +34,7 @@ This guide is for people running OCG Manager as a desktop app, a headless gatewa
 ## Reading paths
 
 - **New user** — `overview` → `architecture` → `install` → `first-client` → `accounts` → `providers` → `gateway` → `applications` → `troubleshooting`.
-- **Docker / CLI operator** — `overview` → `architecture` → `docker` → `cli` → `accounts` → `providers` → `routing` → `logs-settings` → `troubleshooting`.
+- **Docker / CLI operator** — `overview` → `architecture` → `docker` → `external-integrations` → `cli` → `accounts` → `providers` → `routing` → `logs-settings` → `troubleshooting`.
 - **Integration author** — `add-provider` for an upstream; `add-application` for a downstream client.
 
 ---

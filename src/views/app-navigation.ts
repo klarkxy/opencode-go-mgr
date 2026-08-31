@@ -1,15 +1,51 @@
-export const APP_VIEW_KEYS = [
-  "dashboard",
-  "keys",
-  "accounts",
-  "providers",
-  "apps",
-  "logs",
-  "settings",
-  "browser",
-] as const;
+import type { MessageKey } from "../i18n/index.ts";
 
-export type AppViewKey = (typeof APP_VIEW_KEYS)[number];
+export const APP_NAVIGATION_GROUPS = {
+  core: { key: "core" },
+  external: { key: "external", label: "外部接入" },
+} as const satisfies Record<string, { key: string; label?: MessageKey }>;
+
+export type AppNavigationGroup = keyof typeof APP_NAVIGATION_GROUPS;
+export type AppNavigationIcon =
+  | "dashboard"
+  | "keys"
+  | "accounts"
+  | "providers"
+  | "apps"
+  | "logs"
+  | "settings"
+  | "cpa";
+
+export interface AppNavigationItem {
+  key: string;
+  label: MessageKey;
+  icon: AppNavigationIcon;
+  group: AppNavigationGroup;
+}
+
+// This is the single navigation registration source for desktop, mobile, and
+// the page title. Browser remains an overlay rather than a menu entry.
+export const APP_NAVIGATION = [
+  { key: "dashboard", label: "仪表盘", icon: "dashboard", group: "core" },
+  { key: "keys", label: "接入 Key", icon: "keys", group: "core" },
+  { key: "accounts", label: "账号", icon: "accounts", group: "core" },
+  { key: "providers", label: "供应商", icon: "providers", group: "core" },
+  { key: "apps", label: "应用", icon: "apps", group: "core" },
+  { key: "logs", label: "日志", icon: "logs", group: "core" },
+  { key: "settings", label: "设置", icon: "settings", group: "core" },
+  { key: "cpa", label: "CPA", icon: "cpa", group: "external" },
+] as const satisfies readonly AppNavigationItem[];
+
+export type AppNavigationViewKey = (typeof APP_NAVIGATION)[number]["key"];
+export type AppViewKey = AppNavigationViewKey | "browser";
+
+export const APP_VIEW_KEYS: readonly AppViewKey[] = [
+  ...APP_NAVIGATION.map(({ key }) => key),
+  "browser",
+];
+
+export const CORE_APP_NAVIGATION = APP_NAVIGATION.filter(({ group }) => group === "core");
+export const EXTERNAL_APP_NAVIGATION = APP_NAVIGATION.filter(({ group }) => group === "external");
 
 export const LEGACY_PRICING_VIEW = "pricing";
 export const PROVIDERS_VIEW: AppViewKey = "providers";

@@ -1,0 +1,5 @@
+# CLI Proxy API inference credential. Copy this file to cpa-config.yaml and
+# replace the placeholder before enabling the Compose `cpa` profile. Keep the
+# copied file out of version control and do not reuse an OCG Manager Key.
+api-keys:
+  - "replace-with-a-long-random-cpa-inference-key"

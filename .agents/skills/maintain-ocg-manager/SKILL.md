@@ -20,6 +20,7 @@ state unless explicitly authorized.
 | Desktop capability | [Desktop Host](../../../src-tauri/src/host/), [Tauri startup](../../../src-tauri/src/lib.rs), [host router](../../../crates/ocg-core/src/host_router.rs) | Register a local, process-owned capability in `CoreState`; never add a Tauri `invoke` command or a second desktop control path. |
 | Provider or Plan | [registry](../../../crates/ocg-domain/src/provider.rs), [protocol table](../../../crates/ocg-domain/src/protocol.rs), [alias resolver](../../../crates/ocg-gateway/src/alias.rs) | Keep the registry static and sealed. Unknown pairs fail closed; do not add plugins or runtime discovery. |
 | Application guide/connector | [guide registry](../../../src/views/application-guides.ts), [Applications view](../../../src/views/Applications.vue), [Desktop connector Host](../../../src-tauri/src/host/application_connectors.rs), [native packages](../../../integrations/), [user guide](../../../docs/user/applications.md) | Treat it as a local Desktop capability. Use field-owned configuration for supported config clients and client-native packages for Pi/DSH; never add a connector service, daemon, remote sync, or dynamic Provider registry. |
+| Static external integration | [runtime invariants](../../../docs/maintainer/runtime-invariants.md), [extending](../../../docs/maintainer/extending.md), [Dashboard V3](../../../crates/ocg-core/src/dashboard_v3/) | Keep it a typed, product-approved local-service adapter. It is neither a Provider/Plan nor a dynamic plugin; OCG may manage it but never hosts, upgrades, or reads its private auth files. |
 
 ## Control-plane and connector rules
 
@@ -47,6 +48,9 @@ state unless explicitly authorized.
 - Preserve the local Desktop model: Host capabilities are process-owned and
   compose the one loopback dashboard/gateway. Do not introduce remote sync,
   an admin API, a background connector process, or a second mutation channel.
+  A static external integration may instead address a user-deployed loopback
+  service (or its explicit Compose sibling) through a narrow V3 adapter; it
+  must not become a general remote-service or process-management surface.
 
 ## Native application packages
 

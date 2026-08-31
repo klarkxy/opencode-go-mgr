@@ -28,6 +28,7 @@ mod auth;
 mod browser;
 mod claude_desktop;
 mod connection;
+mod cpa;
 mod custom_discovery;
 mod keys;
 mod managed_key_verify;
@@ -79,7 +80,10 @@ pub use types::{
     ApplicationModels, AuthLogin, AuthLogout, AuthRegister, AuthStatus, BrowserCapabilities,
     BrowserMode, BrowserOpen, BrowserOpenRequest, BrowserTarget, CATALOG_TYPE_NAMES,
     CapabilitySummary, CardCapabilitySummary, ClaudeDesktopModels, ClaudeDesktopModelsUpdate,
-    ConnectionInfo, ConnectionSubKey, ContractScopeKind, ControlRevision, CreditBalance,
+    ConnectionInfo, ConnectionSubKey, ContractScopeKind, ControlRevision, CpaAccount,
+    CpaAccountDelete, CpaAccountStatusUpdate, CpaAccounts, CpaConnectionReport, CpaIntegration,
+    CpaIntegrationUpdate, CpaModels, CpaOAuthProvider, CpaOAuthSessionDelete, CpaOAuthStart,
+    CpaOAuthStartRequest, CpaOAuthStatus, CpaQuotaReset, CpaTestRequest, CreditBalance,
     CustomEndpointContract, CustomModelDiscoveryRequest, CustomModelDiscoveryResponse,
     DailyModelTokens, DailyTokensByModel, DailyTokensQuery, DashboardSummary, DesktopUpdate,
     DesktopUpdatePhase, ERROR_CONFLICT, ERROR_FORBIDDEN, ERROR_GATEWAY_TIMEOUT, ERROR_GONE,
@@ -141,6 +145,44 @@ pub fn api_router(state: CoreState) -> Router<CoreState> {
     let protected = Router::new()
         .route("/contract", get(get_contract))
         .route("/connection", get(connection::get_connection))
+        .route(
+            "/external-integrations/cpa",
+            get(cpa::get_integration)
+                .put(cpa::put_integration)
+                .delete(cpa::delete_integration),
+        )
+        .route(
+            "/external-integrations/cpa/test",
+            post(cpa::test_connection),
+        )
+        .route(
+            "/external-integrations/cpa/models/refresh",
+            post(cpa::refresh_models),
+        )
+        .route(
+            "/external-integrations/cpa/accounts",
+            get(cpa::list_accounts).delete(cpa::delete_account),
+        )
+        .route(
+            "/external-integrations/cpa/accounts/status",
+            patch(cpa::set_account_status),
+        )
+        .route(
+            "/external-integrations/cpa/accounts/reset-quota",
+            post(cpa::reset_quota),
+        )
+        .route(
+            "/external-integrations/cpa/oauth/start",
+            post(cpa::start_oauth),
+        )
+        .route(
+            "/external-integrations/cpa/oauth/status",
+            get(cpa::oauth_status),
+        )
+        .route(
+            "/external-integrations/cpa/oauth/session",
+            delete(cpa::cancel_oauth),
+        )
         .route(
             "/applications/connectors",
             get(application_connectors::list_connectors),

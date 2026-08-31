@@ -85,8 +85,8 @@ test("USER chapter files pair EN/ZH with matching heading structure", () => {
 test("USER guides describe the Providers control plane and drop stale locations", () => {
   assert.match(userEn, /Configurable HTTP adapter, not a base class/);
   assert.match(userZh, /Configurable HTTP 适配器，不是基类/);
-  assert.match(userEn, /`Provider\(provider_id\)`/);
-  assert.match(userZh, /`Provider\(provider_id\)`/);
+  assert.match(userEn, /`Provider\(contract_scope_id\)`/);
+  assert.match(userZh, /`Provider\(contract_scope_id\)`/);
   assert.match(userEn, /`CustomEndpoint\(account_id\)`/);
   assert.match(userZh, /`CustomEndpoint\(account_id\)`/);
   assert.match(userEn, /Chat Completions, Responses,\s+and Messages/);
@@ -95,8 +95,8 @@ test("USER guides describe the Providers control plane and drop stale locations"
   assert.match(userZh, /可能消耗\s*额度/);
   assert.match(userEn, /\?view=pricing/);
   assert.match(userZh, /\?view=pricing/);
-  assert.match(userEn, /schema v32/i);
-  assert.match(userZh, /schema v32/);
+  assert.match(userEn, /schema v34/i);
+  assert.match(userZh, /schema v34/);
   assert.doesNotMatch(userEn, /\*\*Open\s+provider\*\*/);
   assert.doesNotMatch(userZh, /\*\*前往供应商\*\*/);
   assert.match(userEn, /GOAT cards show a clearly labelled local estimate/);

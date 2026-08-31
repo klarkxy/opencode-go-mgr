@@ -15,7 +15,7 @@ rebind → compensation) is acquired before `gateway_lifecycle` when a
 settings write also rebinds. Never hold a `parking_lot` lock across those
 awaits.
 
-Two credential tiers share one `access_keys` table (schema v32) and one
+Two credential tiers share one `access_keys` table (current schema v34) and one
 auth snapshot:
 
 - Primary key: fixed id `00000000-0000-0000-0000-000000000001`, display
@@ -148,7 +148,7 @@ and profile are removed.
 ## Persistence
 
 `crates/ocg-core/src/db.rs` defines the SQLite schema, migrations, and
-queries. Current schema is **v32**. `provider_contracts.rs` owns provider
+queries. Current schema is **v34**. `provider_contracts.rs` owns provider
 contract scopes, per-model/per-protocol overrides, effective contract
 derivation, and model-protocol evidence. `models.rs` defines shared
 serde types and `AppConfig`. Key obfuscation is `ocg-infra::crypto`

@@ -5,8 +5,7 @@ import type {
   ProviderProtocol,
 } from "../api/providers.ts";
 import {
-  accountProviderScope,
-  findScopeView,
+  findAccountScopeView,
   flattenProviderScopes,
   normalizeProviderContractsResponse,
 } from "./provider-contracts.ts";
@@ -25,7 +24,7 @@ export function accountTestModels(
 ): AccountTestModel[] {
   if (!response) return [];
   const scopes = flattenProviderScopes(normalizeProviderContractsResponse(response), catalog);
-  const scope = findScopeView(scopes, accountProviderScope(account));
+  const scope = findAccountScopeView(scopes, account);
   if (!scope) return [];
 
   const seen = new Set<string>();

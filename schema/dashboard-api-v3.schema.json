@@ -1896,6 +1896,593 @@
       ],
       "type": "object"
     },
+    "CpaAccount": {
+      "additionalProperties": false,
+      "properties": {
+        "authIndex": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "disabled": {
+          "type": "boolean"
+        },
+        "email": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mutable": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "quota": true,
+        "runtimeOnly": {
+          "type": "boolean"
+        },
+        "status": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "statusMessage": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "unavailable": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "authIndex",
+        "provider",
+        "label",
+        "status",
+        "statusMessage",
+        "disabled",
+        "unavailable",
+        "runtimeOnly",
+        "mutable",
+        "email",
+        "quota"
+      ],
+      "type": "object"
+    },
+    "CpaAccountDelete": {
+      "additionalProperties": false,
+      "description": "Required process-scoped mutation precondition.\n\nBoth fields travel at the top level of every mutation request. The random\nprocess generation prevents a revision captured before restart from being\naccepted by a fresh process whose in-memory counter reused the same value.",
+      "properties": {
+        "authIndex": {
+          "type": "string"
+        },
+        "expectedRevision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "processGeneration": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "expectedRevision",
+        "processGeneration",
+        "name",
+        "authIndex"
+      ],
+      "type": "object"
+    },
+    "CpaAccountStatusUpdate": {
+      "additionalProperties": false,
+      "description": "Required process-scoped mutation precondition.\n\nBoth fields travel at the top level of every mutation request. The random\nprocess generation prevents a revision captured before restart from being\naccepted by a fresh process whose in-memory counter reused the same value.",
+      "properties": {
+        "authIndex": {
+          "type": "string"
+        },
+        "disabled": {
+          "type": "boolean"
+        },
+        "expectedRevision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "processGeneration": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "expectedRevision",
+        "processGeneration",
+        "name",
+        "authIndex",
+        "disabled"
+      ],
+      "type": "object"
+    },
+    "CpaAccounts": {
+      "additionalProperties": false,
+      "properties": {
+        "accounts": {
+          "items": {
+            "$ref": "#/$defs/CpaAccount"
+          },
+          "type": "array"
+        },
+        "processGeneration": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "accounts",
+        "version",
+        "revision",
+        "processGeneration"
+      ],
+      "type": "object"
+    },
+    "CpaConnectionReport": {
+      "additionalProperties": false,
+      "properties": {
+        "buildDate": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "commit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "inferenceError": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "inferenceReady": {
+          "type": "boolean"
+        },
+        "managementError": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "managementReady": {
+          "type": "boolean"
+        },
+        "modelCount": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "processGeneration": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "reachable": {
+          "type": "boolean"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "reachable",
+        "managementReady",
+        "inferenceReady",
+        "version",
+        "commit",
+        "buildDate",
+        "modelCount",
+        "managementError",
+        "inferenceError",
+        "revision",
+        "processGeneration"
+      ],
+      "type": "object"
+    },
+    "CpaIntegration": {
+      "additionalProperties": false,
+      "description": "Secret-free singleton configuration for the local CPA external integration.",
+      "properties": {
+        "accountId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "baseUrl": {
+          "type": "string"
+        },
+        "baseUrlReadOnly": {
+          "type": "boolean"
+        },
+        "configured": {
+          "type": "boolean"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "inferenceKeyConfigured": {
+          "type": "boolean"
+        },
+        "managementKeyConfigured": {
+          "type": "boolean"
+        },
+        "modelCount": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "modelsRefreshedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "processGeneration": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "configured",
+        "baseUrl",
+        "baseUrlReadOnly",
+        "managementKeyConfigured",
+        "inferenceKeyConfigured",
+        "enabled",
+        "accountId",
+        "modelCount",
+        "modelsRefreshedAt",
+        "revision",
+        "processGeneration"
+      ],
+      "type": "object"
+    },
+    "CpaIntegrationUpdate": {
+      "additionalProperties": false,
+      "description": "PUT CPA configuration. Secret fields are write-only; omission preserves\ntheir existing encrypted values.",
+      "properties": {
+        "baseUrl": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "expectedRevision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "inferenceKey": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "managementKey": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "processGeneration": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "expectedRevision",
+        "processGeneration"
+      ],
+      "type": "object"
+    },
+    "CpaModels": {
+      "additionalProperties": false,
+      "properties": {
+        "models": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "processGeneration": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "refreshedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "models",
+        "refreshedAt",
+        "revision",
+        "processGeneration"
+      ],
+      "type": "object"
+    },
+    "CpaOAuthProvider": {
+      "enum": [
+        "codex",
+        "anthropic",
+        "antigravity",
+        "kimi",
+        "xai"
+      ],
+      "type": "string"
+    },
+    "CpaOAuthSessionDelete": {
+      "additionalProperties": false,
+      "description": "Required process-scoped mutation precondition.\n\nBoth fields travel at the top level of every mutation request. The random\nprocess generation prevents a revision captured before restart from being\naccepted by a fresh process whose in-memory counter reused the same value.",
+      "properties": {
+        "expectedRevision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "processGeneration": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "state": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "expectedRevision",
+        "processGeneration",
+        "state"
+      ],
+      "type": "object"
+    },
+    "CpaOAuthStart": {
+      "additionalProperties": false,
+      "properties": {
+        "expiresIn": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "flow": {
+          "type": "string"
+        },
+        "processGeneration": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "provider": {
+          "$ref": "#/$defs/CpaOAuthProvider"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "state": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "userCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "provider",
+        "state",
+        "url",
+        "flow",
+        "userCode",
+        "expiresIn",
+        "revision",
+        "processGeneration"
+      ],
+      "type": "object"
+    },
+    "CpaOAuthStartRequest": {
+      "additionalProperties": false,
+      "description": "Required process-scoped mutation precondition.\n\nBoth fields travel at the top level of every mutation request. The random\nprocess generation prevents a revision captured before restart from being\naccepted by a fresh process whose in-memory counter reused the same value.",
+      "properties": {
+        "expectedRevision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "processGeneration": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "provider": {
+          "$ref": "#/$defs/CpaOAuthProvider"
+        }
+      },
+      "required": [
+        "expectedRevision",
+        "processGeneration",
+        "provider"
+      ],
+      "type": "object"
+    },
+    "CpaOAuthStatus": {
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "processGeneration": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "state": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "state",
+        "status",
+        "error",
+        "revision",
+        "processGeneration"
+      ],
+      "type": "object"
+    },
+    "CpaQuotaReset": {
+      "additionalProperties": false,
+      "description": "Required process-scoped mutation precondition.\n\nBoth fields travel at the top level of every mutation request. The random\nprocess generation prevents a revision captured before restart from being\naccepted by a fresh process whose in-memory counter reused the same value.",
+      "properties": {
+        "authIndex": {
+          "type": "string"
+        },
+        "expectedRevision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "processGeneration": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "expectedRevision",
+        "processGeneration",
+        "name",
+        "authIndex"
+      ],
+      "type": "object"
+    },
+    "CpaTestRequest": {
+      "additionalProperties": false,
+      "description": "Operational connection test. Optional write-only values allow testing a\nfirst-time configuration without persisting it.",
+      "properties": {
+        "baseUrl": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "inferenceKey": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "managementKey": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "CreditBalance": {
       "additionalProperties": false,
       "description": "One credit balance row as projected for provider usage. Distinct from the\nstored provider credit row.",
@@ -4024,7 +4611,7 @@
     },
     "ProviderContractGroup": {
       "additionalProperties": false,
-      "description": "One built-in provider scope.",
+      "description": "One built-in Provider/Offering contract scope.",
       "properties": {
         "card": {
           "$ref": "#/$defs/CardCapabilitySummary"
@@ -5983,6 +6570,51 @@
     },
     {
       "$ref": "#/$defs/ApplicationConnectorCommitResult"
+    },
+    {
+      "$ref": "#/$defs/CpaIntegration"
+    },
+    {
+      "$ref": "#/$defs/CpaIntegrationUpdate"
+    },
+    {
+      "$ref": "#/$defs/CpaTestRequest"
+    },
+    {
+      "$ref": "#/$defs/CpaConnectionReport"
+    },
+    {
+      "$ref": "#/$defs/CpaModels"
+    },
+    {
+      "$ref": "#/$defs/CpaAccounts"
+    },
+    {
+      "$ref": "#/$defs/CpaAccount"
+    },
+    {
+      "$ref": "#/$defs/CpaAccountStatusUpdate"
+    },
+    {
+      "$ref": "#/$defs/CpaAccountDelete"
+    },
+    {
+      "$ref": "#/$defs/CpaQuotaReset"
+    },
+    {
+      "$ref": "#/$defs/CpaOAuthProvider"
+    },
+    {
+      "$ref": "#/$defs/CpaOAuthStartRequest"
+    },
+    {
+      "$ref": "#/$defs/CpaOAuthStart"
+    },
+    {
+      "$ref": "#/$defs/CpaOAuthStatus"
+    },
+    {
+      "$ref": "#/$defs/CpaOAuthSessionDelete"
     }
   ],
   "title": "DashboardApiV3"

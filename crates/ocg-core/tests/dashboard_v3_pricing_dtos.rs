@@ -352,7 +352,7 @@ fn catalog_type_names_keep_the_frozen_prefix_and_pricing_block() {
         &CATALOG_TYPE_NAMES[account_transfer_end..application_connector_end],
         APPLICATION_CONNECTOR_CATALOG_TYPES
     );
-    assert_eq!(CATALOG_TYPE_NAMES.len(), application_connector_end);
+    assert_eq!(CATALOG_TYPE_NAMES.len(), application_connector_end + 15);
 }
 
 #[test]

@@ -320,8 +320,8 @@ fn custom_create_body() -> Value {
 }
 
 #[test]
-fn dashboard_v3_schema_version_stays_at_v33() {
-    assert_eq!(CURRENT_SCHEMA_VERSION, 33);
+fn dashboard_v3_schema_version_stays_at_v34() {
+    assert_eq!(CURRENT_SCHEMA_VERSION, 34);
 }
 
 #[tokio::test]
@@ -393,7 +393,13 @@ async fn dashboard_v3_v2_login_cookie_authorizes_provider_reads() {
     assert_eq!(listed.status(), StatusCode::OK);
     let body: Value = listed.json().await.unwrap();
     let parsed: ProviderCatalog = serde_json::from_value(body.clone()).unwrap();
-    assert_eq!(parsed.entries.len(), BUILTIN_PLANS.len());
+    assert_eq!(
+        parsed.entries.len(),
+        BUILTIN_PLANS
+            .iter()
+            .filter(|plan| !plan.product_surface.is_external_integration())
+            .count()
+    );
     assert_secret_free(&body, &[]);
 
     harness.stop();
@@ -411,9 +417,13 @@ async fn dashboard_v3_providers_catalog_covers_all_plan_facts_nulls_and_camel_ca
     assert!(body.get("provider_id").is_none());
 
     let parsed: ProviderCatalog = serde_json::from_value(body.clone()).expect("ProviderCatalog");
-    assert_eq!(parsed.entries.len(), BUILTIN_PLANS.len());
+    let provider_plans = BUILTIN_PLANS
+        .iter()
+        .filter(|plan| !plan.product_surface.is_external_integration())
+        .collect::<Vec<_>>();
+    assert_eq!(parsed.entries.len(), provider_plans.len());
 
-    for (plan, entry) in BUILTIN_PLANS.iter().zip(parsed.entries.iter()) {
+    for (plan, entry) in provider_plans.into_iter().zip(parsed.entries.iter()) {
         assert_eq!(entry.provider_id, plan.offering.provider_id);
         assert_eq!(entry.offering_id, plan.offering.offering_id);
         assert_eq!(entry.display_name, plan.display_name);
@@ -1591,7 +1601,10 @@ async fn dashboard_v3_provider_routes_coexist_with_v2_and_omit_v2_aliases() {
     assert!(v3_catalog.get("entries").is_some());
     assert_eq!(
         v3_catalog["entries"].as_array().unwrap().len(),
-        BUILTIN_PLANS.len()
+        BUILTIN_PLANS
+            .iter()
+            .filter(|plan| !plan.product_surface.is_external_integration())
+            .count()
     );
     assert!(v3_catalog["entries"][0].get("providerId").is_some());
     assert!(v3_catalog["entries"][0].get("provider_id").is_none());
@@ -1646,6 +1659,6 @@ async fn dashboard_v3_provider_routes_coexist_with_v2_and_omit_v2_aliases() {
     assert_eq!(v3_zen["enabled"], false);
     assert!(v3_zen.get("account").is_none());
 
-    assert_eq!(CURRENT_SCHEMA_VERSION, 33);
+    assert_eq!(CURRENT_SCHEMA_VERSION, 34);
     harness.stop();
 }

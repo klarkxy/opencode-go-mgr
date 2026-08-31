@@ -8,10 +8,10 @@
 
 底层是静态 Provider Registry 加几个按能力拆分的适配器。Custom API 只是其中一个 Configurable HTTP 适配器，不是基类，其他方案不会继承它。范围划分如下：
 
-- 内置家族使用 `Provider(provider_id)`。
+- 每个精确的内置 Provider/Offering 合约使用 `Provider(contract_scope_id)`；既有 scope ID 继续保留历史上类似 Provider ID 的取值。
 - `CustomEndpoint(account_id)` 范围内的 Custom 映射仍归账号所有，不能在本页编辑。
 
-左侧列出内置 Provider 范围。主区有三个子页签：**模型目录**、**价格** 与 **Alias**。原来的目录与模型合约视图合并为模型目录页签上的一张矩阵表。
+左侧列出内置 Provider/Offering 合约范围。主区有三个子页签：**模型目录**、**价格** 与 **Alias**。原来的目录与模型合约视图合并为模型目录页签上的一张矩阵表。
 
 **Alias** 是只读聚合页。它把现有 Provider 合约和账号能力汇总成公开名称，并展示可路由性与精确上游身份。它不会新建 Alias API、store、cache 或编辑器。Custom 映射通过 `?view=accounts&account_id=<id>` 跳转到**账号**页唯一的编辑器；加载该链接会打开对应账号编辑框。关闭编辑框会移除 `account_id`；账号不存在时会提示，并清掉失效参数。
 

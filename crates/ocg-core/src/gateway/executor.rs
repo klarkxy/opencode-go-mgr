@@ -18,7 +18,7 @@ use crate::gateway::protocol::{MaterializeSpec, RequestPlan, materialize_parsed_
 use crate::gateway::response::{local_protocol_failure, protocol_error_response};
 use crate::gateway::routing::resolve_conversation_key;
 use crate::gateway::selector::AccountSelector;
-use crate::http_client::ForwardRouteSet;
+use crate::http_client::{ForwardRouteSet, RouteLabel};
 use crate::kernel::pricing::PricingSnapshot;
 use crate::kernel::protocol::ApiFormat;
 use crate::models::{AppConfig, UpstreamChannel};
@@ -38,6 +38,7 @@ pub(crate) struct RequestSnapshots {
     routes: Arc<ForwardRouteSet>,
     contracts: Arc<EffectiveContractSet>,
     resolved: alias::ResolvedModel,
+    cpa_base_url: Option<String>,
 }
 
 impl RequestSnapshots {
@@ -47,12 +48,24 @@ impl RequestSnapshots {
         contracts: Arc<EffectiveContractSet>,
         resolved: alias::ResolvedModel,
     ) -> Self {
+        let cpa_base_url = match crate::cpa::env_base_url() {
+            Ok(Some(base_url)) => Some(base_url),
+            Ok(None) => state
+                .db
+                .lock()
+                .cpa_integration()
+                .ok()
+                .flatten()
+                .map(|record| record.base_url),
+            Err(_) => None,
+        };
         Self {
             config,
             pricing: state.pricing_snapshot(),
             routes: state.forward_route_set(),
             contracts,
             resolved,
+            cpa_base_url,
         }
     }
 }
@@ -244,6 +257,7 @@ impl GatewayExecutor {
                 free_available,
                 &custom_runtimes,
                 &goat_runtimes,
+                snapshots.cpa_base_url.as_deref(),
                 &snapshots.contracts,
             ) {
                 Ok(route_set) => route_set,
@@ -398,7 +412,12 @@ impl GatewayExecutor {
                 loop_state.attempt = loop_state.attempt.saturating_add(1);
                 // Re-resolve the leg on every attempt: free fallback or sticky
                 // rewrites can swap `active_plan.model` mid-request.
-                let (client, route) = snapshots.routes.client_for(&active_plan.model);
+                let (client, selected_route) = snapshots.routes.client_for(&active_plan.model);
+                let route = if account.provider_id == crate::provider::CPA_PROVIDER_ID {
+                    RouteLabel::Direct
+                } else {
+                    selected_route
+                };
                 match forward_request(
                     client,
                     route,

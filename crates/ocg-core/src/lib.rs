@@ -4,6 +4,7 @@ pub mod application_connectors;
 pub mod auth;
 pub mod browser;
 pub(crate) mod control;
+pub mod cpa;
 pub mod crypto;
 pub mod custom;
 pub mod custom_http;

@@ -16,8 +16,9 @@ use crate::kernel::zen::ZenFreeModelCatalog;
 use crate::models::Account;
 use crate::provider::{
     COMMAND_CODE_GOAT_BASE_URL, COMMAND_CODE_GOAT_INCLUDED_MODEL_IDS,
-    OPENCODE_CONSTRUCTABLE_PROTOCOLS, ProviderAdapterKind, ProviderRegistry,
-    StructuralProbeCeiling, UpstreamProtocolKind, command_code_goat_includes_model,
+    OPENCODE_CONSTRUCTABLE_PROTOCOLS, ProtocolProbeDescriptor, ProviderAdapterKind,
+    ProviderRegistry, StructuralProbeCeiling, UpstreamProtocolKind,
+    command_code_goat_includes_model,
 };
 use crate::redaction::sanitize_upstream_error_value_with_known_secret;
 use chrono::{DateTime, Utc};
@@ -42,7 +43,8 @@ pub const NO_ENABLED_UPSTREAM_PROTOCOL: &str =
 
 const MAX_PROBE_ERROR_CHARS: usize = 500;
 
-pub fn static_protocol_snapshot_date(provider_id: &str) -> Option<&'static str> {
+pub fn static_protocol_snapshot_date(scope_id: &str) -> Option<&'static str> {
+    let provider_id = provider_scope_descriptor(scope_id)?.provider_id;
     match provider_id {
         OPENCODE_PROVIDER_ID => {
             Some(crate::kernel::protocol::OPENCODE_GO_STATIC_PROTOCOL_SNAPSHOT_DATE)
@@ -124,7 +126,9 @@ impl ContractScope {
             return Err("contract scope id is required".to_string());
         }
         match ContractScopeKind::try_from(kind)? {
-            ContractScopeKind::Provider => Ok(Self::provider(id)),
+            ContractScopeKind::Provider => provider_scope_descriptor(id)
+                .map(|_| Self::provider(id))
+                .ok_or_else(|| format!("unknown provider contract scope `{id}`")),
             ContractScopeKind::CustomEndpoint => Ok(Self::custom_endpoint(id)),
         }
     }
@@ -146,48 +150,29 @@ impl ContractScope {
         offering_id: &str,
         account_id: Option<&str>,
     ) -> Option<Self> {
-        match ProviderAdapterKind::from_offering(provider_id, offering_id)? {
+        let descriptor = ProviderRegistry::get(provider_id, offering_id)?;
+        match descriptor.kind {
             ProviderAdapterKind::ConfigurableHttp => account_id
                 .map(str::trim)
                 .filter(|id| !id.is_empty())
                 .map(Self::custom_endpoint),
-            kind => kind.provider_scope_id().map(Self::provider),
+            _ => descriptor.contract_scope_id.map(Self::provider),
         }
     }
 }
 
 pub fn builtin_provider_scope_ids() -> Vec<&'static str> {
-    let mut ids = Vec::new();
-    for descriptor in ProviderRegistry::iter() {
-        if descriptor.kind.provider_scope_id().is_some() && !ids.contains(&descriptor.provider_id) {
-            ids.push(descriptor.provider_id);
-        }
-    }
-    ids
+    ProviderRegistry::iter()
+        .filter_map(|descriptor| descriptor.contract_scope_id)
+        .collect()
 }
 
-pub fn adapter_kind_for_provider_scope(provider_id: &str) -> Option<ProviderAdapterKind> {
-    if provider_id == CUSTOM_PROVIDER_ID {
-        // Custom has no provider-level contract, but callers use this lookup
-        // to return the more precise account-owned scope error.
-        return Some(ProviderAdapterKind::ConfigurableHttp);
-    }
-    provider_scope_descriptor(provider_id).map(|descriptor| descriptor.kind)
-}
-
-/// Resolve one provider-scoped descriptor without silently choosing a
-/// representative Offering. Provider scopes intentionally support exactly one
-/// non-Custom Offering today; a second Offering fails closed until persistence
-/// and the V3 contract become Offering-aware.
-fn provider_scope_descriptor(provider_id: &str) -> Option<crate::provider::ProviderDescriptor> {
-    let mut matches = ProviderRegistry::iter().filter(|descriptor| {
-        descriptor.provider_id == provider_id && descriptor.kind.provider_scope_id().is_some()
-    });
-    let descriptor = matches.next()?;
-    if matches.next().is_some() {
-        return None;
-    }
-    Some(descriptor)
+/// Resolve one exact, statically declared Provider contract scope. The opaque
+/// scope id is deliberately distinct from Provider identity so a future second
+/// Offering can declare its own scope without changing persistence or V3 wire
+/// shapes.
+pub fn provider_scope_descriptor(scope_id: &str) -> Option<crate::provider::ProviderDescriptor> {
+    ProviderRegistry::iter().find(|descriptor| descriptor.contract_scope_id == Some(scope_id))
 }
 
 pub fn parse_upstream_protocol(value: &str) -> Result<UpstreamProtocolKind, String> {
@@ -452,6 +437,15 @@ impl EffectiveContractSet {
         }
     }
 
+    pub fn provider_offering(
+        &self,
+        provider_id: &str,
+        offering_id: &str,
+    ) -> Option<&EffectiveScopeContract> {
+        let scope = ContractScope::from_offering(provider_id, offering_id, None)?;
+        self.scope(&scope)
+    }
+
     pub fn mapping_has_enabled_protocol(&self, mapping: &ProviderMapping) -> bool {
         let Some(scope) = ContractScope::from_mapping(mapping) else {
             return false;
@@ -565,14 +559,11 @@ pub fn select_upstream_protocol(
 }
 
 pub fn safety_ceiling_protocols(
-    adapter: ProviderAdapterKind,
+    probe: ProtocolProbeDescriptor,
     model_id: &str,
     declared: &[(String, UpstreamProtocolKind)],
 ) -> Vec<UpstreamProtocolKind> {
-    let Some(descriptor) = representative_descriptor(adapter) else {
-        return Vec::new();
-    };
-    match descriptor.protocol_probe.structural_ceiling {
+    match probe.structural_ceiling {
         StructuralProbeCeiling::Unavailable => Vec::new(),
         StructuralProbeCeiling::OpenCodeConstructable => {
             if is_known_model(model_id) {
@@ -623,6 +614,13 @@ pub fn static_verified_protocols(
         ProviderAdapterKind::MiniMaxCn | ProviderAdapterKind::KimiCn => {
             return vec![UpstreamProtocolKind::ChatCompletions];
         }
+        ProviderAdapterKind::Cpa => {
+            return vec![
+                UpstreamProtocolKind::ChatCompletions,
+                UpstreamProtocolKind::Responses,
+                UpstreamProtocolKind::Messages,
+            ];
+        }
         ProviderAdapterKind::ConfigurableHttp => unreachable!("handled above"),
     }
     .into_iter()
@@ -638,14 +636,12 @@ fn opencode_profile(model_id: &str) -> Option<(ApiFormat, &'static [ApiFormat])>
 }
 
 pub fn probe_may_add(
-    adapter: ProviderAdapterKind,
+    probe: ProtocolProbeDescriptor,
     model_id: &str,
     protocol: UpstreamProtocolKind,
     declared: &[(String, UpstreamProtocolKind)],
 ) -> bool {
-    representative_descriptor(adapter)
-        .is_some_and(|descriptor| descriptor.protocol_probe.explicit_probe)
-        && safety_ceiling_protocols(adapter, model_id, declared).contains(&protocol)
+    probe.explicit_probe && safety_ceiling_protocols(probe, model_id, declared).contains(&protocol)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -763,22 +759,21 @@ pub fn build_effective_contracts(
     persisted: PersistedContracts,
 ) -> EffectiveContractSet {
     let mut set = EffectiveContractSet::default();
-    for provider_id in builtin_provider_scope_ids() {
-        let scope = ContractScope::provider(provider_id);
-        let adapter = adapter_kind_for_provider_scope(provider_id)
-            .expect("builtin provider scopes map to adapters");
+    for scope_id in builtin_provider_scope_ids() {
+        let scope = ContractScope::provider(scope_id);
+        let descriptor = provider_scope_descriptor(scope_id)
+            .expect("builtin provider scopes map to exact descriptors");
         let persisted_scope = persisted.scopes.get(&scope);
         let evidence = persisted.evidence.get(&scope).cloned().unwrap_or_default();
         let overrides = persisted.overrides.get(&scope).cloned().unwrap_or_default();
         let contract = merge_provider_scope(
-            provider_id,
-            adapter,
+            descriptor,
             zen_catalog,
             persisted_scope,
             &evidence,
             &overrides,
         );
-        set.providers.insert(provider_id.to_string(), contract);
+        set.providers.insert(scope_id.to_string(), contract);
     }
     for runtime in custom_runtimes {
         let scope = ContractScope::custom_endpoint(&runtime.account_id);
@@ -792,28 +787,17 @@ pub fn build_effective_contracts(
     set
 }
 
-fn representative_descriptor(
-    adapter: ProviderAdapterKind,
-) -> Option<crate::provider::ProviderDescriptor> {
-    let mut matches = ProviderRegistry::iter().filter(|descriptor| descriptor.kind == adapter);
-    let descriptor = matches.next()?;
-    if matches.next().is_some() {
-        return None;
-    }
-    Some(descriptor)
-}
-
 fn merge_provider_scope(
-    provider_id: &str,
-    adapter: ProviderAdapterKind,
+    descriptor: crate::provider::ProviderDescriptor,
     zen_catalog: &ZenFreeModelCatalog,
     persisted: Option<&PersistedScopeRow>,
     evidence: &[PersistedModelProtocol],
     overrides: &[PersistedModelProtocolOverride],
 ) -> EffectiveScopeContract {
-    let descriptor = provider_scope_descriptor(provider_id)
-        .filter(|descriptor| descriptor.kind == adapter)
-        .expect("provider scope must identify exactly one registered offering");
+    let adapter = descriptor.kind;
+    let scope_id = descriptor
+        .contract_scope_id
+        .expect("provider contract descriptor must declare a scope id");
     let revision = persisted.map(|row| row.revision).unwrap_or(1);
     let (catalog, static_models) = match adapter {
         ProviderAdapterKind::OpenCodeGo => {
@@ -941,6 +925,9 @@ fn merge_provider_scope(
                 models,
             )
         }
+        ProviderAdapterKind::Cpa => {
+            unreachable!("CPA is an external integration without a Provider contract scope")
+        }
         ProviderAdapterKind::ConfigurableHttp => unreachable!("custom uses merge_custom_scope"),
     };
 
@@ -957,6 +944,7 @@ fn merge_provider_scope(
             model_id.clone(),
             merge_model_contract(
                 adapter,
+                descriptor.protocol_probe,
                 model_id,
                 &[],
                 default_source,
@@ -975,8 +963,8 @@ fn merge_provider_scope(
     }
 
     EffectiveScopeContract {
-        scope: ContractScope::provider(provider_id),
-        provider_id: provider_id.to_string(),
+        scope: ContractScope::provider(scope_id),
+        provider_id: descriptor.provider_id.to_string(),
         offering_id: descriptor.offering_id.to_string(),
         adapter_kind: adapter,
         catalog_routable: descriptor.inference.catalog_routable,
@@ -1028,6 +1016,7 @@ fn merge_custom_scope(
             model_id.clone(),
             merge_model_contract(
                 ProviderAdapterKind::ConfigurableHttp,
+                descriptor.protocol_probe,
                 model_id,
                 &declared,
                 ContractEvidenceSource::Preset,
@@ -1040,6 +1029,7 @@ fn merge_custom_scope(
     overlay_probe_confirmed_models(
         &mut models,
         ProviderAdapterKind::ConfigurableHttp,
+        descriptor.protocol_probe,
         &declared,
         evidence,
         overrides,
@@ -1080,6 +1070,7 @@ fn preferred_protocol(
         ProviderAdapterKind::MiniMaxCn | ProviderAdapterKind::KimiCn => {
             UpstreamProtocolKind::ChatCompletions
         }
+        ProviderAdapterKind::Cpa => UpstreamProtocolKind::ChatCompletions,
         ProviderAdapterKind::ConfigurableHttp => {
             // A Custom endpoint binds every declared model to exactly one
             // upstream protocol; that protocol is also the conversion target.
@@ -1095,6 +1086,7 @@ fn preferred_protocol(
 
 fn merge_model_contract(
     adapter: ProviderAdapterKind,
+    probe: ProtocolProbeDescriptor,
     model_id: &str,
     declared: &[(String, UpstreamProtocolKind)],
     default_source: ContractEvidenceSource,
@@ -1114,7 +1106,7 @@ fn merge_model_contract(
             .filter_map(protocol_from_api)
             .collect()
     } else {
-        safety_ceiling_protocols(adapter, model_id, declared)
+        safety_ceiling_protocols(probe, model_id, declared)
     };
     let static_verified = static_verified_protocols(adapter, model_id, declared);
     let mut protocols = BTreeMap::new();
@@ -1218,6 +1210,7 @@ fn merge_model_contract(
 fn overlay_probe_confirmed_models(
     models: &mut BTreeMap<String, EffectiveModelContract>,
     adapter: ProviderAdapterKind,
+    probe: ProtocolProbeDescriptor,
     declared: &[(String, UpstreamProtocolKind)],
     evidence: &[PersistedModelProtocol],
     overrides: &[PersistedModelProtocolOverride],
@@ -1234,7 +1227,7 @@ fn overlay_probe_confirmed_models(
         {
             continue;
         }
-        if !probe_may_add(adapter, &row.model_id, row.protocol, declared) {
+        if !probe_may_add(probe, &row.model_id, row.protocol, declared) {
             continue;
         }
         extra.insert(row.model_id.clone());
@@ -1244,6 +1237,7 @@ fn overlay_probe_confirmed_models(
             model_id.clone(),
             merge_model_contract(
                 adapter,
+                probe,
                 &model_id,
                 declared,
                 ContractEvidenceSource::ProbeConfirmed,
@@ -1263,7 +1257,10 @@ fn custom_or_case_match(left: &str, right: &str) -> bool {
 mod tests {
     use super::*;
     use crate::custom::CustomAccountRuntime;
-    use crate::kernel::ids::COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM;
+    use crate::kernel::ids::{
+        ANONYMOUS_FREE_OFFERING_ID, COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM, GO_OFFERING_ID,
+        GOAT_OFFERING_ID,
+    };
     use crate::models::{AccountCustomConfig, AccountModelCapability};
     use crate::provider::{CUSTOM_API_OFFERING_ID, ConnectionVerificationStatus};
 
@@ -1282,6 +1279,12 @@ mod tests {
             .unwrap()
     }
 
+    fn probe_for(provider_id: &str, offering_id: &str) -> ProtocolProbeDescriptor {
+        ProviderRegistry::get(provider_id, offering_id)
+            .expect("test provider scope")
+            .protocol_probe
+    }
+
     #[test]
     fn custom_endpoints_are_isolated_by_account() {
         let left =
@@ -1296,12 +1299,14 @@ mod tests {
     fn provider_scopes_identify_one_exact_registered_offering() {
         let set = build_effective_contracts(&zen_seed(), &[], empty_persisted());
         assert_eq!(set.providers.len(), builtin_provider_scope_ids().len());
-        for (provider_id, contract) in &set.providers {
-            let descriptor = ProviderRegistry::get(provider_id, &contract.offering_id)
+        for (scope_id, contract) in &set.providers {
+            let descriptor = provider_scope_descriptor(scope_id)
                 .expect("effective provider scope must identify a registered offering");
             assert_eq!(descriptor.kind, contract.adapter_kind);
             assert_eq!(descriptor.provider_id, contract.provider_id);
+            assert_eq!(descriptor.offering_id, contract.offering_id);
         }
+        assert!(ContractScope::parse("provider", "unknown-scope").is_err());
     }
 
     #[test]
@@ -1362,8 +1367,11 @@ mod tests {
 
     #[test]
     fn opencode_ceiling_is_constructable_paths_not_static_model_protocols() {
-        let grok_ceiling =
-            safety_ceiling_protocols(ProviderAdapterKind::OpenCodeGo, "grok-4.5", &[]);
+        let grok_ceiling = safety_ceiling_protocols(
+            probe_for(OPENCODE_PROVIDER_ID, GO_OFFERING_ID),
+            "grok-4.5",
+            &[],
+        );
         let grok_static =
             static_verified_protocols(ProviderAdapterKind::OpenCodeGo, "grok-4.5", &[]);
         assert!(grok_ceiling.contains(&UpstreamProtocolKind::ChatCompletions));
@@ -1371,17 +1379,20 @@ mod tests {
         assert!(grok_ceiling.contains(&UpstreamProtocolKind::Messages));
         assert_eq!(grok_static, vec![UpstreamProtocolKind::Responses]);
         assert!(probe_may_add(
-            ProviderAdapterKind::OpenCodeGo,
+            probe_for(OPENCODE_PROVIDER_ID, GO_OFFERING_ID),
             "grok-4.5",
             UpstreamProtocolKind::ChatCompletions,
             &[],
         ));
 
-        let unknown_zen =
-            safety_ceiling_protocols(ProviderAdapterKind::ZenFree, "brand-new-promo-free", &[]);
+        let unknown_zen = safety_ceiling_protocols(
+            probe_for(OPENCODE_ZEN_FREE_PROVIDER_ID, ANONYMOUS_FREE_OFFERING_ID),
+            "brand-new-promo-free",
+            &[],
+        );
         assert_eq!(unknown_zen, vec![UpstreamProtocolKind::ChatCompletions]);
         assert!(!probe_may_add(
-            ProviderAdapterKind::CommandCodeGoat,
+            probe_for(COMMAND_CODE_PROVIDER_ID, GOAT_OFFERING_ID),
             COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM,
             UpstreamProtocolKind::ChatCompletions,
             &[],
@@ -1716,7 +1727,12 @@ mod tests {
                 .unwrap()
                 .routable
         );
-        assert!(!ProviderAdapterKind::CommandCodeGoat.protocol_probe_supported());
+        assert!(
+            !ProviderRegistry::get(COMMAND_CODE_PROVIDER_ID, GOAT_OFFERING_ID)
+                .unwrap()
+                .card_actions
+                .protocol_probe
+        );
     }
 
     #[test]
@@ -1794,7 +1810,7 @@ mod tests {
                 .collect(),
         };
         let ceiling = safety_ceiling_protocols(
-            ProviderAdapterKind::ConfigurableHttp,
+            probe_for(CUSTOM_PROVIDER_ID, CUSTOM_API_OFFERING_ID),
             "declared-model",
             &declared,
         );

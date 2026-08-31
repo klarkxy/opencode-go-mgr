@@ -27,7 +27,7 @@ Gateway 只做四件事，顺序基本符合直觉：
     （系统浏览器）                 客户端 + Key
                \                    /
                 v                  v
-              SQLite schema v32（仅本地）
+              SQLite schema v34（仅本地）
 ```
 
 请求路径、Plan、七个面板视图和协议转换的文字图见

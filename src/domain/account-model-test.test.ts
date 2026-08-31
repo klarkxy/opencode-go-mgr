@@ -18,7 +18,17 @@ const contracts = {
     scope_id: "provider-1",
     provider_id: "provider-1",
     static_protocol_snapshot_date: null,
-    offerings: [],
+    offerings: [{
+      offering_id: "offering-1",
+      display_name: "Provider One",
+      routable: true,
+      accounts: [{
+        id: "account-1",
+        name: "Account One",
+        enabled: true,
+        verification_status: "not_required",
+      }],
+    }],
     catalog: { source: "test", source_url: "", refreshed_at: null, models: [], refresh_supported: false },
     models: [
       { alias: "Beta", model_id: "provider/beta", preferred_protocol: "messages", protocols: {}, routable: true, disabled_reasons: [] },

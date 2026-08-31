@@ -251,31 +251,41 @@ pub async fn models(
 fn published_alias_models_response(state: &CoreState) -> axum::response::Response {
     let zen_catalog = state.zen_free_model_catalog();
     let contracts = state.provider_contracts();
-    let go_ids = provider_catalog_model_ids(&contracts, crate::provider::OPENCODE_PROVIDER_ID);
-    let goat_ids =
-        provider_catalog_model_ids(&contracts, crate::provider::COMMAND_CODE_PROVIDER_ID);
-    let minimax_ids = provider_catalog_model_ids(&contracts, crate::provider::MINIMAX_PROVIDER_ID);
-    let kimi_ids = provider_catalog_model_ids(&contracts, crate::provider::KIMI_PROVIDER_ID);
-    let published = crate::alias::published_routeable_aliases_with_extended_catalogs(
-        &go_ids,
-        &zen_catalog.models,
-        &goat_ids,
-        &minimax_ids,
-        &kimi_ids,
+    let go_ids = provider_catalog_model_ids(
+        &contracts,
+        crate::provider::OPENCODE_PROVIDER_ID,
+        crate::provider::GO_OFFERING_ID,
     );
+    let goat_ids = provider_catalog_model_ids(
+        &contracts,
+        crate::provider::COMMAND_CODE_PROVIDER_ID,
+        crate::provider::GOAT_OFFERING_ID,
+    );
+    let minimax_ids = provider_catalog_model_ids(
+        &contracts,
+        crate::provider::MINIMAX_PROVIDER_ID,
+        crate::provider::MINIMAX_CN_OFFERING_ID,
+    );
+    let kimi_ids = provider_catalog_model_ids(
+        &contracts,
+        crate::provider::KIMI_PROVIDER_ID,
+        crate::provider::KIMI_CN_OFFERING_ID,
+    );
+    let cpa_ids = active_cpa_model_ids(state);
+    let custom_ids = eligible_custom_public_models(state, &contracts);
+    let catalogs = crate::alias::RuntimeCatalogs {
+        go: &go_ids,
+        zen_free: &zen_catalog.models,
+        custom: &custom_ids,
+        command_code: &goat_ids,
+        minimax: &minimax_ids,
+        kimi: &kimi_ids,
+        cpa: &cpa_ids,
+    };
+    let published = crate::alias::published_routeable_aliases_with_runtime_catalogs(catalogs);
     let mut data: Vec<serde_json::Value> = published
         .iter()
-        .filter(|item| {
-            published_alias_has_enabled_protocol(
-                item,
-                &go_ids,
-                &zen_catalog.models,
-                &goat_ids,
-                &minimax_ids,
-                &kimi_ids,
-                &contracts,
-            )
-        })
+        .filter(|item| published_alias_has_enabled_protocol(item, catalogs, &contracts))
         .map(|item| {
             serde_json::json!({
                 "id": item.alias,
@@ -285,18 +295,9 @@ fn published_alias_models_response(state: &CoreState) -> axum::response::Respons
             })
         })
         .collect();
-    let custom_ids = eligible_custom_public_models(state, &contracts);
     for id in &custom_ids {
         let routeable_custom_alias = matches!(
-            crate::alias::resolve_with_extended_catalogs(
-                id,
-                &go_ids,
-                &zen_catalog.models,
-                &custom_ids,
-                &goat_ids,
-                &minimax_ids,
-                &kimi_ids,
-            ),
+            crate::alias::resolve_with_runtime_catalogs(id, catalogs),
             Ok(crate::alias::ResolvedModel::Alias { mappings, .. })
                 if mappings.iter().any(|mapping| mapping.is_custom_api() && mapping.routeable)
         );
@@ -317,6 +318,25 @@ fn published_alias_models_response(state: &CoreState) -> axum::response::Respons
             "owned_by": crate::provider::CUSTOM_PROVIDER_ID
         }));
     }
+    for id in cpa_ids.iter() {
+        let exact_cpa_raw = matches!(
+            crate::alias::resolve_with_runtime_catalogs(id, catalogs),
+            Ok(crate::alias::ResolvedModel::PinnedRaw { mapping, .. })
+                if mapping.provider_id == crate::provider::CPA_PROVIDER_ID && mapping.routeable
+        );
+        if exact_cpa_raw
+            && !data
+                .iter()
+                .any(|item| item.get("id").and_then(|value| value.as_str()) == Some(id))
+        {
+            data.push(serde_json::json!({
+                "id": id,
+                "object": "model",
+                "created": 0,
+                "owned_by": crate::provider::CPA_PROVIDER_ID
+            }));
+        }
+    }
     axum::Json(serde_json::json!({
         "object": "list",
         "data": data
@@ -326,47 +346,34 @@ fn published_alias_models_response(state: &CoreState) -> axum::response::Respons
 
 fn published_alias_has_enabled_protocol(
     item: &alias::PublishedAlias,
-    go_ids: &[String],
-    zen_models: &[String],
-    goat_ids: &[String],
-    minimax_ids: &[String],
-    kimi_ids: &[String],
+    catalogs: alias::RuntimeCatalogs<'_>,
     contracts: &crate::provider_contracts::EffectiveContractSet,
 ) -> bool {
     model_has_enabled_protocol(
         &item.alias,
-        go_ids,
-        zen_models,
-        goat_ids,
-        minimax_ids,
-        kimi_ids,
+        alias::RuntimeCatalogs {
+            custom: &[],
+            ..catalogs
+        },
         contracts,
     )
 }
 
 fn model_has_enabled_protocol(
     model: &str,
-    go_ids: &[String],
-    zen_models: &[String],
-    goat_ids: &[String],
-    minimax_ids: &[String],
-    kimi_ids: &[String],
+    catalogs: alias::RuntimeCatalogs<'_>,
     contracts: &crate::provider_contracts::EffectiveContractSet,
 ) -> bool {
-    match crate::alias::resolve_with_extended_catalogs(
-        model,
-        go_ids,
-        zen_models,
-        &[],
-        goat_ids,
-        minimax_ids,
-        kimi_ids,
-    ) {
-        Ok(alias::ResolvedModel::Alias { mappings, .. }) => mappings
-            .iter()
-            .any(|mapping| mapping.routeable && contracts.mapping_has_enabled_protocol(mapping)),
+    match crate::alias::resolve_with_runtime_catalogs(model, catalogs) {
+        Ok(alias::ResolvedModel::Alias { mappings, .. }) => mappings.iter().any(|mapping| {
+            mapping.routeable
+                && (mapping.provider_id == crate::provider::CPA_PROVIDER_ID
+                    || contracts.mapping_has_enabled_protocol(mapping))
+        }),
         Ok(alias::ResolvedModel::PinnedRaw { mapping, .. }) => {
-            mapping.routeable && contracts.mapping_has_enabled_protocol(&mapping)
+            mapping.routeable
+                && (mapping.provider_id == crate::provider::CPA_PROVIDER_ID
+                    || contracts.mapping_has_enabled_protocol(&mapping))
         }
         Err(_) => false,
     }
@@ -375,10 +382,10 @@ fn model_has_enabled_protocol(
 fn provider_catalog_model_ids(
     contracts: &crate::provider_contracts::EffectiveContractSet,
     provider_id: &str,
+    offering_id: &str,
 ) -> Vec<String> {
     contracts
-        .providers
-        .get(provider_id)
+        .provider_offering(provider_id, offering_id)
         .filter(|scope| {
             provider_id != crate::provider::OPENCODE_PROVIDER_ID
                 || scope.catalog.source == crate::provider_contracts::CATALOG_SOURCE_OPENCODE_MODELS
@@ -408,6 +415,31 @@ fn eligible_custom_public_models(
             })
         })
         .collect()
+}
+
+/// A disabled, cooling, auth-failed, or disconnected CPA must not inject raw
+/// identities before the ordinary selector can fall back to existing routes.
+fn active_cpa_model_ids(state: &CoreState) -> std::sync::Arc<Vec<String>> {
+    let active = {
+        let db = state.db.lock();
+        db.cpa_integration().ok().flatten().is_some_and(|_| {
+            db.get_account(crate::provider::CPA_ACCOUNT_ID)
+                .ok()
+                .flatten()
+                .is_some_and(|account| {
+                    crate::routing_runtime::account_is_available_for(
+                        &account,
+                        crate::models::UpstreamChannel::Go,
+                        &[],
+                    )
+                })
+        })
+    };
+    if active {
+        state.cpa_model_catalog()
+    } else {
+        std::sync::Arc::new(Vec::new())
+    }
 }
 
 async fn proxy_handler(
@@ -479,24 +511,39 @@ async fn proxy_handler_inner(
         parsed.requested_model.clone()
     };
     let contracts = state.provider_contracts();
-    let go_model_ids =
-        provider_catalog_model_ids(&contracts, crate::provider::OPENCODE_PROVIDER_ID);
+    let go_model_ids = provider_catalog_model_ids(
+        &contracts,
+        crate::provider::OPENCODE_PROVIDER_ID,
+        crate::provider::GO_OFFERING_ID,
+    );
     let custom_model_ids = eligible_custom_public_models(&state, &contracts);
-    let goat_model_ids =
-        provider_catalog_model_ids(&contracts, crate::provider::COMMAND_CODE_PROVIDER_ID);
-    let minimax_model_ids =
-        provider_catalog_model_ids(&contracts, crate::provider::MINIMAX_PROVIDER_ID);
-    let kimi_model_ids = provider_catalog_model_ids(&contracts, crate::provider::KIMI_PROVIDER_ID);
+    let goat_model_ids = provider_catalog_model_ids(
+        &contracts,
+        crate::provider::COMMAND_CODE_PROVIDER_ID,
+        crate::provider::GOAT_OFFERING_ID,
+    );
+    let minimax_model_ids = provider_catalog_model_ids(
+        &contracts,
+        crate::provider::MINIMAX_PROVIDER_ID,
+        crate::provider::MINIMAX_CN_OFFERING_ID,
+    );
+    let kimi_model_ids = provider_catalog_model_ids(
+        &contracts,
+        crate::provider::KIMI_PROVIDER_ID,
+        crate::provider::KIMI_CN_OFFERING_ID,
+    );
+    let cpa_model_ids = active_cpa_model_ids(&state);
     let zen_catalog = state.zen_free_model_catalog();
-    let resolved = match crate::alias::resolve_with_extended_catalogs(
-        &routing_model,
-        &go_model_ids,
-        &zen_catalog.models,
-        &custom_model_ids,
-        &goat_model_ids,
-        &minimax_model_ids,
-        &kimi_model_ids,
-    ) {
+    let catalogs = crate::alias::RuntimeCatalogs {
+        go: &go_model_ids,
+        zen_free: &zen_catalog.models,
+        custom: &custom_model_ids,
+        command_code: &goat_model_ids,
+        minimax: &minimax_model_ids,
+        kimi: &kimi_model_ids,
+        cpa: &cpa_model_ids,
+    };
+    let resolved = match crate::alias::resolve_with_runtime_catalogs(&routing_model, catalogs) {
         Ok(resolved) => resolved,
         Err(error) => {
             return local_protocol_failure(
@@ -588,24 +635,39 @@ async fn gemini_proxy_handler(
     let client_model = parsed.requested_model.clone();
     let routing_model = parsed.requested_model.clone();
     let contracts = state.provider_contracts();
-    let go_model_ids =
-        provider_catalog_model_ids(&contracts, crate::provider::OPENCODE_PROVIDER_ID);
+    let go_model_ids = provider_catalog_model_ids(
+        &contracts,
+        crate::provider::OPENCODE_PROVIDER_ID,
+        crate::provider::GO_OFFERING_ID,
+    );
     let custom_model_ids = eligible_custom_public_models(&state, &contracts);
-    let goat_model_ids =
-        provider_catalog_model_ids(&contracts, crate::provider::COMMAND_CODE_PROVIDER_ID);
-    let minimax_model_ids =
-        provider_catalog_model_ids(&contracts, crate::provider::MINIMAX_PROVIDER_ID);
-    let kimi_model_ids = provider_catalog_model_ids(&contracts, crate::provider::KIMI_PROVIDER_ID);
+    let goat_model_ids = provider_catalog_model_ids(
+        &contracts,
+        crate::provider::COMMAND_CODE_PROVIDER_ID,
+        crate::provider::GOAT_OFFERING_ID,
+    );
+    let minimax_model_ids = provider_catalog_model_ids(
+        &contracts,
+        crate::provider::MINIMAX_PROVIDER_ID,
+        crate::provider::MINIMAX_CN_OFFERING_ID,
+    );
+    let kimi_model_ids = provider_catalog_model_ids(
+        &contracts,
+        crate::provider::KIMI_PROVIDER_ID,
+        crate::provider::KIMI_CN_OFFERING_ID,
+    );
+    let cpa_model_ids = active_cpa_model_ids(&state);
     let zen_catalog = state.zen_free_model_catalog();
-    let resolved = match crate::alias::resolve_with_extended_catalogs(
-        &routing_model,
-        &go_model_ids,
-        &zen_catalog.models,
-        &custom_model_ids,
-        &goat_model_ids,
-        &minimax_model_ids,
-        &kimi_model_ids,
-    ) {
+    let catalogs = crate::alias::RuntimeCatalogs {
+        go: &go_model_ids,
+        zen_free: &zen_catalog.models,
+        custom: &custom_model_ids,
+        command_code: &goat_model_ids,
+        minimax: &minimax_model_ids,
+        kimi: &kimi_model_ids,
+        cpa: &cpa_model_ids,
+    };
+    let resolved = match crate::alias::resolve_with_runtime_catalogs(&routing_model, catalogs) {
         Ok(resolved) => resolved,
         Err(error) => {
             return local_protocol_failure(
@@ -761,7 +823,9 @@ fn local_failure_response(
 
 #[cfg(test)]
 mod tests {
-    use super::{check_auth, extract_client_key_id, rewrite_claude_desktop_model};
+    use super::{
+        active_cpa_model_ids, check_auth, extract_client_key_id, rewrite_claude_desktop_model,
+    };
     use crate::gateway::materialize::resolved_alias_from_model;
     use crate::gateway::protocol::{
         ApiFormat, MaterializeSpec, materialize_parsed_request, parse_client_request,
@@ -999,6 +1063,69 @@ mod tests {
             ..AppConfig::default()
         };
         config.validate().expect("scalar-key config validates");
+    }
+
+    #[test]
+    fn disabled_cpa_catalog_does_not_enter_request_alias_resolution() {
+        let state = state_with_snapshot();
+        let now = chrono::Utc::now();
+        let account = crate::models::Account {
+            id: crate::provider::CPA_ACCOUNT_ID.to_string(),
+            provider_id: crate::provider::CPA_PROVIDER_ID.to_string(),
+            offering_id: crate::provider::CPA_OFFERING_ID.to_string(),
+            credential_kind: crate::provider::CredentialKind::ApiKey,
+            quota_scope: crate::provider::QuotaScope::Key,
+            name: crate::provider::CPA_ACCOUNT_NAME.to_string(),
+            username: None,
+            password_cipher: None,
+            key_cipher: state.encrypt_key("inference").unwrap(),
+            enabled: true,
+            account_type: crate::models::AccountType::Key,
+            setup_step: crate::models::AccountSetupStep::Ready,
+            referral_code: None,
+            purchase_date: String::new(),
+            expires_on: String::new(),
+            cooldown_until: None,
+            cooldown_generic_until: None,
+            cooldown_5h_until: None,
+            cooldown_week_until: None,
+            cooldown_month_until: None,
+            cooldown_free_until: None,
+            last_error: None,
+            auth_error: None,
+            notes: None,
+            created_at: now,
+            updated_at: now,
+        };
+        let management = state.encrypt_key("management").unwrap();
+        state
+            .db
+            .lock()
+            .upsert_cpa_integration(&account, crate::cpa::DEFAULT_CPA_BASE_URL, &management)
+            .unwrap();
+        state
+            .activate_cpa_model_catalog(
+                vec!["grok-4.5".into()],
+                crate::cpa::DEFAULT_CPA_BASE_URL,
+                now,
+            )
+            .unwrap();
+        assert_eq!(active_cpa_model_ids(&state).as_slice(), ["grok-4.5"]);
+
+        state
+            .db
+            .lock()
+            .update_account(
+                crate::provider::CPA_ACCOUNT_ID,
+                &crate::models::AccountUpdate {
+                    enabled: Some(false),
+                    ..Default::default()
+                },
+                None,
+                None,
+            )
+            .unwrap();
+        assert!(active_cpa_model_ids(&state).is_empty());
     }
 
     #[test]

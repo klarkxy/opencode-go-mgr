@@ -35,6 +35,19 @@ import type {
   ClaudeDesktopModels,
   ClaudeDesktopModelsUpdate,
   ConnectionInfo,
+  CpaAccountDelete,
+  CpaAccountStatusUpdate,
+  CpaAccounts,
+  CpaConnectionReport,
+  CpaIntegration,
+  CpaIntegrationUpdate,
+  CpaModels,
+  CpaOAuthSessionDelete,
+  CpaOAuthStart,
+  CpaOAuthStartRequest,
+  CpaOAuthStatus,
+  CpaQuotaReset,
+  CpaTestRequest,
   ContractScopeKind,
   ControlRevision,
   CustomModelDiscoveryRequest,
@@ -357,6 +370,69 @@ export const dashboardV3 = {
 
   // --- connection center (the only plaintext Key payload) ---
   getConnection: () => requestV3<ConnectionInfo>("/connection"),
+
+  // --- static local external integrations ---
+  getCpaIntegration: () => requestV3<CpaIntegration>("/external-integrations/cpa"),
+  putCpaIntegration: (
+    update: WithoutExpectation<CpaIntegrationUpdate>,
+    expectation: MutationExpectation,
+  ) => requestV3<CpaIntegration>("/external-integrations/cpa", {
+    method: "PUT",
+    body: withExpectation(update, expectation),
+  }),
+  deleteCpaIntegration: (expectation: MutationExpectation) =>
+    requestV3<MutationAck>("/external-integrations/cpa", {
+      method: "DELETE",
+      body: mutation(expectation),
+    }),
+  testCpaIntegration: (input: CpaTestRequest) =>
+    requestV3<CpaConnectionReport>("/external-integrations/cpa/test", {
+      method: "POST",
+      body: json(input),
+    }),
+  refreshCpaModels: (expectation: MutationExpectation) =>
+    requestV3<CpaModels>("/external-integrations/cpa/models/refresh", {
+      method: "POST",
+      body: mutation(expectation),
+    }),
+  getCpaAccounts: () => requestV3<CpaAccounts>("/external-integrations/cpa/accounts"),
+  setCpaAccountStatus: (
+    update: WithoutExpectation<CpaAccountStatusUpdate>,
+    expectation: MutationExpectation,
+  ) => requestV3<MutationAck>("/external-integrations/cpa/accounts/status", {
+    method: "PATCH",
+    body: withExpectation(update, expectation),
+  }),
+  deleteCpaAccount: (
+    input: WithoutExpectation<CpaAccountDelete>,
+    expectation: MutationExpectation,
+  ) => requestV3<MutationAck>("/external-integrations/cpa/accounts", {
+    method: "DELETE",
+    body: withExpectation(input, expectation),
+  }),
+  resetCpaQuota: (
+    input: WithoutExpectation<CpaQuotaReset>,
+    expectation: MutationExpectation,
+  ) => requestV3<MutationAck>("/external-integrations/cpa/accounts/reset-quota", {
+    method: "POST",
+    body: withExpectation(input, expectation),
+  }),
+  startCpaOAuth: (
+    input: WithoutExpectation<CpaOAuthStartRequest>,
+    expectation: MutationExpectation,
+  ) => requestV3<CpaOAuthStart>("/external-integrations/cpa/oauth/start", {
+    method: "POST",
+    body: withExpectation(input, expectation),
+  }),
+  getCpaOAuthStatus: (state: string) =>
+    requestV3<CpaOAuthStatus>(`/external-integrations/cpa/oauth/status?state=${encode(state)}`),
+  cancelCpaOAuth: (
+    input: WithoutExpectation<CpaOAuthSessionDelete>,
+    expectation: MutationExpectation,
+  ) => requestV3<MutationAck>("/external-integrations/cpa/oauth/session", {
+    method: "DELETE",
+    body: withExpectation(input, expectation),
+  }),
 
   // --- local Desktop application connectors ---
   getApplicationConnectors: () => requestV3<ApplicationConnectors>("/applications/connectors"),

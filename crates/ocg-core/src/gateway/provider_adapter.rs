@@ -2,8 +2,7 @@
 //!
 //! Authentication belongs to the provider/offering, not the wire protocol.
 //! [`resolve_route`] dispatches exhaustively on
-//! [`crate::provider::ProviderAdapterKind`] onto the same zero-sized identities
-//! that compose capability contracts in [`crate::provider`]. Alias resolution
+//! [`crate::provider::ProviderAdapterKind`] onto sealed route helpers. Alias resolution
 //! stays ahead of this seam: Alias and PinnedRaw candidates both materialize a
 //! [`RequestPlan`] then call here. Adapters must not probe a billable inference
 //! path to discover protocol support.
@@ -30,11 +29,10 @@ use crate::gateway::protocol::{
 use crate::models::{Account, AppConfig, UpstreamChannel};
 use crate::provider::{
     COMMAND_CODE_GOAT_BASE_URL, COMMAND_CODE_GOAT_CHAT_COMPLETIONS_PATH, COMMAND_CODE_GOAT_HOST,
-    COMMAND_CODE_GOAT_MESSAGES_PATH, COMMAND_CODE_GOAT_MODELS_PATH, CommandCodeGoatAdapter,
-    ConfigurableHttpAdapter, CredentialKind, InferenceAuthDescriptor, KIMI_CN_BASE_URL,
-    KIMI_CN_CHAT_COMPLETIONS_PATH, KimiCnAdapter, MINIMAX_CN_BASE_URL,
-    MINIMAX_CN_CHAT_COMPLETIONS_PATH, MiniMaxCnAdapter, OpenCodeGoAdapter, ProviderAdapterKind,
-    ProviderRegistry, QuotaScope, UpstreamAuthScheme, ZEN_FREE_ACCOUNT_ID, ZenFreeAdapter,
+    COMMAND_CODE_GOAT_MESSAGES_PATH, COMMAND_CODE_GOAT_MODELS_PATH, CPA_ACCOUNT_ID, CredentialKind,
+    InferenceAuthDescriptor, KIMI_CN_BASE_URL, KIMI_CN_CHAT_COMPLETIONS_PATH, MINIMAX_CN_BASE_URL,
+    MINIMAX_CN_CHAT_COMPLETIONS_PATH, ProviderAdapterKind, ProviderRegistry, QuotaScope,
+    UpstreamAuthScheme, ZEN_FREE_ACCOUNT_ID,
 };
 use crate::provider_contracts::EffectiveContractSet;
 use std::collections::HashMap;
@@ -217,19 +215,18 @@ fn resolve_route_with_policy(
 ) -> Result<AttemptSpec, String> {
     match ProviderAdapterKind::from_offering(&account.provider_id, &account.offering_id) {
         Some(ProviderAdapterKind::OpenCodeGo) => {
-            OpenCodeGoAdapter.resolve(account, config, plan, policy)
+            resolve_open_code_go(account, config, plan, policy)
         }
-        Some(ProviderAdapterKind::ZenFree) => ZenFreeAdapter.resolve(account, config, plan, policy),
+        Some(ProviderAdapterKind::ZenFree) => resolve_zen_free(account, config, plan, policy),
         Some(ProviderAdapterKind::CommandCodeGoat) => {
-            CommandCodeGoatAdapter.resolve(account, config, plan, policy)
+            resolve_command_code_goat(account, config, plan, policy)
         }
-        Some(ProviderAdapterKind::MiniMaxCn) => {
-            MiniMaxCnAdapter.resolve(account, config, plan, policy)
-        }
-        Some(ProviderAdapterKind::KimiCn) => KimiCnAdapter.resolve(account, config, plan, policy),
+        Some(ProviderAdapterKind::MiniMaxCn) => resolve_minimax_cn(account, config, plan, policy),
+        Some(ProviderAdapterKind::KimiCn) => resolve_kimi_cn(account, config, plan, policy),
         Some(ProviderAdapterKind::ConfigurableHttp) => {
-            ConfigurableHttpAdapter.resolve(account, config, plan, policy)
+            resolve_configurable_http(account, config, plan, policy)
         }
+        Some(ProviderAdapterKind::Cpa) => resolve_cpa(account, config, plan, policy),
         None => Err(format!(
             "unsupported provider offering `{}/{}`",
             account.provider_id, account.offering_id
@@ -237,159 +234,119 @@ fn resolve_route_with_policy(
     }
 }
 
-/// Local trait so route construction can live in this crate after the
-/// zero-sized adapter identities moved to `ocg_domain`. Inherent impls on
-/// those types are illegal across the crate boundary; a local trait is not.
-trait RuntimeRouteAdapter {
-    fn resolve(
-        self,
-        account: &Account,
-        config: &AppConfig,
-        plan: &RequestPlan,
-        policy: RoutePolicy<'_>,
-    ) -> Result<AttemptSpec, String>;
-}
-
-impl RuntimeRouteAdapter for OpenCodeGoAdapter {
-    fn resolve(
-        self,
-        account: &Account,
-        config: &AppConfig,
-        plan: &RequestPlan,
-        policy: RoutePolicy<'_>,
-    ) -> Result<AttemptSpec, String> {
-        let descriptor = registered_descriptor(ProviderAdapterKind::OpenCodeGo, account)?;
-        require_binding(
-            account,
-            descriptor.inference.credential_kind,
-            descriptor.inference.quota_scope,
-        )?;
-        if plan.channel != UpstreamChannel::Go {
-            return Err("OpenCode Go does not serve the Zen free channel".to_string());
-        }
-        require_opencode_protocol_policy(
-            ProviderAdapterKind::OpenCodeGo,
-            account,
-            plan,
-            policy,
-            "OpenCode Go",
-        )?;
-        Ok(AttemptSpec {
-            base_url: config.upstream_base_url.trim_end_matches('/').to_string(),
-            path: opencode_upstream_path(plan.upstream)?,
-            upstream: plan.upstream,
-            auth: descriptor_auth(descriptor.inference.auth)?,
-            follow_redirects: descriptor.inference.follow_redirects,
-            credential: credential_handle(account, descriptor),
-            proxy_routing: ProxyRoutingModel::RequestEntrySnapshot,
-        })
+fn resolve_open_code_go(
+    account: &Account,
+    config: &AppConfig,
+    plan: &RequestPlan,
+    policy: RoutePolicy<'_>,
+) -> Result<AttemptSpec, String> {
+    let descriptor = registered_descriptor(ProviderAdapterKind::OpenCodeGo, account)?;
+    require_binding(
+        account,
+        descriptor.inference.credential_kind,
+        descriptor.inference.quota_scope,
+    )?;
+    if plan.channel != UpstreamChannel::Go {
+        return Err("OpenCode Go does not serve the Zen free channel".to_string());
     }
+    require_opencode_protocol_policy(descriptor, account, plan, policy, "OpenCode Go")?;
+    Ok(AttemptSpec {
+        base_url: config.upstream_base_url.trim_end_matches('/').to_string(),
+        path: opencode_upstream_path(plan.upstream)?,
+        upstream: plan.upstream,
+        auth: descriptor_auth(descriptor.inference.auth)?,
+        follow_redirects: descriptor.inference.follow_redirects,
+        credential: credential_handle(account, descriptor),
+        proxy_routing: ProxyRoutingModel::RequestEntrySnapshot,
+    })
 }
 
-impl RuntimeRouteAdapter for ZenFreeAdapter {
-    fn resolve(
-        self,
-        account: &Account,
-        config: &AppConfig,
-        plan: &RequestPlan,
-        policy: RoutePolicy<'_>,
-    ) -> Result<AttemptSpec, String> {
-        let descriptor = registered_descriptor(ProviderAdapterKind::ZenFree, account)?;
-        require_binding(
-            account,
-            descriptor.inference.credential_kind,
-            descriptor.inference.quota_scope,
-        )?;
-        if account.id != ZEN_FREE_ACCOUNT_ID {
-            return Err("Zen Free route must use the reserved singleton account".to_string());
-        }
-        if plan.channel != UpstreamChannel::Free {
-            return Err(format!(
-                "Zen Free does not support routed model `{}` on this channel",
-                plan.model
-            ));
-        }
-        require_opencode_protocol_policy(
-            ProviderAdapterKind::ZenFree,
-            account,
-            plan,
-            policy,
-            "Zen Free",
-        )?;
-        let base_url = plan.upstream_base_override.clone().map_or_else(
-            || resolve_upstream_base(UpstreamChannel::Free, &config.upstream_base_url),
-            Ok,
-        )?;
-        Ok(AttemptSpec {
-            base_url,
-            path: opencode_upstream_path(plan.upstream)?,
-            upstream: plan.upstream,
-            auth: descriptor_auth(descriptor.inference.auth)?,
-            follow_redirects: descriptor.inference.follow_redirects,
-            credential: credential_handle(account, descriptor),
-            proxy_routing: ProxyRoutingModel::RequestEntrySnapshot,
-        })
+fn resolve_zen_free(
+    account: &Account,
+    config: &AppConfig,
+    plan: &RequestPlan,
+    policy: RoutePolicy<'_>,
+) -> Result<AttemptSpec, String> {
+    let descriptor = registered_descriptor(ProviderAdapterKind::ZenFree, account)?;
+    require_binding(
+        account,
+        descriptor.inference.credential_kind,
+        descriptor.inference.quota_scope,
+    )?;
+    if account.id != ZEN_FREE_ACCOUNT_ID {
+        return Err("Zen Free route must use the reserved singleton account".to_string());
     }
+    if plan.channel != UpstreamChannel::Free {
+        return Err(format!(
+            "Zen Free does not support routed model `{}` on this channel",
+            plan.model
+        ));
+    }
+    require_opencode_protocol_policy(descriptor, account, plan, policy, "Zen Free")?;
+    let base_url = plan.upstream_base_override.clone().map_or_else(
+        || resolve_upstream_base(UpstreamChannel::Free, &config.upstream_base_url),
+        Ok,
+    )?;
+    Ok(AttemptSpec {
+        base_url,
+        path: opencode_upstream_path(plan.upstream)?,
+        upstream: plan.upstream,
+        auth: descriptor_auth(descriptor.inference.auth)?,
+        follow_redirects: descriptor.inference.follow_redirects,
+        credential: credential_handle(account, descriptor),
+        proxy_routing: ProxyRoutingModel::RequestEntrySnapshot,
+    })
 }
 
-impl RuntimeRouteAdapter for CommandCodeGoatAdapter {
-    fn resolve(
-        self,
-        account: &Account,
-        _config: &AppConfig,
-        plan: &RequestPlan,
-        policy: RoutePolicy<'_>,
-    ) -> Result<AttemptSpec, String> {
-        if matches!(policy, RoutePolicy::Probe) {
-            return Err(
-                "protocol probes are not available for Command Code GOAT in this slice".to_string(),
-            );
-        }
-        let descriptor = registered_descriptor(ProviderAdapterKind::CommandCodeGoat, account)?;
-        require_binding(
-            account,
-            descriptor.inference.credential_kind,
-            descriptor.inference.quota_scope,
-        )?;
-        if plan.channel != UpstreamChannel::Go {
-            return Err("Command Code GOAT does not serve the Zen free channel".to_string());
-        }
-        if !command_code_supports_upstream(&plan.model, plan.upstream) {
-            return Err(format!(
-                "Command Code GOAT has no verified support for model `{}` over {:?}",
-                plan.model, plan.upstream
-            ));
-        }
-        require_opencode_protocol_policy(
-            ProviderAdapterKind::CommandCodeGoat,
-            account,
-            plan,
-            policy,
-            "Command Code GOAT",
-        )?;
-        let path = command_code_upstream_path(plan.upstream).ok_or_else(|| {
-            format!(
-                "Command Code GOAT has no upstream path for {:?}",
-                plan.upstream
-            )
-        })?;
-        let routes = GOAT_LOOPBACK_ROUTES
-            .read()
-            .map_err(|_| "GOAT loopback route lock is poisoned".to_string())?;
-        let base_url = routes.get(&account.id).map_or_else(
-            || COMMAND_CODE_GOAT_BASE_URL.to_string(),
-            |route| command_code_goat_loopback_base(&route.origin),
+fn resolve_command_code_goat(
+    account: &Account,
+    _config: &AppConfig,
+    plan: &RequestPlan,
+    policy: RoutePolicy<'_>,
+) -> Result<AttemptSpec, String> {
+    if matches!(policy, RoutePolicy::Probe) {
+        return Err(
+            "protocol probes are not available for Command Code GOAT in this slice".to_string(),
         );
-        Ok(AttemptSpec {
-            base_url,
-            path: path.to_string(),
-            upstream: plan.upstream,
-            auth: descriptor_auth(descriptor.inference.auth)?,
-            follow_redirects: descriptor.inference.follow_redirects,
-            credential: credential_handle(account, descriptor),
-            proxy_routing: ProxyRoutingModel::ProcessWideNoRedirect,
-        })
     }
+    let descriptor = registered_descriptor(ProviderAdapterKind::CommandCodeGoat, account)?;
+    require_binding(
+        account,
+        descriptor.inference.credential_kind,
+        descriptor.inference.quota_scope,
+    )?;
+    if plan.channel != UpstreamChannel::Go {
+        return Err("Command Code GOAT does not serve the Zen free channel".to_string());
+    }
+    if !command_code_supports_upstream(&plan.model, plan.upstream) {
+        return Err(format!(
+            "Command Code GOAT has no verified support for model `{}` over {:?}",
+            plan.model, plan.upstream
+        ));
+    }
+    require_opencode_protocol_policy(descriptor, account, plan, policy, "Command Code GOAT")?;
+    let path = command_code_upstream_path(plan.upstream).ok_or_else(|| {
+        format!(
+            "Command Code GOAT has no upstream path for {:?}",
+            plan.upstream
+        )
+    })?;
+    let routes = GOAT_LOOPBACK_ROUTES
+        .read()
+        .map_err(|_| "GOAT loopback route lock is poisoned".to_string())?;
+    let base_url = routes.get(&account.id).map_or_else(
+        || COMMAND_CODE_GOAT_BASE_URL.to_string(),
+        |route| command_code_goat_loopback_base(&route.origin),
+    );
+    Ok(AttemptSpec {
+        base_url,
+        path: path.to_string(),
+        upstream: plan.upstream,
+        auth: descriptor_auth(descriptor.inference.auth)?,
+        follow_redirects: descriptor.inference.follow_redirects,
+        credential: credential_handle(account, descriptor),
+        proxy_routing: ProxyRoutingModel::ProcessWideNoRedirect,
+    })
 }
 
 fn resolve_fixed_chat_plan(
@@ -416,7 +373,7 @@ fn resolve_fixed_chat_plan(
     if plan.upstream != ApiFormat::ChatCompletions {
         return Err(format!("{label} only accepts Chat Completions upstream"));
     }
-    require_opencode_protocol_policy(adapter, account, plan, policy, label)?;
+    require_opencode_protocol_policy(descriptor, account, plan, policy, label)?;
     Ok(AttemptSpec {
         base_url: base_url.to_string(),
         path: path.to_string(),
@@ -428,104 +385,135 @@ fn resolve_fixed_chat_plan(
     })
 }
 
-impl RuntimeRouteAdapter for MiniMaxCnAdapter {
-    fn resolve(
-        self,
-        account: &Account,
-        _config: &AppConfig,
-        plan: &RequestPlan,
-        policy: RoutePolicy<'_>,
-    ) -> Result<AttemptSpec, String> {
-        resolve_fixed_chat_plan(
-            account,
-            plan,
-            policy,
-            ProviderAdapterKind::MiniMaxCn,
-            "MiniMax CN Token Plan",
-            MINIMAX_CN_BASE_URL,
-            MINIMAX_CN_CHAT_COMPLETIONS_PATH,
-        )
-    }
+fn resolve_minimax_cn(
+    account: &Account,
+    _config: &AppConfig,
+    plan: &RequestPlan,
+    policy: RoutePolicy<'_>,
+) -> Result<AttemptSpec, String> {
+    resolve_fixed_chat_plan(
+        account,
+        plan,
+        policy,
+        ProviderAdapterKind::MiniMaxCn,
+        "MiniMax CN Token Plan",
+        MINIMAX_CN_BASE_URL,
+        MINIMAX_CN_CHAT_COMPLETIONS_PATH,
+    )
 }
 
-impl RuntimeRouteAdapter for KimiCnAdapter {
-    fn resolve(
-        self,
-        account: &Account,
-        _config: &AppConfig,
-        plan: &RequestPlan,
-        policy: RoutePolicy<'_>,
-    ) -> Result<AttemptSpec, String> {
-        resolve_fixed_chat_plan(
-            account,
-            plan,
-            policy,
-            ProviderAdapterKind::KimiCn,
-            "Kimi Code CN",
-            KIMI_CN_BASE_URL,
-            KIMI_CN_CHAT_COMPLETIONS_PATH,
-        )
-    }
+fn resolve_kimi_cn(
+    account: &Account,
+    _config: &AppConfig,
+    plan: &RequestPlan,
+    policy: RoutePolicy<'_>,
+) -> Result<AttemptSpec, String> {
+    resolve_fixed_chat_plan(
+        account,
+        plan,
+        policy,
+        ProviderAdapterKind::KimiCn,
+        "Kimi Code CN",
+        KIMI_CN_BASE_URL,
+        KIMI_CN_CHAT_COMPLETIONS_PATH,
+    )
 }
 
-impl RuntimeRouteAdapter for ConfigurableHttpAdapter {
-    fn resolve(
-        self,
-        account: &Account,
-        _config: &AppConfig,
-        plan: &RequestPlan,
-        policy: RoutePolicy<'_>,
-    ) -> Result<AttemptSpec, String> {
-        let descriptor = registered_descriptor(ProviderAdapterKind::ConfigurableHttp, account)?;
-        require_binding(
-            account,
-            descriptor.inference.credential_kind,
-            descriptor.inference.quota_scope,
-        )?;
-        if plan.channel != UpstreamChannel::Go {
-            return Err("Custom API does not serve the Zen free channel".to_string());
-        }
-        let custom = plan.custom_route.as_ref().ok_or_else(|| {
-            "Custom API account is missing a persisted endpoint URL and upstream protocol"
-                .to_string()
-        })?;
-        let protocol = protocol_kind_for(plan.upstream)?;
-        if let RoutePolicy::Production {
-            contracts: Some(contracts),
-        } = policy
-            && !contracts.production_protocol_allowed(
-                account,
-                plan.resolved_alias.as_deref().unwrap_or(&plan.model),
-                protocol,
-            )
-        {
-            return Err(format!(
-                "Custom API has no verified support for public model `{}` over {:?}",
-                plan.resolved_alias.as_deref().unwrap_or(&plan.model),
-                plan.upstream
-            ));
-        }
-        let endpoint = resolve_custom_endpoints(&custom.endpoint_url, protocol)
-            .map_err(|error| error.to_string())?
-            .inference;
-        let endpoint_path = endpoint.path().to_string();
-        let mut base = endpoint;
-        base.set_path("");
-        base.set_query(None);
-        base.set_fragment(None);
-        Ok(AttemptSpec {
-            base_url: base.as_str().trim_end_matches('/').to_string(),
-            path: endpoint_path,
-            upstream: plan.upstream,
-            auth: match custom_auth_scheme(protocol) {
-                UpstreamAuthScheme::Bearer => UpstreamAuth::Bearer,
-                UpstreamAuthScheme::XApiKey => UpstreamAuth::XApiKey,
-            },
-            follow_redirects: descriptor.inference.follow_redirects,
-            credential: credential_handle(account, descriptor),
-            proxy_routing: ProxyRoutingModel::IsolatedTrustedAdmin,
-        })
+fn resolve_configurable_http(
+    account: &Account,
+    _config: &AppConfig,
+    plan: &RequestPlan,
+    policy: RoutePolicy<'_>,
+) -> Result<AttemptSpec, String> {
+    let descriptor = registered_descriptor(ProviderAdapterKind::ConfigurableHttp, account)?;
+    require_binding(
+        account,
+        descriptor.inference.credential_kind,
+        descriptor.inference.quota_scope,
+    )?;
+    if plan.channel != UpstreamChannel::Go {
+        return Err("Custom API does not serve the Zen free channel".to_string());
     }
+    let custom = plan.custom_route.as_ref().ok_or_else(|| {
+        "Custom API account is missing a persisted endpoint URL and upstream protocol".to_string()
+    })?;
+    let protocol = protocol_kind_for(plan.upstream)?;
+    if let RoutePolicy::Production {
+        contracts: Some(contracts),
+    } = policy
+        && !contracts.production_protocol_allowed(
+            account,
+            plan.resolved_alias.as_deref().unwrap_or(&plan.model),
+            protocol,
+        )
+    {
+        return Err(format!(
+            "Custom API has no verified support for public model `{}` over {:?}",
+            plan.resolved_alias.as_deref().unwrap_or(&plan.model),
+            plan.upstream
+        ));
+    }
+    let endpoint = resolve_custom_endpoints(&custom.endpoint_url, protocol)
+        .map_err(|error| error.to_string())?
+        .inference;
+    let endpoint_path = endpoint.path().to_string();
+    let mut base = endpoint;
+    base.set_path("");
+    base.set_query(None);
+    base.set_fragment(None);
+    Ok(AttemptSpec {
+        base_url: base.as_str().trim_end_matches('/').to_string(),
+        path: endpoint_path,
+        upstream: plan.upstream,
+        auth: match custom_auth_scheme(protocol) {
+            UpstreamAuthScheme::Bearer => UpstreamAuth::Bearer,
+            UpstreamAuthScheme::XApiKey => UpstreamAuth::XApiKey,
+        },
+        follow_redirects: descriptor.inference.follow_redirects,
+        credential: credential_handle(account, descriptor),
+        proxy_routing: ProxyRoutingModel::IsolatedTrustedAdmin,
+    })
+}
+
+fn resolve_cpa(
+    account: &Account,
+    _config: &AppConfig,
+    plan: &RequestPlan,
+    policy: RoutePolicy<'_>,
+) -> Result<AttemptSpec, String> {
+    if matches!(policy, RoutePolicy::Probe | RoutePolicy::AccountTest) {
+        return Err("CPA protocol probes and account tests are not available".to_string());
+    }
+    let descriptor = registered_descriptor(ProviderAdapterKind::Cpa, account)?;
+    require_binding(
+        account,
+        descriptor.inference.credential_kind,
+        descriptor.inference.quota_scope,
+    )?;
+    if account.id != CPA_ACCOUNT_ID {
+        return Err("CPA route must use the reserved singleton account".to_string());
+    }
+    if plan.channel != UpstreamChannel::Go {
+        return Err("CPA does not serve the Zen free channel".to_string());
+    }
+    let path = plan
+        .upstream
+        .upstream_path()
+        .ok_or_else(|| "CPA has no native Gemini inference path".to_string())?;
+    let base_url = plan
+        .upstream_base_override
+        .clone()
+        .ok_or_else(|| "CPA is not configured".to_string())?;
+    crate::cpa::normalize_base_url(&base_url, true).map_err(|error| error.to_string())?;
+    Ok(AttemptSpec {
+        base_url,
+        path: path.to_string(),
+        upstream: plan.upstream,
+        auth: UpstreamAuth::Bearer,
+        follow_redirects: false,
+        credential: credential_handle(account, descriptor),
+        proxy_routing: ProxyRoutingModel::LocalExternalIntegration,
+    })
 }
 
 fn registered_descriptor(
@@ -574,16 +562,20 @@ fn credential_handle(
 }
 
 fn require_opencode_protocol_policy(
-    adapter: ProviderAdapterKind,
+    descriptor: crate::provider::ProviderDescriptor,
     account: &Account,
     plan: &RequestPlan,
     policy: RoutePolicy<'_>,
     label: &str,
 ) -> Result<(), String> {
     let protocol = protocol_kind_for(plan.upstream)?;
-    let ceiling = crate::provider_contracts::safety_ceiling_protocols(adapter, &plan.model, &[]);
+    let ceiling = crate::provider_contracts::safety_ceiling_protocols(
+        descriptor.protocol_probe,
+        &plan.model,
+        &[],
+    );
     let static_verified =
-        crate::provider_contracts::static_verified_protocols(adapter, &plan.model, &[]);
+        crate::provider_contracts::static_verified_protocols(descriptor.kind, &plan.model, &[]);
     match policy {
         RoutePolicy::Probe => {
             // Dashboard V3 admits probe requests only for models present in
@@ -608,9 +600,9 @@ fn require_opencode_protocol_policy(
         RoutePolicy::AccountTest | RoutePolicy::Production { contracts: None } => {
             let statically_ok = static_verified.contains(&protocol)
                 || opencode_supports_upstream(&plan.model, plan.upstream)
-                || (adapter == ProviderAdapterKind::CommandCodeGoat
+                || (descriptor.kind == ProviderAdapterKind::CommandCodeGoat
                     && command_code_supports_upstream(&plan.model, plan.upstream))
-                || (adapter == ProviderAdapterKind::ZenFree
+                || (descriptor.kind == ProviderAdapterKind::ZenFree
                     && !crate::gateway::protocol::is_known_model(&plan.model)
                     && plan.model.ends_with("-free")
                     && plan.upstream == ApiFormat::ChatCompletions);
@@ -1034,27 +1026,21 @@ mod tests {
     }
 
     #[test]
-    fn resolve_uses_the_same_four_concrete_adapter_identities() {
-        use crate::provider::InferenceAdapter;
-        let go_plan = crate::provider::builtin_plan(OPENCODE_PROVIDER_ID, GO_OFFERING_ID).unwrap();
-        let zen_plan = crate::provider::builtin_plan(
-            OPENCODE_ZEN_FREE_PROVIDER_ID,
-            ANONYMOUS_FREE_OFFERING_ID,
-        )
-        .unwrap();
-        let goat_plan =
-            crate::provider::builtin_plan(COMMAND_CODE_PROVIDER_ID, GOAT_OFFERING_ID).unwrap();
-        let custom_plan =
-            crate::provider::builtin_plan(CUSTOM_PROVIDER_ID, CUSTOM_API_OFFERING_ID).unwrap();
-        assert!(OpenCodeGoAdapter::inference(go_plan).production_inference);
+    fn resolve_uses_the_same_sealed_descriptors() {
+        let go = ProviderRegistry::get(OPENCODE_PROVIDER_ID, GO_OFFERING_ID).unwrap();
+        let zen = ProviderRegistry::get(OPENCODE_ZEN_FREE_PROVIDER_ID, ANONYMOUS_FREE_OFFERING_ID)
+            .unwrap();
+        let goat = ProviderRegistry::get(COMMAND_CODE_PROVIDER_ID, GOAT_OFFERING_ID).unwrap();
+        let custom = ProviderRegistry::get(CUSTOM_PROVIDER_ID, CUSTOM_API_OFFERING_ID).unwrap();
+        assert!(go.inference.production_inference);
         assert_eq!(
-            ZenFreeAdapter::inference(zen_plan).channel,
+            zen.inference.channel,
             Some(crate::provider::InferenceChannelKind::Free)
         );
-        assert!(CommandCodeGoatAdapter::inference(goat_plan).production_inference);
-        assert!(!CommandCodeGoatAdapter::inference(goat_plan).loopback_test_seam_only);
+        assert!(goat.inference.production_inference);
+        assert!(!goat.inference.loopback_test_seam_only);
         assert_eq!(
-            ConfigurableHttpAdapter::inference(custom_plan).auth,
+            custom.inference.auth,
             InferenceAuthDescriptor::ProtocolDerivedBearerOrXApiKey
         );
     }
@@ -1068,6 +1054,7 @@ mod tests {
                 | ProviderAdapterKind::CommandCodeGoat
                 | ProviderAdapterKind::MiniMaxCn
                 | ProviderAdapterKind::KimiCn
+                | ProviderAdapterKind::Cpa
                 | ProviderAdapterKind::ConfigurableHttp => {}
             }
             let descriptor = ProviderRegistry::iter()
@@ -1092,6 +1079,10 @@ mod tests {
                     assert!(!descriptor.inference.loopback_test_seam_only);
                 }
                 ProviderAdapterKind::MiniMaxCn | ProviderAdapterKind::KimiCn => {
+                    assert_eq!(descriptor.inference.auth, InferenceAuthDescriptor::Bearer);
+                    assert!(!descriptor.inference.follow_redirects);
+                }
+                ProviderAdapterKind::Cpa => {
                     assert_eq!(descriptor.inference.auth, InferenceAuthDescriptor::Bearer);
                     assert!(!descriptor.inference.follow_redirects);
                 }

@@ -157,8 +157,8 @@ fn assert_unrelated_config(harness: &V3Harness, before: &ocg_core::models::AppCo
 }
 
 #[test]
-fn dashboard_v3_claude_desktop_schema_version_stays_at_v33() {
-    assert_eq!(CURRENT_SCHEMA_VERSION, 33);
+fn dashboard_v3_claude_desktop_schema_version_stays_at_v34() {
+    assert_eq!(CURRENT_SCHEMA_VERSION, 34);
 }
 
 #[test]
@@ -232,7 +232,7 @@ fn catalog_type_names_append_claude_desktop_after_custom_discovery() {
         ]
     );
     assert_eq!(
-        &CATALOG_TYPE_NAMES[application_connector_start..],
+        &CATALOG_TYPE_NAMES[application_connector_start..application_connector_start + 9],
         [
             "ApplicationConnectorAction",
             "ApplicationConnectorStatus",
@@ -245,7 +245,27 @@ fn catalog_type_names_append_claude_desktop_after_custom_discovery() {
             "ApplicationConnectorCommitResult",
         ]
     );
-    assert_eq!(CATALOG_TYPE_NAMES.len(), application_connector_start + 9);
+    assert_eq!(
+        &CATALOG_TYPE_NAMES[application_connector_start + 9..],
+        [
+            "CpaIntegration",
+            "CpaIntegrationUpdate",
+            "CpaTestRequest",
+            "CpaConnectionReport",
+            "CpaModels",
+            "CpaAccounts",
+            "CpaAccount",
+            "CpaAccountStatusUpdate",
+            "CpaAccountDelete",
+            "CpaQuotaReset",
+            "CpaOAuthProvider",
+            "CpaOAuthStartRequest",
+            "CpaOAuthStart",
+            "CpaOAuthStatus",
+            "CpaOAuthSessionDelete",
+        ]
+    );
+    assert_eq!(CATALOG_TYPE_NAMES.len(), application_connector_start + 24);
 
     let schema = contract_schema();
     let defs = schema["$defs"].as_object().expect("$defs");
