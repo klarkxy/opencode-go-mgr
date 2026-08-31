@@ -99,11 +99,20 @@ cargo test -p ocg-core dashboard_v3
 cargo test -p ocg-core v3_runtime_invariants
 ```
 
-`ocg-domain` 与 `ocg-gateway` 把生产源码的依赖与纯度守卫编成普通
-`cargo test`。宿主刻画矩阵见
-`crates/ocg-core/tests/fixtures/v3/requirement_map.md`，副本在
-`src-tauri/tests/fixtures/v3/host_requirement_map.md` 与
-`crates/ocg-cli/tests/fixtures/v3/host_requirement_map.md`。
+分层约束（`ocg-domain` 与 `ocg-gateway` 保持无 I/O，kernel 不导入宿主代码）
+属于设计意图，写在各模块头部注释里，由 crate 依赖图和代码评审保证，不再用
+源码文本断言来守卫。
+
+Rust 单元测试放在同名子模块文件里，而不是内联在源文件中，这样源文件本身保持
+可读：`src/db.rs` 里只写 `#[cfg(test)] mod tests;`，测试正文放在
+`src/db/tests.rs`。新增单元测试请写在那里。有两点需要注意：`include_str!`
+是相对所在文件解析的，因此 `tests.rs` 里的 fixture 路径要比内联时多一层
+`../`；另外少数被生产代码引用的 `#[cfg(test)]` 小工具仍然有意保留在源文件里。
+
+不要再写断言源码文本、工作流 YAML 或文档正文的测试：读取 `.rs`、`.vue`、
+`.yml`、`.md` 再用正则匹配内容，或用 `syn` 遍历 AST 来管制 import，都只会在
+有人修改该文件时失败，而修法永远是在同一个提交里改测试本身。请改为通过公开
+API 断言行为。
 
 测试真实账号流时先在沙箱跑 CLI：
 

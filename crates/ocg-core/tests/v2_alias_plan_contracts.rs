@@ -6,8 +6,6 @@
 //! an available verification runtime; live Custom network coverage lives in
 //! `custom_trusted_admin.rs`.
 //!
-//! Requirement map: `fixtures/v2/requirement_map.md`.
-//!
 //! Out of scope: live GOAT network calls.
 
 use reqwest::StatusCode;

@@ -130,11 +130,23 @@ cargo test -p ocg-core dashboard_v3
 cargo test -p ocg-core v3_runtime_invariants
 ```
 
-`ocg-domain` and `ocg-gateway` compile their production-source dependency and
-purity guards as ordinary `cargo test` cases. Host characterization is in
-`crates/ocg-core/tests/fixtures/v3/requirement_map.md` and the copies at
-`src-tauri/tests/fixtures/v3/host_requirement_map.md` and
-`crates/ocg-cli/tests/fixtures/v3/host_requirement_map.md`.
+Layering rules (`ocg-domain` and `ocg-gateway` stay I/O-free; the kernel does
+not import host code) are design intent documented in the module headers and
+enforced by review and the crate graph, not by source-text assertions.
+
+Rust unit tests live in a sibling child module rather than inline, so source
+files stay readable: `src/db.rs` declares `#[cfg(test)] mod tests;` and the
+tests live in `src/db/tests.rs`. Add new unit tests there. Two consequences
+worth knowing: `include_str!` resolves relative to the file containing it, so
+fixture paths in a `tests.rs` need one more `../` than they did inline, and a
+few small `#[cfg(test)]` helpers that production code references are still
+inline on purpose.
+
+Do not add tests that assert on source text, workflow YAML, or documentation
+prose. Reading a `.rs`, `.vue`, `.yml`, or `.md` file to regex-match its
+contents, or walking a `syn` AST to police imports, only fails when someone
+edits that file, and the fix is always to edit the test in the same commit.
+Assert behavior through public APIs instead.
 
 Test real account flows in a sandboxed CLI first:
 

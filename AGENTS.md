@@ -95,7 +95,10 @@ Before developing, quit the release tray app to release the single-instance lock
 - For CLI changes run `cargo test -p ocg-manager-cli`; when needed use a temporary data dir for real `key add/list`, `status`.
 - For desktop Host changes run `cargo test -p ocg-manager --lib`.
 - For frontend changes run `pnpm run build:web`; for contract changes run `pnpm run contract:v3:check`.
+- `pnpm run test:web` covers only product tests under `src/` and finishes in seconds. Release-tooling tests (`scripts/*.test.mjs`) live behind `pnpm run test:tooling`, are slow because they spawn a fake container toolchain, and are gated on release/tooling changes rather than every run.
 - Rust and frontend regression runs `pnpm run test` (web tests + typecheck + vite build + `cargo test --workspace --locked`); GUI/packaging changes run the current platform's `pnpm run build`. To claim real desktop availability, actually launch the installer, DMG, or AppImage and verify dashboard/gateway behavior.
+- Rust unit tests live in a sibling `tests.rs` child module, not inline: `src/db.rs` declares `#[cfg(test)] mod tests;` and the tests live in `src/db/tests.rs`. Keep new unit tests there so source files stay readable. `include_str!` in a `tests.rs` resolves relative to that file, so fixture paths need the extra `../`. A few small `#[cfg(test)]` helpers that production code references stay inline on purpose.
+- Do not add tests that assert on source text, workflow YAML, or documentation prose: no `include_str!`/`read_to_string` of `.rs`, `.vue`, `.yml`, or `.md` files to regex-match their contents, and no `syn`/AST scanning to police imports or module boundaries. Such tests only fail when someone edits the file and the fix is always to edit the test, so they cost tokens without protecting runtime behavior. Assert behavior through public APIs instead.
 
 ## Known gaps
 
