@@ -176,31 +176,97 @@ test("Providers shows catalog, pricing, and the read-only Alias aggregate in thr
   assert.doesNotMatch(providers, /id="provider-protocol-title"/);
 });
 
-test("ProviderModelMatrix renders a model-by-protocol grid with capability-gated row probes", () => {
-  assert.match(matrix, /matrixModels/);
-  assert.match(matrix, /PROVIDER_PROTOCOLS/);
-  assert.match(matrix, /n-switch/);
-  assert.match(matrix, /cellEnabled\(modelId, protocol\)/);
-  assert.match(matrix, /on \? 'force_on' : 'force_off'/);
-  assert.doesNotMatch(matrix, /canForceOn/);
-  assert.doesNotMatch(matrix, /n-radio-group/);
-  assert.doesNotMatch(matrix, /expandedModel/);
-  assert.doesNotMatch(matrix, /status-dot/);
-  assert.doesNotMatch(matrix, /overrideOptions/);
-  assert.match(matrix, /applyColumnBatch/);
-  assert.match(matrix, /columnBatchOptions/);
-  assert.match(matrix, /n-popconfirm/);
-  assert.match(matrix, /ReloadOutlined/);
-  assert.match(matrix, /runRowProbe/);
-  assert.match(matrix, /props\.scope\.card\.protocol_probe/);
-  assert.match(matrix, /v-if="probeSupported"/);
-  assert.doesNotMatch(matrix, /scope\.provider_id !== "command-code"/);
+test("ProviderModelMatrix uses a scrollable table with sticky headers", () => {
+  assert.match(matrix, /<table class="matrix-table">/);
+  assert.match(matrix, /overflow-x: auto/);
+  assert.match(matrix, /position:\s*sticky/);
+  assert.match(matrix, /matrix-cell--protocol-header/);
 });
 
-test("Provider model rows use aliases and expose all-disabled state from matrix cells", () => {
+test("ProviderModelMatrix binds one switch per model-protocol cell to the enabled state", () => {
+  assert.match(matrix, /<n-switch/);
+  assert.match(matrix, /:value="cellEnabled\(modelId, protocol\)"/);
+  assert.match(matrix, /cellEvidence\(modelId, protocol\)\?\.enabled === true/);
+  assert.match(matrix, /props\.optimisticOverrides\?\.get\(cellKey\(modelId, protocol\)\)/);
+  assert.match(matrix, /:loading="cellSaving\(modelId, protocol\)"/);
+  assert.match(matrix, /:disabled="props\.actionLocked \|\| rowProbing\(modelId\)"/);
+  assert.match(matrix, /\.matrix-switch \{\s*--n-rail-color-active: var\(--ocg-success\)/);
+});
+
+test("ProviderModelMatrix scopes pending override state to the affected cells", () => {
+  assert.match(matrix, /modelProtocolOverrideKey\(/);
+  assert.match(matrix, /pendingOverrideKeys\?\.has\(cellKey\(modelId, protocol\)\)/);
+  assert.match(matrix, /columnSaving\(protocol\)/);
+  assert.doesNotMatch(matrix, /loading\?: boolean/);
+});
+
+test("ProviderModelMatrix renders and probes only current catalog models", () => {
+  assert.match(matrix, /new Set\(props\.scope\.catalog\.models\)/);
+  assert.doesNotMatch(matrix, /for \(const model of props\.scope\.models\) ids\.add/);
+  assert.match(matrix, /overridesSaving\(\) \|\| rowProbing\(modelId\)/);
+});
+
+test("ProviderModelMatrix presents canonical aliases and derives an all-disabled provider state", () => {
+  assert.match(matrix, /modelContract\(modelId\)\?\.alias\?\.trim\(\)/);
   assert.match(matrix, /modelAlias\(modelId\) \|\| modelId/);
   assert.match(matrix, /modelAlias\(modelId\) !== modelId/);
   assert.match(matrix, /const providerDisabled = computed/);
+  assert.match(matrix, /matrixModels\.value\.length > 0/);
   assert.match(matrix, /cellEnabled\(modelId, protocol\)/);
-  assert.match(matrix, /全部供应商协议已关闭/);
+  assert.match(matrix, /t\("全部供应商协议已关闭"\)/);
+});
+
+test("ProviderModelMatrix shows all provider protocols while limiting Custom to declared evidence", () => {
+  assert.match(matrix, /v-for="protocol in matrixProtocols"/);
+  assert.match(matrix, /scope\.scope_kind !== "custom_endpoint"/);
+  assert.doesNotMatch(matrix, /scope\.provider_id !== "command-code"/);
+  assert.match(matrix, /model\.protocols\[protocol\]\?\.available === true/);
+  assert.doesNotMatch(matrix, /v-for="protocol in PROVIDER_PROTOCOLS"/);
+});
+
+test("ProviderModelMatrix emits force_on or force_off on switch toggle, never auto", () => {
+  assert.match(matrix, /updateSingle\(modelId, protocol, on \? 'force_on' : 'force_off'\)/);
+  assert.match(matrix, /emit\("update:overrides"/);
+  const singleStates = matrix.match(/updateSingle\(modelId, protocol, [^)]+\)/g) ?? [];
+  assert.ok(singleStates.length > 0);
+  for (const call of singleStates) assert.ok(!call.includes("'auto'"), `unexpected auto state in ${call}`);
+  assert.doesNotMatch(matrix, /canForceOn/);
+});
+
+test("ProviderModelMatrix batch actions set whole columns on or off", () => {
+  assert.match(matrix, /makeOverrides\(/);
+  assert.match(matrix, /applyColumnBatch\(/);
+  assert.match(matrix, /columnBatchOptions/);
+  assert.match(matrix, /\{ key: "force_on", label: t\("全部开启"\) \}/);
+  assert.match(matrix, /\{ key: "force_off", label: t\("全部关闭"\) \}/);
+  assert.doesNotMatch(matrix, /rowBatchOptions/);
+  assert.doesNotMatch(matrix, /applyRowBatch/);
+  assert.doesNotMatch(matrix, /\{ key: "auto"/);
+});
+
+test("ProviderModelMatrix renders probe controls only when the Provider supports probes", () => {
+  assert.match(matrix, /ReloadOutlined/);
+  assert.match(matrix, /:aria-label="t\('测试'\)"/);
+  assert.match(matrix, /:loading="rowProbing\(modelId\)"/);
+  assert.match(matrix, /const probeSupported = computed\(\(\) => props\.scope\.card\.protocol_probe\)/);
+  assert.match(matrix, /v-if="probeSupported"/);
+  assert.match(matrix, /if \(!probeSupported\.value\) return/);
+  assert.match(matrix, /n-popconfirm/);
+  assert.match(matrix, /runRowProbe/);
+  assert.match(matrix, /emit\("probe", \{ modelId \}\)/);
+  assert.doesNotMatch(matrix, /probeAccounts|accountId/);
+});
+
+test("ProviderModelMatrix has no expand rows, dots, dropdown editors, or hint remnants", () => {
+  assert.doesNotMatch(matrix, /expandedModel/);
+  assert.doesNotMatch(matrix, /toggleRow/);
+  assert.doesNotMatch(matrix, /status-dot/);
+  assert.doesNotMatch(matrix, /overrideOptions/);
+  assert.doesNotMatch(matrix, /overrideStateLabel/);
+  assert.doesNotMatch(matrix, /rowHintNeeded/);
+  assert.doesNotMatch(matrix, /cellHintNeeded/);
+  assert.doesNotMatch(matrix, /status-label/);
+  assert.doesNotMatch(matrix, /override-badge/);
+  assert.doesNotMatch(matrix, /n-radio-group/);
+  assert.doesNotMatch(matrix, /无可用证据/);
 });

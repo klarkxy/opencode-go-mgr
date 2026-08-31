@@ -4,22 +4,6 @@ import test from "node:test";
 
 const app = readFileSync(new URL("./App.vue", import.meta.url), "utf8");
 
-test("the sidebar replaces Pricing with Providers and keeps the established order", () => {
-  assert.match(app, /type ViewKey = AppViewKey/);
-  assert.match(app, /APP_NAVIGATION/);
-  assert.match(app, /CORE_APP_NAVIGATION/);
-  assert.match(app, /EXTERNAL_APP_NAVIGATION/);
-  assert.match(app, /<Providers v-else-if="activeKey === 'providers'" \/>/);
-  assert.match(app, /<Cpa v-else-if="activeKey === 'cpa'" \/>/);
-  assert.match(app, /import\("\.\/views\/Providers\.vue"\)/);
-  assert.doesNotMatch(app, /key: "pricing"/);
-  assert.doesNotMatch(app, /activeKey === 'pricing'/);
-  assert.doesNotMatch(app, /views\/Pricing\.vue/);
-  assert.doesNotMatch(app, /const viewConfig/);
-  assert.match(app, /const currentTitle = computed\(\(\) => t\([\s\S]*APP_NAVIGATION\.find/);
-  assert.match(app, /CORE_APP_NAVIGATION\.map\(menuOption\)[\s\S]*EXTERNAL_APP_NAVIGATION\.map\(menuOption\)/);
-});
-
 test("mobile navigation exposes every sidebar page without responsive overflow", () => {
   assert.match(app, /<n-layout-sider[\s\S]*?<n-menu[\s\S]*:options="menuOptions"/);
   assert.match(app, /<n-dropdown[\s\S]*class="mobile-nav-dropdown"[\s\S]*:options="mobileMenuOptions"/);
@@ -30,13 +14,6 @@ test("mobile navigation exposes every sidebar page without responsive overflow",
   assert.match(app, /aria-haspopup="menu"/);
   assert.match(app, /:aria-expanded="mobileMenuShown"/);
   assert.match(app, /"aria-checked": item\.key === activeKey\.value/);
-});
-
-test("legacy pricing URLs migrate to providers with replaceState", () => {
-  assert.match(app, /isLegacyPricingView\(raw\)/);
-  assert.match(app, /window\.history\.replaceState/);
-  assert.match(app, /applyAppViewSearchParams/);
-  assert.match(app, /resolveAppViewKey\(raw\)/);
 });
 
 test("account cards stay focused on account state instead of provider contracts", () => {

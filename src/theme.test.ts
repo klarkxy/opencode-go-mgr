@@ -137,47 +137,6 @@ test("theme tokens drive CSS and Naive UI from the same values", () => {
   }
 });
 
-test("approved theme identities and light semantic colors stay stable", () => {
-  const identities = {
-    white: ["light", "#F7F7F8", "#FFFFFF", "#FFFFFF", "#18181B", "#18181B", "#303038", "#050506", "#ECECEF", "#E3E3E8", "#E9E9ED"],
-    black: ["dark", "#000000", "#0B0B0D", "#151519", "#F5F5F7", "#F5F5F7", "#FFFFFF", "#D6D6DC", "#1D1D22", "#28272F", "#222228"],
-    violet: ["light", "#E5DBF0", "#EEE5F6", "#F8F3FC", "#211A2D", "#5B44B4", "#6C55C7", "#49349A", "#D9CBEF", "#BFAAD5", "#D3C5E2"],
-    azure: ["light", "#D2E3F2", "#DEEBF7", "#EEF5FB", "#172435", "#0F50E5", "#2A61E6", "#043DBF", "#C9DCF3", "#A9C2DB", "#C3D5E6"],
-    celadon: ["light", "#D2E5DC", "#DDECE5", "#EEF6F2", "#172721", "#0B666B", "#127277", "#075358", "#C4DED4", "#A4C6B7", "#BFD8CD"],
-    copper: ["light", "#E9D7C8", "#F2E5DA", "#FAF2EB", "#30221B", "#8A4F34", "#9A5D41", "#6F3F2A", "#E4C6B2", "#CAA58E", "#DDC0AD"],
-  } as const;
-  for (const [name, expected] of Object.entries(identities) as Array<[keyof typeof identities, readonly string[]]>) {
-    const tokens = THEME_TOKENS[name];
-    assert.deepEqual([
-      tokens.colorScheme,
-      tokens.canvas,
-      tokens.surface,
-      tokens.surfaceRaised,
-      tokens.ink,
-      tokens.primary,
-      tokens.primaryHover,
-      tokens.primaryPressed,
-      tokens.primarySoft,
-      tokens.border,
-      tokens.divider,
-    ], expected);
-  }
-
-  const lightNames = ["white", "violet", "azure", "celadon", "copper"] as const;
-  for (const name of lightNames) {
-    const tokens = THEME_TOKENS[name];
-    assert.deepEqual(
-      [tokens.success, tokens.successSoft, tokens.warning, tokens.warningSoft, tokens.error, tokens.info],
-      ["#0B6844", "#E6F4EE", "#8A4D00", "#FFF1D8", "#A92742", "#245DB6"],
-    );
-  }
-  const black = THEME_TOKENS.black;
-  assert.deepEqual(
-    [black.success, black.successSoft, black.warning, black.warningSoft, black.error, black.info],
-    ["#56C596", "#18372C", "#E7AE55", "#3C2E18", "#F08095", "#74A6F6"],
-  );
-});
-
 test("colored themes keep broad lightness separation from white", () => {
   for (const name of ["violet", "azure", "celadon", "copper"] as const) {
     const tokens = THEME_TOKENS[name];

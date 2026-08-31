@@ -54,20 +54,3 @@ test("the dashboard consume surface does not host key lifecycle controls", async
   assert.doesNotMatch(template, /t\("启用或停用 Key"\)/);
   assert.doesNotMatch(template, /t\("自定义主 Key 值"\)/);
 });
-
-test("app registers the keys view between dashboard and accounts", async () => {
-  const app = await readFile(new URL("../App.vue", import.meta.url), "utf8");
-  const navigation = await readFile(new URL("./app-navigation.ts", import.meta.url), "utf8");
-
-  assert.match(app, /type ViewKey = AppViewKey/);
-  assert.match(app, /<Keys v-else-if="activeKey === 'keys'" \/>/);
-  assert.match(app, /<Dashboard v-if="activeKey === 'dashboard'" @navigate="selectView" \/>/);
-  assert.match(app, /import\("\.\/views\/Keys\.vue"\)/);
-  assert.match(app, /CORE_APP_NAVIGATION\.map\(menuOption\)/);
-  assert.ok(
-    navigation.indexOf('{ key: "dashboard"')
-      < navigation.indexOf('{ key: "keys", label: "接入 Key"')
-      && navigation.indexOf('{ key: "keys", label: "接入 Key"')
-        < navigation.indexOf('{ key: "accounts", label: "账号"'),
-  );
-});

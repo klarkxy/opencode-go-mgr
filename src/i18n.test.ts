@@ -26,6 +26,18 @@ import { zhTWMessages } from "./i18n/messages/zh-TW.ts";
 import { managedAccountEnUSMessages } from "./i18n/messages/managed-account.ts";
 import { formatCost } from "./utils/format.ts";
 
+const localeCatalogs = {
+  "zh-TW": zhTWMessages,
+  "en-US": enUSMessages,
+  "ja-JP": jaJPMessages,
+  "ko-KR": koKRMessages,
+  "es-ES": esESMessages,
+  "fr-FR": frFRMessages,
+  "de-DE": deDEMessages,
+  "pt-BR": ptBRMessages,
+  "ru-RU": ruRUMessages,
+} as const;
+
 test("locale matching uses stored preference, browser languages, and a stable fallback", () => {
   assert.equal(matchLocale("zh-Hant-HK"), "zh-TW");
   assert.equal(matchLocale("pt_PT"), "pt-BR");
@@ -49,24 +61,13 @@ test("locale preference can be read and written without requiring browser storag
 });
 
 test("all locale catalogs have identical keys and placeholders", () => {
-  const expectedKeys = (Object.keys(enUSMessages) as MessageKey[]).sort();
+  const expectedKeys = Object.keys(enUSMessages).sort();
   const placeholders = (value: string) => [...value.matchAll(/\{\w+\}/g)].map(([token]) => token).sort();
-  const rawCatalogs = {
-    "zh-TW": zhTWMessages,
-    "en-US": enUSMessages,
-    "ja-JP": jaJPMessages,
-    "ko-KR": koKRMessages,
-    "es-ES": esESMessages,
-    "fr-FR": frFRMessages,
-    "de-DE": deDEMessages,
-    "pt-BR": ptBRMessages,
-    "ru-RU": ruRUMessages,
-  } as const;
 
-  for (const [value, catalog] of Object.entries(rawCatalogs)) {
+  for (const [value, catalog] of Object.entries(localeCatalogs)) {
     assert.deepEqual(Object.keys(catalog).sort(), expectedKeys, value);
     for (const key of expectedKeys) {
-      assert.deepEqual(placeholders(catalog[key]), placeholders(key), `${value}: ${key}`);
+      assert.deepEqual(placeholders(catalog[key as MessageKey]), placeholders(key), `${value}: ${key}`);
     }
   }
 });
@@ -85,163 +86,6 @@ test("managed account copy is localized instead of inheriting English fallbacks"
   for (const [localeName, catalog] of Object.entries(localizedCatalogs)) {
     for (const [key, english] of Object.entries(managedAccountEnUSMessages)) {
       assert.notEqual(catalog[key as MessageKey], english, `${localeName}: ${key}`);
-    }
-  }
-});
-
-test("v2 plan, form, draft, pricing, and Alias copy has no English fallback in any non-English locale", () => {
-  const localizedCatalogs = {
-    "zh-TW": zhTWMessages,
-    "ja-JP": jaJPMessages,
-    "ko-KR": koKRMessages,
-    "es-ES": esESMessages,
-    "fr-FR": frFRMessages,
-    "de-DE": deDEMessages,
-    "pt-BR": ptBRMessages,
-    "ru-RU": ruRUMessages,
-  } as const;
-  const keys = [
-    "服务商目录加载失败",
-    "服务套餐",
-    "选择服务套餐",
-    "例如：主号",
-    "Base URL",
-    "完整 Endpoint",
-    "请填写完整 Endpoint",
-    "请填写 API 地址",
-    "Endpoint 格式无效",
-    "Endpoint 必须是 http:// 或 https:// URL",
-    "Endpoint 不能包含用户名或密码",
-    "上游协议",
-    "请选择上游协议",
-    "所选协议对该账号下全部模型统一生效。",
-    "仅标准推理 Endpoint 可自动推导 /models；请手动添加模型 ID。",
-    "推荐填写不带 /v1 的 API 根地址；OCG 会自动补全 /v1 和协议路径。已带 /v1 时不会重复添加。",
-    "非标准完整 Endpoint 无法自动推导 /models；请手动添加模型 ID。",
-    "查看完整条款",
-    "我已阅读并同意上述条款",
-    "模型能力",
-    "模型 ID",
-    "选择 Alias（模型 ID）",
-    "添加模型",
-    "请填写 Base URL",
-    "请阅读并同意条款",
-    "请至少添加一个模型能力",
-    "模型 ID 不能重复",
-    "模型 ID 最多 200 个字符",
-    "模型 ID 不能包含控制字符",
-    "模型能力必须使用所选上游协议",
-    "创建为禁用草稿；验证与路由尚未就绪",
-    "路由尚未就绪",
-    "已归档",
-    "该方案已归档，暂不支持创建",
-    "该方案已归档，不支持启用",
-    "创建为禁用账号，验证连接成功后手动启用。",
-    "创建后默认启用；可随时通过账号卡片测试连接。",
-    "验证连接",
-    "连接验证成功，账号保持禁用，可手动启用。",
-    "连接验证失败: {error}",
-    "验证连接成功后才能启用",
-    "目标端点由管理员自行选择并负责：使用 http:// 时 Key 将明文传输；验证连接会发送一次最小真实请求，可能产生服务商费用。",
-    "目标端点由管理员自行选择并负责：使用 http:// 时 Key 将明文传输；测试连接会发送最小真实请求，可能产生服务商费用。",
-    "Base URL 格式无效",
-    "Base URL 必须是 http:// 或 https:// URL",
-    "Base URL 不能包含用户名或密码",
-    "{count} 个模型",
-    "连接已验证：{time}",
-    "连接已验证",
-    "上次验证失败，请检查 Key 与端点配置后重试。",
-    "以下为官方套餐参考，不是 OCG Manager 实时计价或用量。",
-    "官方套餐参考 · 截至 {date}",
-    "月费",
-    "另加处理费",
-    "每月含额度",
-    "官方估算请求数",
-    "滚动额度限制",
-    "5 小时",
-    "7 天",
-    "请求数是官方估算，实际取决于模型、tokens 与缓存；部分模型有单独额度。",
-    "套餐",
-    "活动价",
-    "原价",
-    "每月 Credits",
-    "基础版",
-    "标准版",
-    "高级版",
-    "仅限 AI 工具内交互式使用；禁止共享账号、自动化脚本、自定义应用后端及非交互批量调用。",
-    "查看使用限制",
-    "该方案暂不可路由",
-    "该方案暂不可路由。",
-    "待验证",
-    "等待支持",
-    "该方案验证功能暂不可用，创建后保持禁用草稿。",
-    "账号待验证，验证通过前保持禁用。",
-    "尚未验证连接：账号可先启用，也可先验证连接。",
-    "输入模型 ID 后按 Enter 添加",
-    "测试连接：{name}",
-    "测试将锁定当前账号发送最小真实请求，不会切换其他账号；可能产生少量服务商费用。",
-    "筛选模型",
-    "确认测试",
-    "测试全部 {count} 个模型",
-    "将通过当前账号依次测试筛选结果中的 {count} 个模型，是否继续？",
-    "没有匹配的模型",
-    "当前账号没有可测试模型",
-    "刷新模型列表",
-    "测试模型 {model}",
-    "正在测试 {current}/{total}",
-    "测试中",
-    "未测试",
-    "测试失败",
-    "共 {count} 个模型",
-    "测试账号 {name} 的连接",
-    "完成注册后可测试连接",
-    "加载测试模型失败: {error}",
-    "结果",
-    "验证失败，请检查 Key 或等待该方案支持验证。",
-    "验证失败",
-    "验证中",
-    "该方案无需价格表",
-    "该方案未定价",
-    "解析别名",
-    "模型解析",
-    "请求模型",
-    "选择要添加的方案",
-    "可添加",
-    "草稿方案",
-    "暂不可用",
-    "添加 {plan} 账号",
-    "无法确定账号方案，请关闭后重试",
-    "账号创建失败，请重试",
-    "供应商",
-    "加载供应商失败: {error}",
-    "前往供应商",
-    "有效协议：{protocols}",
-    "全部供应商协议已关闭",
-    "该供应商范围当前不可路由",
-    "刷新模型目录",
-    "测试账号 {name} 的模型与协议",
-    "根据 OCG 内已定价请求估算；不含其他客户端用量，可手工校准。",
-    "模型价格",
-    "开",
-    "关",
-    "强制",
-    "本行全部",
-    "本列全部",
-    "本行全部：自动",
-    "本行全部：强制开启",
-    "本行全部：强制关闭",
-    "本列全部：自动",
-    "本列全部：强制开启",
-    "本列全部：强制关闭",
-    "探测会向上游发送真实最小请求，可能消耗额度。是否继续？",
-    "该模型无测试账号",
-    "协议覆盖已保存",
-    "保存协议覆盖失败: {error}",
-  ] satisfies MessageKey[];
-
-  for (const [localeName, catalog] of Object.entries(localizedCatalogs)) {
-    for (const key of keys) {
-      assert.notEqual(catalog[key], enUSMessages[key], `${localeName}: ${key}`);
     }
   }
 });

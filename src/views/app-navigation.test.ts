@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   APP_NAVIGATION,
@@ -28,6 +29,14 @@ test("legacy pricing view keys resolve to providers without inventing a second e
   assert.equal(resolveAppViewKey("accounts"), "accounts");
   assert.equal(resolveAppViewKey("cpa"), "cpa");
   assert.equal(resolveAppViewKey("not-a-view"), "dashboard");
+});
+
+test("legacy pricing URLs migrate to providers with replaceState", () => {
+  const app = readFileSync(new URL("../App.vue", import.meta.url), "utf8");
+  assert.match(app, /isLegacyPricingView\(raw\)/);
+  assert.match(app, /window\.history\.replaceState/);
+  assert.match(app, /applyAppViewSearchParams/);
+  assert.match(app, /resolveAppViewKey\(raw\)/);
 });
 
 test("provider deep-link query fields round-trip on the providers view", () => {

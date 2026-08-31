@@ -2,35 +2,25 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { dashboardApi } from "../api/dashboard.ts";
+import { installFetchMock } from "../test-helpers/dashboard-v3-fetch.ts";
 
 const logs = readFileSync(new URL("./Logs.vue", import.meta.url), "utf8");
 const presenters = readFileSync(new URL("../api/dashboard-presenters.ts", import.meta.url), "utf8");
 
 test("forward log API sends the provider attribution filters as exact query params", async () => {
-  Object.defineProperty(globalThis, "window", {
-    configurable: true,
-    value: { location: { pathname: "/dashboard" }, dispatchEvent() {} },
-  });
-  let requested = "";
-  Object.defineProperty(globalThis, "fetch", {
-    configurable: true,
-    value: async (input: string) => {
-      requested = input;
-      return new Response(JSON.stringify({
-        revision: 1,
-        processGeneration: 99,
-        pricingRevision: null,
-        items: [],
-        summary: {
-          totalRequests: 0,
-          promptTokens: 0,
-          completionTokens: 0,
-          cachedTokens: 0,
-          cost: 0,
-        },
-      }), { headers: { "Content-Type": "application/json" } });
+  const requests = installFetchMock(() => ({
+    revision: 1,
+    processGeneration: 99,
+    pricingRevision: null,
+    items: [],
+    summary: {
+      totalRequests: 0,
+      promptTokens: 0,
+      completionTokens: 0,
+      cachedTokens: 0,
+      cost: 0,
     },
-  });
+  }));
 
   await dashboardApi.getForwardLogs({
     limit: 20,
@@ -41,7 +31,7 @@ test("forward log API sends the provider attribution filters as exact query para
     credential_account_id: "cred 2",
   });
 
-  const query = new URL(requested, "http://localhost").searchParams;
+  const query = new URL(requests[0]!.url, "http://localhost").searchParams;
   assert.equal(query.get("providerId"), "opencode");
   assert.equal(query.get("offeringId"), "go");
   assert.equal(query.get("routeAccountId"), "route 1");

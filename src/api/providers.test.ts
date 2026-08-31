@@ -1,42 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createPinia, setActivePinia } from "pinia";
 import { providerApi } from "./providers.ts";
-import { useControlPlaneStore } from "../stores/controlPlane.ts";
-
-interface RequestRecord {
-  url: string;
-  method: string;
-  body: Record<string, unknown> | null;
-}
-
-function installFetch(responder: (request: RequestRecord) => object): RequestRecord[] {
-  Object.defineProperty(globalThis, "window", {
-    configurable: true,
-    value: { location: { pathname: "/dashboard" }, dispatchEvent() {} },
-  });
-  const requests: RequestRecord[] = [];
-  Object.defineProperty(globalThis, "fetch", {
-    configurable: true,
-    value: async (input: string, init: RequestInit = {}) => {
-      const request = {
-        url: input,
-        method: init.method ?? "GET",
-        body: init.body ? JSON.parse(String(init.body)) as Record<string, unknown> : null,
-      };
-      requests.push(request);
-      return new Response(JSON.stringify(responder(request)), {
-        headers: { "Content-Type": "application/json" },
-      });
-    },
-  });
-  return requests;
-}
+import { installFetchMock, setupControlPlane } from "../test-helpers/dashboard-v3-fetch.ts";
 
 test("Go protocol probe sends only provider, model, and protocol intent", async () => {
-  setActivePinia(createPinia());
-  useControlPlaneStore().sync({ revision: 12, processGeneration: 42, pricingRevision: "p1" });
-  const requests = installFetch(({ url }) => {
+  setupControlPlane(12, 42, "p1");
+  const requests = installFetchMock(({ url }) => {
     if (url.endsWith("/providers/opencode/protocol-probes")) {
       return {
         accountId: null,
@@ -71,13 +40,12 @@ test("Go protocol probe sends only provider, model, and protocol intent", async 
 });
 
 test("Go and GOAT model refresh use the selected account on the provider route", async () => {
-  setActivePinia(createPinia());
-  useControlPlaneStore().sync({ revision: 12, processGeneration: 42, pricingRevision: "p1" });
+  setupControlPlane(12, 42, "p1");
   const providers: Record<string, string> = {
     "go-account": "opencode",
     "goat-account": "command-code",
   };
-  const requests = installFetch(({ url, method }) => {
+  const requests = installFetchMock(({ url, method }) => {
     const accountId = Object.keys(providers).find((id) => url.endsWith(`/accounts/${id}`));
     if (accountId) {
       return {
@@ -122,9 +90,8 @@ test("Go and GOAT model refresh use the selected account on the provider route",
 });
 
 test("unified catalog refresh sends only the selected contract scope and CAS tokens", async () => {
-  setActivePinia(createPinia());
-  useControlPlaneStore().sync({ revision: 12, processGeneration: 42, pricingRevision: "p1" });
-  const requests = installFetch(({ url, method }) => {
+  setupControlPlane(12, 42, "p1");
+  const requests = installFetchMock(({ url, method }) => {
     if (url.endsWith("/provider-contracts/provider/opencode/catalog/refresh") && method === "POST") {
       return {
         revision: 13,
@@ -147,9 +114,8 @@ test("unified catalog refresh sends only the selected contract scope and CAS tok
 });
 
 test("Custom endpoint protocol probe stays blocked while overrides use the model-protocol-overrides route", async () => {
-  setActivePinia(createPinia());
-  useControlPlaneStore().sync({ revision: 8, processGeneration: 42, pricingRevision: "p1" });
-  const requests = installFetch(({ url, method }) => {
+  setupControlPlane(8, 42, "p1");
+  const requests = installFetchMock(({ url, method }) => {
     if (url.endsWith("/accounts/custom-1")) {
       return { id: "custom-1", providerId: "custom", revision: 8, processGeneration: 42 };
     }
@@ -232,9 +198,8 @@ function zenFreeAccountDto(overrides: Record<string, unknown> = {}) {
 }
 
 test("Zen Free provider settings reject non-Zen accounts before the dedicated write", async () => {
-  setActivePinia(createPinia());
-  useControlPlaneStore().sync({ revision: 12, processGeneration: 42, pricingRevision: "p1" });
-  const requests = installFetch(({ url }) => {
+  setupControlPlane(12, 42, "p1");
+  const requests = installFetchMock(({ url }) => {
     if (url.endsWith("/accounts/go-account-2")) {
       return { id: "go-account-2", providerId: "opencode", revision: 12, processGeneration: 42 };
     }
@@ -251,10 +216,9 @@ test("Zen Free provider settings reject non-Zen accounts before the dedicated wr
 });
 
 test("Zen Free enable switch writes the catalog provider through PATCH /providers/zen-free", async () => {
-  setActivePinia(createPinia());
-  useControlPlaneStore().sync({ revision: 12, processGeneration: 42, pricingRevision: "p1" });
+  setupControlPlane(12, 42, "p1");
   let enabled = true;
-  const requests = installFetch(({ url, method }) => {
+  const requests = installFetchMock(({ url, method }) => {
     if (url.endsWith(`/accounts/${ZEN_FREE_ACCOUNT_ID}`)) {
       return zenFreeAccountDto({ enabled, revision: enabled ? 12 : 13 });
     }

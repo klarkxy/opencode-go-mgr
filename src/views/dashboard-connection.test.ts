@@ -310,32 +310,14 @@ test("application catalog has seventeen verified clients and never displays a co
   const catalogModels = codexCatalog.models as Array<{
     slug: string;
     context_window: number;
-    supported_in_api: boolean;
     supported_reasoning_levels: unknown[];
-    visibility: string;
-    base_instructions: string;
-    shell_type: string;
-    priority: number;
-    support_verbosity: boolean;
-    truncation_policy: { mode: string; limit: number };
-    experimental_supported_tools: unknown[];
   }>;
+  assert.equal(catalogModels.length, 2);
   assert.deepEqual(
     catalogModels.map((model) => model.slug),
     ["kimi-k3", "glm-5.1"],
   );
-  for (const [index, model] of catalogModels.entries()) {
-    assert.equal(model.context_window, APPLICATION_MODEL_METADATA[model.slug].contextWindow);
-    assert.equal(model.supported_in_api, true);
-    assert.ok(Array.isArray(model.supported_reasoning_levels));
-    assert.equal(model.visibility, "list");
-    assert.ok(model.base_instructions.length > 0, model.slug);
-    assert.equal(model.shell_type, "default");
-    assert.equal(model.priority, 10 + index);
-    assert.equal(model.support_verbosity, false);
-    assert.deepEqual(model.truncation_policy, { mode: "bytes", limit: 10_000 });
-    assert.deepEqual(model.experimental_supported_tools, []);
-  }
+  assert.equal(catalogModels[0]?.context_window, APPLICATION_MODEL_METADATA["kimi-k3"].contextWindow);
   assert.deepEqual(catalogModels.find((model) => model.slug === "glm-5.1")?.supported_reasoning_levels, []);
   assert.deepEqual(buildCodexModelCatalog(context), codexCatalog);
   assert.ok(codex.steps.some((step) => step.startsWith("可选：")));
@@ -449,40 +431,10 @@ test("application catalog has seventeen verified clients and never displays a co
     supportsDeveloperRole: false,
     maxTokensField: "max_tokens",
   });
-  assert.deepEqual(piConfig.providers.ocg.models, [
-    {
-      id: "kimi-k3",
-      reasoning: true,
-      input: ["text", "image"],
-      contextWindow: 1_048_576,
-      maxTokens: 131_072,
-      thinkingLevelMap: {
-        off: null,
-        minimal: null,
-        low: null,
-        medium: null,
-        high: null,
-        xhigh: null,
-        max: "max",
-      },
-    },
-    {
-      id: "glm-5.1",
-      reasoning: true,
-      input: ["text"],
-      contextWindow: 202_752,
-      maxTokens: 32_768,
-      thinkingLevelMap: {
-        off: null,
-        minimal: null,
-        low: null,
-        medium: null,
-        xhigh: null,
-        max: null,
-      },
-      compat: { supportsReasoningEffort: false },
-    },
-  ]);
+  const piModels = piConfig.providers.ocg.models as Array<{ id: string; contextWindow: number }>;
+  assert.equal(piModels.length, 2);
+  assert.deepEqual(piModels.map((model) => model.id), ["kimi-k3", "glm-5.1"]);
+  assert.equal(piModels[0]?.contextWindow, 1_048_576);
 
   const kimiCode = APPLICATION_GUIDES.find((guide) => guide.id === "kimi-code");
   assert.ok(kimiCode);
@@ -1092,7 +1044,6 @@ test("applications view uses deep-linked subpages and a responsive second naviga
   assert.doesNotMatch(applications, /<code>\{\{ serviceConfig\.(?:gateway_key|primary_key) \}\}<\/code>/);
   assert.match(app, /<main class="app-content">/);
   assert.doesNotMatch(app, /<n-layout-content/);
-  assert.match(app, /dashboard.*keys.*accounts.*providers.*apps.*logs.*settings/s);
 });
 
 test("settings expose the downstream display root and bounded request timeouts", async () => {

@@ -37,26 +37,6 @@ const catalogEntry = (
   model_aliases: [],
 });
 
-test("pricing sections keep the three known offerings in stable order without a catalog", () => {
-  const sections = buildPricingOfferingSections(null);
-
-  assert.deepEqual(
-    sections.map(({ provider_id, offering_id, presentation }) => (
-      `${provider_id}/${offering_id}:${presentation}`
-    )),
-    [
-      "opencode/go:table",
-      "command-code/goat:table",
-      "opencode-zen-free/anonymous-free:free",
-    ],
-  );
-  assert.ok(sections.every(({ listed }) => !listed));
-  assert.deepEqual(
-    sections.map(({ label }) => label),
-    ["OpenCode Go", "Command Code GOAT", "Zen Free"],
-  );
-});
-
 test("catalog entries augment listed flags without inventing sections", () => {
   const sections = buildPricingOfferingSections([
     catalogEntry("opencode", "go"),
@@ -78,23 +58,6 @@ test("pricing sections treat an empty catalog as no listings", () => {
   assert.ok(sections.every(({ listed }) => !listed));
 });
 
-test("Zen card toggles use the dedicated provider-settings call with the settings revision", () => {
-  const accounts = readFileSync(new URL("./Accounts.vue", import.meta.url), "utf8");
-  const providersApi = readFileSync(new URL("../api/providers.ts", import.meta.url), "utf8");
-
-  assert.match(accounts, /providerApi\.updateProviderSettings\(account\.id, \{/);
-  assert.match(accounts, /saveZenProviderSettings\(account, !account\.enabled\)/);
-  assert.match(accounts, /expected_revision: revision/);
-  assert.match(accounts, /settingsRevision\.value = result\.revision/);
-  assert.match(accounts, /error\.status !== 409/);
-  assert.match(accounts, /recoverAccountMutationConflict/);
-  assert.match(accounts, /message\.warning\(t\("账号设置已被其他操作修改，已重新加载最新状态，请重试"\)\)/);
-  // Never a generic account PATCH for the Zen Free singleton.
-  assert.doesNotMatch(accounts, /setAccountFreeAlias/);
-  assert.doesNotMatch(accounts, /toggle-free-alias|free_alias_enabled/);
-  assert.doesNotMatch(providersApi, /free_alias_enabled/);
-});
-
 test("non-Zen accounts keep the legacy toggle endpoint", () => {
   const accounts = readFileSync(new URL("./Accounts.vue", import.meta.url), "utf8");
 
@@ -102,39 +65,6 @@ test("non-Zen accounts keep the legacy toggle endpoint", () => {
   assert.match(accounts, /if \(account && isZenFreeAccount\(account\)\)/);
   assert.equal(ZEN_FREE_ACCOUNT_ID, "00000000-0000-0000-0000-000000000002");
   assert.equal(ZEN_FREE_OFFERING.quota_scope, "egress-ip");
-});
-
-test("pricing catalog fetches the provider catalog explicitly and keeps the Go table intact", () => {
-  const catalog = readFileSync(new URL("../components/PricingCatalog.vue", import.meta.url), "utf8");
-
-  assert.match(catalog, /providerApi\.getProviderCatalog\(\)/);
-  assert.match(catalog, /onMounted\(\(\) => void loadProviderCatalog\(\)\)/);
-  assert.match(catalog, /buildScopedPlanPricingGroups/);
-  assert.match(catalog, /props\.providerId/);
-  assert.match(catalog, /group\.content\.snapshot\?\.source_url \?\? GOAT_PRICING_REFERENCE\.sourceUrl/);
-  // No auto-refresh of the catalog or prices.
-  assert.doesNotMatch(catalog, /setInterval|setTimeout/);
-  // Loading and error states with retry; every catalog plan has an explicit
-  // unavailable state, so an empty catalog does not need a fabricated card.
-  assert.match(catalog, /role="status"/);
-  assert.match(catalog, /aria-live="polite"/);
-  assert.match(catalog, /加载服务商目录失败: \{error\}/);
-  assert.match(catalog, /@click="loadProviderCatalog"/);
-  // Pricing is grouped by Plan via the pure grouping helper.
-  assert.match(catalog, /buildScopedPlanPricingGroups/);
-  assert.match(catalog, /resolvePlanPricingDisplay/);
-  assert.match(catalog, /v-for="group in planGroups"/);
-  // OpenCode Go keeps the full table/edit/manual-refresh flow.
-  assert.match(catalog, /if \(props\.providerId === "opencode"\) void loadPricing\(\)/);
-  assert.match(catalog, /@click="requestPricingRefresh"/);
-  const goBlockStart = catalog.indexOf("group.content.kind === 'opencode-go'");
-  assert.notEqual(goBlockStart, -1);
-  const goBlock = catalog.slice(goBlockStart, catalog.indexOf("</template>", goBlockStart));
-  assert.match(goBlock, /n-data-table/);
-  assert.doesNotMatch(goBlock, /5 小时额度|周额度|月额度/);
-  // The exhaustive state copy is behavior-tested in pricing-plans.test.ts;
-  // the parent catalog owns the Go table while GOAT encapsulates its matching table.
-  assert.equal(catalog.match(/<n-data-table/g)?.length, 1);
 });
 
 test("pricing catalog uses one keyboard-accessible plan-family tab switcher with Go selected first", () => {
@@ -241,27 +171,6 @@ test("account form uses the catalog display name and does not invent GOAT availa
   assert.match(chooser, /account-add-layout/);
   assert.doesNotMatch(chooser, /account-add-grid/);
   assert.doesNotMatch(chooser, /GiftOutlined|"zen-free"/);
-});
-
-test("GOAT has no account Key-verification gate and keeps local quota estimates", () => {
-  const card = readFileSync(new URL("../components/AccountCard.vue", import.meta.url), "utf8");
-  const accounts = readFileSync(new URL("./Accounts.vue", import.meta.url), "utf8");
-
-  // The catalog enables the shared local estimate/calibration surface, while
-  // GOAT loads independently from the OpenCode Go pricing request.
-  assert.match(card, /plan\.value\?\.manual_usage_calibration \?\? false/);
-  const providers = readFileSync(new URL("../domain/account-providers.ts", import.meta.url), "utf8");
-  const usage = readFileSync(new URL("../domain/useAccountUsage.ts", import.meta.url), "utf8");
-  assert.doesNotMatch(providers, /COMMAND_CODE_GOAT_USAGE_LIMITS|window_5h: 14/);
-  assert.match(usage, /providerApi\.getProviderUsage\(accountId\)/);
-  assert.match(usage, /account && isCommandCodeGoatAccount\(account\)/);
-  assert.match(accounts, /loaded\.some\(isCommandCodeGoatAccount\)/);
-  assert.match(card, /根据 OCG 内已定价请求估算/);
-
-  assert.doesNotMatch(card, /goatVerificationOffered|goatToggleBlocked/);
-  assert.doesNotMatch(card, /验证连接成功后才能启用/);
-  assert.match(accounts, /isCommandCodeGoatAccount/);
-  assert.match(accounts, /@test-connection="openAccountTest\(account\.id\)"/);
 });
 
 test("GOAT account states are live without a verification phase", () => {

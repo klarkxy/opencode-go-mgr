@@ -1,44 +1,15 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { createPinia, setActivePinia } from "pinia";
 import { DashboardRequestError, dashboardV3 } from "../api/dashboard-v3.ts";
 import { dashboardApi } from "../api/dashboard.ts";
 import { useConnectionStore } from "../stores/connection.ts";
-import { useControlPlaneStore } from "../stores/controlPlane.ts";
+import {
+  installFetchMock,
+  setupControlPlane,
+  v3AccountDto,
+} from "../test-helpers/dashboard-v3-fetch.ts";
 import { computeTimeRange, resolveTimeRange } from "./log-time-range.ts";
-
-interface RecordedRequest {
-  url: string;
-  method: string;
-  body: Record<string, unknown> | null;
-}
-
-function installBrowser(
-  responder: (request: RecordedRequest) => Response | object,
-): RecordedRequest[] {
-  Object.defineProperty(globalThis, "window", {
-    configurable: true,
-    value: { location: { pathname: "/dashboard" }, dispatchEvent() {} },
-  });
-  const requests: RecordedRequest[] = [];
-  Object.defineProperty(globalThis, "fetch", {
-    configurable: true,
-    value: async (input: string, init: RequestInit = {}) => {
-      const request = {
-        url: input,
-        method: init.method ?? "GET",
-        body: init.body ? JSON.parse(String(init.body)) as Record<string, unknown> : null,
-      };
-      requests.push(request);
-      const result = responder(request);
-      return result instanceof Response
-        ? result
-        : new Response(JSON.stringify(result), { headers: { "Content-Type": "application/json" } });
-    },
-  });
-  return requests;
-}
 
 function v3ForwardLogs(): object {
   return {
@@ -56,66 +27,8 @@ function v3ForwardLogs(): object {
   };
 }
 
-function v3Account(id: string): object {
-  return {
-    id,
-    name: "Account",
-    username: "",
-    password: "",
-    key: "",
-    enabled: true,
-    accountType: "key",
-    setupStep: "ready",
-    providerId: "opencode",
-    offeringId: "go",
-    credentialKind: "api_key",
-    quotaScope: "key",
-    revision: 1,
-    purchaseDate: "2026-07-15",
-    expiresOn: "2026-08-15",
-    cooldownUntil: null,
-    cooldownGenericUntil: null,
-    cooldown5hUntil: null,
-    cooldownWeekUntil: null,
-    cooldownMonthUntil: null,
-    cooldownFreeUntil: null,
-    lastError: null,
-    authError: null,
-    notes: "",
-    usageSyncLastSuccessAt: null,
-    usageSyncNextAllowedAt: null,
-    createdAt: "2026-07-15T00:00:00Z",
-    updatedAt: "2026-07-15T00:00:00Z",
-    verificationStatus: "not_required",
-    connectionVerifiedAt: null,
-    verificationError: null,
-    planRoutable: true,
-    customConfig: null,
-    modelCapabilities: [],
-  };
-}
-
-function setupControlPlane(revision = 7, processGeneration = 99): void {
-  setActivePinia(createPinia());
-  useControlPlaneStore().sync({ revision, processGeneration, pricingRevision: null });
-}
-
 test("forward log API sends remote paging and filter parameters", async () => {
-  let requested = "";
-  Object.defineProperty(globalThis, "window", {
-    configurable: true,
-    value: {
-      location: { pathname: "/dashboard" },
-      dispatchEvent() {},
-    },
-  });
-  Object.defineProperty(globalThis, "fetch", {
-    configurable: true,
-    value: async (input: string) => {
-      requested = input;
-      return new Response(JSON.stringify(v3ForwardLogs()), { headers: { "Content-Type": "application/json" } });
-    },
-  });
+  const requests = installFetchMock(() => v3ForwardLogs());
 
   await dashboardApi.getForwardLogs({
     limit: 20,
@@ -127,7 +40,7 @@ test("forward log API sends remote paging and filter parameters", async () => {
     sort_order: "asc",
   });
 
-  const query = new URL(requested, "http://localhost").searchParams;
+  const query = new URL(requests[0]!.url, "http://localhost").searchParams;
   assert.equal(query.get("limit"), "20");
   assert.equal(query.get("offset"), "40");
   assert.equal(query.get("status"), "success");
@@ -138,17 +51,10 @@ test("forward log API sends remote paging and filter parameters", async () => {
 });
 
 test("dashboard request errors preserve status for localized handling", async () => {
-  Object.defineProperty(globalThis, "window", {
-    configurable: true,
-    value: { location: { pathname: "/dashboard" }, dispatchEvent() {} },
-  });
-  Object.defineProperty(globalThis, "fetch", {
-    configurable: true,
-    value: async () => new Response(JSON.stringify({ code: "conflict", message: "raw fallback" }), {
-      status: 409,
-      headers: { "Content-Type": "application/json" },
-    }),
-  });
+  installFetchMock(() => new Response(JSON.stringify({ code: "conflict", message: "raw fallback" }), {
+    status: 409,
+    headers: { "Content-Type": "application/json" },
+  }));
 
   await assert.rejects(
     () => dashboardV3.registerAdmin("admin", "password123", { expectedRevision: 0, processGeneration: 0 }),
@@ -159,18 +65,11 @@ test("dashboard request errors preserve status for localized handling", async ()
 });
 
 test("dashboard request errors preserve a non-JSON proxy response body", async () => {
-  Object.defineProperty(globalThis, "window", {
-    configurable: true,
-    value: { location: { pathname: "/dashboard" }, dispatchEvent() {} },
-  });
-  Object.defineProperty(globalThis, "fetch", {
-    configurable: true,
-    value: async () => new Response("<h1>Bad Gateway</h1>", {
-      status: 502,
-      statusText: "Bad Gateway",
-      headers: { "Content-Type": "text/html" },
-    }),
-  });
+  installFetchMock(() => new Response("<h1>Bad Gateway</h1>", {
+    status: 502,
+    statusText: "Bad Gateway",
+    headers: { "Content-Type": "text/html" },
+  }));
 
   await assert.rejects(
     () => dashboardV3.registerAdmin("admin", "password123", { expectedRevision: 0, processGeneration: 0 }),
@@ -182,7 +81,7 @@ test("dashboard request errors preserve a non-JSON proxy response body", async (
 
 test("settings update writes CAS tokens and reloads the full config", async () => {
   setupControlPlane(7);
-  const requests = installBrowser(({ url, method }) => {
+  const requests = installFetchMock(({ url, method }) => {
     if (method === "PUT" && url.endsWith("/settings")) {
       return { revision: 8, processGeneration: 99 };
     }
@@ -252,7 +151,7 @@ test("settings update writes CAS tokens and reloads the full config", async () =
 test("primary key regeneration reloads plaintext from the connection endpoint", async () => {
   setupControlPlane(7);
   let primaryKey = "ocg-old-key";
-  const requests = installBrowser(({ url, method }) => {
+  const requests = installFetchMock(({ url, method }) => {
     if (method === "POST" && url.endsWith("/keys/primary/regenerate")) {
       primaryKey = "ocg-new-key";
       return { revision: 8, processGeneration: 99 };
@@ -283,12 +182,12 @@ test("primary key regeneration reloads plaintext from the connection endpoint", 
 
 test("account API sends purchase dates and the complete reorder payload", async () => {
   setupControlPlane(1);
-  const requests = installBrowser(({ url, method }) => {
+  const requests = installFetchMock(({ url, method }) => {
     if (method === "POST" && url.endsWith("/accounts")) {
-      return { account: v3Account("account-2"), revision: 1, processGeneration: 99 };
+      return { account: v3AccountDto("account-2"), revision: 1, processGeneration: 99 };
     }
     if (method === "PUT" && url.endsWith("/accounts/order")) {
-      return { accounts: [v3Account("account-2")], revision: 1, processGeneration: 99 };
+      return { accounts: [v3AccountDto("account-2")], revision: 1, processGeneration: 99 };
     }
     throw new Error(`unexpected request ${method} ${url}`);
   });
@@ -325,32 +224,17 @@ test("account API sends purchase dates and the complete reorder payload", async 
 
 test("managed account API uses ordered setup, browser targets, and profile reset routes", async () => {
   setupControlPlane(1);
-  const requests: RecordedRequest[] = [];
-  Object.defineProperty(globalThis, "window", {
-    configurable: true,
-    value: { location: { pathname: "/dashboard" }, dispatchEvent() {} },
-  });
-  Object.defineProperty(globalThis, "fetch", {
-    configurable: true,
-    value: async (input: string, init: RequestInit = {}) => {
-      const request = {
-        url: input,
-        method: init.method ?? "GET",
-        body: init.body ? JSON.parse(String(init.body)) as Record<string, unknown> : null,
-      };
-      requests.push(request);
-      let result: object;
-      if (input.endsWith("/browser/capabilities")) {
-        result = { mode: "remote", reason: null, revision: 1, processGeneration: 99, pricingRevision: null };
-      } else if (input.endsWith("/browser-profile")) {
-        result = { account: v3Account("managed-1"), revision: 1, processGeneration: 99 };
-      } else if (input.endsWith("/browser")) {
-        result = { mode: "remote", sessionToken: "session-1", revision: 1, processGeneration: 99, pricingRevision: null };
-      } else {
-        result = { account: v3Account("managed-1"), revision: 1, processGeneration: 99 };
-      }
-      return new Response(JSON.stringify(result), { headers: { "Content-Type": "application/json" } });
-    },
+  const requests = installFetchMock(({ url }) => {
+    if (url.endsWith("/browser/capabilities")) {
+      return { mode: "remote", reason: null, revision: 1, processGeneration: 99, pricingRevision: null };
+    }
+    if (url.endsWith("/browser-profile")) {
+      return { account: v3AccountDto("managed-1"), revision: 1, processGeneration: 99 };
+    }
+    if (url.endsWith("/browser")) {
+      return { mode: "remote", sessionToken: "session-1", revision: 1, processGeneration: 99, pricingRevision: null };
+    }
+    return { account: v3AccountDto("managed-1"), revision: 1, processGeneration: 99 };
   });
 
   await dashboardApi.createManagedAccount({ name: "Managed", username: "note@example.com" });
