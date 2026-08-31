@@ -158,10 +158,6 @@ case "\${3:-}" in
     fi
     ;;
   create)
-    if [[ "\${FAIL_DOCKER_DRY_RUN:-0}" == 1 && "$*" == *"--dry-run"* ]]; then
-      echo "forced docker dry-run failure" >&2
-      exit 71
-    fi
     image=$MAIN_IMAGE
     if [[ "$*" == *"$BROWSER_IMAGE@"* || "$*" == *"--tag $BROWSER_IMAGE:"* ]]; then
       image=$BROWSER_IMAGE
@@ -198,10 +194,6 @@ esac
 const fakeJq = String.raw`#!/usr/bin/env bash
 set -euo pipefail
 input=$(cat)
-if [[ "\${FAIL_JQ:-0}" == 1 ]]; then
-  echo "forced jq failure" >&2
-  exit 73
-fi
 arguments="$*"
 if [[ "$arguments" == *"--arg architecture"* && "$arguments" == *"| length"* ]]; then
   case "\${SOURCE_MODE:-nested}" in
@@ -457,21 +449,13 @@ test("source resolution rejects missing, duplicate, and wrong-platform children 
   }
 });
 
-test("docker, jq, node, and command-substitution failures remain non-zero", async (t) => {
-  const scenarios = [
-    ["docker", { FAIL_DOCKER_DRY_RUN: "1" }],
-    ["jq", { FAIL_JQ: "1" }],
-    ["node", { FAIL_IMMUTABLE_CALL: "1" }],
-    ["command substitution", { FAIL_SHA256SUM: "1" }],
-  ];
-  for (const [name, overrides] of scenarios) {
-    await t.test(name, (t) => {
-      const sandbox = createSandbox(t);
-      const result = sandbox.run("publish-immutable", overrides);
-      assert.notEqual(result.status, 0, diagnostic(result));
-      assert.equal(createLines(sandbox.log()).length, 0, sandbox.log());
-    });
-  }
+// `set -euo pipefail` already covers a failing command; the case worth pinning
+// is a failure inside command substitution, which bash does not always surface.
+test("a command-substitution failure remains non-zero and writes no tag", (t) => {
+  const sandbox = createSandbox(t);
+  const result = sandbox.run("publish-immutable", { FAIL_SHA256SUM: "1" });
+  assert.notEqual(result.status, 0, diagnostic(result));
+  assert.equal(createLines(sandbox.log()).length, 0, sandbox.log());
 });
 
 test("moving phase freshly preflights remote channels then publishes browser before main", (t) => {

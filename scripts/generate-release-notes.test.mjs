@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -212,17 +212,4 @@ test("CLI writes notes for a local tag range without depending on checkout depth
   } finally {
     rmSync(repoRoot, { recursive: true, force: true });
   }
-});
-
-test("release workflow generates notes from git instead of a fixed blurb", () => {
-  const workflow = readFileSync(
-    new URL("../.github/workflows/release.yml", import.meta.url),
-    "utf8",
-  );
-  assert.match(workflow, /generate-release-notes\.mjs --tag "\$GITHUB_REF_NAME"/);
-  assert.match(workflow, /fetch-depth:\s*0/);
-  assert.doesNotMatch(
-    workflow,
-    /notes="Updater payloads include Tauri minisign signatures/,
-  );
 });

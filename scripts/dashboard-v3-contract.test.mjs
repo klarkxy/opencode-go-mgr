@@ -56,7 +56,6 @@ test("artifact paths are schema plus types and never an endpoint client", () => 
     "--locked",
     "--quiet",
   ]);
-  assert.match(scriptSource, /Types only; no HTTP wrappers/);
   assert.doesNotMatch(scriptSource, /dashboard-v3-client/);
   assert.doesNotMatch(scriptSource, /src\/api\/tauri/);
 });

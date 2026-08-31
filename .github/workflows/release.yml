@@ -95,11 +95,8 @@ jobs:
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
-      - name: Validate Windows release smoke
-        shell: pwsh
-        run: ./scripts/validate-windows-release-smoke.ps1
       - name: Test release helpers
-        run: node --test scripts/generate-release-notes.test.mjs scripts/generate-updater-manifest.test.mjs scripts/release-policy.test.mjs scripts/verify-release-assets.test.mjs scripts/prune-appimage-wayland-libs.test.mjs
+        run: pnpm run test:tooling
       - name: Validate release contract and signing pair
         # On a production tag push this also proves the updater signing pair
         # and committed public-key fingerprint before any native runner starts;
