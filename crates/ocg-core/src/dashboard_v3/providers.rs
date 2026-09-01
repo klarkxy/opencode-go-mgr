@@ -3,8 +3,8 @@
 //! Catalog, contracts, model capabilities, and saved Zen models are local
 //! reads. Zen enablement and provider-scope protocol switches share the V3
 //! CAS envelope. Zen catalog refresh uses the fixed official keyless directory.
-//! Go/Zen protocol probes share the crate-root transport. Custom scopes hide
-//! the Provider Test action; account-page tests use V3 model-tests.
+//! Every built-in Provider scope shares the crate-root protocol-probe transport.
+//! Custom scopes hide the Provider Test action; account-page tests use V3 model-tests.
 
 use axum::Json;
 use axum::body::Bytes;
@@ -34,10 +34,10 @@ use crate::models::{Account as ModelAccount, AppConfig, ForwardLog, UpstreamChan
 use crate::protocol_probe::{self, ProtocolProbeContext, ProtocolProbeRunError};
 use crate::provider::{
     BUILTIN_PLANS, BuiltinPlan, COMMAND_CODE_PROVIDER_ID, CUSTOM_PROVIDER_ID,
-    ConnectionVerificationStatus, GO_OFFERING_ID, KIMI_CN_BASE_URL, KIMI_CN_OFFERING_ID,
-    KIMI_PROVIDER_ID, MINIMAX_CN_BASE_URL, MINIMAX_CN_OFFERING_ID, MINIMAX_PROVIDER_ID,
-    OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID, ProviderAdapterKind, ProviderRegistry,
-    ZEN_FREE_ACCOUNT_ID, default_verification_status,
+    ConnectionVerificationStatus, GO_OFFERING_ID, GOAT_OFFERING_ID, KIMI_CN_BASE_URL,
+    KIMI_CN_OFFERING_ID, KIMI_PROVIDER_ID, MINIMAX_CN_BASE_URL, MINIMAX_CN_OFFERING_ID,
+    MINIMAX_PROVIDER_ID, OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID, ProviderAdapterKind,
+    ProviderRegistry, ZEN_FREE_ACCOUNT_ID, default_verification_status,
 };
 use crate::provider_contracts::{
     self, ContractScope, EffectiveContractSet, EffectiveModelContract as DomainModelContract,
@@ -719,16 +719,19 @@ pub(super) async fn reset_provider_model_protocols_to_static(
         .map(|contract| contract.catalog.models.to_vec())
         .ok_or_else(|| V3ApiError::not_found_at(&state, "provider scope not found"))?;
     let now = Utc::now();
-    {
+    let revision = {
         let db = state.db.lock();
         db.reset_provider_static_model_protocols(&scope, &models, now)
             .map_err(V3ApiError::internal)?;
+        // The reset transaction is already durable. Advance CAS before the
+        // fallible reload so persisted state can never hide behind an old token.
+        let revision = state.bump_settings_revision();
         state
             .reload_provider_contracts_locked(&db)
             .map_err(V3ApiError::internal)?;
-    }
+        revision
+    };
     state.routing.reset();
-    let revision = state.bump_settings_revision();
     state.log_runtime_event(
         "info",
         "provider",
@@ -1093,14 +1096,28 @@ fn prepare_protocol_probe(
             "at least one explicit upstream protocol is required",
         ));
     }
-    let protocols: Vec<_> = input
+    let scope = ContractScope::provider(provider_id);
+    ensure_probe_model_is_current(state, &scope, provider_id, model_id)?;
+    let requested_protocols: Vec<_> = input
         .protocols
         .iter()
         .copied()
         .map(crate::provider::UpstreamProtocolKind::from)
         .collect();
-    protocol_probe::require_unique_probe_protocols(&protocols)
+    protocol_probe::require_unique_probe_protocols(&requested_protocols)
         .map_err(|message| V3ApiError::invalid_request_at(state, message))?;
+    let ceiling =
+        provider_contracts::safety_ceiling_protocols(descriptor.protocol_probe, model_id, &[]);
+    let protocols = requested_protocols
+        .into_iter()
+        .filter(|protocol| ceiling.contains(protocol))
+        .collect::<Vec<_>>();
+    if protocols.is_empty() {
+        return Err(V3ApiError::invalid_request_at(
+            state,
+            "none of the requested protocols are probeable for this model",
+        ));
+    }
     let now = Utc::now();
     let all_accounts = state
         .db
@@ -1119,10 +1136,11 @@ fn prepare_protocol_probe(
                 && match adapter {
                     ProviderAdapterKind::OpenCodeGo => account.offering_id == GO_OFFERING_ID,
                     ProviderAdapterKind::ZenFree => account.id == ZEN_FREE_ACCOUNT_ID,
-                    ProviderAdapterKind::MiniMaxCn | ProviderAdapterKind::KimiCn => false,
+                    ProviderAdapterKind::CommandCodeGoat => account.offering_id == GOAT_OFFERING_ID,
+                    ProviderAdapterKind::MiniMaxCn => account.offering_id == MINIMAX_CN_OFFERING_ID,
+                    ProviderAdapterKind::KimiCn => account.offering_id == KIMI_CN_OFFERING_ID,
                     ProviderAdapterKind::Cpa => false,
-                    ProviderAdapterKind::ConfigurableHttp
-                    | ProviderAdapterKind::CommandCodeGoat => false,
+                    ProviderAdapterKind::ConfigurableHttp => false,
                 }
                 && account_is_available_for_at(account, channel, &[], now)
         })
@@ -1137,8 +1155,6 @@ fn prepare_protocol_probe(
             "no eligible provider accounts are available for protocol probes",
         ));
     }
-    let scope = ContractScope::provider(provider_id);
-    ensure_probe_model_is_current(state, &scope, provider_id, model_id)?;
     let mut existing = HashMap::new();
     {
         let db = state.db.lock();

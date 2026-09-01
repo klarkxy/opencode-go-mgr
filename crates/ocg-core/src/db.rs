@@ -4016,8 +4016,9 @@ impl Database {
 
     /// Clear mutable protocol judgments for a built-in snapshot provider while
     /// preserving its current catalog. Static-supported pairs intentionally have no
-    /// override (Auto); every absent static pair receives ForceOff so a future
-    /// preferred-protocol fallback cannot make an unknown catalog model live.
+    /// override (Auto). GOAT rows added after the dated snapshot restore their
+    /// sealed family protocol as Preset evidence; every other absent pair receives
+    /// ForceOff so a future preferred-protocol fallback cannot make it live.
     pub fn reset_provider_static_model_protocols(
         &self,
         scope: &ContractScope,
@@ -4049,12 +4050,41 @@ impl Database {
                 model_id,
                 &[],
             );
+            let preset_protocols: Vec<_> = if descriptor.kind
+                == ProviderAdapterKind::CommandCodeGoat
+                && static_protocols.is_empty()
+                && !command_code_goat_includes_model(model_id)
+            {
+                ocg_domain::protocol::command_code_supported_formats(model_id)
+                    .iter()
+                    .copied()
+                    .filter_map(crate::provider_contracts::protocol_from_api)
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            for protocol in &preset_protocols {
+                upsert_model_protocol_row_on(
+                    &tx,
+                    &PersistedModelProtocol {
+                        scope: scope.clone(),
+                        model_id: model_id.clone(),
+                        protocol: *protocol,
+                        source: ContractEvidenceSource::Preset,
+                        verified_at: None,
+                        observed_at: None,
+                        last_probe_result: None,
+                        last_probe_at: None,
+                        last_probe_error: None,
+                    },
+                )?;
+            }
             for protocol in [
                 UpstreamProtocolKind::ChatCompletions,
                 UpstreamProtocolKind::Responses,
                 UpstreamProtocolKind::Messages,
             ] {
-                if !static_protocols.contains(&protocol) {
+                if !static_protocols.contains(&protocol) && !preset_protocols.contains(&protocol) {
                     set_model_protocol_override_on(
                         &tx,
                         scope,

@@ -565,11 +565,21 @@ pub fn safety_ceiling_protocols(
 ) -> Vec<UpstreamProtocolKind> {
     match probe.structural_ceiling {
         StructuralProbeCeiling::Unavailable => Vec::new(),
+        StructuralProbeCeiling::CommandCodeConstructable => {
+            ocg_domain::protocol::command_code_supported_formats(model_id)
+                .iter()
+                .copied()
+                .filter_map(protocol_from_api)
+                .collect()
+        }
+        StructuralProbeCeiling::FixedChatCompletions => {
+            vec![UpstreamProtocolKind::ChatCompletions]
+        }
         StructuralProbeCeiling::OpenCodeConstructable => {
-            if is_known_model(model_id) {
-                OPENCODE_CONSTRUCTABLE_PROTOCOLS.to_vec()
-            } else {
+            if model_id.trim().is_empty() {
                 Vec::new()
+            } else {
+                OPENCODE_CONSTRUCTABLE_PROTOCOLS.to_vec()
             }
         }
         StructuralProbeCeiling::ZenFreeConstructable => {
@@ -1151,9 +1161,10 @@ fn merge_model_contract(
             }
             ProtocolOverrideState::ForceOn => (true, true),
             ProtocolOverrideState::ForceOff => (evidence_available, false),
-            ProtocolOverrideState::Auto => {
-                (evidence_available, evidence_available && default_enabled)
-            }
+            ProtocolOverrideState::Auto => (
+                evidence_available,
+                evidence_available && (default_enabled || source == ContractEvidenceSource::Preset),
+            ),
         };
         protocols.insert(
             protocol.as_str().to_string(),

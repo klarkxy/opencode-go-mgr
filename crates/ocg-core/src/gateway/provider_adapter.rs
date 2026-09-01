@@ -304,11 +304,6 @@ fn resolve_command_code_goat(
     plan: &RequestPlan,
     policy: RoutePolicy<'_>,
 ) -> Result<AttemptSpec, String> {
-    if matches!(policy, RoutePolicy::Probe) {
-        return Err(
-            "protocol probes are not available for Command Code GOAT in this slice".to_string(),
-        );
-    }
     let descriptor = registered_descriptor(ProviderAdapterKind::CommandCodeGoat, account)?;
     require_binding(
         account,
@@ -358,9 +353,6 @@ fn resolve_fixed_chat_plan(
     base_url: &str,
     path: &str,
 ) -> Result<AttemptSpec, String> {
-    if matches!(policy, RoutePolicy::Probe) {
-        return Err(format!("protocol probes are not available for {label}"));
-    }
     let descriptor = registered_descriptor(adapter, account)?;
     require_binding(
         account,

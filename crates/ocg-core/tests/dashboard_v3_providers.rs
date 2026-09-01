@@ -699,6 +699,13 @@ async fn dashboard_v3_provider_contracts_project_five_scopes_and_custom_endpoint
         ]
     );
     assert!(parsed.custom_endpoints.is_empty());
+    assert!(
+        parsed
+            .providers
+            .iter()
+            .all(|group| group.card.protocol_probe),
+        "every built-in Provider scope must expose the shared probe action"
+    );
     assert!(body["providers"][0].get("scope_kind").is_none());
     assert_eq!(body["providers"][0]["scopeKind"], "provider");
     let kimi = parsed

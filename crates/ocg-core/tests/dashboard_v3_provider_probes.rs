@@ -7,14 +7,16 @@ use axum::extract::OriginalUri;
 use axum::http::{HeaderMap, Method as HttpMethod};
 use axum::routing::any;
 use ocg_core::dashboard_v3::{
-    ERROR_INTERNAL, ERROR_INVALID_JSON, ERROR_INVALID_REQUEST, ERROR_MISSING_EXPECTED_REVISION,
-    ERROR_NOT_FOUND, ERROR_NOT_IMPLEMENTED, ERROR_REVISION_CONFLICT, ERROR_UNAUTHORIZED,
+    AccountUpstreamProtocol, ERROR_INTERNAL, ERROR_INVALID_JSON, ERROR_INVALID_REQUEST,
+    ERROR_MISSING_EXPECTED_REVISION, ERROR_NOT_FOUND, ERROR_REVISION_CONFLICT, ERROR_UNAUTHORIZED,
     ProtocolProbeResponse,
 };
+use ocg_core::gateway::provider_adapter::install_goat_loopback_route_for_test;
 use ocg_core::models::{ProxyListDirection, ProxyMode};
 use ocg_core::provider::{
-    COMMAND_CODE_PROVIDER_ID, CUSTOM_API_OFFERING_ID, CUSTOM_PROVIDER_ID, OPENCODE_PROVIDER_ID,
-    OPENCODE_ZEN_FREE_PROVIDER_ID, UpstreamProtocolKind,
+    COMMAND_CODE_PROVIDER_ID, CUSTOM_API_OFFERING_ID, CUSTOM_PROVIDER_ID, GOAT_OFFERING_ID,
+    KIMI_PROVIDER_ID, MINIMAX_PROVIDER_ID, OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID,
+    UpstreamProtocolKind,
 };
 use ocg_core::provider_contracts::{
     CATALOG_SOURCE_OPENCODE_MODELS, ContractScope, PersistedModelProtocol, ProbeResultKind,
@@ -314,6 +316,29 @@ async fn create_go_account_with(harness: &V3Harness, name: &str, key: &str) -> S
         .to_string()
 }
 
+async fn create_goat_account(harness: &V3Harness) -> String {
+    let (status, created) = send_json(
+        harness,
+        Method::POST,
+        "/accounts",
+        &cas(
+            harness,
+            json!({
+                "name": "GOAT probe",
+                "key": GO_KEY,
+                "providerId": COMMAND_CODE_PROVIDER_ID,
+                "offeringId": GOAT_OFFERING_ID
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    created["account"]["id"]
+        .as_str()
+        .expect("created GOAT account id")
+        .to_string()
+}
+
 fn point_upstream(harness: &V3Harness, base_url: &str) {
     let mut config = harness.state.config();
     config.upstream_base_url = base_url.to_string();
@@ -567,8 +592,7 @@ async fn zen_static_protocol_reset_restores_exact_snapshot_pairs_and_defaults_ot
 }
 
 #[tokio::test]
-async fn goat_static_protocol_reset_defaults_unusable_and_future_channels_off_but_allows_manual_override()
- {
+async fn goat_static_protocol_reset_restores_later_models_as_family_presets() {
     let harness = start_loopback("goat-static-protocol-reset").await;
     let scope = ContractScope::provider(COMMAND_CODE_PROVIDER_ID);
     let models = vec![
@@ -612,23 +636,32 @@ async fn goat_static_protocol_reset_defaults_unusable_and_future_channels_off_bu
         .iter()
         .find(|model| model["modelId"] == "claude-fable-5")
         .unwrap();
-    assert_eq!(fable["protocols"]["messages"]["override"], "force_off");
-    assert_eq!(fable["protocols"]["messages"]["available"], false);
-    assert_eq!(fable["protocols"]["messages"]["enabled"], false);
-    for model_id in ["stealth/ox-alpha", "future-goat-model"] {
-        let model = goat["models"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|model| model["modelId"] == model_id)
-            .unwrap();
-        assert_eq!(
-            model["protocols"]["chat_completions"]["override"],
-            "force_off"
-        );
-        assert_eq!(model["protocols"]["chat_completions"]["enabled"], false);
-    }
-    let (status, overridden) = send_json(&harness, Method::PUT, "/provider-contracts/provider/command-code/model-protocol-overrides", &cas(&harness, json!({"overrides":[{"modelId":"future-goat-model","protocol":"chat_completions","state":"force_on"}]}))).await;
+    assert_eq!(fable["protocols"]["messages"]["override"], "auto");
+    assert_eq!(fable["protocols"]["messages"]["source"], "preset");
+    assert_eq!(fable["protocols"]["messages"]["available"], true);
+    assert_eq!(fable["protocols"]["messages"]["enabled"], true);
+    assert!(fable["protocols"]["messages"]["verifiedAt"].is_null());
+    let stealth = goat["models"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|model| model["modelId"] == "stealth/ox-alpha")
+        .unwrap();
+    assert_eq!(
+        stealth["protocols"]["chat_completions"]["override"],
+        "force_off"
+    );
+    assert_eq!(stealth["protocols"]["chat_completions"]["enabled"], false);
+    let future = goat["models"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|model| model["modelId"] == "future-goat-model")
+        .unwrap();
+    assert_eq!(future["protocols"]["chat_completions"]["override"], "auto");
+    assert_eq!(future["protocols"]["chat_completions"]["source"], "preset");
+    assert_eq!(future["protocols"]["chat_completions"]["enabled"], true);
+    let (status, overridden) = send_json(&harness, Method::PUT, "/provider-contracts/provider/command-code/model-protocol-overrides", &cas(&harness, json!({"overrides":[{"modelId":"future-goat-model","protocol":"chat_completions","state":"force_off"}]}))).await;
     assert_eq!(status, StatusCode::OK, "{overridden}");
     let goat = overridden["providers"]
         .as_array()
@@ -642,7 +675,67 @@ async fn goat_static_protocol_reset_defaults_unusable_and_future_channels_off_bu
         .iter()
         .find(|model| model["modelId"] == "future-goat-model")
         .unwrap();
-    assert_eq!(future["protocols"]["chat_completions"]["enabled"], true);
+    assert_eq!(future["protocols"]["chat_completions"]["enabled"], false);
+    harness.stop();
+}
+
+#[tokio::test]
+async fn fixed_chat_provider_resets_restore_every_current_catalog_model() {
+    let harness = start_loopback("fixed-chat-static-protocol-reset").await;
+    let now = chrono::Utc::now();
+    for (provider_id, model_id) in [
+        (MINIMAX_PROVIDER_ID, "MiniMax-New"),
+        (KIMI_PROVIDER_ID, "kimi-new"),
+    ] {
+        harness
+            .state
+            .db
+            .lock()
+            .set_contract_catalog(
+                &ContractScope::provider(provider_id),
+                &[model_id.to_string()],
+                Some(now),
+                "provider_get_models",
+                "https://example.test/models",
+                now,
+            )
+            .unwrap();
+    }
+    harness.state.reload_provider_contracts().unwrap();
+
+    for (provider_id, model_id) in [
+        (MINIMAX_PROVIDER_ID, "MiniMax-New"),
+        (KIMI_PROVIDER_ID, "kimi-new"),
+    ] {
+        let (status, reset) = send_json(
+            &harness,
+            Method::POST,
+            &static_reset_path_for(provider_id),
+            &cas(&harness, json!({})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{reset}");
+        let provider = reset["providers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|provider| provider["providerId"] == provider_id)
+            .unwrap();
+        assert_eq!(provider["staticProtocolSnapshotDate"], "2026-08-27");
+        let model = provider["models"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|model| model["modelId"] == model_id)
+            .unwrap();
+        assert_eq!(model["protocols"]["chat_completions"]["override"], "auto");
+        assert_eq!(model["protocols"]["chat_completions"]["source"], "static");
+        assert_eq!(model["protocols"]["chat_completions"]["enabled"], true);
+        for protocol in ["responses", "messages"] {
+            assert_eq!(model["protocols"][protocol]["override"], "force_off");
+            assert_eq!(model["protocols"][protocol]["enabled"], false);
+        }
+    }
     harness.stop();
 }
 
@@ -791,21 +884,32 @@ async fn protocol_probes_zero_call_gates_do_not_touch_upstream() {
             .contains("account-owned")
     );
 
-    let (status, goat) = send_json(
-        &harness,
-        Method::POST,
-        &probe_path(COMMAND_CODE_PROVIDER_ID),
-        &cas(
+    for (provider_id, model_id) in [
+        (MINIMAX_PROVIDER_ID, "MiniMax-M3"),
+        (KIMI_PROVIDER_ID, "kimi-for-coding"),
+    ] {
+        let (status, missing_account) = send_json(
             &harness,
-            json!({
-                "modelId": "deepseek/deepseek-v4-flash",
-                "protocols": ["chat_completions"]
-            }),
-        ),
-    )
-    .await;
-    assert_eq!(status, StatusCode::NOT_IMPLEMENTED, "{goat}");
-    assert_v3_error(&goat, ERROR_NOT_IMPLEMENTED);
+            Method::POST,
+            &probe_path(provider_id),
+            &cas(
+                &harness,
+                json!({
+                    "modelId": model_id,
+                    "protocols": ["chat_completions", "responses", "messages"]
+                }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{missing_account}");
+        assert_v3_error(&missing_account, ERROR_INVALID_REQUEST);
+        assert!(
+            missing_account["message"]
+                .as_str()
+                .unwrap()
+                .contains("no eligible provider accounts")
+        );
+    }
 
     let (status, unknown_provider) = send_json(
         &harness,
@@ -886,6 +990,83 @@ async fn go_protocol_probes_send_one_admin_post_per_protocol_with_correct_path_a
     assert_eq!(calls[2].path, "/v1/messages");
     assert!(calls[2].authorization.is_none());
     assert_eq!(calls[2].x_api_key.as_deref(), Some(GO_KEY));
+    harness.stop();
+}
+
+#[tokio::test]
+async fn goat_protocol_probes_use_only_each_models_sealed_native_family_path() {
+    let harness = start_loopback("probes-goat-native-family").await;
+    let origin = start_probe_origin(StatusCode::OK, SUCCESS_BODY, Duration::ZERO).await;
+    let account_id = create_goat_account(&harness).await;
+    let _route = install_goat_loopback_route_for_test(&account_id, &origin.url).unwrap();
+    let scope = ContractScope::provider(COMMAND_CODE_PROVIDER_ID);
+    let now = chrono::Utc::now();
+    harness
+        .state
+        .db
+        .lock()
+        .set_contract_catalog(
+            &scope,
+            &[
+                "deepseek/deepseek-v4-flash".to_string(),
+                "claude-sonnet-5".to_string(),
+            ],
+            Some(now),
+            "command_code_get_models",
+            "https://example.test/goat",
+            now,
+        )
+        .unwrap();
+    harness.state.reload_provider_contracts().unwrap();
+
+    for (model_id, expected_protocol) in [
+        (
+            "deepseek/deepseek-v4-flash",
+            AccountUpstreamProtocol::ChatCompletions,
+        ),
+        ("claude-sonnet-5", AccountUpstreamProtocol::Messages),
+    ] {
+        let (status, body) = send_json(
+            &harness,
+            Method::POST,
+            &probe_path(COMMAND_CODE_PROVIDER_ID),
+            &cas(
+                &harness,
+                json!({
+                    "modelId": model_id,
+                    "protocols": ["chat_completions", "responses", "messages"]
+                }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let parsed = parse_probe(&body);
+        assert_eq!(parsed.results.len(), 1, "{body}");
+        assert_eq!(parsed.results[0].protocol, expected_protocol);
+        assert!(parsed.results[0].success);
+        let contract = parsed
+            .contract
+            .expect("probe returns the updated model contract");
+        let evidence = match expected_protocol {
+            AccountUpstreamProtocol::ChatCompletions => contract.protocols.chat_completions,
+            AccountUpstreamProtocol::Responses => contract.protocols.responses,
+            AccountUpstreamProtocol::Messages => contract.protocols.messages,
+        }
+        .expect("probed family protocol");
+        assert!(evidence.available);
+        assert!(evidence.enabled);
+        assert_secret_free(&body, &[GO_KEY]);
+    }
+
+    let calls = origin.calls.lock().unwrap().clone();
+    assert_eq!(calls.len(), 2, "{calls:?}");
+    assert_eq!(calls[0].path, "/provider/v1/chat/completions");
+    assert_eq!(calls[1].path, "/provider/v1/messages");
+    assert!(calls.iter().all(|call| {
+        call.authorization.as_deref() == Some("Bearer sk-probe-secret-key")
+            && call.x_api_key.is_none()
+            && call.cookie.is_none()
+    }));
     harness.stop();
 }
 
@@ -1773,6 +1954,75 @@ async fn probe_commit_advances_global_revision_before_reload_failure() {
         )
         .unwrap();
     assert_eq!(stored_source, "invalid-after-commit");
+    assert_eq!(
+        before_contracts.as_ref(),
+        harness.state.provider_contracts().as_ref()
+    );
+    drop(conn);
+    harness.stop();
+}
+
+#[tokio::test]
+async fn static_reset_advances_global_revision_before_reload_failure() {
+    let harness = start_loopback("static-reset-reload-fail").await;
+    let now = chrono::Utc::now();
+    harness
+        .state
+        .db
+        .lock()
+        .set_contract_catalog(
+            &ContractScope::provider(KIMI_PROVIDER_ID),
+            &["kimi-for-coding".to_string()],
+            Some(now),
+            "provider_get_models",
+            "https://example.test/models",
+            now,
+        )
+        .unwrap();
+    harness.state.reload_provider_contracts().unwrap();
+    let before = harness.state.settings_revision();
+    let before_contracts = harness.state.provider_contracts();
+    let conn = open_sqlite(&harness);
+    conn.execute(
+        "INSERT OR REPLACE INTO provider_contract_model_protocols
+         (scope_kind, scope_id, model_id, protocol, source)
+         VALUES ('provider', ?1, 'kimi-for-coding', 'chat_completions', 'invalid-before-reload')",
+        [KIMI_PROVIDER_ID],
+    )
+    .unwrap();
+
+    let (status, body) = send_json(
+        &harness,
+        Method::POST,
+        &static_reset_path(),
+        &cas(&harness, json!({})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{body}");
+    assert_v3_error(&body, ERROR_INTERNAL);
+    assert_eq!(harness.state.settings_revision(), before + 1);
+    let stored_source: String = conn
+        .query_row(
+            "SELECT source FROM provider_contract_model_protocols
+             WHERE scope_kind = 'provider' AND scope_id = ?1
+             LIMIT 1",
+            [KIMI_PROVIDER_ID],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(stored_source, "invalid-before-reload");
+    let go_override_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM provider_contract_model_protocol_overrides
+             WHERE scope_kind = 'provider' AND scope_id = ?1",
+            [OPENCODE_PROVIDER_ID],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(
+        go_override_count > 0,
+        "the reset transaction must be durable"
+    );
     assert_eq!(
         before_contracts.as_ref(),
         harness.state.provider_contracts().as_ref()

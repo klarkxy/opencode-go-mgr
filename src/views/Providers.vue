@@ -106,7 +106,7 @@
                         {{ t("恢复静态协议快照") }}
                       </n-button>
                     </template>
-                    {{ t("不会请求上游；将清除手动和探测判断，保留当前目录，恢复 {date} 静态协议快照，并默认关闭静态快照中没有的协议。是否继续？", { date: activeScope.static_protocol_snapshot_date ?? "" }) }}
+                    {{ staticProtocolResetConfirmation }}
                   </n-popconfirm>
                 </div>
               </div>
@@ -362,6 +362,17 @@ const staticProtocolResetVisible = computed(() => (
   activeScope.value?.scope_kind === "provider"
   && Boolean(activeScope.value.static_protocol_snapshot_date)
 ));
+const staticProtocolResetConfirmation = computed(() => {
+  const scope = activeScope.value;
+  if (scope?.provider_id === "command-code") {
+    return t("不会请求上游；将清除手动和探测判断，保留当前目录，恢复 {date} 静态协议快照，并将快照后新增的 GOAT 模型恢复为密封供应商协议预设，其余协议关闭。是否继续？", {
+      date: scope.static_protocol_snapshot_date ?? "",
+    });
+  }
+  return t("不会请求上游；将清除手动和探测判断，保留当前目录，恢复 {date} 静态协议快照，并默认关闭静态快照中没有的协议。是否继续？", {
+    date: scope?.static_protocol_snapshot_date ?? "",
+  });
+});
 const safeSourceUrl = computed(() => {
   const url = activeScope.value?.catalog.source_url ?? "";
   return isSafeSourceUrl(url) ? url : "";

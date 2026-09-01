@@ -5,7 +5,8 @@ use crate::models::{Account, AccountSetupStep, AccountType, AppConfig};
 use crate::provider::{
     ANONYMOUS_FREE_OFFERING_ID, COMMAND_CODE_GOAT_BASE_URL,
     COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM, COMMAND_CODE_PROVIDER_ID, CUSTOM_API_OFFERING_ID,
-    CUSTOM_PROVIDER_ID, GO_OFFERING_ID, GOAT_OFFERING_ID, MINIMAX_CN_OFFERING_ID,
+    CUSTOM_PROVIDER_ID, GO_OFFERING_ID, GOAT_OFFERING_ID, KIMI_CN_BASE_URL,
+    KIMI_CN_CHAT_COMPLETIONS_PATH, KIMI_CN_OFFERING_ID, KIMI_PROVIDER_ID, MINIMAX_CN_OFFERING_ID,
     MINIMAX_PROVIDER_ID, OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID,
     ZEN_FREE_ACCOUNT_NAME,
 };
@@ -510,43 +511,69 @@ fn probe_route_allows_ceiling_without_static_support_production_requires_contrac
         CredentialKind::ApiKey,
         QuotaScope::Key,
     );
-    assert!(
-        resolve_probe_route(
-            &goat,
-            &config,
-            &chat_plan(
-                COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM,
-                UpstreamChannel::Go,
-                ApiFormat::ChatCompletions,
-                None,
-            ),
-        )
-        .unwrap_err()
-        .contains("not available")
-    );
-}
-
-#[test]
-fn account_test_route_keeps_fixed_chat_plan_available_without_enabling_provider_probes() {
-    let config = AppConfig::default();
-    let minimax = account(
-        "minimax-test",
-        MINIMAX_PROVIDER_ID,
-        MINIMAX_CN_OFFERING_ID,
-        CredentialKind::ApiKey,
-        QuotaScope::Key,
-    );
-    let route = resolve_account_test_route(
-        &minimax,
+    let goat_probe = resolve_probe_route(
+        &goat,
         &config,
         &chat_plan(
-            "MiniMax-M3",
+            COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM,
             UpstreamChannel::Go,
             ApiFormat::ChatCompletions,
             None,
         ),
     )
-    .expect("account-level tests use the fixed production Chat route");
-    assert_eq!(route.base_url, MINIMAX_CN_BASE_URL);
-    assert_eq!(route.path, MINIMAX_CN_CHAT_COMPLETIONS_PATH);
+    .expect("GOAT provider probes reuse the fixed official route");
+    assert_eq!(goat_probe.base_url, COMMAND_CODE_GOAT_BASE_URL);
+    assert_eq!(goat_probe.path, COMMAND_CODE_GOAT_CHAT_COMPLETIONS_PATH);
+}
+
+#[test]
+fn fixed_chat_plans_expose_the_same_sealed_chat_route_to_tests_and_provider_probes() {
+    let config = AppConfig::default();
+    for (provider_id, offering_id, base_url, path, model_id) in [
+        (
+            MINIMAX_PROVIDER_ID,
+            MINIMAX_CN_OFFERING_ID,
+            MINIMAX_CN_BASE_URL,
+            MINIMAX_CN_CHAT_COMPLETIONS_PATH,
+            "MiniMax-M3",
+        ),
+        (
+            KIMI_PROVIDER_ID,
+            KIMI_CN_OFFERING_ID,
+            KIMI_CN_BASE_URL,
+            KIMI_CN_CHAT_COMPLETIONS_PATH,
+            "kimi-for-coding",
+        ),
+    ] {
+        let account = account(
+            &format!("{provider_id}-test"),
+            provider_id,
+            offering_id,
+            CredentialKind::ApiKey,
+            QuotaScope::Key,
+        );
+        let plan = chat_plan(
+            model_id,
+            UpstreamChannel::Go,
+            ApiFormat::ChatCompletions,
+            None,
+        );
+        let account_route = resolve_account_test_route(&account, &config, &plan)
+            .expect("account-level tests use the fixed production Chat route");
+        let provider_route = resolve_probe_route(&account, &config, &plan)
+            .expect("provider probes reuse the same fixed Chat route");
+        for route in [account_route, provider_route] {
+            assert_eq!(route.base_url, base_url);
+            assert_eq!(route.path, path);
+        }
+        assert!(
+            resolve_probe_route(
+                &account,
+                &config,
+                &chat_plan(model_id, UpstreamChannel::Go, ApiFormat::Responses, None,),
+            )
+            .unwrap_err()
+            .contains("only accepts Chat Completions")
+        );
+    }
 }

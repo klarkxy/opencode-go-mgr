@@ -848,11 +848,15 @@ pub enum ProtocolMatrixKind {
 /// protocol.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StructuralProbeCeiling {
-    /// GOAT: request-path probes are unavailable. GOAT production uses saved
-    /// GET `/models` facts plus hard-coded family rules.
+    /// This adapter does not expose provider-scoped request-path probes.
     Unavailable,
-    /// Known OpenCode Go models: Chat Completions, Responses, and Messages
-    /// all have constructable `/v1/...` paths and OpenCode auth.
+    /// Command Code GOAT has both route families, while each model's sealed
+    /// family rule selects the one path worth probing.
+    CommandCodeConstructable,
+    /// This sealed provider exposes only its fixed Chat Completions path.
+    FixedChatCompletions,
+    /// Current-catalog OpenCode Go models: Chat Completions, Responses, and
+    /// Messages all have constructable `/v1/...` paths and OpenCode auth.
     OpenCodeConstructable,
     /// Known Zen models share OpenCode constructable paths. Unknown `-free`
     /// IDs stay Chat-only. Anything else is empty.
@@ -1110,8 +1114,8 @@ fn command_code_goat_capabilities(plan: BuiltinPlan) -> ProviderCapabilities {
             matrix: ProtocolMatrixKind::CommandCodeNative,
             unknown_zen_free_defaults_to_chat: false,
             fallback_priority: PROTOCOL_FALLBACK_CHAT_MESSAGES,
-            explicit_probe: false,
-            structural_ceiling: StructuralProbeCeiling::Unavailable,
+            explicit_probe: true,
+            structural_ceiling: StructuralProbeCeiling::CommandCodeConstructable,
         },
         verification: VerificationDescriptor {
             policy: plan.verification_policy,
@@ -1143,7 +1147,7 @@ fn command_code_goat_capabilities(plan: BuiltinPlan) -> ProviderCapabilities {
             manual_usage_calibration: plan.manual_usage_calibration,
             connection_verify: CardVerifyAction::NotApplicable,
             protocol_and_auth_immutable_after_create: false,
-            protocol_probe: false,
+            protocol_probe: true,
             catalog_refresh: true,
         },
     }
@@ -1175,8 +1179,8 @@ fn minimax_cn_capabilities(plan: BuiltinPlan) -> ProviderCapabilities {
             matrix: ProtocolMatrixKind::FixedChatCompletions,
             unknown_zen_free_defaults_to_chat: false,
             fallback_priority: &CHAT_PROTOCOLS,
-            explicit_probe: false,
-            structural_ceiling: StructuralProbeCeiling::Unavailable,
+            explicit_probe: true,
+            structural_ceiling: StructuralProbeCeiling::FixedChatCompletions,
         },
         verification: VerificationDescriptor {
             policy: plan.verification_policy,
@@ -1208,7 +1212,7 @@ fn minimax_cn_capabilities(plan: BuiltinPlan) -> ProviderCapabilities {
             manual_usage_calibration: false,
             connection_verify: CardVerifyAction::NotApplicable,
             protocol_and_auth_immutable_after_create: false,
-            protocol_probe: false,
+            protocol_probe: true,
             catalog_refresh: true,
         },
     }
@@ -1240,8 +1244,8 @@ fn kimi_cn_capabilities(plan: BuiltinPlan) -> ProviderCapabilities {
             matrix: ProtocolMatrixKind::FixedChatCompletions,
             unknown_zen_free_defaults_to_chat: false,
             fallback_priority: &CHAT_PROTOCOLS,
-            explicit_probe: false,
-            structural_ceiling: StructuralProbeCeiling::Unavailable,
+            explicit_probe: true,
+            structural_ceiling: StructuralProbeCeiling::FixedChatCompletions,
         },
         verification: VerificationDescriptor {
             policy: plan.verification_policy,
@@ -1273,7 +1277,7 @@ fn kimi_cn_capabilities(plan: BuiltinPlan) -> ProviderCapabilities {
             manual_usage_calibration: false,
             connection_verify: CardVerifyAction::NotApplicable,
             protocol_and_auth_immutable_after_create: false,
-            protocol_probe: false,
+            protocol_probe: true,
             catalog_refresh: true,
         },
     }

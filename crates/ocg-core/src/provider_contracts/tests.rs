@@ -2,7 +2,8 @@ use super::*;
 use crate::custom::CustomAccountRuntime;
 use crate::kernel::ids::{
     ANONYMOUS_FREE_OFFERING_ID, COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM, GO_OFFERING_ID,
-    GOAT_OFFERING_ID,
+    GOAT_OFFERING_ID, KIMI_CN_OFFERING_ID, KIMI_PROVIDER_ID, MINIMAX_CN_OFFERING_ID,
+    MINIMAX_PROVIDER_ID,
 };
 use crate::models::{AccountCustomConfig, AccountModelCapability};
 use crate::provider::{CUSTOM_API_OFFERING_ID, ConnectionVerificationStatus};
@@ -133,12 +134,41 @@ fn opencode_ceiling_is_constructable_paths_not_static_model_protocols() {
         &[],
     );
     assert_eq!(unknown_zen, vec![UpstreamProtocolKind::ChatCompletions]);
-    assert!(!probe_may_add(
+    assert!(probe_may_add(
         probe_for(COMMAND_CODE_PROVIDER_ID, GOAT_OFFERING_ID),
         COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM,
         UpstreamProtocolKind::ChatCompletions,
         &[],
     ));
+    assert!(!probe_may_add(
+        probe_for(COMMAND_CODE_PROVIDER_ID, GOAT_OFFERING_ID),
+        COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM,
+        UpstreamProtocolKind::Messages,
+        &[],
+    ));
+    assert!(probe_may_add(
+        probe_for(COMMAND_CODE_PROVIDER_ID, GOAT_OFFERING_ID),
+        "claude-sonnet-5",
+        UpstreamProtocolKind::Messages,
+        &[],
+    ));
+    for (provider_id, offering_id) in [
+        (MINIMAX_PROVIDER_ID, MINIMAX_CN_OFFERING_ID),
+        (KIMI_PROVIDER_ID, KIMI_CN_OFFERING_ID),
+    ] {
+        assert!(probe_may_add(
+            probe_for(provider_id, offering_id),
+            "new-catalog-model",
+            UpstreamProtocolKind::ChatCompletions,
+            &[],
+        ));
+        assert!(!probe_may_add(
+            probe_for(provider_id, offering_id),
+            "new-catalog-model",
+            UpstreamProtocolKind::Responses,
+            &[],
+        ));
+    }
 }
 
 #[test]
@@ -469,7 +499,7 @@ fn goat_is_production_routable_after_probe_success() {
             .routable
     );
     assert!(
-        !ProviderRegistry::get(COMMAND_CODE_PROVIDER_ID, GOAT_OFFERING_ID)
+        ProviderRegistry::get(COMMAND_CODE_PROVIDER_ID, GOAT_OFFERING_ID)
             .unwrap()
             .card_actions
             .protocol_probe

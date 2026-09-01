@@ -7,6 +7,7 @@ use crate::ids::{
     ANONYMOUS_FREE_OFFERING_ID, COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM,
     COMMAND_CODE_PROVIDER_ID, CPA_ACCOUNT_ID, CPA_OFFERING_ID, CPA_PROVIDER_ID,
     CUSTOM_API_OFFERING_ID, CUSTOM_PROVIDER_ID, GO_OFFERING_ID, GOAT_OFFERING_ID,
+    KIMI_CN_OFFERING_ID, KIMI_PROVIDER_ID, MINIMAX_CN_OFFERING_ID, MINIMAX_PROVIDER_ID,
     OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID, ZEN_FREE_ACCOUNT_ID,
 };
 
@@ -387,6 +388,9 @@ fn provider_registry_is_exhaustive_for_plans_and_adapter_kinds() {
                 kind,
                 ProviderAdapterKind::OpenCodeGo
                     | ProviderAdapterKind::ZenFree
+                    | ProviderAdapterKind::CommandCodeGoat
+                    | ProviderAdapterKind::MiniMaxCn
+                    | ProviderAdapterKind::KimiCn
                     | ProviderAdapterKind::ConfigurableHttp
             )
         );
@@ -498,12 +502,12 @@ fn adapter_descriptors_preserve_current_capability_decisions() {
         goat.protocol_probe.matrix,
         ProtocolMatrixKind::CommandCodeNative
     );
-    assert!(!goat.protocol_probe.explicit_probe);
+    assert!(goat.protocol_probe.explicit_probe);
     assert_eq!(
         goat.protocol_probe.structural_ceiling,
-        StructuralProbeCeiling::Unavailable
+        StructuralProbeCeiling::CommandCodeConstructable
     );
-    assert!(!goat.card_actions.protocol_probe);
+    assert!(goat.card_actions.protocol_probe);
     assert!(goat.card_actions.catalog_refresh);
     assert_eq!(
         goat.card_actions.connection_verify,
@@ -511,6 +515,18 @@ fn adapter_descriptors_preserve_current_capability_decisions() {
     );
     assert!(!goat.verification.uses_get_models);
     assert!(!goat.verification.never_auto_enable);
+
+    for fixed_chat in [
+        ProviderRegistry::get(MINIMAX_PROVIDER_ID, MINIMAX_CN_OFFERING_ID).unwrap(),
+        ProviderRegistry::get(KIMI_PROVIDER_ID, KIMI_CN_OFFERING_ID).unwrap(),
+    ] {
+        assert!(fixed_chat.protocol_probe.explicit_probe);
+        assert_eq!(
+            fixed_chat.protocol_probe.structural_ceiling,
+            StructuralProbeCeiling::FixedChatCompletions
+        );
+        assert!(fixed_chat.card_actions.protocol_probe);
+    }
 
     let custom = ProviderRegistry::get(CUSTOM_PROVIDER_ID, CUSTOM_API_OFFERING_ID).unwrap();
     assert_eq!(custom.kind, ProviderAdapterKind::ConfigurableHttp);

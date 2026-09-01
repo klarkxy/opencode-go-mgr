@@ -932,6 +932,7 @@ export const enUSMessages = {
   "静态协议快照 {date}；未出现的协议默认关闭": "Static protocol snapshot {date}; protocols absent from it default to off",
   "恢复静态协议快照": "Restore static protocol snapshot",
   "不会请求上游；将清除手动和探测判断，保留当前目录，恢复 {date} 静态协议快照，并默认关闭静态快照中没有的协议。是否继续？": "No upstream request will be made. This clears manual and probe judgments, keeps the current catalog, restores the {date} static protocol snapshot, and defaults protocols absent from it to off. Continue?",
+  "不会请求上游；将清除手动和探测判断，保留当前目录，恢复 {date} 静态协议快照，并将快照后新增的 GOAT 模型恢复为密封供应商协议预设，其余协议关闭。是否继续？": "No upstream request will be made. This clears manual and probe judgments, keeps the current catalog, restores the {date} static protocol snapshot, restores later GOAT models to the sealed provider protocol preset, and turns the other protocols off. Continue?",
   "已恢复静态协议快照": "Static protocol snapshot restored",
   "恢复静态协议快照失败: {error}": "Failed to restore the static protocol snapshot: {error}",
   "前往供应商": "Open provider",
