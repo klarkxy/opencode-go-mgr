@@ -378,6 +378,7 @@ fn adapter_kind_match_is_exhaustive_and_consistent_with_descriptors() {
             | ProviderAdapterKind::CommandCodeGoat
             | ProviderAdapterKind::MiniMaxCn
             | ProviderAdapterKind::KimiCn
+            | ProviderAdapterKind::OllamaCloud
             | ProviderAdapterKind::Cpa
             | ProviderAdapterKind::ConfigurableHttp => {}
         }
@@ -402,7 +403,9 @@ fn adapter_kind_match_is_exhaustive_and_consistent_with_descriptors() {
                 assert!(descriptor.inference.production_inference);
                 assert!(!descriptor.inference.loopback_test_seam_only);
             }
-            ProviderAdapterKind::MiniMaxCn | ProviderAdapterKind::KimiCn => {
+            ProviderAdapterKind::MiniMaxCn
+            | ProviderAdapterKind::KimiCn
+            | ProviderAdapterKind::OllamaCloud => {
                 assert_eq!(descriptor.inference.auth, InferenceAuthDescriptor::Bearer);
                 assert!(!descriptor.inference.follow_redirects);
             }

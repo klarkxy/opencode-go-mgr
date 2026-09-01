@@ -108,7 +108,7 @@ pub const PRE_V3_BACKUP_FILE_PREFIX: &str = "data.sqlite.pre-v3.";
 /// database is rewritten to provider-only identity in v35.
 pub const PRE_V35_BACKUP_FILE_PREFIX: &str = "data.sqlite.pre-v35.";
 /// Highest schema this binary can open or migrate. Newer databases fail closed.
-pub const CURRENT_SCHEMA_VERSION: i32 = 35;
+pub const CURRENT_SCHEMA_VERSION: i32 = 36;
 /// Canonical source schema for the v35 provider-identity rewrite.
 pub const V34_SCHEMA_VERSION: i32 = 34;
 /// Historical v34 offering IDs. Used only by v1–v34 SQL and the v35 preflight
@@ -2167,7 +2167,7 @@ fn ensure_dynamic_provider_tables(conn: &Connection) -> Result<()> {
 /// first schema that omits it.
 fn migrate_to_v35(conn: &Connection, db_path: &Path, is_fresh: bool) -> Result<()> {
     let version = schema_version_on(conn)?;
-    if version >= CURRENT_SCHEMA_VERSION {
+    if version >= 35 {
         return Ok(());
     }
     anyhow::ensure!(
@@ -2181,7 +2181,7 @@ fn migrate_to_v35(conn: &Connection, db_path: &Path, is_fresh: bool) -> Result<(
     with_foreign_keys_off(conn, || {
         let tx = Transaction::new_unchecked(conn, TransactionBehavior::Immediate)?;
         let version_locked = schema_version_on(&tx)?;
-        if version_locked >= CURRENT_SCHEMA_VERSION {
+        if version_locked >= 35 {
             tx.rollback()?;
             return Ok(());
         }
@@ -2191,12 +2191,43 @@ fn migrate_to_v35(conn: &Connection, db_path: &Path, is_fresh: bool) -> Result<(
         );
         preflight_v35_identity(&tx)?;
         migrate_v35_body(&tx)?;
-        tx.execute_batch(&format!(
-            "INSERT OR REPLACE INTO schema_version (version) VALUES ({CURRENT_SCHEMA_VERSION});"
-        ))?;
+        tx.execute_batch("INSERT OR REPLACE INTO schema_version (version) VALUES (35);")?;
         tx.commit()?;
         Ok(())
     })
+}
+
+/// v36: additive Ollama Cloud Cookie-usage state. One row per account holds
+/// the obfuscated browser-session Cookie and the last-good sanitized snapshot.
+/// Failures update status columns and never clear the snapshot. The row
+/// cascades with the account.
+fn migrate_to_v36(conn: &Connection) -> Result<()> {
+    let version = schema_version_on(conn)?;
+    if version >= 36 {
+        return Ok(());
+    }
+    anyhow::ensure!(
+        version == 35,
+        "v36 requires a canonical schema v35 source, found {version}"
+    );
+    let tx = conn.unchecked_transaction()?;
+    tx.execute_batch(
+        "CREATE TABLE IF NOT EXISTS ollama_cloud_usage_state (
+            account_id TEXT PRIMARY KEY,
+            cookie_cipher TEXT,
+            status TEXT NOT NULL DEFAULT 'unconfigured',
+            snapshot TEXT,
+            last_error TEXT,
+            last_success_at TEXT,
+            last_attempt_at TEXT,
+            next_eligible_at TEXT,
+            failure_streak INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+        );
+        INSERT OR REPLACE INTO schema_version (version) VALUES (36);",
+    )?;
+    tx.commit()?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -2975,6 +3006,7 @@ impl Database {
         migrate_to_v33(&db.conn)?;
         migrate_to_v34(&db.conn)?;
         migrate_to_v35(&db.conn, &db_path, is_fresh)?;
+        migrate_to_v36(&db.conn)?;
         ensure_dynamic_provider_tables(&db.conn)?;
         Ok(db)
     }
@@ -6108,6 +6140,154 @@ impl Database {
         Ok(map)
     }
 
+    /// Ollama Cloud Cookie + usage state for one account, if configured.
+    pub fn ollama_cloud_usage_state(
+        &self,
+        account_id: &str,
+    ) -> Result<Option<OllamaCloudUsageState>> {
+        self.conn
+            .query_row(
+                "SELECT account_id, cookie_cipher IS NOT NULL, status, snapshot, last_error,
+                        last_success_at, last_attempt_at, next_eligible_at,
+                        failure_streak
+                 FROM ollama_cloud_usage_state WHERE account_id = ?1",
+                [account_id],
+                ollama_cloud_usage_state_from_row,
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    /// Store the obfuscated web-session Cookie. Configuring (or replacing) a
+    /// Cookie resets the whole capability: the previous snapshot no longer
+    /// describes the new session.
+    pub fn set_ollama_cloud_cookie(&self, account_id: &str, cookie_cipher: &str) -> Result<()> {
+        anyhow::ensure!(self.get_account(account_id)?.is_some(), "account not found");
+        self.conn
+            .execute(
+                "INSERT INTO ollama_cloud_usage_state
+                     (account_id, cookie_cipher, status, snapshot, failure_streak)
+                 VALUES (?1, ?2, 'unconfigured', NULL, 0)
+                 ON CONFLICT(account_id) DO UPDATE SET
+                     cookie_cipher = excluded.cookie_cipher,
+                     status = 'unconfigured',
+                     snapshot = NULL,
+                     last_error = NULL,
+                     last_success_at = NULL,
+                     last_attempt_at = NULL,
+                     next_eligible_at = NULL,
+                     failure_streak = 0",
+                params![account_id, cookie_cipher],
+            )
+            .map(|_| ())?;
+        Ok(())
+    }
+
+    /// Clearing the Cookie returns the capability to the unconfigured state;
+    /// the row, snapshot, and refresh metadata go with it.
+    pub fn clear_ollama_cloud_cookie(&self, account_id: &str) -> Result<()> {
+        self.conn
+            .execute(
+                "DELETE FROM ollama_cloud_usage_state WHERE account_id = ?1",
+                [account_id],
+            )
+            .map(|_| ())?;
+        Ok(())
+    }
+
+    /// The obfuscated Cookie ciphertext, resolved through the Host cipher by
+    /// the caller. Never exposed through any API response.
+    pub fn ollama_cloud_cookie_cipher(&self, account_id: &str) -> Result<Option<String>> {
+        let cipher: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT cookie_cipher FROM ollama_cloud_usage_state WHERE account_id = ?1",
+                [account_id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten();
+        Ok(cipher)
+    }
+
+    /// CAS guard for the manual refresh: the stored Cookie must match the
+    /// snapshot the caller decrypted, otherwise the account changed mid-flight.
+    pub fn ollama_cloud_usage_state_for_cookie(
+        &self,
+        account_id: &str,
+        cookie_cipher: &str,
+    ) -> Result<Option<OllamaCloudUsageState>> {
+        self.conn
+            .query_row(
+                "SELECT account_id, cookie_cipher IS NOT NULL, status, snapshot, last_error,
+                        last_success_at, last_attempt_at, next_eligible_at,
+                        failure_streak
+                 FROM ollama_cloud_usage_state
+                 WHERE account_id = ?1 AND cookie_cipher = ?2",
+                params![account_id, cookie_cipher],
+                ollama_cloud_usage_state_from_row,
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    /// Record a successful scrape. `snapshot_json` is the sanitized snapshot
+    /// (no HTML, no Cookie, no session fields); failure columns reset.
+    pub fn commit_ollama_cloud_usage_success(
+        &self,
+        account_id: &str,
+        snapshot_json: &str,
+        now: DateTime<Utc>,
+        next_eligible_at: Option<DateTime<Utc>>,
+    ) -> Result<()> {
+        self.conn
+            .execute(
+                "UPDATE ollama_cloud_usage_state
+                 SET status = 'ok', snapshot = ?2, last_error = NULL,
+                     last_success_at = ?3, last_attempt_at = ?3,
+                     next_eligible_at = ?4, failure_streak = 0
+                 WHERE account_id = ?1",
+                params![
+                    account_id,
+                    snapshot_json,
+                    now.to_rfc3339(),
+                    next_eligible_at.map(|at| at.to_rfc3339())
+                ],
+            )
+            .map(|_| ())?;
+        Ok(())
+    }
+
+    /// Record a failed (or unauthorized) attempt. Only status/attempt metadata
+    /// move; the last successful snapshot stays intact.
+    pub fn record_ollama_cloud_usage_failure(
+        &self,
+        account_id: &str,
+        status: &str,
+        last_error: Option<&str>,
+        now: DateTime<Utc>,
+        next_eligible_at: Option<DateTime<Utc>>,
+        failure_streak: i64,
+    ) -> Result<()> {
+        self.conn
+            .execute(
+                "UPDATE ollama_cloud_usage_state
+                 SET status = ?2, last_error = ?3, last_attempt_at = ?4,
+                     next_eligible_at = ?5, failure_streak = ?6
+                 WHERE account_id = ?1",
+                params![
+                    account_id,
+                    status,
+                    last_error,
+                    now.to_rfc3339(),
+                    next_eligible_at.map(|at| at.to_rfc3339()),
+                    failure_streak
+                ],
+            )
+            .map(|_| ())?;
+        Ok(())
+    }
+
     pub fn upsert_quota_window(&self, window: &QuotaWindow) -> Result<()> {
         anyhow::ensure!(
             self.get_account(&window.account_id)?.is_some(),
@@ -8550,6 +8730,22 @@ fn custom_verification_contract_still_matches_on(
         current.push((public_model, upstream_model, protocol));
     }
     Ok(current == contract.capabilities)
+}
+
+fn ollama_cloud_usage_state_from_row(row: &Row<'_>) -> rusqlite::Result<OllamaCloudUsageState> {
+    let parse_stamp =
+        |value: Option<String>| value.filter(|text| !text.is_empty()).map(parse_datetime);
+    Ok(OllamaCloudUsageState {
+        account_id: row.get(0)?,
+        cookie_configured: row.get(1)?,
+        status: row.get(2)?,
+        snapshot: row.get(3)?,
+        last_error: row.get(4)?,
+        last_success_at: parse_stamp(row.get(5)?),
+        last_attempt_at: parse_stamp(row.get(6)?),
+        next_eligible_at: parse_stamp(row.get(7)?),
+        failure_streak: row.get(8)?,
+    })
 }
 
 fn account_custom_config_from_row(row: &Row<'_>) -> rusqlite::Result<AccountCustomConfig> {

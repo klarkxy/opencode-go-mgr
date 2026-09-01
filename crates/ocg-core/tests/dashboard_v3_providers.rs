@@ -25,7 +25,8 @@ use ocg_core::kernel::zen::ZEN_MODELS_SOURCE_URL;
 use ocg_core::models::ProxyMode;
 use ocg_core::provider::{
     BUILTIN_PROVIDERS, COMMAND_CODE_PROVIDER_ID, CUSTOM_PROVIDER_ID, KIMI_PROVIDER_ID,
-    MINIMAX_PROVIDER_ID, OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID, ZEN_FREE_ACCOUNT_ID,
+    MINIMAX_PROVIDER_ID, OLLAMA_PROVIDER_ID, OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID,
+    ZEN_FREE_ACCOUNT_ID,
 };
 use ocg_core::provider_contracts::{
     CATALOG_SOURCE_COMMAND_CODE_MODELS, CATALOG_SOURCE_KIMI_CN_MODELS,
@@ -666,14 +667,14 @@ async fn dashboard_v3_model_capabilities_are_go_protocol_rows_including_grok_45(
 }
 
 #[tokio::test]
-async fn dashboard_v3_provider_contracts_project_five_scopes_and_custom_endpoints() {
+async fn dashboard_v3_provider_contracts_project_builtin_scopes_and_custom_endpoints() {
     let harness = start_loopback("providers-contracts").await;
     let (status, body) = get_v3(&harness, "/provider-contracts").await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_secret_free(&body, &[]);
     assert_revision_snapshot(&body, &harness);
     let parsed: ProviderContracts = serde_json::from_value(body.clone()).expect("contracts");
-    assert_eq!(parsed.providers.len(), 5);
+    assert_eq!(parsed.providers.len(), 6);
     let ids: Vec<_> = parsed
         .providers
         .iter()
@@ -687,16 +688,25 @@ async fn dashboard_v3_provider_contracts_project_five_scopes_and_custom_endpoint
             COMMAND_CODE_PROVIDER_ID,
             MINIMAX_PROVIDER_ID,
             KIMI_PROVIDER_ID,
+            OLLAMA_PROVIDER_ID,
         ]
     );
     assert!(parsed.custom_endpoints.is_empty());
-    assert!(
-        parsed
-            .providers
-            .iter()
-            .all(|group| group.card.protocol_probe),
-        "every built-in Provider scope must expose the shared probe action"
-    );
+    for group in &parsed.providers {
+        if group.provider_id == OLLAMA_PROVIDER_ID {
+            assert!(
+                !group.card.protocol_probe,
+                "Ollama Cloud is Chat-only and has no protocol-probe action"
+            );
+            assert!(group.card.catalog_refresh);
+        } else {
+            assert!(
+                group.card.protocol_probe,
+                "{} must expose the shared probe action",
+                group.provider_id
+            );
+        }
+    }
     assert!(body["providers"][0].get("scope_kind").is_none());
     assert_eq!(body["providers"][0]["scopeKind"], "provider");
     let kimi = parsed

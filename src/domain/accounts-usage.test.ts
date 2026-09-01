@@ -202,7 +202,7 @@ test("keeps account cards compact with metadata tags and popover calibration", a
   assert.ok(card.indexOf("<n-popover") < card.indexOf("<n-dropdown"));
   assert.match(editor, /class="usage-editor-popover"[\s\S]*?class="usage-resets-row"/);
   assert.match(usage, /async function focusUsageEditor\(accountId: string\)[\s\S]*?requestAnimationFrame[\s\S]*?\.n-input-number input[\s\S]*?\.focus\(\)/);
-  assert.match(card, /v-if="\(isGo \|\| isOfficialCn\) && accountIsReady\(account\)"[\s\S]*?刷新额度/);
+  assert.match(card, /v-if="\(isGo \|\| isOfficialCn || isOllamaCloud\) && accountIsReady\(account\)"[\s\S]*?刷新额度/);
   assert.doesNotMatch(
     card,
     /accountIsReady\(account\) && account\.account_type === 'managed'/,
@@ -254,7 +254,7 @@ test("accounts page surfaces official sync last-success and retry state beyond b
   assert.match(display, /上次官方同步: \{time\}/);
   assert.match(display, /尚未官方同步/);
   assert.match(display, /刷新额度冷却中，请于 \{time\} 后重试/);
-  assert.match(card, /:disabled="isUsageRefreshBlocked\(account, now\)/);
+  assert.match(card, /!isOllamaCloud && isUsageRefreshBlocked\(account, now\)/);
 });
 
 test("usage refresh preserves dirty drafts unless a real 429 reset that window", () => {

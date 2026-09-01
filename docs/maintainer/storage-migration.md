@@ -33,7 +33,7 @@ Downgrades are not supported: never point an older binary at a migrated database
 
 ## Schema v27 and the pre-v3 snapshot
 
-`CURRENT_SCHEMA_VERSION = 35` (`crates/ocg-core/src/db.rs`). Opening a historical database first migrates canonically to v26, then the v27 rewrite copies the primary Key and every `sub_gateway_keys` row into one `access_keys` table (live primary id `00000000-0000-0000-0000-000000000001`), drops `sub_gateway_keys`, and drops the five legacy `accounts.usage_sync_*` columns (usage-sync metadata lives in `provider_usage_sync_state`). v33 adds the exact Custom upstream model identity; v34 adds the singleton CPA configuration table without importing or exporting CPA state. v35 collapses Provider/Plan identity to `provider_id` only: it preflights every known v34 provider/offering pair, refuses unknown pairs and lossy composite-key collisions before mutation, then rebuilds affected tables so offering columns are absent. Account `key_cipher` / `password_cipher` bytes are validated with the Host cipher and never re-encrypted.
+`CURRENT_SCHEMA_VERSION = 36` (`crates/ocg-core/src/db.rs`). Opening a historical database first migrates canonically to v26, then the v27 rewrite copies the primary Key and every `sub_gateway_keys` row into one `access_keys` table (live primary id `00000000-0000-0000-0000-000000000001`), drops `sub_gateway_keys`, and drops the five legacy `accounts.usage_sync_*` columns (usage-sync metadata lives in `provider_usage_sync_state`). v33 adds the exact Custom upstream model identity; v34 adds the singleton CPA configuration table without importing or exporting CPA state. v35 collapses Provider/Plan identity to `provider_id` only: it preflights every known v34 provider/offering pair, refuses unknown pairs and lossy composite-key collisions before mutation, then rebuilds affected tables so offering columns are absent. v36 additively creates `ollama_cloud_usage_state` for the Ollama Cloud Cookie-usage scrape. Account `key_cipher` / `password_cipher` bytes are validated with the Host cipher and never re-encrypted.
 
 ## Schema v31 — per-model/per-protocol overrides
 
@@ -60,6 +60,30 @@ The snapshot is a standalone v34 SQLite file (`VACUUM INTO`, `quick_check` on bo
 sha256sum -c data.sqlite.pre-v35.<timestamp>.bak.sha256      # Linux
 shasum -a 256 -c data.sqlite.pre-v35.<timestamp>.bak.sha256  # macOS
 ```
+
+## Schema v36 — Ollama Cloud usage state
+
+v36 creates the `ollama_cloud_usage_state` table. One row per configured
+account holds:
+
+- `cookie_cipher` — the obfuscated browser-session Cookie for the
+  `https://ollama.com/settings` usage scrape. It uses the same
+  key-obfuscation facility as account keys and is explicitly not
+  AEAD; it is never returned by any API and never enters an export payload.
+- `status` — `unconfigured`, `ok`, `unauthorized`, or `failed`.
+- `snapshot` — the sanitized JSON from the last successful scrape (5h/7d
+  windows, per-model request counts, optional plan/balance). Written only on
+  success; failures update status columns and never clear it.
+- `last_error`, `last_success_at`, `last_attempt_at`, `next_eligible_at`,
+  `failure_streak` — manual-refresh throttle (30 seconds) and last-attempt
+  metadata.
+
+The row is keyed by `account_id` with `ON DELETE CASCADE`, so account
+deletion removes the usage state; clearing the Cookie deletes the row and
+returns the capability to the unconfigured state. The migration is
+additive-only: no existing table, row, or routing fact changes, and it does
+not create a new backup family. Rollback remains the existing whole-directory
+restore.
 
 ## Schema v33 — Custom upstream model identity
 

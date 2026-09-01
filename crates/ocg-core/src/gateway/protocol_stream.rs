@@ -7,6 +7,7 @@ use super::protocol::{
     rewrite_existing_visible_model, sanitize_minimax_anthropic_usage, sanitize_minimax_chat_usage,
     unix_seconds,
 };
+use super::wire::WireNormalization;
 use bytes::{Bytes, BytesMut};
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -31,6 +32,10 @@ pub(crate) struct StreamConverter {
     passthrough_tainted: bool,
     deferred_passthrough: Vec<DeferredPassthroughFrame>,
     deferred_passthrough_bytes: usize,
+    /// Per-attempt provider wire normalization. When set, parsed upstream JSON
+    /// frames are normalized before passthrough/conversion; `[DONE]` and
+    /// non-JSON frames are untouched by construction (they never parse).
+    wire_normalization: WireNormalization,
 }
 
 struct DeferredPassthroughFrame {
@@ -768,7 +773,12 @@ fn longest_secret_prefix_suffix(value: &str, secret: &str) -> usize {
 impl StreamConverter {
     #[cfg(test)]
     pub(crate) fn new(plan: &RequestPlan) -> Self {
-        Self::new_with_known_secret(plan, None)
+        Self::new_with_known_secret_and_normalization(plan, None, WireNormalization::None)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new_with_known_secret(plan: &RequestPlan, known_secret: Option<&str>) -> Self {
+        Self::new_with_known_secret_and_normalization(plan, known_secret, WireNormalization::None)
     }
 
     fn visible_model(&self) -> &str {
@@ -779,7 +789,14 @@ impl StreamConverter {
         }
     }
 
-    pub(crate) fn new_with_known_secret(plan: &RequestPlan, known_secret: Option<&str>) -> Self {
+    /// Build with a per-attempt wire normalization marker (the forwarder
+    /// derives it from the attempt that actually served the request, so mixed
+    /// candidate chains never leak another family's rewrite).
+    pub(crate) fn new_with_known_secret_and_normalization(
+        plan: &RequestPlan,
+        known_secret: Option<&str>,
+        wire_normalization: WireNormalization,
+    ) -> Self {
         Self {
             source: plan.upstream,
             target: plan.client,
@@ -802,6 +819,7 @@ impl StreamConverter {
             passthrough_tainted: false,
             deferred_passthrough: Vec::new(),
             deferred_passthrough_bytes: 0,
+            wire_normalization,
         }
     }
 
@@ -1035,7 +1053,9 @@ impl StreamConverter {
     /// Same-protocol passthrough for a single SSE frame. The frame is parsed
     /// exactly once here: the sanitized passthrough copy and the converted
     /// fallback share the same `Value`, and untouched frames are emitted
-    /// byte-for-byte without copying.
+    /// byte-for-byte without copying. A wire-normalization marker rewrites
+    /// only the parsed JSON (data field); event lines and `[DONE]` stay
+    /// byte-identical.
     fn same_protocol_frame(
         &mut self,
         frame: Bytes,
@@ -1050,11 +1070,15 @@ impl StreamConverter {
                 &self.client_model,
                 secret,
                 None,
+                self.wire_normalization,
             );
             return Ok((passthrough, Vec::new(), false));
         };
         let payload = payload.trim();
-        let value = parse_sse_payload(payload)?;
+        let mut value = parse_sse_payload(payload)?;
+        // Sanitize reads the raw parsed payload so its internal diff sees the
+        // normalization rewrite and replaces the data field; the conversion
+        // path below then consumes the normalized value.
         let passthrough = sanitize_passthrough_sse_frame(
             self.source,
             frame,
@@ -1062,7 +1086,11 @@ impl StreamConverter {
             &self.client_model,
             secret,
             value.as_ref(),
+            self.wire_normalization,
         );
+        if let Some(parsed) = value.as_mut() {
+            self.wire_normalization.normalize_response_value(parsed);
+        }
         let (converted, secret_matched) = self.convert_parsed_frame(event_name, payload, value)?;
         Ok((passthrough, converted, secret_matched))
     }
@@ -1078,7 +1106,10 @@ impl StreamConverter {
                 continue;
             };
             let payload = payload.trim();
-            let value = parse_sse_payload(payload)?;
+            let mut value = parse_sse_payload(payload)?;
+            if let Some(parsed) = value.as_mut() {
+                self.wire_normalization.normalize_response_value(parsed);
+            }
             let (chunks, matched) = self.convert_parsed_frame(event_name, payload, value)?;
             output.extend(chunks);
             secret_changed |= matched;
@@ -1142,6 +1173,7 @@ impl StreamConverter {
                     &self.client_model,
                     Some(secret),
                     None,
+                    WireNormalization::None,
                 )
             })
             .collect()
@@ -2694,6 +2726,7 @@ fn sanitize_passthrough_sse_frame(
     client_model: &str,
     known_secret: Option<&str>,
     parsed: Option<&Value>,
+    wire_normalization: WireNormalization,
 ) -> Bytes {
     let secret = known_secret.filter(|secret| !secret.is_empty());
     let mut output = frame;
@@ -2708,6 +2741,7 @@ fn sanitize_passthrough_sse_frame(
     };
     if let Some(source_value) = parsed {
         let mut value = source_value.clone();
+        wire_normalization.normalize_response_value(&mut value);
         if let Some(secret) = secret {
             redact_known_secret_stream_values(&mut value, secret);
         }

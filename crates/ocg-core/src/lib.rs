@@ -26,6 +26,7 @@ pub mod host_router;
 pub(crate) mod http_client;
 pub mod kernel;
 pub mod models;
+pub mod ollama_usage;
 pub(crate) mod plan_usage;
 pub mod pricing;
 pub(crate) mod protocol_probe;

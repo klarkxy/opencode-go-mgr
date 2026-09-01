@@ -26,6 +26,8 @@ use crate::gateway::protocol::{
     ApiFormat, RequestPlan, command_code_supports_upstream, command_code_upstream_path,
     opencode_supports_upstream,
 };
+use crate::gateway::wire::WireNormalization;
+use crate::kernel::ids::{OLLAMA_CLOUD_BASE_URL, OLLAMA_CLOUD_CHAT_COMPLETIONS_PATH};
 use crate::models::{Account, AppConfig, UpstreamChannel};
 use crate::provider::{
     COMMAND_CODE_GOAT_BASE_URL, COMMAND_CODE_GOAT_CHAT_COMPLETIONS_PATH, COMMAND_CODE_GOAT_HOST,
@@ -94,6 +96,66 @@ struct GoatLoopbackRoute {
 
 static GOAT_LOOPBACK_ROUTES: LazyLock<RwLock<HashMap<String, GoatLoopbackRoute>>> =
     LazyLock::new(|| RwLock::new(HashMap::new()));
+
+static OLLAMA_LOOPBACK_ROUTES: LazyLock<RwLock<HashMap<String, String>>> =
+    LazyLock::new(|| RwLock::new(HashMap::new()));
+
+/// RAII guard for the integration-only Ollama Cloud seam. The production
+/// adapter always uses the fixed `https://ollama.com` origin; without a live
+/// guard, tests cannot reach a fake upstream.
+#[doc(hidden)]
+pub struct OllamaCloudLoopbackRouteGuard {
+    account_id: String,
+    origin: String,
+}
+
+impl Drop for OllamaCloudLoopbackRouteGuard {
+    fn drop(&mut self) {
+        if let Ok(mut routes) = OLLAMA_LOOPBACK_ROUTES.write()
+            && routes
+                .get(&self.account_id)
+                .is_some_and(|origin| *origin == self.origin)
+        {
+            routes.remove(&self.account_id);
+        }
+    }
+}
+
+/// Installs a loopback-only origin substitute used by gateway integration
+/// tests. Path, protocol, Bearer auth, and the wire normalization marker come
+/// from the official Ollama Cloud contract; this cannot configure a remote
+/// production endpoint.
+#[doc(hidden)]
+pub fn install_ollama_cloud_loopback_route_for_test(
+    account_id: impl Into<String>,
+    origin: impl Into<String>,
+) -> Result<OllamaCloudLoopbackRouteGuard, String> {
+    let account_id = account_id.into();
+    let origin = origin.into();
+    ensure_loopback_base(&origin)?;
+    let trimmed = origin.trim_end_matches('/').to_string();
+    let guard = OllamaCloudLoopbackRouteGuard {
+        account_id: account_id.clone(),
+        origin: trimmed.clone(),
+    };
+    OLLAMA_LOOPBACK_ROUTES
+        .write()
+        .map_err(|_| "Ollama Cloud loopback route lock is poisoned".to_string())?
+        .insert(account_id, trimmed);
+    Ok(guard)
+}
+
+fn ollama_cloud_base_url_for(account: &Account) -> String {
+    OLLAMA_LOOPBACK_ROUTES
+        .read()
+        .map(|routes| {
+            routes
+                .get(&account.id)
+                .cloned()
+                .unwrap_or_else(|| OLLAMA_CLOUD_BASE_URL.to_string())
+        })
+        .unwrap_or_else(|_| OLLAMA_CLOUD_BASE_URL.to_string())
+}
 
 #[cfg(debug_assertions)]
 #[doc(hidden)]
@@ -238,6 +300,9 @@ fn resolve_route_with_policy(
         }
         Some(ProviderAdapterKind::MiniMaxCn) => resolve_minimax_cn(account, config, plan, policy),
         Some(ProviderAdapterKind::KimiCn) => resolve_kimi_cn(account, config, plan, policy),
+        Some(ProviderAdapterKind::OllamaCloud) => {
+            resolve_ollama_cloud(account, config, plan, policy)
+        }
         Some(ProviderAdapterKind::ConfigurableHttp)
             if crate::provider::is_custom_api(&account.provider_id) =>
         {
@@ -278,6 +343,7 @@ fn resolve_open_code_go(
         follow_redirects: descriptor.inference.follow_redirects,
         credential: credential_handle(account, descriptor),
         proxy_routing: ProxyRoutingModel::RequestEntrySnapshot,
+        wire_normalization: WireNormalization::None,
     })
 }
 
@@ -315,6 +381,7 @@ fn resolve_zen_free(
         follow_redirects: descriptor.inference.follow_redirects,
         credential: credential_handle(account, descriptor),
         proxy_routing: ProxyRoutingModel::RequestEntrySnapshot,
+        wire_normalization: WireNormalization::None,
     })
 }
 
@@ -361,6 +428,7 @@ fn resolve_command_code_goat(
         follow_redirects: descriptor.inference.follow_redirects,
         credential: credential_handle(account, descriptor),
         proxy_routing: ProxyRoutingModel::ProcessWideNoRedirect,
+        wire_normalization: WireNormalization::None,
     })
 }
 
@@ -391,6 +459,7 @@ fn resolve_fixed_provider_plan(
         follow_redirects: descriptor.inference.follow_redirects,
         credential: credential_handle(account, descriptor),
         proxy_routing: ProxyRoutingModel::ProcessWideNoRedirect,
+        wire_normalization: WireNormalization::None,
     })
 }
 
@@ -418,6 +487,28 @@ fn resolve_minimax_cn(
         base_url,
         path,
     )
+}
+
+fn resolve_ollama_cloud(
+    account: &Account,
+    _config: &AppConfig,
+    plan: &RequestPlan,
+    policy: RoutePolicy<'_>,
+) -> Result<AttemptSpec, String> {
+    if plan.upstream != ApiFormat::ChatCompletions {
+        return Err("Ollama Cloud has no official upstream path for this protocol".into());
+    }
+    let mut spec = resolve_fixed_provider_plan(
+        account,
+        plan,
+        policy,
+        ProviderAdapterKind::OllamaCloud,
+        "Ollama Cloud",
+        &ollama_cloud_base_url_for(account),
+        OLLAMA_CLOUD_CHAT_COMPLETIONS_PATH,
+    )?;
+    spec.wire_normalization = WireNormalization::OllamaCloud;
+    Ok(spec)
 }
 
 fn resolve_kimi_cn(
@@ -497,6 +588,7 @@ fn resolve_configurable_http(
         follow_redirects: descriptor.inference.follow_redirects,
         credential: credential_handle(account, descriptor),
         proxy_routing: ProxyRoutingModel::IsolatedTrustedAdmin,
+        wire_normalization: WireNormalization::None,
     })
 }
 
@@ -553,6 +645,7 @@ fn resolve_dynamic_http(
             CredentialHandle::None
         },
         proxy_routing: ProxyRoutingModel::IsolatedTrustedAdmin,
+        wire_normalization: WireNormalization::None,
     })
 }
 
@@ -594,6 +687,7 @@ fn resolve_cpa(
         follow_redirects: false,
         credential: credential_handle(account, descriptor),
         proxy_routing: ProxyRoutingModel::LocalExternalIntegration,
+        wire_normalization: WireNormalization::None,
     })
 }
 
@@ -679,6 +773,11 @@ fn require_opencode_protocol_policy(
                 || opencode_supports_upstream(&plan.model, plan.upstream)
                 || (descriptor.kind == ProviderAdapterKind::CommandCodeGoat
                     && command_code_supports_upstream(&plan.model, plan.upstream))
+                || (descriptor.kind == ProviderAdapterKind::OllamaCloud
+                    && crate::kernel::protocol::ollama_cloud_supports_upstream(
+                        &plan.model,
+                        plan.upstream,
+                    ))
                 || (descriptor.kind == ProviderAdapterKind::ZenFree
                     && !crate::gateway::protocol::is_known_model(&plan.model)
                     && plan.model.ends_with("-free")

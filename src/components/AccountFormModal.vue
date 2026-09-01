@@ -97,6 +97,24 @@
         </n-form-item>
 
         <n-form-item
+          v-if="isOllamaPlan && isEdit"
+          path="ollamaCookie"
+          :label="t('网页会话 Cookie（可选）')"
+          :validation-status="ollamaCookieIssue ? 'error' : undefined"
+        >
+          <n-input
+            v-model:value="form.ollamaCookie"
+            type="textarea"
+            :autosize="{ minRows: 2, maxRows: 4 }"
+            :placeholder="t('粘贴浏览器 Cookie 请求头，如 session=...; theme=...；留空保持不变')"
+            :input-props="{ 'aria-label': t('网页会话 Cookie（可选）') }"
+          />
+          <template v-if="ollamaCookieIssue" #feedback>
+            <span role="alert">{{ ollamaCookieIssue }}</span>
+          </template>
+        </n-form-item>
+
+        <n-form-item
           v-if="isCustomPlan"
           path="endpointUrl"
           :label="t('API 地址')"
@@ -301,6 +319,8 @@ export type AccountFormPayload = {
     upstream_model: string;
     protocol: AccountProtocol;
   }>;
+  /** Ollama Cloud edit only; `null` clears the stored Cookie. */
+  ollama_cookie?: string | null;
 };
 
 type FormModel = {
@@ -312,6 +332,7 @@ type FormModel = {
   endpointUrl: string;
   upstreamProtocol: AccountProtocol | null;
   modelCapabilities: EditableModelCapability[];
+  ollamaCookie: string;
 };
 
 type EditableModelCapability = AccountCreateCapability & { row_id: number };
@@ -379,6 +400,32 @@ const effectivePlan = computed<PlanDefinition | null>(() => {
 });
 
 const isCustomPlan = computed(() => effectivePlan.value?.id === "custom-endpoint");
+const isOllamaPlan = computed(() => effectivePlan.value?.id === "ollama-cloud");
+
+const ollamaCookieIssue = computed(() => {
+  if (!isOllamaPlan.value || !isEdit.value) return "";
+  const raw = form.value.ollamaCookie.trim();
+  if (!raw) return "";
+  if (raw.length > 16 * 1024) return t("Cookie 超过 16KB 上限");
+  const seen = new Set<string>();
+  for (const part of raw.split(";")) {
+    const pair = part.trim();
+    if (!pair) continue;
+    const eq = pair.indexOf("=");
+    if (eq <= 0 || eq === pair.length - 1) {
+      return t("请粘贴 Cookie 请求头（name=value 形式），而不是 Set-Cookie 响应头");
+    }
+    const name = pair.slice(0, eq).trim();
+    const value = pair.slice(eq + 1).trim();
+    if (value.includes('"') || value.includes(",") || value.includes(";")) {
+      return t("请粘贴 Cookie 请求头（name=value 形式），而不是 Set-Cookie 响应头");
+    }
+    const key = name.toLowerCase();
+    if (seen.has(key)) return t("请粘贴 Cookie 请求头（name=value 形式），而不是 Set-Cookie 响应头");
+    seen.add(key);
+  }
+  return "";
+});
 const isDynamicPlan = computed(() => effectivePlan.value?.id === "dynamic-http");
 
 const catalogEntry = computed<ProviderCatalogEntry | undefined>(() => {
@@ -572,6 +619,7 @@ function blankForm(): FormModel {
     endpointUrl: "",
     upstreamProtocol: "chat_completions",
     modelCapabilities: [],
+    ollamaCookie: "",
   };
 }
 
@@ -592,6 +640,7 @@ function formFromAccount(account: Account): FormModel {
     endpointUrl: account.custom_config?.endpoint_url ?? "",
     upstreamProtocol: account.custom_config?.upstream_protocol ?? "chat_completions",
     modelCapabilities,
+    ollamaCookie: "",
   };
 }
 
@@ -703,6 +752,10 @@ async function handleSave() {
         upstream_model: capability.upstream_model,
         protocol: form.value.upstreamProtocol ?? "chat_completions",
       }));
+    }
+    if (isOllamaPlan.value) {
+      if (ollamaCookieIssue.value) return;
+      payload.ollama_cookie = form.value.ollamaCookie.trim() || undefined;
     }
     emit("save", payload);
     return;

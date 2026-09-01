@@ -605,6 +605,15 @@ async fn forward_request_impl(
             }
         };
     attempt_context.set_provider_route(account, &attempt_spec);
+    // Attempt-level wire normalization: request-plan bytes are shared by every
+    // candidate of a mixed chain, so the rewrite happens here after the
+    // attempt is chosen and before the single send, and only for the family
+    // whose adapter declared a marker. `upstream_body_bytes` records the
+    // bytes actually sent.
+    let attempt_body = attempt_spec
+        .wire_normalization
+        .normalize_request_body(plan.body.clone());
+    attempt_context.upstream_body_bytes = attempt_body.len();
     if attempt_spec.is_local_external_integration() {
         crate::cpa::normalize_base_url(&attempt_spec.base_url, true)
             .map_err(|error| anyhow::anyhow!(error.to_string()))?;
@@ -787,7 +796,7 @@ async fn forward_request_impl(
         ),
         &url,
         send_headers,
-        plan.body.clone(),
+        attempt_body,
         plan.stream,
     )
     .await?;
@@ -1301,7 +1310,7 @@ async fn forward_request_impl(
         }
     }
 
-    // Success path — for non-stream, record breaker success now.
+    // Success path —for non-stream, record breaker success now.
     // For streams, don't pre-record success; the stream error handler
     // records errors, and we haven't proven success until the stream completes.
 
@@ -1337,10 +1346,13 @@ async fn forward_request_impl(
         let stream_idle_timeout = StdDuration::from_secs(config.stream_idle_timeout_secs);
         let mut upstream_stream = Box::pin(upstream_resp.bytes_stream());
         let st = Arc::new(Mutex::new(StreamState::default()));
-        let converter = Arc::new(Mutex::new(StreamConverter::new_with_known_secret(
-            plan,
-            attempt_context.known_secret.as_deref(),
-        )));
+        let converter = Arc::new(Mutex::new(
+            StreamConverter::new_with_known_secret_and_normalization(
+                plan,
+                attempt_context.known_secret.as_deref(),
+                attempt_spec.wire_normalization,
+            ),
+        ));
         let upstream_format = plan.upstream;
         let stream_idle_timeout_secs = config.stream_idle_timeout_secs;
 
@@ -1693,7 +1705,7 @@ async fn forward_request_impl(
             );
             // `unfold` is a clean "run once, then end" stream. The DB write is the
             // unfold's state transition, the body emits a single empty chunk, and
-            // the stream then terminates — no need for once() + flatten gymnastics.
+            // the stream then terminates —no need for once() + flatten gymnastics.
             futures_util::stream::unfold(
                 FinalizerState::Init {
                     db_h,
@@ -1978,6 +1990,12 @@ async fn forward_request_impl(
                 "usage_missing",
             )
         };
+        // Normalize the upstream response before protocol conversion so the
+        // marker family's reasoning backfill is visible to every client
+        // format, not only Chat-to-Chat passthrough.
+        attempt_spec
+            .wire_normalization
+            .normalize_response_value(&mut upstream_json);
         // Redact before protocol conversion as well as after it. Some response
         // adapters serialize source values into opaque replay fields (for
         // example, Anthropic thinking blocks in Responses encrypted_content),
@@ -2757,9 +2775,9 @@ fn extract_data_payload(event: &[u8]) -> Option<String> {
     }
 }
 
-// ponytail: ignore_err on JSON parse — SSE frames may be comments or keep-alive
+// ponytail: ignore_err on JSON parse —SSE frames may be comments or keep-alive
 // heartbeats. Silent skip; the last non-null usage frame still wins.
-// ponytail: bounded buffer — if the upstream never sends a complete event
+// ponytail: bounded buffer —if the upstream never sends a complete event
 // (malformed stream, CRLF-only chunks, dropped keep-alive framing), drop the
 // garbage so memory can't grow unbounded.
 fn process_chunk_for_usage(

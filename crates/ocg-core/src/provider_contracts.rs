@@ -8,8 +8,8 @@ use crate::alias::ProviderMapping;
 use crate::custom::CustomAccountRuntime;
 use crate::kernel::ids::{
     COMMAND_CODE_PROVIDER_ID, CUSTOM_PROVIDER_ID, KIMI_PROVIDER_ID, MINIMAX_PROVIDER_ID,
-    OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID, custom_model_id_matches,
-    normalize_model_name,
+    OLLAMA_PROVIDER_ID, OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID,
+    custom_model_id_matches, normalize_model_name,
 };
 use crate::kernel::protocol::{ApiFormat, is_known_model, supported_model_protocol_profiles};
 use crate::kernel::zen::ZenFreeModelCatalog;
@@ -37,6 +37,7 @@ pub const CATALOG_SOURCE_COMMAND_CODE_MODELS: &str = "command_code_get_models";
 pub const CATALOG_SOURCE_OPENCODE_MODELS: &str = "opencode_get_models";
 pub const CATALOG_SOURCE_MINIMAX_CN_MODELS: &str = "minimax_cn_get_models";
 pub const CATALOG_SOURCE_KIMI_CN_MODELS: &str = "kimi_cn_get_models";
+pub const CATALOG_SOURCE_OLLAMA_CLOUD_MODELS: &str = "ollama_cloud_get_models";
 
 pub const NO_ENABLED_UPSTREAM_PROTOCOL: &str =
     "no enabled upstream protocol is available for this model";
@@ -51,6 +52,9 @@ pub fn static_protocol_snapshot_date(scope_id: &str) -> Option<&'static str> {
         | COMMAND_CODE_PROVIDER_ID
         | MINIMAX_PROVIDER_ID
         | KIMI_PROVIDER_ID => Some(crate::kernel::protocol::OFFICIAL_PROTOCOL_BASELINE_DATE),
+        OLLAMA_PROVIDER_ID => {
+            Some(crate::kernel::protocol::OLLAMA_CLOUD_STATIC_PROTOCOL_SNAPSHOT_DATE)
+        }
         _ => None,
     }
 }
@@ -177,6 +181,28 @@ pub fn protocol_from_api(format: ApiFormat) -> Option<UpstreamProtocolKind> {
         ApiFormat::Messages => Some(UpstreamProtocolKind::Messages),
         ApiFormat::Gemini => None,
     }
+}
+
+/// Administrator `force_on` Chat rows for the Ollama Cloud catalog. Used as
+/// the pin set when multiple `:`-tagged snapshot ids share one alias stem.
+pub fn ollama_cloud_pinned_model_ids(contracts: &EffectiveContractSet) -> Vec<String> {
+    contracts
+        .providers
+        .get(OLLAMA_PROVIDER_ID)
+        .map(|scope| {
+            scope
+                .models
+                .iter()
+                .filter(|(_, model)| {
+                    model
+                        .protocols
+                        .get(UpstreamProtocolKind::ChatCompletions.as_str())
+                        .is_some_and(|row| row.r#override == ProtocolOverrideState::ForceOn)
+                })
+                .map(|(id, _)| id.clone())
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 pub fn protocol_to_api(protocol: UpstreamProtocolKind) -> ApiFormat {
@@ -605,6 +631,13 @@ pub fn static_verified_protocols(
                 UpstreamProtocolKind::Messages,
             ];
         }
+        ProviderAdapterKind::OllamaCloud => {
+            return if model_id.trim().is_empty() {
+                Vec::new()
+            } else {
+                vec![UpstreamProtocolKind::ChatCompletions]
+            };
+        }
         ProviderAdapterKind::Cpa => {
             return vec![
                 UpstreamProtocolKind::ChatCompletions,
@@ -915,6 +948,32 @@ fn merge_provider_scope(
                 models,
             )
         }
+        ProviderAdapterKind::OllamaCloud => {
+            let fallback: Vec<String> = crate::kernel::protocol::ollama_cloud_protocol_seed_ids()
+                .into_iter()
+                .map(str::to_string)
+                .collect();
+            let models = persisted
+                .filter(|row| !row.catalog_models.is_empty())
+                .map(|row| row.catalog_models.clone())
+                .unwrap_or(fallback);
+            (
+                EffectiveCatalog {
+                    source: persisted
+                        .map(|row| row.catalog_source.clone())
+                        .filter(|value| !value.is_empty())
+                        .unwrap_or_else(|| CATALOG_SOURCE_OLLAMA_CLOUD_MODELS.to_string()),
+                    source_url: persisted
+                        .map(|row| row.catalog_source_url.clone())
+                        .filter(|value| !value.is_empty())
+                        .unwrap_or_else(|| crate::kernel::ids::OLLAMA_CLOUD_BASE_URL.to_string()),
+                    refreshed_at: persisted.and_then(|row| row.catalog_refreshed_at),
+                    models: models.clone(),
+                    refresh_supported: true,
+                },
+                models,
+            )
+        }
         ProviderAdapterKind::Cpa => {
             unreachable!("CPA is an external integration without a Provider contract scope")
         }
@@ -925,6 +984,10 @@ fn merge_provider_scope(
     for model_id in &static_models {
         let default_source = if adapter == ProviderAdapterKind::CommandCodeGoat
             && command_code_goat_includes_model(model_id)
+        {
+            ContractEvidenceSource::Preset
+        } else if adapter == ProviderAdapterKind::OllamaCloud
+            && crate::kernel::protocol::ollama_cloud_includes_model(model_id)
         {
             ContractEvidenceSource::Preset
         } else {
@@ -1060,6 +1123,7 @@ fn preferred_protocol(
         ProviderAdapterKind::MiniMaxCn | ProviderAdapterKind::KimiCn => {
             UpstreamProtocolKind::ChatCompletions
         }
+        ProviderAdapterKind::OllamaCloud => UpstreamProtocolKind::ChatCompletions,
         ProviderAdapterKind::Cpa => UpstreamProtocolKind::ChatCompletions,
         ProviderAdapterKind::ConfigurableHttp => {
             // A Custom endpoint binds every declared model to exactly one

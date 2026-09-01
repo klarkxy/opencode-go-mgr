@@ -14,6 +14,7 @@ pub mod provider_adapter;
 mod response;
 pub mod routing;
 pub mod selector;
+pub mod wire;
 
 use crate::state::CoreState;
 

@@ -35,8 +35,8 @@ use crate::protocol_probe::{self, ProtocolProbeContext, ProtocolProbeRunError};
 use crate::provider::{
     BUILTIN_PROVIDERS, BuiltinProvider, COMMAND_CODE_PROVIDER_ID, CUSTOM_PROVIDER_ID,
     ConnectionVerificationStatus, KIMI_CN_BASE_URL, KIMI_PROVIDER_ID, MINIMAX_CN_BASE_URL,
-    MINIMAX_PROVIDER_ID, OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID, ProviderAdapterKind,
-    ProviderRegistry, ZEN_FREE_ACCOUNT_ID, default_verification_status,
+    MINIMAX_PROVIDER_ID, OLLAMA_PROVIDER_ID, OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID,
+    ProviderAdapterKind, ProviderRegistry, ZEN_FREE_ACCOUNT_ID, default_verification_status,
 };
 use crate::provider_contracts::{
     self, ContractScope, EffectiveContractSet, EffectiveModelContract as DomainModelContract,
@@ -464,6 +464,67 @@ pub(super) async fn refresh_contract_catalog(
                 now,
                 provider_contracts::CATALOG_SOURCE_COMMAND_CODE_MODELS,
                 &source_url,
+            )
+            .map_err(V3ApiError::internal)?;
+            state
+                .reload_provider_contracts_locked(&db)
+                .map_err(V3ApiError::internal)?;
+        }
+        state.routing.reset();
+        let revision = state.bump_settings_revision();
+        audit_catalog_success(&state, &scope_id, models.len(), revision);
+        return provider_contracts_response(&state);
+    }
+    if scope_id == OLLAMA_PROVIDER_ID {
+        // Public keyless GET /models: no account, no Key verification, explicit
+        // control-plane refresh only. Reuses the process-wide catalog lock.
+        let _refresh = state.provider_models_refresh.try_lock().map_err(|_| {
+            V3ApiError::conflict_at(&state, "provider model refresh is already running")
+        })?;
+        let (config, base_url, source_url) = {
+            let _settings_update = state.settings_update.lock();
+            check_expectation(&state, &expectation)?;
+            validate_provider_scope(&state, &scope)?;
+            let config = state.config();
+            let base_url = {
+                #[cfg(debug_assertions)]
+                {
+                    goat::ollama_cloud_models_base_url(Some(state.process_generation()))
+                }
+                #[cfg(not(debug_assertions))]
+                {
+                    crate::provider::OLLAMA_CLOUD_BASE_URL.to_string()
+                }
+            };
+            let source_url = goat::ollama_cloud_models_url_for_base(&base_url);
+            (config, base_url, source_url)
+        };
+        let models = match goat::refresh_ollama_cloud_models(&config, &base_url).await {
+            Ok(models) => models,
+            Err(failure) => {
+                audit_catalog_failure(&state, &scope_id, "fetch");
+                return Err(V3ApiError::outbound_failed(&state, failure.message));
+            }
+        };
+        if models.is_empty() {
+            audit_catalog_failure(&state, &scope_id, "empty_catalog");
+            return Err(V3ApiError::outbound_failed(
+                &state,
+                "Ollama Cloud model refresh returned an empty catalog",
+            ));
+        }
+        let now = Utc::now();
+        let _settings_update = state.settings_update.lock();
+        check_expectation(&state, &expectation)?;
+        {
+            let db = state.db.lock();
+            db.set_contract_catalog(
+                &scope,
+                &models,
+                Some(now),
+                provider_contracts::CATALOG_SOURCE_OLLAMA_CLOUD_MODELS,
+                &source_url,
+                now,
             )
             .map_err(V3ApiError::internal)?;
             state
@@ -1156,7 +1217,9 @@ fn prepare_protocol_probe(
         .filter(|account| {
             account.provider_id == provider_id
                 && match adapter {
-                    ProviderAdapterKind::ConfigurableHttp => false,
+                    ProviderAdapterKind::ConfigurableHttp | ProviderAdapterKind::OllamaCloud => {
+                        false
+                    }
                     _ => true,
                 }
                 && account_is_available_for_at(account, channel, &[], now)
@@ -1276,6 +1339,12 @@ fn provider_catalog_from_state(state: &CoreState) -> ProviderCatalog {
         .get(KIMI_PROVIDER_ID)
         .map(|scope| scope.catalog.models.as_slice())
         .unwrap_or_default();
+    let ollama_models = contracts
+        .providers
+        .get(OLLAMA_PROVIDER_ID)
+        .map(|scope| scope.catalog.models.as_slice())
+        .unwrap_or_default();
+    let ollama_pinned_models = provider_contracts::ollama_cloud_pinned_model_ids(&contracts);
     let mut entries: Vec<ProviderCatalogEntry> = BUILTIN_PROVIDERS
         .iter()
         .filter(|plan| !plan.product_surface.is_external_integration())
@@ -1286,6 +1355,8 @@ fn provider_catalog_from_state(state: &CoreState) -> ProviderCatalog {
                 goat_models,
                 minimax_models,
                 kimi_models,
+                ollama_models,
+                &ollama_pinned_models,
             )
         })
         .collect();
@@ -1370,6 +1441,8 @@ fn catalog_entry(
     goat_models: &[String],
     minimax_models: &[String],
     kimi_models: &[String],
+    ollama_models: &[String],
+    ollama_pinned_models: &[String],
 ) -> ProviderCatalogEntry {
     ProviderCatalogEntry {
         provider_id: plan.provider_id.to_string(),
@@ -1413,12 +1486,17 @@ fn catalog_entry(
                 immutable_after_create: field.immutable_after_create,
             })
             .collect(),
-        model_aliases: alias::routeable_aliases_for_with_extended_catalogs(
+        model_aliases: alias::routeable_aliases_for_with_runtime_catalogs(
             plan.provider_id,
-            zen_models,
-            goat_models,
-            minimax_models,
-            kimi_models,
+            alias::RuntimeCatalogs {
+                zen_free: zen_models,
+                command_code: goat_models,
+                minimax: minimax_models,
+                kimi: kimi_models,
+                ollama: ollama_models,
+                ollama_pinned: ollama_pinned_models,
+                ..alias::RuntimeCatalogs::default()
+            },
         ),
     }
 }

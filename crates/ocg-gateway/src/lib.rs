@@ -35,3 +35,10 @@ pub mod selector;
 /// Do not glob-reexport.
 #[doc(hidden)]
 pub mod protocol;
+
+/// Pure per-attempt wire normalization (Ollama Cloud request/response rewrite).
+///
+/// Public only as the cross-crate bridge; the host crate's `gateway::wire`
+/// facade keeps these items crate-private.
+#[doc(hidden)]
+pub mod wire;

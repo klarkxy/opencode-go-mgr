@@ -13,9 +13,22 @@ pub const OPENCODE_ZEN_FREE_PROVIDER_ID: &str = "opencode-zen-free";
 pub const CUSTOM_PROVIDER_ID: &str = "custom";
 pub const MINIMAX_PROVIDER_ID: &str = "minimax";
 pub const KIMI_PROVIDER_ID: &str = "kimi";
+pub const OLLAMA_PROVIDER_ID: &str = "ollama";
 /// Reserved sealed provider identity for the local CPA external integration.
 /// This is not a user-defined Provider row or plugin identifier.
 pub const CPA_PROVIDER_ID: &str = "cpa";
+
+/// Fixed Ollama Cloud inference origin. Production routes always use this
+/// origin; catalog ids (including `:` tags) ride the request body, not the URL.
+pub const OLLAMA_CLOUD_BASE_URL: &str = "https://ollama.com";
+/// Chat Completions path relative to [`OLLAMA_CLOUD_BASE_URL`]. Ollama Cloud
+/// exposes only this inference surface; Responses/Messages do not exist.
+pub const OLLAMA_CLOUD_CHAT_COMPLETIONS_PATH: &str = "/v1/chat/completions";
+/// Public `GET /models` discovery path used for Provider catalog refresh.
+pub const OLLAMA_CLOUD_MODELS_PATH: &str = "/v1/models";
+/// Web settings page scraped (opt-in, account Cookie) for usage windows.
+/// This is a page URL, never an inference or JSON usage API endpoint.
+pub const OLLAMA_CLOUD_SETTINGS_URL: &str = "https://ollama.com/settings";
 
 /// Client-facing Alias. Go still owns the published kebab alias; GOAT maps it
 /// internally to the slash raw ID and stays non-routeable.
@@ -42,7 +55,7 @@ pub const CPA_ACCOUNT_NAME: &str = "CPA Subscription Pool";
 pub const PRIMARY_KEY_ID: &str = "00000000-0000-0000-0000-000000000001";
 
 /// Fixed display name for the primary key in snapshots and backfills; the UI
-/// labels the entry with the localized "主 Key".
+/// labels the entry with the localized "涓?Key".
 pub const PRIMARY_KEY_NAME: &str = "Primary";
 
 /// Canonicalize a client or catalog model name for table lookup.
@@ -65,7 +78,7 @@ pub fn is_free_model(model: &str) -> bool {
 }
 
 /// Slash, underscore, or whitespace means "treat as a raw ID": never fold those
-/// characters into `-` and then hit a kebab alias (`glm/5.2` ≠ `glm-5.2`).
+/// characters into `-` and then hit a kebab alias (`glm/5.2` 鈮?`glm-5.2`).
 ///
 /// Public only as the cross-crate bridge; `ocg_core::kernel::ids` keeps this
 /// crate-private.
@@ -139,5 +152,18 @@ mod tests {
         ));
         assert!(!custom_model_id_matches("", "glm-5.2"));
         assert!(!custom_model_id_matches("glm-5.2", "   "));
+    }
+
+    #[test]
+    fn ollama_cloud_identities_and_fixed_surfaces_stay_stable() {
+        assert_eq!(OLLAMA_PROVIDER_ID, "ollama");
+        assert_eq!(OLLAMA_CLOUD_BASE_URL, "https://ollama.com");
+        assert_eq!(OLLAMA_CLOUD_CHAT_COMPLETIONS_PATH, "/v1/chat/completions");
+        assert_eq!(OLLAMA_CLOUD_MODELS_PATH, "/v1/models");
+        assert_eq!(OLLAMA_CLOUD_SETTINGS_URL, "https://ollama.com/settings");
+        // Both constants share the host today; keeping them independent means
+        // moving the settings page can never silently move the API base.
+        assert!(OLLAMA_CLOUD_SETTINGS_URL.starts_with(OLLAMA_CLOUD_BASE_URL));
+        assert_ne!(OLLAMA_CLOUD_SETTINGS_URL, OLLAMA_CLOUD_BASE_URL);
     }
 }

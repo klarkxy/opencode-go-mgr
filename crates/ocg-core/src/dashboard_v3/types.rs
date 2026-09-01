@@ -12,7 +12,7 @@
 //! revision. `POST /settings/install-update` is an in-memory control-plane mutation
 //! that requires `expectedRevision` and `processGeneration` but does not bump them.
 //! Plaintext OCG Manager Keys must not appear on `Settings` or
-//! provider/Zen/contract DTOs — `ConnectionInfo` is the only secret-bearing
+//! provider/Zen/contract DTOs —`ConnectionInfo` is the only secret-bearing
 //! V3 response DTO for those Keys. `CpaRuntimeKeyCreated.secret` returns a
 //! newly generated CPA client inference key once. `CustomModelDiscoveryRequest.apiKey` is write-only. Protocol path/switch tokens
 //! stay `chat_completions`, `responses`, and `messages`. Pricing wire DTOs are
@@ -212,6 +212,9 @@ pub const CATALOG_TYPE_NAMES: &[&str] = &[
     "DynamicProviderDiscoverResponse",
     "DynamicProviderTestRequest",
     "DynamicProviderTestResponse",
+    "OllamaUsageStatus",
+    "OllamaCookieUpdate",
+    "OllamaUsageThrottleError",
 ];
 
 pub const ERROR_UNAUTHORIZED: &str = "unauthorized";
@@ -2074,7 +2077,7 @@ pub struct GatewayStatus {
     pub pricing_revision: String,
 }
 
-/// Local Applications picker: Go routable Alias ∩ current pricing snapshot.
+/// Local Applications picker: Go routable Alias 鈭?current pricing snapshot.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 #[schemars(rename_all = "camelCase", deny_unknown_fields)]
@@ -2617,7 +2620,7 @@ pub struct BrowserOpenRequest {
 /// POST `/accounts/{id}/browser` result. Distinct from `browser::BrowserOpenResult`.
 ///
 /// Native mode always emits `sessionToken: null`. Remote mode emits only the
-/// opaque dashboard-bound display token — never a worker URL or control token.
+/// opaque dashboard-bound display token —never a worker URL or control token.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 #[schemars(rename_all = "camelCase", deny_unknown_fields)]
@@ -2651,6 +2654,52 @@ pub struct UsageRefreshThrottleError {
     pub message: String,
     pub current_revision: Option<u64>,
     pub process_generation: Option<u64>,
+    pub next_allowed_at: String,
+}
+
+/// GET `/accounts/{id}/ollama-usage` response. The Cookie itself never
+/// appears: `cookieConfigured` is the only Cookie fact the API exposes, and
+/// `snapshot` is the sanitized usage view from the last successful scrape.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(rename_all = "camelCase", deny_unknown_fields)]
+pub struct OllamaUsageStatus {
+    pub account_id: String,
+    pub cookie_configured: bool,
+    /// `unconfigured` | `ok` | `unauthorized` | `failed`.
+    pub status: String,
+    pub snapshot: Option<serde_json::Value>,
+    /// Sanitized failure reason from the most recent attempt (≤256 chars,
+    /// no HTML fragments or URL query strings); `null` after a success.
+    pub last_error: Option<String>,
+    pub last_success_at: Option<String>,
+    pub last_attempt_at: Option<String>,
+    pub next_eligible_at: Option<String>,
+    pub failure_streak: i64,
+    pub revision: u64,
+    pub process_generation: u64,
+}
+
+/// PUT `/accounts/{id}/ollama-cookie` body. A `null` (or absent) `cookie`
+/// clears the stored web session and resets the capability; a string is the
+/// pasted Cookie request header validated server-side before storage.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[schemars(rename_all = "camelCase", deny_unknown_fields)]
+pub struct OllamaCookieUpdate {
+    #[serde(flatten)]
+    pub expectation: MutationExpectation,
+    pub cookie: Option<String>,
+}
+
+/// POST `/accounts/{id}/ollama-usage/refresh` throttle response (HTTP 429):
+/// the absolute instant the next manual attempt becomes eligible.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(rename_all = "camelCase", deny_unknown_fields)]
+pub struct OllamaUsageThrottleError {
+    pub code: String,
+    pub message: String,
     pub next_allowed_at: String,
 }
 
@@ -3196,6 +3245,8 @@ pub fn contract_schema() -> Value {
     include_type::<DesktopUpdate>(&mut serialize);
     include_type::<UsageRefresh>(&mut serialize);
     include_type::<UsageRefreshThrottleError>(&mut serialize);
+    include_type::<OllamaUsageStatus>(&mut serialize);
+    include_type::<OllamaUsageThrottleError>(&mut serialize);
     include_type::<ApplicationConnectorAction>(&mut serialize);
     include_type::<ApplicationConnectorStatus>(&mut serialize);
     include_type::<ApplicationConnectorChange>(&mut serialize);
@@ -3283,6 +3334,7 @@ pub fn contract_schema() -> Value {
     include_type::<DynamicProviderUpdate>(&mut deserialize);
     include_type::<DynamicProviderDiscoverRequest>(&mut deserialize);
     include_type::<DynamicProviderTestRequest>(&mut deserialize);
+    include_type::<OllamaCookieUpdate>(&mut deserialize);
     for (name, schema) in deserialize.take_definitions(true) {
         defs.entry(name).or_insert(schema);
     }

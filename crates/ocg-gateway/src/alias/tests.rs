@@ -520,14 +520,7 @@ fn eligible_goat_catalog_joins_static_aliases_and_keeps_other_ids_raw() {
         }
         other => panic!("expected raw-only GOAT pin, got {other:?}"),
     }
-    match resolve_with_catalogs(
-        COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_ALIAS,
-        &[],
-        &[],
-        &goat_ids,
-    )
-    .unwrap()
-    {
+    match resolve_with_catalogs("deepseek-v4-flash", &[], &[], &goat_ids).unwrap() {
         ResolvedModel::Alias { mappings, .. } => {
             assert!(
                 mappings
@@ -1152,4 +1145,94 @@ fn extra_catalogs_aggregate_public_aliases_and_fail_closed_on_raw_ambiguity() {
     )
     .unwrap_err();
     assert_eq!(err.code(), Some(AMBIGUOUS_MODEL_ID));
+}
+
+fn resolve_ollama(
+    requested: &str,
+    ollama: &[&str],
+    pinned: &[&str],
+) -> Result<ResolvedModel, ResolveError> {
+    let ollama_models: Vec<String> = ollama.iter().map(|id| id.to_string()).collect();
+    let pinned_models: Vec<String> = pinned.iter().map(|id| id.to_string()).collect();
+    resolve_with_runtime_catalogs(
+        requested,
+        RuntimeCatalogs {
+            ollama: &ollama_models,
+            ollama_pinned: &pinned_models,
+            ..RuntimeCatalogs::default()
+        },
+    )
+}
+
+#[test]
+fn ollama_overlay_appends_shared_alias_mappings_without_stealing_publication() {
+    match resolve_ollama(
+        "deepseek-v4-flash",
+        &["deepseek-v4-flash:0731", "gpt-oss:20b", "gpt-oss:120b"],
+        &[],
+    )
+    .unwrap()
+    {
+        ResolvedModel::Alias {
+            alias, mappings, ..
+        } => {
+            assert_eq!(alias, "deepseek-v4-flash");
+            assert!(
+                mappings.iter().any(ProviderMapping::is_opencode_go),
+                "Go keeps owning the shared alias"
+            );
+            assert!(mappings.iter().any(|mapping| {
+                mapping.is_ollama_cloud()
+                    && mapping.routeable
+                    && mapping.upstream_model == "deepseek-v4-flash:0731"
+            }));
+            assert!(
+                !mappings.iter().any(|mapping| {
+                    mapping.is_ollama_cloud() && mapping.upstream_model == "gpt-oss:20b"
+                }),
+                "size-variant stems must not bind the shared alias"
+            );
+        }
+        other => panic!("expected shared alias, got {other:?}"),
+    }
+
+    match resolve_ollama("gpt-oss:20b", &["gpt-oss:20b", "gpt-oss:120b"], &[]).unwrap() {
+        ResolvedModel::PinnedRaw { mapping, .. } => {
+            assert!(mapping.is_ollama_cloud());
+            assert_eq!(mapping.upstream_model, "gpt-oss:20b");
+        }
+        other => panic!("expected raw pin, got {other:?}"),
+    }
+    assert!(resolve_ollama("gpt-oss", &["gpt-oss:20b", "gpt-oss:120b"], &[]).is_err());
+}
+
+#[test]
+fn ollama_overlay_coexisting_tags_fail_closed_until_pinned() {
+    let coexisting = ["deepseek-v4-flash:0731", "deepseek-v4-flash:0915"];
+    match resolve_ollama(COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_ALIAS, &coexisting, &[]).unwrap() {
+        ResolvedModel::Alias { mappings, .. } => {
+            assert!(
+                !mappings.iter().any(ProviderMapping::is_ollama_cloud),
+                "coexisting tags must not guess a shared-alias binding"
+            );
+        }
+        other => panic!("expected shared alias, got {other:?}"),
+    }
+    match resolve_ollama(
+        "deepseek-v4-flash",
+        &coexisting,
+        &["deepseek-v4-flash:0915"],
+    )
+    .unwrap()
+    {
+        ResolvedModel::Alias { mappings, .. } => {
+            let ollama: Vec<_> = mappings
+                .iter()
+                .filter(|mapping| mapping.is_ollama_cloud())
+                .collect();
+            assert_eq!(ollama.len(), 1);
+            assert_eq!(ollama[0].upstream_model, "deepseek-v4-flash:0915");
+        }
+        other => panic!("expected pinned shared alias, got {other:?}"),
+    }
 }

@@ -173,7 +173,10 @@ export type DashboardApiV3 =
   | DynamicProviderDiscoverRequest
   | DynamicProviderDiscoverResponse
   | DynamicProviderTestRequest
-  | DynamicProviderTestResponse;
+  | DynamicProviderTestResponse
+  | OllamaUsageStatus
+  | OllamaCookieUpdate
+  | OllamaUsageThrottleError;
 /**
  * Which listed models take the list-mode exception leg.
  */
@@ -1061,7 +1064,7 @@ export interface GatewayStatus {
   upstreamBaseUrl: string;
 }
 /**
- * Local Applications picker: Go routable Alias ∩ current pricing snapshot.
+ * Local Applications picker: Go routable Alias 鈭?current pricing snapshot.
  */
 export interface ApplicationModels {
   models: string[];
@@ -1491,7 +1494,7 @@ export interface BrowserOpenRequest {
  * POST `/accounts/{id}/browser` result. Distinct from `browser::BrowserOpenResult`.
  *
  * Native mode always emits `sessionToken: null`. Remote mode emits only the
- * opaque dashboard-bound display token — never a worker URL or control token.
+ * opaque dashboard-bound display token —never a worker URL or control token.
  */
 export interface BrowserOpen {
   mode: BrowserMode;
@@ -2112,4 +2115,48 @@ export interface DynamicProviderTestResponse {
   ok: boolean;
   processGeneration: number;
   revision: number;
+}
+/**
+ * GET `/accounts/{id}/ollama-usage` response. The Cookie itself never
+ * appears: `cookieConfigured` is the only Cookie fact the API exposes, and
+ * `snapshot` is the sanitized usage view from the last successful scrape.
+ */
+export interface OllamaUsageStatus {
+  accountId: string;
+  cookieConfigured: boolean;
+  failureStreak: number;
+  lastAttemptAt: string | null;
+  /**
+   * Sanitized failure reason from the most recent attempt (≤256 chars,
+   * no HTML fragments or URL query strings); `null` after a success.
+   */
+  lastError: string | null;
+  lastSuccessAt: string | null;
+  nextEligibleAt: string | null;
+  processGeneration: number;
+  revision: number;
+  snapshot: any;
+  /**
+   * `unconfigured` | `ok` | `unauthorized` | `failed`.
+   */
+  status: string;
+}
+/**
+ * PUT `/accounts/{id}/ollama-cookie` body. A `null` (or absent) `cookie`
+ * clears the stored web session and resets the capability; a string is the
+ * pasted Cookie request header validated server-side before storage.
+ */
+export interface OllamaCookieUpdate {
+  cookie?: string | null;
+  expectedRevision: number;
+  processGeneration: number;
+}
+/**
+ * POST `/accounts/{id}/ollama-usage/refresh` throttle response (HTTP 429):
+ * the absolute instant the next manual attempt becomes eligible.
+ */
+export interface OllamaUsageThrottleError {
+  code: string;
+  message: string;
+  nextAllowedAt: string;
 }

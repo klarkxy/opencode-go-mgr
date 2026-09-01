@@ -1411,7 +1411,7 @@
     },
     "ApplicationModels": {
       "additionalProperties": false,
-      "description": "Local Applications picker: Go routable Alias ∩ current pricing snapshot.",
+      "description": "Local Applications picker: Go routable Alias 鈭?current pricing snapshot.",
       "properties": {
         "models": {
           "items": {
@@ -1596,7 +1596,7 @@
     },
     "BrowserOpen": {
       "additionalProperties": false,
-      "description": "POST `/accounts/{id}/browser` result. Distinct from `browser::BrowserOpenResult`.\n\nNative mode always emits `sessionToken: null`. Remote mode emits only the\nopaque dashboard-bound display token — never a worker URL or control token.",
+      "description": "POST `/accounts/{id}/browser` result. Distinct from `browser::BrowserOpenResult`.\n\nNative mode always emits `sessionToken: null`. Remote mode emits only the\nopaque dashboard-bound display token 鈥?never a worker URL or control token.",
       "properties": {
         "mode": {
           "$ref": "#/$defs/BrowserMode"
@@ -6764,6 +6764,124 @@
         "enabled"
       ],
       "type": "object"
+    },
+    "OllamaUsageStatus": {
+      "additionalProperties": false,
+      "description": "GET `/accounts/{id}/ollama-usage` response. The Cookie itself never\nappears: `cookieConfigured` is the only Cookie fact the API exposes, and\n`snapshot` is the sanitized usage view from the last successful scrape.",
+      "properties": {
+        "accountId": {
+          "type": "string"
+        },
+        "cookieConfigured": {
+          "type": "boolean"
+        },
+        "failureStreak": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "lastAttemptAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lastError": {
+          "description": "Sanitized failure reason from the most recent attempt (≤256 chars,\nno HTML fragments or URL query strings); `null` after a success.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lastSuccessAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "nextEligibleAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "processGeneration": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "snapshot": true,
+        "status": {
+          "description": "`unconfigured` | `ok` | `unauthorized` | `failed`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "accountId",
+        "cookieConfigured",
+        "status",
+        "snapshot",
+        "lastError",
+        "lastSuccessAt",
+        "lastAttemptAt",
+        "nextEligibleAt",
+        "failureStreak",
+        "revision",
+        "processGeneration"
+      ],
+      "type": "object"
+    },
+    "OllamaCookieUpdate": {
+      "additionalProperties": false,
+      "description": "PUT `/accounts/{id}/ollama-cookie` body. A `null` (or absent) `cookie`\nclears the stored web session and resets the capability; a string is the\npasted Cookie request header validated server-side before storage.",
+      "properties": {
+        "cookie": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "expectedRevision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "processGeneration": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "expectedRevision",
+        "processGeneration"
+      ],
+      "type": "object"
+    },
+    "OllamaUsageThrottleError": {
+      "additionalProperties": false,
+      "description": "POST `/accounts/{id}/ollama-usage/refresh` throttle response (HTTP 429):\nthe absolute instant the next manual attempt becomes eligible.",
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "nextAllowedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "nextAllowedAt"
+      ],
+      "type": "object"
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -7274,6 +7392,15 @@
     },
     {
       "$ref": "#/$defs/DynamicProviderTestResponse"
+    },
+    {
+      "$ref": "#/$defs/OllamaUsageStatus"
+    },
+    {
+      "$ref": "#/$defs/OllamaCookieUpdate"
+    },
+    {
+      "$ref": "#/$defs/OllamaUsageThrottleError"
     }
   ],
   "title": "DashboardApiV3"

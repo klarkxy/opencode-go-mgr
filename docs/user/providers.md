@@ -160,6 +160,7 @@ refreshes those Plans only. Refresh stays manual:
 - Zen Free has no price (egress-IP-shared free quota).
 - Custom API is unpriced: successful forwards log `cost_state=unknown` with
   no quota debit and no official usage refresh.
+- Ollama Cloud refreshes the public keyless directory `https://ollama.com/v1/models` without selecting an account. Discovered ids enable Chat Completions immediately; Responses and Messages are unsupported, and there is no protocol-probe entry. A refreshed catalog may append one routeable Ollama mapping to a Go-owned alias only when stripping the `:` tag leaves exactly one catalog match. Date-tagged snapshot ids are runtime catalog data and must never be hardcoded. Cookie usage is optional and manual-only (30-second throttle) against `https://ollama.com/settings`; usage failures never write inference cooldown.
 - MiniMax CN and Kimi Code CN are unpriced in OCG, but their account cards can
   manually read the official subscription windows (`/token_plan/remains` and
   `/usages`). These snapshots are display-only, never auto-polled, and never

@@ -34,6 +34,7 @@ The Adapter Registry is sealed. Built-in Provider families are:
 | Command Code GOAT | `command-code` | Yes | Public Provider catalog; GOAT preset models default on, additional models default off in the Providers matrix; no account-level GOAT/All or Max mode |
 | MiniMax CN Token Plan | `minimax` | Yes | Dedicated `sk-cp` Key; fixed official Chat and Messages routes, authenticated model directory, and manual official Token Plan usage refresh |
 | Kimi Code CN | `kimi` | Yes | Dedicated Kimi Code Key; fixed official Chat and Messages routes, authenticated model directory, and manual official weekly/rate-window usage refresh |
+| Ollama Cloud | `ollama` | Yes | Fixed-origin Chat Completions only (`https://ollama.com`, Bearer); public keyless catalog refresh; optional account web-session Cookie for a manual usage scrape of `https://ollama.com/settings`; unpriced |
 | Custom API | `custom` | Yes | Trusted-administrator destination; one API URL, one account-wide upstream protocol, and public-name → upstream-ID mappings per account; common base URLs are completed automatically; new accounts default on; eligible public names appear on `/v1/models`; unpriced/unknown cost, no quota debit |
 
 ## Move a node configuration

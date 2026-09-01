@@ -94,6 +94,12 @@
 
 - `setup_step` 顺序为 `google_account`（UI：登录身份，可跳过）→ `opencode_registration` → `payment` → `key_verification` → `ready`。`PATCH /dashboard/api/v3/accounts/{id}/setup` 允许前进一步或回退到更早步骤；禁止跳过步骤或直达 `ready`。草稿创建可编辑邀请链接并写回 `opencode_invite_url`（`DEFAULT_OPENCODE_INVITE_URL` 是演示默认值）。浏览器目标包括 Google/GitHub 注册与登录、邀请 URL，以及控制台 `https://opencode.ai/auth`。托管页可通过 dashboard HTTP 打开浏览器；桌面原生浏览器是 Host hook，不是 WebView invoke。
 
+## Ollama Cloud
+
+- 家族密封且固定源：`https://ollama.com`，仅 Chat Completions，Bearer，不跟随重定向，`ProcessWideNoRedirect` 代理语义（方向默认段；本家族模型 id 不参与按模型例外段匹配）。协议事实存于 `ocg_domain::protocol` 的家族独立种子（`OLLAMA_CLOUD_*`）；`MODEL_PROTOCOLS` 必须保持无 Ollama 专属 id——该表派生 Go 已发布别名。adapter 标记 `WireNormalization::OllamaCloud`；forwarder 按尝试改写请求字节（assistant `reasoning_content` 缺失时补 `reasoning`，`max_tokens`/`max_completion_tokens` 钳制到 65535），并对响应/SSE 帧做规范化（`reasoning`/`thinking` → 补 `reasoning_content`）。混合候选链中非 Ollama 尝试的请求字节必须逐字节不变；`upstream_body_bytes` 记录实际发送字节；面向客户端的归因保留请求名。
+- Cookie 用量为 opt-in 且仅手动：存储的网页会话 Cookie（与 Key 同级混淆设施，非 AEAD）仅用于抓取固定 `https://ollama.com/settings` 页（不重定向，15 秒超时，512KB 上限，进程级出站默认段）。解析锚定 `data-usage-track`/`data-usage-segment`/`data-model`/`data-requests`/`data-time`；快照仅持久化脱敏 JSON，失败只更新状态/退避且不动上次成功快照，`unauthorized` 表示会话过期。手动刷新 30 秒限速（成败都计）；**用量路径的任何失败绝不写推理冷却、绝不改变账号启用状态、绝不影响路由资格**。状态存于 `ollama_cloud_usage_state`（schema v36，随账号级联删除）。Cookie 与用量快照不进导出载荷；载荷结构与版本不变。
+- 别名追加守卫：目录刷新仅在剥除 `:` 标签后恰好命中一个目录 id 时，向 Go 拥有的别名（如共享词干）追加一个可路由 Ollama 映射；同词干多快照并存时该映射退出，别名仍由既有家族服务，管理员矩阵钉定会被后续刷新尊重。带日期标签的快照 id 是运行时目录数据，严禁写进代码。
+
 ## 用量同步
 
 - 已完成账号的配额：官方 `https://opencode.ai/zen/go/v1/usage`（`go_usage.rs`）是周期性校准基线；本地 `forward_logs` 在上次成功校准后仍做实时估算。`usage_sync.rs` 协调手动与后台路径：ready+enabled 且最近约 24h 内有本地活动的账号约每小时对账一次，不活跃的约每天一次；disabled/not-ready/空 Key 账号不自动刷新。全局并发 1，带 jitter 与可注入 clock/jitter/fetch seams；无启动惊群。手动 `POST /dashboard/api/v3/accounts/{id}/usage/refresh` 仍可用；服务端限流为每账号 15s（无论成功失败都计入），带并发去重，返回 Retry-After / `next_allowed_at`；失败保留上次基线与上次成功。本地最大 Go 用量 ≥80% 时，加速对账至多每 15 分钟一次。真实推理 429 仍写入现有冷却/选择器，并额外安排约 1–2 分钟后官方对账（非内联）；官方失败或 `status=rate-limited` 从不写入推理冷却。成功后按最早 `resetsAt`（加有界 jitter）重新调度，尊重活跃/不活跃节奏。失败退避：5m → 15m → 1h → 6h。同步元数据位于 `provider_usage_sync_state`（`accounts.usage_sync_*` 不再使用）。共享实现包括 CAS / 三窗原子校准与全局代理。官方 Go 文档未列出该端点。不要引入 CDP 自动化刷新。

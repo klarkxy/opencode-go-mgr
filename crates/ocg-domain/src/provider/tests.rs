@@ -5,7 +5,7 @@ use crate::catalog::{
 };
 use crate::ids::{
     COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM, COMMAND_CODE_PROVIDER_ID, CPA_ACCOUNT_ID,
-    CPA_PROVIDER_ID, CUSTOM_PROVIDER_ID, KIMI_PROVIDER_ID, MINIMAX_PROVIDER_ID,
+    CPA_PROVIDER_ID, CUSTOM_PROVIDER_ID, KIMI_PROVIDER_ID, MINIMAX_PROVIDER_ID, OLLAMA_PROVIDER_ID,
     OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID, ZEN_FREE_ACCOUNT_ID,
 };
 
@@ -125,7 +125,7 @@ fn singleton_and_provider_validation_is_fail_closed() {
 
 #[test]
 fn catalog_hardcodes_providers_and_keeps_unverified_providers_unroutable() {
-    assert_eq!(BUILTIN_PROVIDERS.len(), 7);
+    assert_eq!(BUILTIN_PROVIDERS.len(), 8);
     let goat = builtin_provider(COMMAND_CODE_PROVIDER_ID).unwrap();
     assert!(goat.routable);
     assert_eq!(goat.verification_policy, VerificationPolicy::NotRequired);
@@ -344,6 +344,7 @@ fn provider_registry_is_exhaustive_for_plans_and_adapter_kinds() {
                     | ProviderAdapterKind::CommandCodeGoat
                     | ProviderAdapterKind::MiniMaxCn
                     | ProviderAdapterKind::KimiCn
+                    | ProviderAdapterKind::OllamaCloud
                     | ProviderAdapterKind::Cpa
             )
         );
@@ -372,6 +373,7 @@ fn provider_registry_is_exhaustive_for_plans_and_adapter_kinds() {
             | ProviderAdapterKind::CommandCodeGoat
             | ProviderAdapterKind::MiniMaxCn
             | ProviderAdapterKind::KimiCn
+            | ProviderAdapterKind::OllamaCloud
             | ProviderAdapterKind::ConfigurableHttp
             | ProviderAdapterKind::Cpa => {
                 assert!(descriptor.inference.production_inference);
@@ -388,7 +390,7 @@ fn provider_registry_is_exhaustive_for_plans_and_adapter_kinds() {
     assert_eq!(seen.len(), ProviderAdapterKind::ALL.len());
     assert!(ProviderAdapterKind::from_provider_id("unknown").is_none());
     assert!(ProviderRegistry::get("unknown").is_none());
-    assert_eq!(ProviderAdapterKind::ALL.len(), 7);
+    assert_eq!(ProviderAdapterKind::ALL.len(), 8);
 }
 
 #[test]
@@ -498,6 +500,28 @@ fn adapter_descriptors_preserve_current_capability_decisions() {
         );
         assert!(fixed_provider.card_actions.protocol_probe);
     }
+
+    let ollama = ProviderRegistry::get(OLLAMA_PROVIDER_ID).unwrap();
+    assert_eq!(ollama.kind, ProviderAdapterKind::OllamaCloud);
+    assert_eq!(ollama.inference.auth, InferenceAuthDescriptor::Bearer);
+    assert!(!ollama.inference.follow_redirects);
+    assert_eq!(ollama.inference.origin, InferenceOriginKind::OfficialFixed);
+    assert!(ollama.inference.catalog_routable);
+    assert!(!ollama.protocol_probe.explicit_probe);
+    assert_eq!(
+        ollama.protocol_probe.structural_ceiling,
+        StructuralProbeCeiling::Unavailable
+    );
+    assert_eq!(ollama.protocol_probe.fallback_priority, &CHAT_PROTOCOLS);
+    assert_eq!(ollama.usage.contract, UsageContractKind::LocalState);
+    assert!(ollama.usage.publishes_capability);
+    assert!(ollama.card_actions.usage_refresh);
+    assert!(ollama.card_actions.catalog_refresh);
+    assert!(!ollama.card_actions.protocol_probe);
+    assert_eq!(
+        ollama.model_catalog.kind,
+        ModelCatalogKind::ProviderPersistedSnapshot
+    );
 
     let custom = ProviderRegistry::get(CUSTOM_PROVIDER_ID).unwrap();
     assert_eq!(custom.kind, ProviderAdapterKind::ConfigurableHttp);

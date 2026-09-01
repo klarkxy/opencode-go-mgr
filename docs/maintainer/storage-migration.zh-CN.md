@@ -33,7 +33,7 @@ GUI 或 CLI 启动时会原地执行 SQLite 迁移。打开新版二进制前：
 
 ## Schema v27 与 pre-v3 快照
 
-`CURRENT_SCHEMA_VERSION = 35`（`crates/ocg-core/src/db.rs`）。打开历史库会先规范迁移到 v26，再由 v27 重写把主 Key 与全部 `sub_gateway_keys` 行复制进一张 `access_keys` 表（主 Key 固定 id `00000000-0000-0000-0000-000000000001`），删除 `sub_gateway_keys`，并删除 `accounts` 上遗留的五列 `usage_sync_*`（用量同步元数据在 `provider_usage_sync_state`）。v33 新增 Custom 精确上游模型身份；v34 新增 CPA 单例配置表，但不会导入或导出 CPA 状态。v35 把 Provider/Plan 身份收成只有 `provider_id`：先预检每一个已知的 v34 provider/offering 对，未知对与会丢数据的复合键冲突在写入前失败，再重建受影响的表，使 offering 列不存在。账号 `key_cipher` / `password_cipher` 用 Host cipher 就地校验，**不会重新加密**。
+`CURRENT_SCHEMA_VERSION = 36`（`crates/ocg-core/src/db.rs`）。打开历史库会先规范迁移到 v26，再由 v27 重写把主 Key 与全部 `sub_gateway_keys` 行复制进一张 `access_keys` 表（主 Key 固定 id `00000000-0000-0000-0000-000000000001`），删除 `sub_gateway_keys`，并删除 `accounts` 上遗留的五列 `usage_sync_*`（用量同步元数据在 `provider_usage_sync_state`）。v33 新增 Custom 精确上游模型身份；v34 新增 CPA 单例配置表，但不会导入或导出 CPA 状态。v35 把 Provider/Plan 身份收成只有 `provider_id`：先预检每一个已知的 v34 provider/offering 对，未知对与会丢数据的复合键冲突在写入前失败，再重建受影响的表，使 offering 列不存在。v36 增量创建 `ollama_cloud_usage_state`，供 Ollama Cloud Cookie 用量抓取使用。账号 `key_cipher` / `password_cipher` 用 Host cipher 就地校验，**不会重新加密**。
 
 ## Schema v31 — 按模型/按协议覆盖
 
@@ -60,6 +60,17 @@ data.sqlite.pre-v35.<timestamp>.bak.sha256
 sha256sum -c data.sqlite.pre-v35.<timestamp>.bak.sha256      # Linux
 shasum -a 256 -c data.sqlite.pre-v35.<timestamp>.bak.sha256  # macOS
 ```
+
+## Schema v36 — Ollama Cloud 用量状态
+
+v36 创建 `ollama_cloud_usage_state` 表。每个已配置账号一行，包含：
+
+- `cookie_cipher` — 抓取 `https://ollama.com/settings` 用量页所用的混淆浏览器会话 Cookie。它使用与账号 Key 相同的混淆设施，明确不是 AEAD；任何 API 都不会返回它，导出载荷也不包含它。
+- `status` — `unconfigured`、`ok`、`unauthorized` 或 `failed`。
+- `snapshot` — 最近一次成功抓取的脱敏 JSON（5h/7d 窗口、按模型请求数、可选套餐/余额）。仅成功时写入；失败只更新状态列，不清空快照。
+- `last_error`、`last_success_at`、`last_attempt_at`、`next_eligible_at`、`failure_streak` — 手动刷新 30 秒限速与最近一次尝试的元数据。
+
+该行以 `account_id` 为键并 `ON DELETE CASCADE`，删除账号会带走用量状态；清除 Cookie 会删除该行并回到未配置。该迁移只做加法：不改现有表、行或路由事实，也不新增备份族。回滚仍是既有的整目录恢复。
 
 ## Schema v33 — Custom 上游模型身份
 

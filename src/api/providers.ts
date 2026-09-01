@@ -14,6 +14,7 @@ import type {
   ProviderPricingSnapshot as V3ProviderPricingSnapshot,
   ProviderModels as V3ProviderModels,
   ProviderUsage as V3ProviderUsage,
+  OllamaUsageStatus as V3OllamaUsage,
   ProtocolOverrideState as V3ProtocolOverrideState,
   ProtocolProbeResponse as V3ProtocolProbeResponse,
   ZenFreeModels as V3ZenFreeModels,
@@ -166,6 +167,25 @@ export interface ProviderUsageSyncState {
   next_eligible_at: string | null;
   failure_streak: number;
   last_expedited_at: string | null;
+}
+
+/** Sanitized Ollama Cloud Cookie-usage status (never carries the Cookie). */
+export interface OllamaUsageResponse {
+  account_id: string;
+  cookie_configured: boolean;
+  status: "unconfigured" | "ok" | "unauthorized" | "failed";
+  snapshot: {
+    windows: { window: string; used_percent: number | null; reset_at: string | null }[];
+    models: { model: string; requests_5h: number | null; requests_7d: number | null }[];
+    plan: string | null;
+    balance: string | null;
+  } | null;
+  /** Sanitized failure reason (≤256 chars, no HTML/query strings) or null. */
+  last_error: string | null;
+  last_success_at: string | null;
+  last_attempt_at: string | null;
+  next_eligible_at: string | null;
+  failure_streak: number;
 }
 
 export interface ProviderUsageResponse {
@@ -563,6 +583,38 @@ function presentProviderPricingSnapshot(value: V3ProviderPricingSnapshot): Provi
   };
 }
 
+function presentOllamaUsage(value: V3OllamaUsage): OllamaUsageResponse {
+  const snapshot = value.snapshot as
+    | OllamaUsageResponse["snapshot"]
+    | null
+    | undefined;
+  return {
+    account_id: value.accountId,
+    cookie_configured: value.cookieConfigured,
+    status: value.status as OllamaUsageResponse["status"],
+    snapshot: snapshot === null || snapshot === undefined ? null : {
+      windows: (snapshot.windows ?? []).map((window: { window: unknown; used_percent?: unknown; reset_at?: unknown }) => ({
+        window: String(window.window),
+        used_percent: window.used_percent === undefined ? null : Number(window.used_percent),
+        reset_at: window.reset_at === undefined ? null : String(window.reset_at),
+      })),
+      models: (snapshot.models ?? []).map((model: { model: unknown; requests_5h?: unknown; requests_7d?: unknown }) => ({
+        model: String(model.model),
+        requests_5h: model.requests_5h === undefined ? null : Number(model.requests_5h),
+        requests_7d: model.requests_7d === undefined ? null : Number(model.requests_7d),
+      })),
+      plan: snapshot.plan === undefined || snapshot.plan === null ? null : String(snapshot.plan),
+      balance:
+        snapshot.balance === undefined || snapshot.balance === null ? null : String(snapshot.balance),
+    },
+    last_error: value.lastError,
+    last_success_at: value.lastSuccessAt,
+    last_attempt_at: value.lastAttemptAt,
+    next_eligible_at: value.nextEligibleAt,
+    failure_streak: value.failureStreak,
+  };
+}
+
 function presentProviderUsage(value: V3ProviderUsage): ProviderUsageResponse {
   return {
     account_id: value.accountId,
@@ -679,6 +731,27 @@ export const providerApi = {
   },
   getProviderUsage: async (accountId: string) =>
     presentProviderUsage(await dashboardV3.getProviderUsage(accountId)),
+  getOllamaUsage: async (accountId: string): Promise<OllamaUsageResponse> =>
+    presentOllamaUsage(await dashboardV3.getOllamaUsage(accountId)),
+  refreshOllamaUsage: async (accountId: string): Promise<OllamaUsageResponse> => {
+    const control = useControlPlaneStore();
+    if (!control.hasTokens()) await control.refresh();
+    return presentOllamaUsage(
+      await control.runMutation((expectation) =>
+        dashboardV3.refreshOllamaUsage(accountId, expectation)),
+    );
+  },
+  setOllamaCookie: async (
+    accountId: string,
+    cookie: string | null,
+  ): Promise<OllamaUsageResponse> => {
+    const control = useControlPlaneStore();
+    if (!control.hasTokens()) await control.refresh();
+    return presentOllamaUsage(
+      await control.runMutation((expectation) =>
+        dashboardV3.setOllamaCookie(accountId, cookie, expectation)),
+    );
+  },
   refreshProviderUsage: async (accountId: string) => {
     const control = useControlPlaneStore();
     if (!control.hasTokens()) await control.refresh();
