@@ -111,13 +111,13 @@ test("every ready account card exposes the same test action without gating the e
   // disabled, cooling, or historically unverified ready accounts.
   assert.doesNotMatch(card, /customAccountToggleBlocked/);
   assert.match(card, /:disabled="!!toggleBlockedReason"/);
-  // Subscription dates render only when the account actually carries the
-  // catalog-owned purchase and derived expiry fields.
-  assert.match(card, /<n-tooltip v-if="hasValidityPeriod"/);
+  // Custom endpoints never present a subscription expiry, even if legacy
+  // account data still carries lifecycle dates.
+  assert.match(card, /<n-popover[\s\S]*?v-if="hasValidityPeriod"/);
+  assert.match(card, /accountIsReady\(props\.account\)[\s\S]*?!isCustom\.value[\s\S]*?!isZen\.value[\s\S]*?purchase_date[\s\S]*?expires_on/);
   assert.match(form, /if \(hasField\("purchase_date"\)\)/);
   assert.doesNotMatch(card, /isScnet/);
-  // The persistent warning carries the administrator-trust risk copy.
-  assert.match(card, /目标端点由管理员自行选择并负责/);
+  assert.doesNotMatch(card, /目标端点由管理员自行选择并负责/);
 });
 
 test("the form declares one API URL and one account-level protocol", () => {

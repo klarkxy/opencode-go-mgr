@@ -265,6 +265,9 @@ export const deDEMessages = {
 
   "新增账号": "Konto hinzufügen",
   "购买日期": "Kaufdatum",
+  "修改购买日期": "Kaufdatum ändern",
+  "更新到今天": "Auf heute setzen",
+  "购买日期已更新": "Kaufdatum aktualisiert",
   "到期日期": "Ablaufdatum",
   "剩 {days} 天": "Noch {days} Tage",
   "今天到期": "Läuft heute ab",
@@ -945,7 +948,6 @@ export const deDEMessages = {
   "使用 {model} 的 {protocol} 协议测试账号 {name}": "Konto {name} mit {model} über {protocol} testen",
   "首选": "Bevorzugt",
   "{model} · {protocol} 测试成功": "Test {model} · {protocol} erfolgreich",
-  "根据 OCG 内已定价请求估算；不含其他客户端用量，可手工校准。": "Schätzung aus von OCG verarbeiteten, bepreisten Anfragen; Nutzung anderer Clients fehlt und kann manuell kalibriert werden.",
   "加载供应商失败: {error}": "Anbieter konnten nicht geladen werden: {error}",
   "暂无供应商范围": "Keine Anbieterbereiche",
   "模型目录": "Modellkatalog",

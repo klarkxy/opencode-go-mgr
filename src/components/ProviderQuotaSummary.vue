@@ -1,22 +1,42 @@
 <template>
-  <div v-if="displayedWindows.length" class="provider-quota-summary">
-    <div v-for="window in displayedWindows" :key="window.window_kind" class="provider-quota-row">
+  <div class="provider-quota-summary">
+    <div
+      v-if="displayedWindows.length === 0"
+      class="provider-quota-row provider-quota-row--empty"
+      role="status"
+    >
       <div class="provider-quota-row__heading">
-        <span>{{ windowLabel(window) }}</span>
-        <strong>{{ usedLabel(window) }}</strong>
+        <span>{{ t("尚未刷新") }}</span>
+        <strong>—</strong>
       </div>
       <n-progress
         type="line"
-        :percentage="usedPercent(window)"
-        :status="usedPercent(window) >= 100 ? 'error' : 'default'"
+        :percentage="0"
+        status="default"
         :show-indicator="false"
         :height="8"
         :border-radius="4"
       />
-      <time v-if="window.resets_at" class="provider-quota-row__reset">
-        {{ t("{time}后重置", { time: formatCooldownRemainingUntil(window.resets_at, now) }) }}
-      </time>
     </div>
+    <template v-else>
+      <div v-for="window in displayedWindows" :key="window.window_kind" class="provider-quota-row">
+        <div class="provider-quota-row__heading">
+          <span>{{ windowLabel(window) }}</span>
+          <strong>{{ usedLabel(window) }}</strong>
+        </div>
+        <n-progress
+          type="line"
+          :percentage="usedPercent(window)"
+          :status="usedPercent(window) >= 100 ? 'error' : 'default'"
+          :show-indicator="false"
+          :height="8"
+          :border-radius="4"
+        />
+        <time v-if="window.resets_at" class="provider-quota-row__reset">
+          {{ t("{time}后重置", { time: formatCooldownRemainingUntil(window.resets_at, now) }) }}
+        </time>
+      </div>
+    </template>
   </div>
 </template>
 

@@ -77,6 +77,18 @@ test("disabled accounts and expired cooldowns never need attention", () => {
   assert.deepEqual(items.map((item) => item.accountId), ["offdraft"]);
 });
 
+test("Custom API ignores legacy lifecycle dates", () => {
+  const custom = account({
+    id: "custom",
+    name: "Custom",
+    provider_id: "custom",
+    offering_id: "api",
+    purchase_date: "2026-07-01",
+    expires_on: "2026-08-01",
+  });
+  assert.deepEqual(buildNeedsAttention([custom], NOW), []);
+});
+
 test("zen free cooling is reported through the shared free lane", () => {
   const zen = account({
     id: "zen",
@@ -85,6 +97,7 @@ test("zen free cooling is reported through the shared free lane", () => {
     offering_id: "anonymous-free",
     credential_kind: "none",
     quota_scope: "egress-ip",
+    expires_on: "2026-08-01",
     cooldown_free_until: "2026-08-21T13:00:00Z",
   });
   assert.deepEqual(buildNeedsAttention([zen], NOW), [

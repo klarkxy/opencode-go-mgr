@@ -112,6 +112,7 @@
           :usage-loading="!!usageLoading[account.id]"
           :usage-load-error="usageLoadErrors[account.id] ?? null"
           :usage-refresh-loading="!!usageRefreshLoading[account.id]"
+          :purchase-date-saving="busy || !!purchaseDateSaving[account.id]"
           :quota-limits-failed="!!quotaLimitsError"
           :menu-options="accountMenuOptions(account, now)"
           @order-keydown="handleOrderKeydown($event, account.id)"
@@ -119,6 +120,7 @@
           @toggle="toggleAccount(account.id)"
           @test-connection="openAccountTest(account.id)"
           @refresh-usage="refreshAccountUsage(account.id)"
+          @update-purchase-date="updatePurchaseDate(account.id, $event)"
           @reload-usage="loadAccountUsage(account.id)"
           @open-wizard="openManagedWizard(account.id)"
           @menu-select="handleMenuSelect($event, account.id)"
@@ -328,6 +330,7 @@ const accountListLoading = ref(true);
 const accountListError = ref("");
 const testingAccountId = ref<string | null>(null);
 const providerSettingsSaving = ref<Record<string, boolean>>({});
+const purchaseDateSaving = ref<Record<string, boolean>>({});
 /** Settings revision from `GET /settings`, used for conditional Zen writes. */
 const settingsRevision = ref<number | null>(null);
 const showModal = ref(false);
@@ -776,6 +779,7 @@ function removeAccountState(id: string): void {
   delete usageLoadErrors.value[id];
   if (testingAccountId.value === id) testingAccountId.value = null;
   delete providerSettingsSaving.value[id];
+  delete purchaseDateSaving.value[id];
 }
 
 function accountHasUsageDisplay(account: Account): boolean {
@@ -960,6 +964,35 @@ async function onFormSave(payload: AccountInput | AccountFormPayload) {
     } finally {
       busy.value = false;
     }
+  }
+}
+
+async function updatePurchaseDate(accountId: string, purchaseDate: string): Promise<void> {
+  const account = accounts.value.find((item) => item.id === accountId);
+  if (
+    !account
+    || !accountIsReady(account)
+    || isCustomApiAccount(account)
+    || isZenFreeAccount(account)
+    || busy.value
+    || purchaseDateSaving.value[accountId]
+  ) return;
+
+  purchaseDateSaving.value[accountId] = true;
+  try {
+    const saved = await runWithFreshSettingsRevision((revision) => dashboardApi.updateAccount(accountId, {
+      purchase_date: purchaseDate,
+      expected_revision: revision,
+    }));
+    replaceAccount(saved);
+    if (accountHasUsageDisplay(saved)) await loadAccountUsage(saved.id);
+    message.success(t("购买日期已更新"));
+  } catch (error) {
+    if (!(await recoverAccountMutationConflict(error))) {
+      message.error(t("保存失败: {error}", { error: dashboardErrorDetail(error) }));
+    }
+  } finally {
+    purchaseDateSaving.value[accountId] = false;
   }
 }
 

@@ -82,7 +82,9 @@ MiniMax and Kimi keys are also origin-bound: MiniMax CN uses
 `https://api.minimaxi.com/v1`; Kimi Code CN uses
 `https://api.kimi.com/coding/v1`. Model and usage refreshes are explicit
 dashboard actions. OCG does not poll either subscription endpoint, and usage
-display never changes routing eligibility.
+display never changes routing eligibility. Before the first successful usage
+refresh, the account card still shows a neutral **Not yet refreshed** quota bar;
+official windows replace it after refresh.
 
 Command Code's official `GET /models` is public and refreshes one Provider-level
 catalog. It does not prove that a stored Key is valid. The Providers matrix is
@@ -246,13 +248,16 @@ anonymous, egress-IP-shared free cooldown rather than a key quota.
   Optional freeform notes live in **Edit account**. They can stay empty and do
   not affect routing or quota. The dashboard stores the account key but does not
   collect or manage third-party login passwords.
-- **Purchase date.** New accounts default to the browser's current date, and the
-  value remains editable. The managed wizard also writes the purchase date when
+- **Purchase date.** New lifecycle-bearing accounts default to the browser's
+  current date. Click the expiry tag on a card to choose another purchase date
+  or set it directly to today; the full edit form remains available. The managed
+  wizard also writes the purchase date when
   payment advances to key verification. Expiry is the same day in the next
   natural month, clamped to that month's last day when necessary:
   `2026-01-31` expires on `2026-02-28`. Accounts and Dashboard show days
   remaining, due today, or days expired. This is informational only and never
-  disables an account or prevents the gateway from selecting it.
+  disables an account or prevents the gateway from selecting it. Zen Free and
+  Custom API have no purchase-cycle expiry and show no expiry tag or alert.
 - **Priority order.** Use the drag handle on an account card to persist its
   priority with a mouse, touchscreen, or pen. When the handle has keyboard focus,
   the Up and Down arrow keys move the account as well. Dashboard, the Logs

@@ -142,9 +142,10 @@ test("account form uses the catalog display name and does not invent GOAT availa
   assert.match(accountCard, /planLabel\(account, catalog\)/);
   assert.doesNotMatch(accountCard, /<AccountTestPopover/);
   assert.doesNotMatch(accountCard, /subscription-risk|订阅制方案：/);
-  assert.match(accountCard, /warning === "endpoint-risk"/);
+  assert.doesNotMatch(accountCard, /endpoint-risk|目标端点由管理员自行选择并负责/);
   assert.doesNotMatch(accountCard, /有效协议|前往供应商|contractSummary/);
   assert.match(providerQuota, /v-for="window in displayedWindows"/);
+  assert.match(providerQuota, /v-if="displayedWindows\.length === 0"[\s\S]*?t\("尚未刷新"\)[\s\S]*?:percentage="0"/);
   assert.match(providerQuota, /kind\.startsWith\("minimax_"\) && kind\.endsWith\(":video"\)/);
   assert.match(providerQuota, /<strong>\{\{ usedLabel\(window\) \}\}<\/strong>/);
   assert.match(providerQuota, /:percentage="usedPercent\(window\)"/);

@@ -266,6 +266,9 @@ export const ptBRMessages = {
 
   "新增账号": "Adicionar conta",
   "购买日期": "Data da compra",
+  "修改购买日期": "Alterar data da compra",
+  "更新到今天": "Definir como hoje",
+  "购买日期已更新": "Data da compra atualizada",
   "到期日期": "Data de vencimento",
   "剩 {days} 天": "{days} dias restantes",
   "今天到期": "Vence hoje",
@@ -946,7 +949,6 @@ export const ptBRMessages = {
   "使用 {model} 的 {protocol} 协议测试账号 {name}": "Testar a conta {name} com {model} via {protocol}",
   "首选": "Preferencial",
   "{model} · {protocol} 测试成功": "Teste {model} · {protocol} bem-sucedido",
-  "根据 OCG 内已定价请求估算；不含其他客户端用量，可手工校准。": "Estimativa baseada em solicitações tarifadas processadas pelo OCG; não inclui outros clientes e pode ser calibrada manualmente.",
   "加载供应商失败: {error}": "Falha ao carregar fornecedores: {error}",
   "暂无供应商范围": "Nenhum escopo de fornecedor",
   "模型目录": "Catálogo de modelos",

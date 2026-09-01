@@ -107,6 +107,9 @@ export const esESMessages = {
 
   "新增账号": "Añadir cuenta",
   "购买日期": "Fecha de compra",
+  "修改购买日期": "Editar fecha de compra",
+  "更新到今天": "Establecer como hoy",
+  "购买日期已更新": "Fecha de compra actualizada",
   "到期日期": "Fecha de vencimiento",
   "剩 {days} 天": "Quedan {days} días",
   "今天到期": "Vence hoy",
@@ -945,7 +948,6 @@ export const esESMessages = {
   "使用 {model} 的 {protocol} 协议测试账号 {name}": "Probar la cuenta {name} con {model} por {protocol}",
   "首选": "Preferido",
   "{model} · {protocol} 测试成功": "Prueba de {model} · {protocol} correcta",
-  "根据 OCG 内已定价请求估算；不含其他客户端用量，可手工校准。": "Estimación de solicitudes con precio procesadas por OCG; no incluye otros clientes y puede calibrarse manualmente.",
   "加载供应商失败: {error}": "No se pudieron cargar los proveedores: {error}",
   "暂无供应商范围": "No hay ámbitos de proveedor",
   "模型目录": "Catálogo de modelos",

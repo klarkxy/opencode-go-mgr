@@ -186,17 +186,19 @@ test("keeps account cards compact with metadata tags and popover calibration", a
   );
 
   assert.ok(header.indexOf("accountStatusLabel(account, now)") < header.indexOf('v-if="hasValidityPeriod"'));
-  // Subscription dates collapse into one status tag; exact purchase and expiry
-  // dates remain available in its tooltip and accessible label.
-  assert.match(header, /<n-tooltip v-if="hasValidityPeriod" trigger="hover">/);
+  // Subscription dates collapse into one clickable status tag whose popover
+  // supports a selected date or a one-click update to today.
+  assert.match(header, /<n-popover[\s\S]*?v-if="hasValidityPeriod"[\s\S]*?trigger="click"/);
   assert.match(header, /accountExpiryLabel\(account, now\) \}\} ·/);
   assert.match(header, /t\("到期于 \{date\}"/);
   assert.match(header, /:aria-label="`\$\{accountExpiryLabel/);
+  assert.match(header, /<n-date-picker[\s\S]*?v-model:formatted-value="purchaseDateDraft"/);
+  assert.match(header, /@click="commitPurchaseDate\(today\)"/);
   assert.doesNotMatch(header, /<n-tag v-if="isGo && accountIsReady\(account\)"/);
   assert.match(card, /<n-popover[\s\S]*?trigger="click"[\s\S]*?placement="bottom-end"[\s\S]*?:width="320"[\s\S]*?@update:show="\(show: boolean\) => show && emit\('usage-editor-open'\)"/);
   assert.match(editor, /class="usage-editor-popover"/);
   assert.doesNotMatch(card, /:flip="false"/);
-  assert.ok(header.indexOf("@update:value=\"emit('toggle')\"") < card.indexOf("<n-popover"));
+  assert.ok(card.indexOf("@update:value=\"emit('toggle')\"") < card.indexOf('placement="bottom-end"'));
   assert.ok(card.indexOf("<n-popover") < card.indexOf("<n-dropdown"));
   assert.match(editor, /class="usage-editor-popover"[\s\S]*?class="usage-resets-row"/);
   assert.match(usage, /async function focusUsageEditor\(accountId: string\)[\s\S]*?requestAnimationFrame[\s\S]*?\.n-input-number input[\s\S]*?\.focus\(\)/);
@@ -210,6 +212,7 @@ test("keeps account cards compact with metadata tags and popover calibration", a
   assert.match(usage, /额度已从 OpenCode 官方用量刷新/);
   assert.doesNotMatch(usage, /refreshManagedUsage|refreshManagedAccountUsage|额度已从 OpenCode 控制台刷新/);
   assert.match(card, /:aria-label="t\('校准用量'\)"/);
+  assert.doesNotMatch(card, /根据 OCG 内已定价请求估算/);
   assert.match(
     card,
     /manualUsageCalibration && accountIsReady\(account\) && edits"[\s\S]*?class="account-action account-action--secondary"/,

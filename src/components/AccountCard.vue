@@ -63,21 +63,65 @@
             <n-tag v-else :type="accountStatusTagType(account, now)" size="small">
               {{ accountStatusLabel(account, now) }}
             </n-tag>
-            <n-tooltip v-if="hasValidityPeriod" trigger="hover">
+            <n-popover
+              v-if="hasValidityPeriod"
+              :show="purchaseDatePopoverShown"
+              trigger="click"
+              placement="bottom-start"
+              :show-arrow="false"
+              @update:show="handlePurchaseDatePopover"
+            >
               <template #trigger>
-                <n-tag
-                  :type="accountExpiryTagType(account, now)"
+                <n-button
+                  text
                   size="small"
-                  :bordered="false"
-                  :aria-label="`${accountExpiryLabel(account, now)}；${t('购买于 {date}', { date: account.purchase_date })}；${t('到期于 {date}', { date: account.expires_on })}`"
+                  class="account-expiry-trigger"
+                  :disabled="purchaseDateSaving"
+                  :aria-label="`${accountExpiryLabel(account, now)}；${t('到期于 {date}', { date: account.expires_on })}；${t('修改购买日期')}`"
                 >
-                  {{ accountExpiryLabel(account, now) }} ·
-                  {{ t("到期于 {date}", { date: account.expires_on }) }}
-                </n-tag>
+                  <n-tag
+                    :type="accountExpiryTagType(account, now)"
+                    size="small"
+                    :bordered="false"
+                  >
+                    {{ accountExpiryLabel(account, now) }} ·
+                    {{ t("到期于 {date}", { date: account.expires_on }) }}
+                  </n-tag>
+                </n-button>
               </template>
-              <div>{{ t("购买于 {date}", { date: account.purchase_date }) }}</div>
-              <div>{{ t("到期于 {date}", { date: account.expires_on }) }}</div>
-            </n-tooltip>
+              <div class="purchase-date-popover">
+                <strong>{{ t("购买日期") }}</strong>
+                <n-date-picker
+                  v-model:formatted-value="purchaseDateDraft"
+                  type="date"
+                  value-format="yyyy-MM-dd"
+                  format="yyyy-MM-dd"
+                  :to="false"
+                  :clearable="false"
+                  :disabled="purchaseDateSaving"
+                  :is-date-disabled="isPurchaseDateDisabled"
+                  :aria-label="t('购买日期')"
+                />
+                <div class="purchase-date-popover__actions">
+                  <n-button
+                    size="small"
+                    :disabled="purchaseDateSaving || account.purchase_date === today"
+                    @click="commitPurchaseDate(today)"
+                  >
+                    {{ t("更新到今天") }}
+                  </n-button>
+                  <n-button
+                    type="primary"
+                    size="small"
+                    :loading="purchaseDateSaving"
+                    :disabled="!canSavePurchaseDate"
+                    @click="commitPurchaseDate(purchaseDateDraft)"
+                  >
+                    {{ t("保存") }}
+                  </n-button>
+                </div>
+              </div>
+            </n-popover>
           </div>
         </div>
       </div>
@@ -207,16 +251,6 @@
       </div>
     </template>
 
-    <n-alert
-      v-if="planWarning"
-      class="account-plan-warning"
-      :type="planWarning.type"
-      :title="planWarning.title"
-      :show-icon="false"
-    >
-      {{ planWarning.message }}
-    </n-alert>
-
     <div v-if="!accountIsReady(account)" class="managed-pending">
       <div>
         <strong>{{ managedStepLabel(account.setup_step) }}</strong>
@@ -249,9 +283,6 @@
         :limits="limits"
         :editing="!!edits"
       />
-      <p v-if="!usageLoadError" class="usage-sync-meta">
-        {{ t("根据 OCG 内已定价请求估算；不含其他客户端用量，可手工校准。") }}
-      </p>
     </div>
     <div v-else-if="isCustom" class="custom-endpoint">
       <div class="custom-endpoint__meta">
@@ -304,11 +335,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref, watch } from "vue";
 import {
-  NAlert,
   NButton,
   NCard,
+  NDatePicker,
   NDropdown,
   NIcon,
   NPopover,
@@ -341,9 +372,14 @@ import {
   usageSyncCaption,
 } from "../domain/account-display.ts";
 import type { AccountMenuOption } from "../domain/account-display.ts";
-import { isCpaIntegrationAccount, isOfficialCnPlanAccount, isZenFreeAccount } from "../domain/account-providers.ts";
+import {
+  isCpaIntegrationAccount,
+  isOfficialCnPlanAccount,
+  isZenFreeAccount,
+} from "../domain/account-providers.ts";
 import { isCustomApiAccount } from "../domain/custom-account.ts";
-import { accountPlanWarning, planLabel } from "../domain/plans.ts";
+import { localDateString } from "../domain/account-lifecycle.ts";
+import { planLabel } from "../domain/plans.ts";
 import type { AccountUsageEdits, UsageLimitView } from "../domain/useAccountUsage.ts";
 import { t } from "../i18n/index.ts";
 import AccountUsageEditor from "./AccountUsageEditor.vue";
@@ -363,6 +399,7 @@ const props = defineProps<{
   usageLoading: boolean;
   usageLoadError: string | null;
   usageRefreshLoading: boolean;
+  purchaseDateSaving: boolean;
   quotaLimitsFailed: boolean;
   menuOptions: AccountMenuOption[];
 }>();
@@ -373,6 +410,7 @@ const emit = defineEmits<{
   toggle: [];
   "test-connection": [];
   "refresh-usage": [];
+  "update-purchase-date": [date: string];
   "reload-usage": [];
   "open-wizard": [];
   "menu-select": [key: string | number];
@@ -392,8 +430,19 @@ const isCustom = computed(() => isCustomApiAccount(props.account));
 const isOfficialCn = computed(() => isOfficialCnPlanAccount(props.account));
 const hasValidityPeriod = computed(() => (
   accountIsReady(props.account)
+  && !isCustom.value
+  && !isZen.value
   && !!props.account.purchase_date
   && !!props.account.expires_on
+));
+const purchaseDatePopoverShown = ref(false);
+const purchaseDateDraft = ref<string | null>(props.account.purchase_date || null);
+const today = computed(() => localDateString(props.now));
+const canSavePurchaseDate = computed(() => (
+  !props.purchaseDateSaving
+  && !!purchaseDateDraft.value
+  && purchaseDateDraft.value <= today.value
+  && purchaseDateDraft.value !== props.account.purchase_date
 ));
 const plan = computed(() => props.catalog?.find((entry) => (
   entry.provider_id === props.account.provider_id
@@ -417,21 +466,31 @@ const draftDescription = computed(() => {
   return key ? t(key) : "";
 });
 
-const planWarning = computed(() => {
-  const warning = accountPlanWarning(props.account);
-  if (warning === "endpoint-risk") {
-    return {
-      type: "warning" as const,
-      title: t("自定义端点"),
-      message: t("目标端点由管理员自行选择并负责：使用 http:// 时 Key 将明文传输；测试连接会发送最小真实请求，可能产生服务商费用。"),
-    };
-  }
-  return null;
-});
-
 const usageEditorAvailable = computed(() => {
   if (props.usageLoading || props.usageLoadError) return false;
   return props.limits.some(({ key }) => !isUsageLimitReached(props.account, key, props.now));
+});
+
+function handlePurchaseDatePopover(show: boolean): void {
+  purchaseDatePopoverShown.value = show;
+  if (show) purchaseDateDraft.value = props.account.purchase_date || today.value;
+}
+
+function isPurchaseDateDisabled(timestamp: number): boolean {
+  return localDateString(timestamp) > today.value;
+}
+
+function commitPurchaseDate(date: string | null): void {
+  if (!date || date > today.value || date === props.account.purchase_date) {
+    purchaseDatePopoverShown.value = false;
+    return;
+  }
+  emit("update-purchase-date", date);
+  purchaseDatePopoverShown.value = false;
+}
+
+watch(() => props.account.purchase_date, (value) => {
+  if (!purchaseDatePopoverShown.value) purchaseDateDraft.value = value || null;
 });
 </script>
 
@@ -532,10 +591,6 @@ const usageEditorAvailable = computed(() => {
   font-size: var(--ocg-font-sm);
 }
 
-.account-plan-warning {
-  margin-bottom: 12px;
-}
-
 .account-title {
   display: flex;
   align-items: center;
@@ -581,6 +636,26 @@ const usageEditorAvailable = computed(() => {
 
 .account-name-row :deep(.n-tag) {
   flex: 0 0 auto;
+}
+
+.account-expiry-trigger {
+  min-width: 0;
+}
+
+.account-expiry-trigger :deep(.n-button__content) {
+  min-width: 0;
+}
+
+.purchase-date-popover {
+  display: grid;
+  gap: 10px;
+  width: min(280px, calc(100vw - 64px));
+}
+
+.purchase-date-popover__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .managed-pending {

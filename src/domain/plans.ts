@@ -232,23 +232,3 @@ export function planRoutable(
   const entry = findCatalogEntry(catalog, providerId, offeringId);
   return entry?.routable ?? false;
 }
-
-export type PlanUseWarning = "endpoint-risk" | "subscription-risk" | null;
-
-/**
- * Persistent risk semantics per plan kind: custom endpoints keep an
- * endpoint-risk note.
- */
-export function planUseWarning(plan: PlanDefinition): PlanUseWarning {
-  if (plan.kind === "custom") return "endpoint-risk";
-  if (plan.id === "minimax-cn" || plan.id === "kimi-cn") return "subscription-risk";
-  return null;
-}
-
-/** Plans with accounts that should keep a persistent risk warning on cards. */
-export function accountPlanWarning(
-  account: Pick<Account, "provider_id" | "offering_id">,
-): PlanUseWarning {
-  const plan = planForAccount(account);
-  return plan ? planUseWarning(plan) : null;
-}

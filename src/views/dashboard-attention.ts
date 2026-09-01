@@ -2,6 +2,7 @@ import type { Account } from "../api/dashboard.ts";
 import { isCooling, isFreeCooling } from "../domain/accounts-usage.ts";
 import { daysUntilDate } from "../domain/account-lifecycle.ts";
 import { isZenFreeAccount } from "../domain/account-providers.ts";
+import { isCustomApiAccount } from "../domain/custom-account.ts";
 
 /**
  * The Dashboard "needs attention" area: a single honest list of accounts that
@@ -47,7 +48,11 @@ export function buildNeedsAttention(
       continue;
     }
     if (ready && account.enabled) {
-      const expiryDays = account.expires_on ? daysUntilDate(account.expires_on, now) : Number.POSITIVE_INFINITY;
+      const expiryDays = !isCustomApiAccount(account)
+        && !isZenFreeAccount(account)
+        && account.expires_on
+        ? daysUntilDate(account.expires_on, now)
+        : Number.POSITIVE_INFINITY;
       if (Number.isFinite(expiryDays) && expiryDays < 0) {
         items.push({ accountId: account.id, accountName: account.name, reason: "expired" });
         continue;
