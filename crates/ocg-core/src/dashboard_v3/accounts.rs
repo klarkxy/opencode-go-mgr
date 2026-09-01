@@ -20,9 +20,7 @@ use crate::models::{
     AccountSetupStep as ModelSetupStep, AccountType as ModelAccountType,
     AccountUpdate as ModelAccountUpdate, normalize_account_notes, normalize_purchase_date,
 };
-use crate::provider::{
-    CreationAvailability, ProviderRegistry, default_offering_id, default_provider_id,
-};
+use crate::provider::{CreationAvailability, ProviderRegistry, default_provider_id};
 use crate::redaction::redact_known_secret;
 use crate::state::CoreState;
 
@@ -144,6 +142,70 @@ pub(super) async fn put_account_model_capabilities(
     put_capabilities_locked(&state, &id, input).map(Json)
 }
 
+fn create_dynamic_account_locked(
+    state: &CoreState,
+    input: AccountCreate,
+    runtime: crate::dynamic::DynamicProviderRuntime,
+) -> Result<AccountMutation, V3ApiError> {
+    if input.custom_config.is_some() || !input.model_capabilities.is_empty() {
+        return Err(V3ApiError::invalid_request_at(
+            state,
+            "dynamic Provider accounts do not own Endpoint, protocol, or model mappings",
+        ));
+    }
+    if runtime.auth_kind.is_singleton() {
+        return Err(V3ApiError::invalid_request_at(
+            state,
+            "no-auth provider already has a singleton account",
+        ));
+    }
+    if input.key.trim().is_empty() {
+        return Err(V3ApiError::invalid_request_at(state, "key is required"));
+    }
+    let notes = match input.notes.as_deref() {
+        Some(value) => normalize_account_notes(value)
+            .map_err(|error| V3ApiError::invalid_request_at(state, error.to_string()))?,
+        None => None,
+    };
+    let now = Utc::now();
+    let id = uuid::Uuid::new_v4().to_string();
+    let account = ModelAccount {
+        id: id.clone(),
+        provider_id: runtime.id.clone(),
+        credential_kind: runtime.auth_kind.credential_kind(),
+        quota_scope: runtime.auth_kind.quota_scope(),
+        name: input.name.trim().to_string(),
+        username: clean_optional(input.username),
+        password_cipher: None,
+        key_cipher: state
+            .encrypt_key(input.key.trim())
+            .map_err(V3ApiError::internal)?,
+        enabled: true,
+        account_type: ModelAccountType::Key,
+        setup_step: ModelSetupStep::Ready,
+        referral_code: None,
+        purchase_date: String::new(),
+        expires_on: String::new(),
+        cooldown_until: None,
+        cooldown_generic_until: None,
+        cooldown_5h_until: None,
+        cooldown_week_until: None,
+        cooldown_month_until: None,
+        cooldown_free_until: None,
+        last_error: None,
+        auth_error: None,
+        notes,
+        created_at: now,
+        updated_at: now,
+    };
+    {
+        let db = state.db.lock();
+        db.create_account(&account)
+            .map_err(|error| map_account_write_error(state, error))?;
+    }
+    mutation_after_commit(state, &id, false)
+}
+
 fn create_account_locked(
     state: &CoreState,
     input: AccountCreate,
@@ -155,24 +217,22 @@ fn create_account_locked(
         return Err(V3ApiError::invalid_request_at(state, "name is required"));
     }
     let default_provider = default_provider_id();
-    let default_offering = default_offering_id();
     let provider_id = input
         .provider_id
         .as_deref()
         .unwrap_or(&default_provider)
         .trim();
-    let offering_id = input
-        .offering_id
-        .as_deref()
-        .unwrap_or(&default_offering)
-        .trim();
-    let plan = crate::provider::builtin_plan(provider_id, offering_id).ok_or_else(|| {
-        V3ApiError::invalid_request_at(
-            state,
-            format!("unknown provider offering `{provider_id}/{offering_id}`"),
-        )
+    if let Some(runtime) = state
+        .dynamic_providers()
+        .iter()
+        .find(|runtime| crate::dynamic::provider_ids_equal(&runtime.id, provider_id))
+        .cloned()
+    {
+        return create_dynamic_account_locked(state, input, runtime);
+    }
+    let plan = crate::provider::builtin_provider(provider_id).ok_or_else(|| {
+        V3ApiError::invalid_request_at(state, format!("unknown provider `{provider_id}`"))
     })?;
-    let offering = plan.offering;
     if plan.creation_availability == CreationAvailability::Unavailable {
         return Err(V3ApiError::invalid_request_at(
             state,
@@ -181,7 +241,7 @@ fn create_account_locked(
                 .to_string(),
         ));
     }
-    if offering.singleton_account_id.is_some() {
+    if plan.singleton_account_id.is_some() {
         return Err(V3ApiError::invalid_request_at(
             state,
             "Zen Free is a built-in singleton and cannot be created through the generic account API",
@@ -245,12 +305,10 @@ fn create_account_locked(
             ));
         }
     }
-    let enable_requires_verification =
-        ProviderRegistry::get(offering.provider_id, offering.offering_id)
-            .is_some_and(|descriptor| descriptor.card_actions.enable_requires_verification);
-    let enabled =
-        crate::provider::offering_allows_enablement(offering.provider_id, offering.offering_id)
-            && !enable_requires_verification;
+    let enable_requires_verification = ProviderRegistry::get(plan.provider_id)
+        .is_some_and(|descriptor| descriptor.card_actions.enable_requires_verification);
+    let enabled = crate::provider::provider_allows_enablement(plan.provider_id)
+        && !enable_requires_verification;
     let purchase_date = match input.purchase_date {
         Some(value) if !value.trim().is_empty() => normalize_purchase_date(&value)
             .map_err(|error| V3ApiError::invalid_request_at(state, error.to_string()))?,
@@ -265,10 +323,9 @@ fn create_account_locked(
     let id = uuid::Uuid::new_v4().to_string();
     let account = ModelAccount {
         id: id.clone(),
-        provider_id: offering.provider_id.to_string(),
-        offering_id: offering.offering_id.to_string(),
-        credential_kind: offering.credential_kind,
-        quota_scope: offering.quota_scope,
+        provider_id: plan.provider_id.to_string(),
+        credential_kind: plan.credential_kind,
+        quota_scope: plan.quota_scope,
         name,
         username: clean_optional(input.username),
         password_cipher: encrypted_optional(state, &input.password)?,
@@ -338,7 +395,7 @@ fn create_managed_locked(
     let account = ModelAccount {
         id: id.clone(),
         provider_id: crate::provider::default_provider_id(),
-        offering_id: crate::provider::default_offering_id(),
+
         credential_kind: crate::provider::default_credential_kind(),
         quota_scope: crate::provider::default_quota_scope(),
         name,
@@ -433,7 +490,7 @@ fn update_account_locked(
                 .unwrap_or_default(),
         );
     }
-    if let Some(plan) = crate::provider::builtin_plan(&existing.provider_id, &existing.offering_id)
+    if let Some(plan) = crate::provider::builtin_provider(&existing.provider_id)
         && let Some(key) = update.key.as_deref()
     {
         crate::provider::validate_plan_key(plan, key)
@@ -671,7 +728,7 @@ fn require_custom_plan(
     account: &ModelAccount,
     message: &'static str,
 ) -> Result<(), V3ApiError> {
-    let plan = crate::provider::builtin_plan(&account.provider_id, &account.offering_id)
+    let plan = crate::provider::builtin_provider(&account.provider_id)
         .ok_or_else(|| V3ApiError::invalid_request_at(state, "unknown provider offering"))?;
     if crate::provider::plan_requires_custom_config(plan) {
         Ok(())
@@ -801,11 +858,11 @@ fn account_from_state(state: &CoreState, account: ModelAccount) -> Result<Accoun
                 .map(|secret| redact_known_secret(&error, secret))
         })
     };
-    let plan = crate::provider::builtin_plan(&account.provider_id, &account.offering_id);
+    let plan = crate::provider::builtin_provider(&account.provider_id);
     Ok(Account {
         id: account.id.clone(),
         provider_id: account.provider_id.clone(),
-        offering_id: account.offering_id.clone(),
+
         credential_kind: account.credential_kind.into(),
         quota_scope: account.quota_scope.into(),
         name: account.name,

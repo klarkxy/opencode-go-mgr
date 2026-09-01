@@ -153,8 +153,7 @@ impl BrowserRuntime {
                                 "no desktop Chromium launcher or remote browser worker is configured"
                                     .to_string()
                             }),
-                    ),
-                };
+                    ) };
             }
             Err(error) => {
                 return BrowserCapabilities {

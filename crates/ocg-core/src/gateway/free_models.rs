@@ -68,8 +68,7 @@ pub fn resolve_upstream_base(channel: UpstreamChannel, go_base: &str) -> Result<
         UpstreamChannel::Go => Ok(go_base.trim_end_matches('/').to_string()),
         UpstreamChannel::Free => derive_free_upstream_base(go_base).ok_or_else(|| {
             "Zen free models require an OpenCode Zen upstream (…/zen or …/zen/go); custom upstream cannot serve free models".to_string()
-        }),
-    }
+        }) }
 }
 
 /// Append known Zen free model ids to an OpenAI-style `/v1/models` payload.
@@ -95,8 +94,7 @@ pub fn merge_free_models_into_list(body: &[u8]) -> Result<Vec<u8>, String> {
         }
         data.push(json!({
             "id": id,
-            "object": "model",
-        }));
+            "object": "model" }));
     }
     serde_json::to_vec(&value).map_err(|error| format!("failed to encode models list: {error}"))
 }

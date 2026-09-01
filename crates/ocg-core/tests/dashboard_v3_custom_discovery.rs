@@ -12,7 +12,7 @@ use ocg_core::dashboard_v3::{
     ERROR_UNAUTHORIZED,
 };
 use ocg_core::models::{ProxyListDirection, ProxyMode};
-use ocg_core::provider::{CUSTOM_API_OFFERING_ID, CUSTOM_PROVIDER_ID};
+use ocg_core::provider::CUSTOM_PROVIDER_ID;
 use ocg_core::provider_contracts::ContractScope;
 use reqwest::{Method, StatusCode};
 use serde_json::{Map, Value, json};
@@ -199,8 +199,7 @@ fn inference_endpoint(base_url: &str, protocol: &str) -> String {
 fn discover_body(base_url: &str, protocol: &str, _auth: &str, api_key: Option<&str>) -> Value {
     let mut body = json!({
         "endpointUrl": inference_endpoint(base_url, protocol),
-        "upstreamProtocol": protocol,
-    });
+        "upstreamProtocol": protocol });
     if let Some(api_key) = api_key {
         body["apiKey"] = json!(api_key);
     }
@@ -331,7 +330,6 @@ async fn create_custom_account(harness: &V3Harness, base_url: &str, _auth: &str)
                 "name": "Custom discovery",
                 "key": CUSTOM_KEY,
                 "providerId": CUSTOM_PROVIDER_ID,
-                "offeringId": CUSTOM_API_OFFERING_ID,
                 "customConfig": {
                     "endpointUrl": inference_endpoint(base_url, "chat_completions"),
                     "upstreamProtocol": "chat_completions"

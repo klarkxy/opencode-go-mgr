@@ -14,7 +14,7 @@ use parking_lot::Mutex;
 use std::time::{Duration, Instant};
 
 #[cfg(test)]
-use crate::kernel::ids::{ANONYMOUS_FREE_OFFERING_ID, OPENCODE_ZEN_FREE_PROVIDER_ID};
+use crate::kernel::ids::OPENCODE_ZEN_FREE_PROVIDER_ID;
 
 pub const CONVERSATION_TTL: Duration = ocg_gateway::selector::CONVERSATION_TTL;
 pub const MAX_CONVERSATIONS: usize = ocg_gateway::selector::MAX_CONVERSATIONS;
@@ -289,17 +289,22 @@ pub(crate) fn account_is_available_for_at(
 /// Keeping this mapping beside selector eligibility prevents observability and
 /// other read paths from growing their own, incomplete provider lists.
 pub(crate) fn account_channel(account: &Account) -> Option<UpstreamChannel> {
-    if account.validate_provider_binding().is_err() {
-        return None;
-    }
-    match ProviderAdapterKind::from_offering(&account.provider_id, &account.offering_id)? {
-        ProviderAdapterKind::OpenCodeGo
-        | ProviderAdapterKind::CommandCodeGoat
-        | ProviderAdapterKind::MiniMaxCn
-        | ProviderAdapterKind::KimiCn
-        | ProviderAdapterKind::Cpa
-        | ProviderAdapterKind::ConfigurableHttp => Some(UpstreamChannel::Go),
-        ProviderAdapterKind::ZenFree => Some(UpstreamChannel::Free),
+    match ProviderAdapterKind::from_provider_id(&account.provider_id) {
+        Some(kind) => {
+            if account.validate_provider_binding().is_err() {
+                return None;
+            }
+            match kind {
+                ProviderAdapterKind::OpenCodeGo
+                | ProviderAdapterKind::CommandCodeGoat
+                | ProviderAdapterKind::MiniMaxCn
+                | ProviderAdapterKind::KimiCn
+                | ProviderAdapterKind::Cpa
+                | ProviderAdapterKind::ConfigurableHttp => Some(UpstreamChannel::Go),
+                ProviderAdapterKind::ZenFree => Some(UpstreamChannel::Free),
+            }
+        }
+        None => Some(UpstreamChannel::Go),
     }
 }
 
@@ -309,7 +314,6 @@ pub(crate) fn free_channel_is_exhausted_at(accounts: &[Account], now: DateTime<U
         .filter(|account| {
             account.id == crate::kernel::ids::ZEN_FREE_ACCOUNT_ID
                 && account.provider_id == crate::kernel::ids::OPENCODE_ZEN_FREE_PROVIDER_ID
-                && account.offering_id == crate::kernel::ids::ANONYMOUS_FREE_OFFERING_ID
         })
         .any(|account| account.cooldown_free_until.is_some_and(|until| until > now))
 }

@@ -13,7 +13,7 @@ use crate::custom_http::{
     self, CustomHttpClient, HttpInferenceTransport, InferenceHttpError, custom_auth_scheme,
     json_content_headers, resolve_custom_endpoints,
 };
-use crate::kernel::ids::{CUSTOM_API_OFFERING_ID, CUSTOM_PROVIDER_ID};
+use crate::kernel::ids::CUSTOM_PROVIDER_ID;
 use crate::kernel::protocol::ApiFormat;
 use crate::models::{
     AccountCustomConfig, AccountCustomConfigInput, AccountModelCapability,
@@ -66,10 +66,7 @@ pub struct CustomAccountRuntime {
 
 impl CustomAccountRuntime {
     pub fn eligible(&self) -> bool {
-        self.enabled
-            && self.setup_ready
-            && self.has_key
-            && is_custom_api(CUSTOM_PROVIDER_ID, CUSTOM_API_OFFERING_ID)
+        self.enabled && self.setup_ready && self.has_key && is_custom_api(CUSTOM_PROVIDER_ID)
     }
 
     pub fn capability_matching_public(&self, requested: &str) -> Option<&AccountModelCapability> {
@@ -190,9 +187,29 @@ pub async fn discover_custom_models(
     input: &AccountCustomConfigInput,
     api_key: &str,
 ) -> Result<CustomModelDiscoveryResult, CustomModelDiscoveryFailure> {
+    if api_key.trim().is_empty() {
+        return Err(CustomModelDiscoveryFailure {
+            message: "Custom model discovery requires an API key".to_string(),
+        });
+    }
+    discover_models_with_auth(
+        config,
+        input,
+        Some(custom_auth_scheme(input.upstream_protocol)),
+        api_key,
+    )
+    .await
+}
+
+pub(crate) async fn discover_models_with_auth(
+    config: &AppConfig,
+    input: &AccountCustomConfigInput,
+    auth: Option<crate::provider::UpstreamAuthScheme>,
+    api_key: &str,
+) -> Result<CustomModelDiscoveryResult, CustomModelDiscoveryFailure> {
     tokio::time::timeout(
         Duration::from_secs(CUSTOM_MODEL_DISCOVERY_TIMEOUT_SECS),
-        discover_custom_models_inner(config, input, api_key),
+        discover_custom_models_inner(config, input, auth, api_key),
     )
     .await
     .map_err(|_| CustomModelDiscoveryFailure {
@@ -205,9 +222,10 @@ pub async fn discover_custom_models(
 async fn discover_custom_models_inner(
     config: &AppConfig,
     input: &AccountCustomConfigInput,
+    auth: Option<crate::provider::UpstreamAuthScheme>,
     api_key: &str,
 ) -> Result<CustomModelDiscoveryResult, CustomModelDiscoveryFailure> {
-    if api_key.trim().is_empty() {
+    if auth.is_some() && api_key.trim().is_empty() {
         return Err(CustomModelDiscoveryFailure {
             message: "Custom model discovery requires an API key".to_string(),
         });
@@ -226,11 +244,10 @@ async fn discover_custom_models_inner(
 
     for page in 0..MAX_CUSTOM_MODEL_DISCOVERY_PAGES {
         let response = client
-            .send_isolated(
+            .send_isolated_optional(
                 reqwest::Method::GET,
                 url.clone(),
-                custom_auth_scheme(input.upstream_protocol),
-                api_key,
+                auth.map(|scheme| (scheme, api_key)),
                 headers.clone(),
                 None,
                 timeout,
@@ -271,8 +288,7 @@ async fn discover_custom_models_inner(
             });
         }
         let cursor = page_result.cursor.or(page_result.last_valid_id).ok_or_else(|| CustomModelDiscoveryFailure {
-            message: "Custom model discovery response has_more=true but contains no valid model ID for after_id".to_string(),
-        })?;
+            message: "Custom model discovery response has_more=true but contains no valid model ID for after_id".to_string() })?;
         advance_model_discovery_cursor(&mut url, &mut seen_cursors, &cursor)?;
     }
     unreachable!("bounded discovery loop always returns")
@@ -304,8 +320,7 @@ pub fn derive_custom_models_endpoint(
         message: format!(
             "cannot derive Custom /models endpoint: use an API root, a base ending in `/v1`, or a {:?} endpoint ending with `{suffix}`; add model IDs manually for non-standard paths",
             protocol
-        ),
-    })
+        ) })
 }
 
 fn model_discovery_headers(protocol: UpstreamProtocolKind) -> reqwest::header::HeaderMap {
@@ -550,12 +565,30 @@ pub async fn probe_custom_connection(
     first_capability: &AccountModelCapability,
     api_key: &str,
 ) -> Result<(), CustomVerifyFailure> {
+    probe_connection_with_auth(
+        config,
+        custom_config,
+        first_capability,
+        Some(custom_auth_scheme(custom_config.upstream_protocol)),
+        api_key,
+    )
+    .await
+}
+
+pub(crate) async fn probe_connection_with_auth(
+    config: &AppConfig,
+    custom_config: &AccountCustomConfig,
+    first_capability: &AccountModelCapability,
+    auth: Option<crate::provider::UpstreamAuthScheme>,
+    api_key: &str,
+) -> Result<(), CustomVerifyFailure> {
     let client = CustomHttpClient::from_config(config)?;
     probe_custom_protocol(
         config,
         custom_config,
         custom_config.upstream_protocol,
         &first_capability.upstream_model,
+        auth,
         api_key,
         &client,
     )
@@ -567,6 +600,7 @@ async fn probe_custom_protocol(
     custom_config: &AccountCustomConfig,
     protocol: UpstreamProtocolKind,
     model_id: &str,
+    auth: Option<crate::provider::UpstreamAuthScheme>,
     api_key: &str,
     client: &CustomHttpClient,
 ) -> Result<(), CustomVerifyFailure> {
@@ -583,11 +617,10 @@ async fn probe_custom_protocol(
             }
         })?;
     let response = client
-        .send_isolated(
+        .send_isolated_optional(
             reqwest::Method::POST,
             url,
-            custom_auth_scheme(protocol),
-            api_key,
+            auth.map(|scheme| (scheme, api_key)),
             extra,
             Some(body),
             Some(Duration::from_secs(config.non_stream_timeout_secs)),

@@ -11,7 +11,6 @@ import type {
   ProviderCatalogEntry,
   ProviderContractGroup,
   ProviderContractsResponse,
-  ProviderOfferingChoice,
   ProviderProtocol,
 } from "../api/providers.ts";
 import {
@@ -55,7 +54,7 @@ export interface ProviderScopeView {
   provider_id: string;
   static_protocol_snapshot_date: string | null;
   label: string;
-  offerings: ProviderOfferingChoice[];
+  accounts: ProviderAccountChoice[];
   catalog: EffectiveCatalog;
   models: ProviderModelContract[];
   pricing: CapabilitySummary;
@@ -119,7 +118,7 @@ export function parseProviderScopeKey(key: string): ProviderScopeRef | null {
 }
 
 function fallbackAccountScopeRef(
-  account: Pick<Account, "id" | "provider_id" | "offering_id">,
+  account: Pick<Account, "id" | "provider_id">,
 ): ProviderScopeRef {
   const plan = planForAccount(account);
   if (plan?.kind === "custom") {
@@ -131,7 +130,7 @@ function fallbackAccountScopeRef(
 /** Match an account to the backend-owned exact contract scope. */
 export function findAccountScopeView(
   scopes: readonly ProviderScopeView[],
-  account: Pick<Account, "id" | "provider_id" | "offering_id">,
+  account: Pick<Account, "id" | "provider_id">,
 ): ProviderScopeView | undefined {
   const plan = planForAccount(account);
   if (plan?.kind === "custom") {
@@ -142,7 +141,6 @@ export function findAccountScopeView(
   return scopes.find((scope) => (
     scope.scope_kind === "provider"
     && scope.provider_id === account.provider_id
-    && scope.offerings.some((offering) => offering.offering_id === account.offering_id)
   ));
 }
 
@@ -252,19 +250,12 @@ function normalizeCard(value: CardCapabilitySummary | null | undefined): CardCap
   };
 }
 
-function normalizeOffering(offering: ProviderOfferingChoice): ProviderOfferingChoice {
+function normalizeAccountChoice(account: ProviderAccountChoice): ProviderAccountChoice {
   return {
-    offering_id: asString(offering.offering_id),
-    display_name: asString(offering.display_name),
-    routable: asBoolean(offering.routable, false),
-    accounts: Array.isArray(offering.accounts)
-      ? offering.accounts.map((account) => ({
-        id: asString(account.id),
-        name: asString(account.name),
-        enabled: asBoolean(account.enabled, false),
-        verification_status: account.verification_status ?? "not_required",
-      }))
-      : [],
+    id: asString(account.id),
+    name: asString(account.name),
+    enabled: asBoolean(account.enabled, false),
+    verification_status: account.verification_status ?? "not_required",
   };
 }
 
@@ -277,7 +268,7 @@ function normalizeProviderGroup(group: ProviderContractGroup): ProviderContractG
     static_protocol_snapshot_date: typeof group.static_protocol_snapshot_date === "string"
       ? group.static_protocol_snapshot_date
       : null,
-    offerings: Array.isArray(group.offerings) ? group.offerings.map(normalizeOffering) : [],
+    accounts: Array.isArray(group.accounts) ? group.accounts.map(normalizeAccountChoice) : [],
     catalog: normalizeCatalog(group.catalog),
     models: Array.isArray(group.models) ? group.models.map(normalizeModel) : [],
     pricing: { availability: asString(group.pricing?.availability) },
@@ -345,23 +336,6 @@ function customEndpointLabel(
   return plan ? planFamilyLabel(plan, catalog) : endpoint.scope_id;
 }
 
-function customOfferings(
-  endpoint: CustomEndpointContract,
-  catalog: readonly ProviderCatalogEntry[] | null | undefined,
-): ProviderOfferingChoice[] {
-  const plan = PLAN_DEFINITIONS.find((item) => item.kind === "custom");
-  const offeringId = plan?.offering_ids[0] ?? "api";
-  const entry = catalog?.find((item) => (
-    item.provider_id === endpoint.provider_id && item.offering_id === offeringId
-  ));
-  return [{
-    offering_id: offeringId,
-    display_name: entry?.display_name || plan?.label || "Custom API",
-    routable: endpoint.catalog_routable,
-    accounts: [endpoint.account],
-  }];
-}
-
 export function flattenProviderScopes(
   response: ProviderContractsResponse,
   catalog: readonly ProviderCatalogEntry[] | null | undefined = null,
@@ -373,7 +347,7 @@ export function flattenProviderScopes(
     provider_id: group.provider_id,
     static_protocol_snapshot_date: group.static_protocol_snapshot_date,
     label: providerLabel(group.provider_id, catalog),
-    offerings: group.offerings,
+    accounts: group.accounts,
     catalog: group.catalog,
     models: group.models,
     pricing: group.pricing,
@@ -391,7 +365,7 @@ export function flattenProviderScopes(
     provider_id: endpoint.provider_id,
     static_protocol_snapshot_date: null,
     label: customEndpointLabel(endpoint, catalog),
-    offerings: customOfferings(endpoint, catalog),
+    accounts: [endpoint.account],
     catalog: endpoint.catalog,
     models: endpoint.models,
     pricing: endpoint.pricing,
@@ -430,12 +404,10 @@ export function findScopeView(
 export function scopeAccounts(scope: ProviderScopeView): ProviderAccountChoice[] {
   const seen = new Set<string>();
   const accounts: ProviderAccountChoice[] = [];
-  for (const offering of scope.offerings) {
-    for (const account of offering.accounts) {
-      if (seen.has(account.id)) continue;
-      seen.add(account.id);
-      accounts.push(account);
-    }
+  for (const account of scope.accounts) {
+    if (seen.has(account.id)) continue;
+    seen.add(account.id);
+    accounts.push(account);
   }
   return accounts;
 }
@@ -512,7 +484,7 @@ export function applyModelContractToResponse(
 }
 
 export function accountContractSummary(
-  account: Pick<Account, "id" | "name" | "provider_id" | "offering_id">,
+  account: Pick<Account, "id" | "name" | "provider_id">,
   response: ProviderContractsResponse | null | undefined,
   catalog: readonly ProviderCatalogEntry[] | null | undefined = null,
 ): AccountContractSummary | null {
@@ -520,7 +492,7 @@ export function accountContractSummary(
   const scopes = flattenProviderScopes(normalizeProviderContractsResponse(response), catalog);
   const scope = findAccountScopeView(scopes, account);
   const ref = scope ?? fallbackAccountScopeRef(account);
-  const plan = findPlanDefinition(account.provider_id, account.offering_id);
+  const plan = findPlanDefinition(account.provider_id);
   const fallbackLabel = scope?.label
     ?? (plan ? planFamilyLabel(plan, catalog) : account.name);
   if (!scope) {
@@ -557,7 +529,7 @@ export function emptyProviderScopeView(
     provider_id: providerId,
     static_protocol_snapshot_date: null,
     label: providerId,
-    offerings: [],
+    accounts: [],
     catalog: EMPTY_CATALOG,
     models: [],
     pricing: { availability: "" },

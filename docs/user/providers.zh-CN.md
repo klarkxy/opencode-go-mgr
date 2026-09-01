@@ -2,16 +2,17 @@
 
 # 供应商
 
-要接入另一个上游或贡献内置集成，请先阅读[新增供应商](add-provider.zh-CN.md)；其中包含上游 HTTP 接口与密封注册表路径。
+要接入另一个上游或贡献内置集成，请先阅读[新增供应商](add-provider.zh-CN.md)；其中包含用户定义供应商、Custom API 与密封适配器注册表路径。
 
 **供应商** 是供应商控制面——如果你的旧书签还挂着 `?view=pricing`，进来的就是这个视图。
 
-底层是静态 Provider Registry 加几个按能力拆分的适配器。Custom API 只是其中一个 Configurable HTTP 适配器，不是基类，其他方案不会继承它。范围划分如下：
+适配器注册表保持静态密封。内置供应商与用户定义供应商共用本页，并分别标注 **内置** 或 **用户定义**。Custom API 是作为账号所有路径使用的 Configurable HTTP 适配器，不是大家继承的基类。范围划分如下：
 
-- 每个精确的内置 Provider/Offering 合约使用 `Provider(contract_scope_id)`；既有 scope ID 继续保留历史上类似 Provider ID 的取值。
+- 每个精确的内置供应商合约使用 `Provider(contract_scope_id)`；既有 scope ID 继续保留历史上类似 Provider ID 的取值。
+- 用户定义供应商作为类型化定义持久化，并绑定 Configurable HTTP。它们的 Endpoint、协议、鉴权方式和映射在本页编辑。
 - `CustomEndpoint(account_id)` 范围内的 Custom 映射仍归账号所有，不能在本页编辑。
 
-左侧列出内置 Provider/Offering 合约范围。主区有三个子页签：**模型目录**、**价格** 与 **Alias**。原来的目录与模型合约视图合并为模型目录页签上的一张矩阵表。
+左侧列出内置合约范围和用户定义供应商。内置主区仍有三个子页签：**模型目录**、**价格** 与 **Alias**。用户定义面板展示配置、映射以及编辑/删除。用户定义供应商未定价。
 
 **Alias** 是只读聚合页。它把现有 Provider 合约和账号能力汇总成公开名称，并展示可路由性与精确上游身份。它不会新建 Alias API、store、cache 或编辑器。Custom 映射通过 `?view=accounts&account_id=<id>` 跳转到**账号**页唯一的编辑器；加载该链接会打开对应账号编辑框。关闭编辑框会移除 `account_id`；账号不存在时会提示，并清掉失效参数。
 

@@ -27,7 +27,6 @@ export interface AccountCreateFormValues {
 }
 
 export type AccountCreatePayloadErrorCode =
-  | "missing_offering"
   | "missing_name"
   | "missing_key"
   | "missing_endpoint_url"
@@ -45,7 +44,6 @@ export type AccountCreatePayloadErrorCode =
   | "custom_fields_not_allowed";
 
 const ACCOUNT_CREATE_PAYLOAD_ERROR_KEYS = {
-  missing_offering: "无法确定账号方案，请关闭后重试",
   missing_name: "名称不能为空",
   missing_key: "请填写 API Key",
   missing_endpoint_url: "请填写 API 地址",
@@ -87,22 +85,18 @@ function trimOptional(value: string | undefined): string | undefined {
 /** Build the exact V3 create payload from the chosen plan and form values. */
 export function buildCreateAccountPayload(
   plan: PlanDefinition,
-  offeringId: string | undefined,
   values: AccountCreateFormValues,
 ): AccountInput {
-  const selectedOfferingId = offeringId && plan.offering_ids.includes(offeringId)
-    ? offeringId
-    : plan.offering_ids[0];
-  if (!selectedOfferingId) throw new AccountCreatePayloadError("missing_offering");
   if (!values.name.trim()) throw new AccountCreatePayloadError("missing_name");
-  if (!values.key.trim()) throw new AccountCreatePayloadError("missing_key");
+  const isDynamic = plan.id === "dynamic-http";
+  const requiresKey = plan.credential_kind !== "none";
+  if (requiresKey && !values.key.trim()) throw new AccountCreatePayloadError("missing_key");
 
   const isCustom = plan.id === "custom-endpoint";
   const payload: AccountInput = {
     name: values.name.trim(),
     provider_id: plan.provider_id,
-    offering_id: selectedOfferingId,
-    key: values.key.trim(),
+    key: requiresKey ? values.key.trim() : "",
   };
 
   const username = trimOptional(values.username);
@@ -153,9 +147,21 @@ export function buildCreateAccountPayload(
       throw error;
     }
   } else if (
-    values.endpoint_url?.trim()
-    || values.upstream_protocol
-    || values.model_capabilities?.length
+    isDynamic
+    && (
+      values.endpoint_url?.trim()
+      || values.upstream_protocol
+      || values.model_capabilities?.length
+    )
+  ) {
+    throw new AccountCreatePayloadError("custom_fields_not_allowed");
+  } else if (
+    !isDynamic
+    && (
+      values.endpoint_url?.trim()
+      || values.upstream_protocol
+      || values.model_capabilities?.length
+    )
   ) {
     throw new AccountCreatePayloadError("custom_fields_not_allowed");
   }

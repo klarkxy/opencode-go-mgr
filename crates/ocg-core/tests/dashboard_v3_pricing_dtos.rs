@@ -49,7 +49,6 @@ const PROVIDER_CATALOG_TYPES: &[&str] = &[
     "ProviderContracts",
     "ProviderContractGroup",
     "CustomEndpointContract",
-    "ProviderOfferingChoice",
     "ProviderAccountChoice",
     "EffectiveCatalog",
     "EffectiveModelContract",
@@ -352,7 +351,7 @@ fn catalog_type_names_keep_the_frozen_prefix_and_pricing_block() {
         &CATALOG_TYPE_NAMES[account_transfer_end..application_connector_end],
         APPLICATION_CONNECTOR_CATALOG_TYPES
     );
-    assert_eq!(CATALOG_TYPE_NAMES.len(), application_connector_end + 15);
+    assert_eq!(CATALOG_TYPE_NAMES.len(), application_connector_end + 25);
 }
 
 #[test]
@@ -565,7 +564,6 @@ fn pricing_schema_registers_required_nulls_and_omittable_requests() {
         required_fields(defs, "ProviderPricing"),
         vec![
             "providerId",
-            "offeringId",
             "availability",
             "snapshot",
             "providerSnapshot",

@@ -2,7 +2,7 @@
 
 # 架构图
 
-这是一组单个本地节点的文字版图。按当前 HEAD：已上线路由是 OpenCode Go、Zen Free、Command Code GOAT、MiniMax CN Token Plan、Kimi Code CN 与 Custom API。每张图下面链接到负责详情的章节；图与章节冲突时，以章节和代码为准。
+这是一组单个本地节点的文字版图。按当前 HEAD：已上线路由是 OpenCode Go、Zen Free、Command Code GOAT、MiniMax CN Token Plan、Kimi Code CN、Custom API，以及你在 **供应商** 页创建的用户定义供应商。每张图下面链接到负责详情的章节；图与章节冲突时，以章节和代码为准。
 
 ## 目录
 
@@ -39,7 +39,7 @@
                    \                      /
                     \                    /
              +----------------+------------------+
-             |         SQLite schema v34         |
+             |         SQLite schema v35         |
              |  桌面  ~/.ocg-mgr                 |
              |  CLI   ~/.ocg-mgr-cli             |
              +-----------------------------------+
@@ -84,7 +84,7 @@ Messages 与 Gemini generate / stream 上均为 `400`。重叠的原始 ID 返�
 
 ## Plan
 
-每张账号卡对应一个 Plan（`provider_id` + `offering_id`）。六个家族均已上线、可路由。
+每张账号卡对应一个 Plan（只有 `provider_id`）。内置家族以及你创建的用户定义供应商均可路由。
 
 ```text
   已上线（可路由）
@@ -104,6 +104,10 @@ Messages 与 Gemini generate / stream 上均为 `400`。重叠的原始 ID 返�
   Custom API
     一个受信管理员 HTTP/HTTPS API URL：根地址、/v1 基址或兼容的完整 Endpoint
     一个上游协议；鉴权自动推导
+  用户定义供应商
+    在供应商页保存类型化定义；绑定 Configurable HTTP
+    Endpoint/协议/鉴权/映射归供应商所有
+    账号 Key/启停/顺序留在账号页；价格与官方用量始终未知
 
 
   Custom API 生命周期
@@ -146,7 +150,7 @@ Zen Free 只有启用开关；不需要时直接关掉卡片。目录刷新在�
 
     AI 客户端 --Key--> 本节点 --账号凭据--> Plan
 
-    Key            access_keys（当前 schema v34）
+    Key            access_keys（当前 schema v35）
                    主 Key + 可选子 Key（活跃上限 64）
     账号凭据       Go Key、Custom Key，或 Zen Free（无）
 ```

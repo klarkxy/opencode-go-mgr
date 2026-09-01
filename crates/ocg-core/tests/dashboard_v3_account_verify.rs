@@ -19,8 +19,7 @@ use ocg_core::dashboard_v3::{
 use ocg_core::gateway::provider_adapter::install_goat_verify_origin_for_test;
 use ocg_core::models::ProxyMode;
 use ocg_core::provider::{
-    COMMAND_CODE_PROVIDER_ID, CUSTOM_API_OFFERING_ID, CUSTOM_PROVIDER_ID, GOAT_OFFERING_ID,
-    OPENCODE_PROVIDER_ID, ZEN_FREE_ACCOUNT_ID,
+    COMMAND_CODE_PROVIDER_ID, CUSTOM_PROVIDER_ID, OPENCODE_PROVIDER_ID, ZEN_FREE_ACCOUNT_ID,
 };
 use reqwest::{Method, StatusCode};
 use serde_json::{Map, Value, json};
@@ -410,7 +409,6 @@ async fn create_goat_account(harness: &V3Harness) -> String {
                 "name": "GOAT verify",
                 "key": "sk-goat-verify",
                 "providerId": COMMAND_CODE_PROVIDER_ID,
-                "offeringId": GOAT_OFFERING_ID
             }),
         ),
     )
@@ -457,7 +455,6 @@ async fn create_custom_account(
                 "name": name,
                 "key": key,
                 "providerId": CUSTOM_PROVIDER_ID,
-                "offeringId": CUSTOM_API_OFFERING_ID,
                 "customConfig": {
                     "endpointUrl": endpoint_url,
                     "upstreamProtocol": protocol
@@ -642,7 +639,7 @@ async fn unknown_offerings_fail_closed_without_touching_goat_or_upstream() {
     {
         let conn = rusqlite::Connection::open(harness.dir.join("data.sqlite")).unwrap();
         conn.execute(
-            "UPDATE accounts SET provider_id = 'unknown-provider', offering_id = 'unknown-offering' WHERE id = ?1",
+            "UPDATE accounts SET provider_id = 'unknown-provider' WHERE id = ?1",
             [&unknown_id],
         )
         .unwrap();
@@ -1125,7 +1122,6 @@ async fn custom_verify_probes_only_the_single_declared_protocol() {
                 "name": "custom-single",
                 "key": CUSTOM_KEY,
                 "providerId": CUSTOM_PROVIDER_ID,
-                "offeringId": CUSTOM_API_OFFERING_ID,
                 "customConfig": {
                     "endpointUrl": format!("{}/messages", origin.url),
                     "upstreamProtocol": "messages"

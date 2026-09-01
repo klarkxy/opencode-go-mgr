@@ -3,8 +3,8 @@
 use crate::catalog::{CredentialKind, QuotaScope};
 use crate::ids::ZEN_FREE_ACCOUNT_ID;
 use crate::provider::{
-    ProviderBindingError, default_credential_kind, default_offering_id, default_provider_id,
-    default_quota_scope, validate_account_binding,
+    ProviderBindingError, default_credential_kind, default_provider_id, default_quota_scope,
+    validate_account_binding,
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -14,8 +14,6 @@ pub struct Account {
     pub id: String,
     #[serde(default = "default_provider_id")]
     pub provider_id: String,
-    #[serde(default = "default_offering_id")]
-    pub offering_id: String,
     #[serde(default = "default_credential_kind")]
     pub credential_kind: CredentialKind,
     #[serde(default = "default_quota_scope")]
@@ -168,7 +166,6 @@ impl Account {
         validate_account_binding(
             &self.id,
             &self.provider_id,
-            &self.offering_id,
             self.credential_kind,
             self.quota_scope,
         )
@@ -237,10 +234,7 @@ pub enum UpstreamChannel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ids::{
-        ANONYMOUS_FREE_OFFERING_ID, GO_OFFERING_ID, OPENCODE_PROVIDER_ID,
-        OPENCODE_ZEN_FREE_PROVIDER_ID, ZEN_FREE_ACCOUNT_ID,
-    };
+    use crate::ids::{OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID, ZEN_FREE_ACCOUNT_ID};
     use chrono::Duration;
 
     fn utc(year: i32, month: u32, day: u32, hour: u32) -> DateTime<Utc> {
@@ -257,7 +251,6 @@ mod tests {
         Account {
             id: "account-1".into(),
             provider_id: OPENCODE_PROVIDER_ID.into(),
-            offering_id: GO_OFFERING_ID.into(),
             credential_kind: CredentialKind::ApiKey,
             quota_scope: QuotaScope::Key,
             name: "go".into(),
@@ -377,7 +370,6 @@ mod tests {
         let mut zen = sample_account();
         zen.id = ZEN_FREE_ACCOUNT_ID.into();
         zen.provider_id = OPENCODE_ZEN_FREE_PROVIDER_ID.into();
-        zen.offering_id = ANONYMOUS_FREE_OFFERING_ID.into();
         zen.credential_kind = CredentialKind::None;
         zen.quota_scope = QuotaScope::EgressIp;
         zen.validate_provider_binding().unwrap();
@@ -392,7 +384,6 @@ mod tests {
 
         let mut singleton = sample_account();
         singleton.provider_id = OPENCODE_ZEN_FREE_PROVIDER_ID.into();
-        singleton.offering_id = ANONYMOUS_FREE_OFFERING_ID.into();
         singleton.credential_kind = CredentialKind::None;
         singleton.quota_scope = QuotaScope::EgressIp;
         assert!(matches!(
@@ -410,10 +401,9 @@ mod tests {
 
         let mut unknown = sample_account();
         unknown.provider_id = "unknown".into();
-        unknown.offering_id = "missing".into();
         assert!(matches!(
             unknown.validate_provider_binding(),
-            Err(ProviderBindingError::UnknownOffering { .. })
+            Err(ProviderBindingError::UnknownProvider { .. })
         ));
     }
 

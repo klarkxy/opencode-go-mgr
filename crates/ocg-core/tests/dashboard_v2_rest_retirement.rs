@@ -40,8 +40,7 @@ fn tombstone_body(body: &Value) {
         body,
         &json!({
             "code": DASHBOARD_V2_REMOVED_CODE,
-            "message": DASHBOARD_V2_REMOVED_MESSAGE,
-        })
+            "message": DASHBOARD_V2_REMOVED_MESSAGE })
     );
 }
 

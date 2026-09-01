@@ -14,9 +14,8 @@ use ocg_core::dashboard_v3::{
 use ocg_core::gateway::provider_adapter::install_goat_loopback_route_for_test;
 use ocg_core::models::{ProxyListDirection, ProxyMode};
 use ocg_core::provider::{
-    COMMAND_CODE_PROVIDER_ID, CUSTOM_API_OFFERING_ID, CUSTOM_PROVIDER_ID, GOAT_OFFERING_ID,
-    KIMI_PROVIDER_ID, MINIMAX_PROVIDER_ID, OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID,
-    UpstreamProtocolKind,
+    COMMAND_CODE_PROVIDER_ID, CUSTOM_PROVIDER_ID, KIMI_PROVIDER_ID, MINIMAX_PROVIDER_ID,
+    OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID, UpstreamProtocolKind,
 };
 use ocg_core::provider_contracts::{
     CATALOG_SOURCE_OPENCODE_MODELS, ContractScope, PersistedModelProtocol, ProbeResultKind,
@@ -327,7 +326,6 @@ async fn create_goat_account(harness: &V3Harness) -> String {
                 "name": "GOAT probe",
                 "key": GO_KEY,
                 "providerId": COMMAND_CODE_PROVIDER_ID,
-                "offeringId": GOAT_OFFERING_ID
             }),
         ),
     )
@@ -445,8 +443,7 @@ async fn opencode_static_protocol_reset_is_cas_protected_and_restores_current_ca
 
     let stale = json!({
         "expectedRevision": harness.state.settings_revision().saturating_sub(1),
-        "processGeneration": harness.state.process_generation(),
-    });
+        "processGeneration": harness.state.process_generation() });
     let (status, body) = send_json(&harness, Method::POST, &static_reset_path(), &stale).await;
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
     assert_v3_error(&body, ERROR_REVISION_CONFLICT);
@@ -2104,7 +2101,6 @@ async fn v2_duplicate_custom_and_ceiling_probes_coexist() {
                 "name": "Custom probe",
                 "key": CUSTOM_KEY,
                 "providerId": CUSTOM_PROVIDER_ID,
-                "offeringId": CUSTOM_API_OFFERING_ID,
                 "customConfig": {
                     "endpointUrl": format!("{}/chat/completions", origin.url.trim_end_matches('/')),
                     "upstreamProtocol": "chat_completions"
@@ -2138,7 +2134,6 @@ async fn v2_duplicate_custom_and_ceiling_probes_coexist() {
         .unwrap()
         .unwrap();
     assert_eq!(stored.provider_id, CUSTOM_PROVIDER_ID);
-    assert_eq!(stored.offering_id, CUSTOM_API_OFFERING_ID);
     assert!(stored.enabled);
     harness.stop();
 }

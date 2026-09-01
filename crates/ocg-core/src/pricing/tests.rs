@@ -9,7 +9,7 @@ use super::{
 use chrono::{DateTime, Utc};
 
 use crate::db::Database;
-use crate::provider::{COMMAND_CODE_PROVIDER_ID, GOAT_OFFERING_ID};
+use crate::provider::COMMAND_CODE_PROVIDER_ID;
 
 #[test]
 fn seed_coverage_backfills_missing_models_and_prices_them() {
@@ -148,14 +148,14 @@ fn provider_snapshot_round_trips_legacy_go_shape() {
     let record = typed.to_storage_record().unwrap();
     let loaded = ProviderScopedPricingSnapshot::from_storage_record(&record).unwrap();
     assert_eq!(loaded.provider_id(), "opencode");
-    assert_eq!(loaded.offering_id(), "go");
+    assert_eq!(loaded.provider_id(), "opencode");
     assert_eq!(loaded.revision(), legacy.revision);
     assert_eq!(loaded.evidence(), ProviderPricingEvidence::Verified);
     assert_eq!(loaded.values().len(), legacy.models.len());
 
     let legacy_record = ProviderPricingSnapshot {
         provider_id: "opencode".to_string(),
-        offering_id: "go".to_string(),
+
         revision: legacy.revision.clone(),
         activated_at: legacy.activated_at.clone(),
         document_updated_at: Some(legacy.document_updated_at.clone()),
@@ -192,7 +192,6 @@ fn provider_snapshot_revision_is_append_only_in_v22_store() {
     let snapshot = |name: &str, allowance: f64| {
         ProviderScopedPricingSnapshot::new(
             COMMAND_CODE_PROVIDER_ID,
-            GOAT_OFFERING_ID,
             "capture-1",
             "2030-01-01T00:00:00Z",
             None,
@@ -206,7 +205,7 @@ fn provider_snapshot_revision_is_append_only_in_v22_store() {
     store_provider_pricing_snapshot(&db, &snapshot("first", 15.0)).unwrap();
     // Same provider/offering/revision is ignored, not overwritten.
     store_provider_pricing_snapshot(&db, &snapshot("second", 60.0)).unwrap();
-    let loaded = latest_provider_pricing_snapshot(&db, COMMAND_CODE_PROVIDER_ID, GOAT_OFFERING_ID)
+    let loaded = latest_provider_pricing_snapshot(&db, COMMAND_CODE_PROVIDER_ID)
         .unwrap()
         .unwrap();
     assert_eq!(loaded.values()[0].display_name(), "first");
@@ -235,7 +234,6 @@ fn provider_multiplier_override_round_trips_and_drives_estimates() {
     .unwrap();
     let active = ProviderScopedPricingSnapshot::new(
         COMMAND_CODE_PROVIDER_ID,
-        GOAT_OFFERING_ID,
         "official-1",
         "2030-01-01T00:00:00Z",
         None,
@@ -275,8 +273,7 @@ fn provider_multiplier_override_round_trips_and_drives_estimates() {
 
 #[test]
 fn goat_manual_pricing_refresh_uses_the_verified_official_source() {
-    let capability =
-        provider_pricing_capability(COMMAND_CODE_PROVIDER_ID, GOAT_OFFERING_ID).unwrap();
+    let capability = provider_pricing_capability(COMMAND_CODE_PROVIDER_ID).unwrap();
     assert_eq!(capability.evidence, ProviderPricingEvidence::Verified);
     assert!(!capability.experimental);
     assert_eq!(capability.source_url, Some(GOAT_SOURCE_URL));
@@ -345,7 +342,6 @@ fn goat_parser_accepts_concatenated_discount_and_free_badges() {
 fn provider_pricing_matches_vendor_prefixed_catalog_ids_to_unique_display_names() {
     let snapshot = ProviderScopedPricingSnapshot::new(
         COMMAND_CODE_PROVIDER_ID,
-        GOAT_OFFERING_ID,
         "goat-test",
         "2030-01-01T00:00:00Z",
         None,

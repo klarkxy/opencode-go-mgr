@@ -56,7 +56,7 @@ fn build_state(base_url: String, keys: &[&str]) -> (Arc<CoreStateInner>, PathBuf
         let account = Account {
             id: format!("acct-{}", idx + 1),
             provider_id: ocg_core::provider::default_provider_id(),
-            offering_id: ocg_core::provider::default_offering_id(),
+
             credential_kind: ocg_core::provider::default_credential_kind(),
             quota_scope: ocg_core::provider::default_quota_scope(),
             name: format!("acct-{}", idx + 1),
@@ -367,14 +367,12 @@ async fn ambiguous_model_id_is_structured_across_client_formats() {
             requested: "shared-raw".into(),
             mappings: vec![
                 alias::ProviderMapping {
-                    provider_id: ocg_core::provider::OPENCODE_PROVIDER_ID,
-                    offering_id: ocg_core::provider::GO_OFFERING_ID,
+                    provider_id: ocg_core::provider::OPENCODE_PROVIDER_ID.to_string(),
                     upstream_model: "shared-raw".into(),
                     routeable: true,
                 },
                 alias::ProviderMapping {
-                    provider_id: ocg_core::provider::OPENCODE_ZEN_FREE_PROVIDER_ID,
-                    offering_id: ocg_core::provider::ANONYMOUS_FREE_OFFERING_ID,
+                    provider_id: ocg_core::provider::OPENCODE_ZEN_FREE_PROVIDER_ID.to_string(),
                     upstream_model: "shared-raw".into(),
                     routeable: true,
                 },

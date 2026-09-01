@@ -4,17 +4,17 @@
 
 ## 日志
 
-**日志** 视图默认打开 **请求日志**，它是 Gateway 转发请求和显式供应商协议探测的滚动记账本：时间戳、选中的 provider/offering、route account、credential account、模型、状态码、上游错误（如果有），以及上游吐出 usage chunk 时的流式用量。探测行的 token 为零、费用不适用、不归因到客户端 Key，也不会出现在运行日志。账号选择前发生的已认证解析、校验或路由失败同样显示在这里，并采用“未解析/Gateway”归因；运行日志只保留进程与控制面事件。可按 provider、offering、route account、credential account、模型、状态、时间范围与客户端 Key 筛选。它不会修你的提示词，但会告诉你这次是谁背的锅。每条存储行把请求身份与上游身份分开，没有 `requested_alias` 字段：
+**日志** 视图默认打开 **请求日志**，它是 Gateway 转发请求和显式供应商协议探测的滚动记账本：时间戳、选中的 provider、route account、credential account、模型、状态码、上游错误（如果有），以及上游吐出 usage chunk 时的流式用量。探测行的 token 为零、费用不适用、不归因到客户端 Key，也不会出现在运行日志。账号选择前发生的已认证解析、校验或路由失败同样显示在这里，并采用“未解析/Gateway”归因；运行日志只保留进程与控制面事件。可按 provider、route account、credential account、模型、状态、时间范围与客户端 Key 筛选。它不会修你的提示词，但会告诉你这次是谁背的锅。每条存储行把请求身份与上游身份分开，没有 `requested_alias` 字段：
 
 - `requested_model` — 客户端发送的公开名称或 Alias
 - `resolved_alias` — 存在时解析出的公开 Alias
 - `upstream_model` — 实际发送到该账号上游的精确模型 ID
 
-以及 `provider_id` 与 `offering_id`。现有模型筛选会对这些身份或遗留 `model` 列做精确匹配。原生成本（`native_cost_value`、`native_cost_unit`、 `native_cost_currency`）是可选字段，只有 offering 提供足够价格证据时才有值。
+以及 `provider_id`。现有模型筛选会对这些身份或遗留 `model` 列做精确匹配。原生成本（`native_cost_value`、`native_cost_unit`、 `native_cost_currency`）是可选字段，只有该 Provider 提供足够价格证据时才有值。
 
-当 offering 有足够价格证据时，每行还会保留原始供应商成本、额度扣减和实际付费成本。allowance 只改变额度扣减倍率，不会让某个模型或供应商变得可路由。
+当该 Provider 有足够价格证据时，每行还会保留原始供应商成本、额度扣减和实际付费成本。allowance 只改变额度扣减倍率，不会让某个模型或供应商变得可路由。
 
-- Chat 流式请求会设置 `stream_options.include_usage`，让 OpenAI 兼容上游返回 usage chunk。仍然没有 usage chunk 的行会标 `success_no_usage`。usage chunk 让 token 数量准确；汇总区显示输入 + 输出的总 Tokens。额度消耗按本次选中 offering 的已验证价格快照估算：OpenCode Go 使用当前快照，Command Code GOAT 使用独立刷新的模型价格与倍率。旧日志不会用新价格追溯重算。已登记的 Zen free 模型（`big-pickle`、`mimo-v2.5-free` 等）会记录 token，但 `cost_state=free`，不计入 Go 额度。Go 上名字带 `free` 的模型（目前 `ox-alpha-free`）仍走 Go；官方价格列为 `-` 时记为 unpriced。Custom API 行记 `cost_state=unknown`，不扣供应商额度。展开行可查看请求 ID 与诊断详情。
+- Chat 流式请求会设置 `stream_options.include_usage`，让 OpenAI 兼容上游返回 usage chunk。仍然没有 usage chunk 的行会标 `success_no_usage`。usage chunk 让 token 数量准确；汇总区显示输入 + 输出的总 Tokens。额度消耗按本次选中 Provider 的已验证价格快照估算：OpenCode Go 使用当前快照，Command Code GOAT 使用独立刷新的模型价格与倍率。旧日志不会用新价格追溯重算。已登记的 Zen free 模型（`big-pickle`、`mimo-v2.5-free` 等）会记录 token，但 `cost_state=free`，不计入 Go 额度。Go 上名字带 `free` 的模型（目前 `ox-alpha-free`）仍走 Go；官方价格列为 `-` 时记为 unpriced。Custom API 行记 `cost_state=unknown`，不扣供应商额度。展开行可查看请求 ID 与诊断详情。
 - `outcome_unknown` 表示上游可能已经完成并扣额，但 Gateway 超时或丢失响应；这类请求不会自动重试，且本地额度消耗保持未知。
 - **Key** 筛选把行与汇总统计限定到单个客户端 Key。选项来自日志表本身，因此已停用、已删除或未知的 Key 仍可筛选。**未归因** 表示多 Key 支持之前写入的行；后台任务会近似归到主 Key。
 

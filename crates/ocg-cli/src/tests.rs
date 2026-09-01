@@ -9,8 +9,8 @@ use ocg_core::browser::browser_profile_paths;
 use ocg_core::crypto::{KeyCipher, StaticKeyCipher};
 use ocg_core::models::{Account, AccountSetupStep, AccountType, AccountUpdate};
 use ocg_core::provider::{
-    BUILTIN_PLANS, CUSTOM_API_OFFERING_ID, CUSTOM_PROVIDER_ID, ConnectionVerificationStatus,
-    CredentialKind, GO_OFFERING_ID, OPENCODE_PROVIDER_ID, ZEN_FREE_ACCOUNT_ID,
+    BUILTIN_PROVIDERS, CUSTOM_PROVIDER_ID, ConnectionVerificationStatus, CredentialKind,
+    OPENCODE_PROVIDER_ID, ZEN_FREE_ACCOUNT_ID,
 };
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener as StdTcpListener};
 use std::path::PathBuf;
@@ -343,19 +343,19 @@ async fn cli_enable_rejects_unroutable_catalog_plans_without_mutation() {
     let cipher = test_cipher();
     let state = build_state(dir.clone(), cipher.clone()).unwrap();
     let now = Utc::now();
-    for plan in BUILTIN_PLANS
+    for plan in BUILTIN_PROVIDERS
         .iter()
         .copied()
-        .filter(|plan| !plan.routable && plan.offering.singleton_account_id.is_none())
+        .filter(|plan| !plan.routable && plan.singleton_account_id.is_none())
     {
         let id = uuid::Uuid::new_v4().to_string();
         let draft = Account {
             id: id.clone(),
-            provider_id: plan.offering.provider_id.to_string(),
-            offering_id: plan.offering.offering_id.to_string(),
-            credential_kind: plan.offering.credential_kind,
-            quota_scope: plan.offering.quota_scope,
-            name: format!("{}-cli", plan.offering.offering_id),
+            provider_id: plan.provider_id.to_string(),
+
+            credential_kind: plan.credential_kind,
+            quota_scope: plan.quota_scope,
+            name: format!("{}-cli", plan.provider_id),
             username: None,
             password_cipher: None,
             key_cipher: state.encrypt_key("draft-key").unwrap(),
@@ -649,7 +649,7 @@ fn custom_draft(state: &ocg_core::state::CoreStateInner, id: &str) -> Account {
     Account {
         id: id.to_string(),
         provider_id: CUSTOM_PROVIDER_ID.to_string(),
-        offering_id: CUSTOM_API_OFFERING_ID.to_string(),
+
         credential_kind: CredentialKind::ApiKey,
         quota_scope: ocg_core::provider::QuotaScope::Key,
         name: id.to_string(),
@@ -720,7 +720,6 @@ async fn cli_key_mutations_share_control_plane_revision_in_process() {
         .find(|account| account.name == "go-cas")
         .expect("CLI key add must be visible to the live serve CoreState via SQLite");
     assert_eq!(go.provider_id, OPENCODE_PROVIDER_ID);
-    assert_eq!(go.offering_id, GO_OFFERING_ID);
     assert!(go.enabled);
     assert_eq!(go.setup_step, AccountSetupStep::Ready);
     assert_eq!(go.credential_kind, CredentialKind::ApiKey);

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { Account } from "../api/dashboard.ts";
 import type { ProviderScopeView } from "./provider-contracts.ts";
-import { providerAliasRows } from "./provider-aliases.ts";
+import { dynamicProviderAliasRows, providerAliasRows } from "./provider-aliases.ts";
 
 const protocol = {
   protocol: "chat_completions" as const,
@@ -44,7 +44,7 @@ const customScope = {
   scope_kind: "custom_endpoint",
   scope_id: "custom-1",
   label: "Home Lab",
-  offerings: [{ display_name: "Custom API" }],
+  accounts: [{ id: "custom-1", name: "Home Lab", enabled: true, verification_status: "verified" }],
   models: [{
     alias: "",
     model_id: "public-model",
@@ -59,7 +59,6 @@ const customAccount = {
   id: "custom-1",
   name: "Home Lab",
   provider_id: "custom",
-  offering_id: "api",
   enabled: true,
   plan_routable: true,
   model_capabilities: [{
@@ -85,7 +84,7 @@ test("Alias rows combine provider contracts with Custom public-to-upstream mappi
     {
       key: "custom:custom-1:public-model:vendor/model:free",
       public_model: "public-model",
-      provider_plan: "Custom API",
+      provider_plan: "Home Lab",
       custom_account: "Home Lab",
       upstream_model: "vendor/model:free",
       routable: false,
@@ -117,4 +116,27 @@ test("Custom Alias routeability includes account readiness and built-in raw conf
   assert.equal(row?.public_model, "raw-only-model");
   assert.equal(row?.upstream_model, "vendor/mapped:latest");
   assert.equal(row?.routable, false);
+});
+
+test("user-defined Provider mappings appear as Alias rows labelled by Provider name", () => {
+  assert.deepEqual(dynamicProviderAliasRows([{
+    id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    name: "Lab",
+    endpoint_url: "http://127.0.0.1:9",
+    upstream_protocol: "chat_completions",
+    auth_kind: "bearer",
+    models: [{ public_model: "lab-opus", upstream_model: "vendor/opus" }],
+    created_at: "",
+    updated_at: "",
+    revision: 1,
+    process_generation: 1,
+  }]), [{
+    key: "dynamic:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa:lab-opus:vendor/opus",
+    public_model: "lab-opus",
+    provider_plan: "Lab",
+    custom_account: null,
+    upstream_model: "vendor/opus",
+    routable: true,
+    custom_account_id: null,
+  }]);
 });

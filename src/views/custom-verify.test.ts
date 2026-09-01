@@ -25,7 +25,6 @@ function customAccount(overrides: Partial<Account> = {}): Account {
     account_type: "key",
     setup_step: "ready",
     provider_id: "custom",
-    offering_id: "api",
     credential_kind: "api_key",
     quota_scope: "key",
     purchase_date: "",
@@ -95,11 +94,11 @@ test("Custom edits validate before dispatching only their changed sections", () 
 
 test("no account usage or official refresh is ever requested for Custom accounts", () => {
   assert.match(accounts, /if \(accountHasUsageDisplay\(created\) && accountIsReady\(created\)\)/);
-  assert.match(accounts, /function accountHasUsageDisplay[\s\S]*isCommandCodeGoatAccount[\s\S]*provider_id === "opencode" && account\.offering_id === "go"/);
+  assert.match(accounts, /function accountHasUsageDisplay[\s\S]*isCommandCodeGoatAccount[\s\S]*provider_id === "opencode"/);
   assert.doesNotMatch(accounts.slice(accounts.indexOf("function accountHasUsageDisplay"), accounts.indexOf("async function refreshAccountState")), /isCustomApiAccount/);
   assert.doesNotMatch(accounts, /isCustomApiAccount\(created\)/);
   assert.match(accounts, /accountIsReady\(account\) && accountHasUsageDisplay\(account\)/);
-  assert.match(usage, /async function retryQuotaLimits[\s\S]*?account\.provider_id === "opencode"[\s\S]*?account\.offering_id === "go"/);
+  assert.match(usage, /async function retryQuotaLimits[\s\S]*?account\.provider_id === "opencode"/);
 });
 
 test("every ready account card exposes the same test action without gating the enable switch", () => {

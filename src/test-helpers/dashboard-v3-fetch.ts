@@ -57,7 +57,6 @@ export function v3AccountDto(id: string, overrides: Record<string, unknown> = {}
     accountType: "key",
     setupStep: "ready",
     providerId: "opencode",
-    offeringId: "go",
     credentialKind: "api_key",
     quotaScope: "key",
     revision: 1,

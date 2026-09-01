@@ -303,8 +303,7 @@ mod tests {
                 "total": null,
                 "error": null,
                 "current_version": env!("CARGO_PKG_VERSION"),
-                "install_supported": false,
-            })
+                "install_supported": false })
         );
         assert!(!desktop.desktop_update_supported());
         assert!(matches!(

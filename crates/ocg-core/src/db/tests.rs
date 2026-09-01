@@ -55,6 +55,7 @@ fn create_v21_fixture(dir: &Path, include_reserved_account_conflict: bool) {
             .expect("reserved v22 account should be removed from a normal v21 fixture");
     }
     drop(db);
+    reverse_current_to_v34(dir);
 
     let conn = Connection::open(dir.join("data.sqlite")).expect("fixture db should reopen");
     conn.execute_batch(
@@ -183,7 +184,109 @@ fn pre_v3_backup_paths(dir: &Path) -> Vec<PathBuf> {
     backup_paths_with_prefix(dir, PRE_V3_BACKUP_FILE_PREFIX)
 }
 
+fn pre_v35_backup_paths(dir: &Path) -> Vec<PathBuf> {
+    backup_paths_with_prefix(dir, PRE_V35_BACKUP_FILE_PREFIX)
+}
+
+fn reverse_current_to_v34(dir: &Path) {
+    let path = dir.join("data.sqlite");
+    let conn = Connection::open(&path).expect("migrated database should reopen for reverse");
+    conn.execute_batch(
+        "
+        PRAGMA foreign_keys=OFF;
+        ALTER TABLE accounts ADD COLUMN offering_id TEXT NOT NULL DEFAULT 'go';
+        UPDATE accounts SET offering_id = CASE provider_id
+            WHEN 'opencode' THEN 'go'
+            WHEN 'opencode-zen-free' THEN 'anonymous-free'
+            WHEN 'command-code' THEN 'goat'
+            WHEN 'minimax' THEN 'cn'
+            WHEN 'kimi' THEN 'cn'
+            WHEN 'custom' THEN 'api'
+            WHEN 'cpa' THEN 'local'
+            ELSE offering_id
+        END;
+        ALTER TABLE forward_logs ADD COLUMN offering_id TEXT;
+        UPDATE forward_logs SET offering_id = CASE provider_id
+            WHEN 'opencode' THEN 'go'
+            WHEN 'opencode-zen-free' THEN 'anonymous-free'
+            WHEN 'command-code' THEN 'goat'
+            WHEN 'minimax' THEN 'cn'
+            WHEN 'kimi' THEN 'cn'
+            WHEN 'custom' THEN 'api'
+            WHEN 'cpa' THEN 'local'
+            ELSE offering_id
+        END;
+        DROP INDEX IF EXISTS idx_forward_logs_provider;
+        CREATE INDEX IF NOT EXISTS idx_forward_logs_provider_offering
+            ON forward_logs(provider_id, offering_id);
+        CREATE TABLE provider_model_catalogs_v34 (
+            provider_id TEXT NOT NULL,
+            offering_id TEXT NOT NULL,
+            models_json TEXT NOT NULL,
+            refreshed_at TEXT,
+            source_url TEXT NOT NULL,
+            PRIMARY KEY (provider_id, offering_id)
+        );
+        INSERT INTO provider_model_catalogs_v34
+            (provider_id, offering_id, models_json, refreshed_at, source_url)
+        SELECT provider_id,
+               CASE provider_id
+                   WHEN 'opencode' THEN 'go'
+                   WHEN 'opencode-zen-free' THEN 'anonymous-free'
+                   WHEN 'command-code' THEN 'goat'
+                   WHEN 'minimax' THEN 'cn'
+                   WHEN 'kimi' THEN 'cn'
+                   WHEN 'custom' THEN 'api'
+                   WHEN 'cpa' THEN 'local'
+                   ELSE 'unknown'
+               END,
+               models_json, refreshed_at, source_url
+          FROM provider_model_catalogs;
+        DROP TABLE provider_model_catalogs;
+        ALTER TABLE provider_model_catalogs_v34 RENAME TO provider_model_catalogs;
+        DROP INDEX IF EXISTS idx_provider_pricing_active;
+        CREATE TABLE provider_pricing_snapshots_v34 (
+            provider_id TEXT NOT NULL,
+            offering_id TEXT NOT NULL,
+            revision TEXT NOT NULL,
+            activated_at TEXT NOT NULL,
+            document_updated_at TEXT,
+            source_url TEXT NOT NULL,
+            content_hash TEXT NOT NULL,
+            snapshot_json TEXT NOT NULL,
+            PRIMARY KEY (provider_id, offering_id, revision)
+        );
+        INSERT INTO provider_pricing_snapshots_v34
+            (provider_id, offering_id, revision, activated_at, document_updated_at,
+             source_url, content_hash, snapshot_json)
+        SELECT provider_id,
+               CASE provider_id
+                   WHEN 'opencode' THEN 'go'
+                   WHEN 'opencode-zen-free' THEN 'anonymous-free'
+                   WHEN 'command-code' THEN 'goat'
+                   WHEN 'minimax' THEN 'cn'
+                   WHEN 'kimi' THEN 'cn'
+                   WHEN 'custom' THEN 'api'
+                   WHEN 'cpa' THEN 'local'
+                   ELSE 'unknown'
+               END,
+               revision, activated_at, document_updated_at, source_url, content_hash, snapshot_json
+          FROM provider_pricing_snapshots;
+        DROP TABLE provider_pricing_snapshots;
+        ALTER TABLE provider_pricing_snapshots_v34 RENAME TO provider_pricing_snapshots;
+        CREATE INDEX IF NOT EXISTS idx_provider_pricing_active
+            ON provider_pricing_snapshots(provider_id, offering_id, activated_at DESC);
+        DELETE FROM schema_version;
+        INSERT INTO schema_version (version) VALUES (34);
+        PRAGMA foreign_keys=ON;
+        ",
+    )
+    .expect("schema should reverse to v34");
+    assert_eq!(schema_version_on(&conn).unwrap(), V34_SCHEMA_VERSION);
+}
+
 fn reverse_current_to_v26(dir: &Path) {
+    reverse_current_to_v34(dir);
     let path = dir.join("data.sqlite");
     let conn = Connection::open(&path).expect("migrated database should reopen for reverse");
     let primary = conn
@@ -262,7 +365,6 @@ fn account(id: &str) -> Account {
     Account {
         id: id.into(),
         provider_id: default_provider_id(),
-        offering_id: default_offering_id(),
         credential_kind: default_credential_kind(),
         quota_scope: default_quota_scope(),
         name: id.into(),
@@ -289,12 +391,11 @@ fn account(id: &str) -> Account {
     }
 }
 
-fn persist_unroutable_draft(db: &Database, plan: BuiltinPlan, id: &str, notes: &str) {
+fn persist_unroutable_draft(db: &Database, plan: BuiltinProvider, id: &str, notes: &str) {
     let mut draft = account(id);
-    draft.provider_id = plan.offering.provider_id.to_string();
-    draft.offering_id = plan.offering.offering_id.to_string();
-    draft.credential_kind = plan.offering.credential_kind;
-    draft.quota_scope = plan.offering.quota_scope;
+    draft.provider_id = plan.provider_id.to_string();
+    draft.credential_kind = plan.credential_kind;
+    draft.quota_scope = plan.quota_scope;
     draft.enabled = false;
     draft.notes = Some(notes.to_string());
     if plan_requires_custom_config(plan) {
@@ -330,7 +431,6 @@ fn clone_account_row_as_enabled(
     source_id: &str,
     new_id: &str,
     provider_id: &str,
-    offering_id: &str,
 ) {
     let mut stmt = conn.prepare("PRAGMA table_info(accounts)").unwrap();
     let columns: Vec<String> = stmt
@@ -343,7 +443,6 @@ fn clone_account_row_as_enabled(
         .map(|column| match column.as_str() {
             "id" | "name" => "?1".to_string(),
             "provider_id" => "?2".to_string(),
-            "offering_id" => "?3".to_string(),
             "enabled" => "1".to_string(),
             other => other.to_string(),
         })
@@ -351,10 +450,10 @@ fn clone_account_row_as_enabled(
         .join(", ");
     conn.execute(
         &format!(
-            "INSERT INTO accounts ({cols}) SELECT {select_list} FROM accounts WHERE id = ?4",
+            "INSERT INTO accounts ({cols}) SELECT {select_list} FROM accounts WHERE id = ?3",
             cols = columns.join(", ")
         ),
-        params![new_id, provider_id, offering_id, source_id],
+        params![new_id, provider_id, source_id],
     )
     .unwrap();
 }
@@ -391,7 +490,6 @@ fn forward_log(account_id: &str, status: &str, cost: f64) -> ForwardLog {
         account_name: account_id.into(),
         route_account_id: None,
         provider_id: None,
-        offering_id: None,
         credential_account_id: None,
         client_key_id: None,
         client_key_name: None,
@@ -459,7 +557,6 @@ fn v24_adds_route_column_and_historical_rows_stay_unlabeled() {
             status: None,
             account_id: None,
             provider_id: None,
-            offering_id: None,
             route_account_id: None,
             credential_account_id: None,
             model: None,
@@ -1902,13 +1999,16 @@ fn v13_migration_preserves_legacy_manual_usage_calibration() {
         )
         .expect("legacy baselines should save");
     finalize_success(&db, "legacy-calibration", 1.0, Utc::now());
-    db.conn
-        .execute_batch(
+    drop(db);
+    reverse_current_to_v34(&dir);
+    {
+        let conn = Connection::open(dir.join("data.sqlite")).unwrap();
+        conn.execute_batch(
             "DELETE FROM schema_version;
                  INSERT INTO schema_version (version) VALUES (10);",
         )
         .expect("legacy schema version should save");
-    drop(db);
+    }
 
     let db = open_with_host_cipher(dir.clone()).expect("legacy database should migrate");
     let usage = db
@@ -1980,6 +2080,15 @@ fn v14_migrates_v13_logs_and_adds_request_id_indexes() {
         )
         .expect("v13 schema should be prepared");
     drop(db);
+    reverse_current_to_v34(&dir);
+    {
+        let conn = Connection::open(dir.join("data.sqlite")).unwrap();
+        conn.execute_batch(
+            "DELETE FROM schema_version;
+                 INSERT INTO schema_version (version) VALUES (13);",
+        )
+        .expect("v13 schema version should be restored after reverse");
+    }
 
     let db = Database::open(dir.clone()).expect("v13 database should migrate");
     let version: i32 = db
@@ -2007,7 +2116,6 @@ fn v14_migrates_v13_logs_and_adds_request_id_indexes() {
             status: None,
             account_id: None,
             provider_id: None,
-            offering_id: None,
             route_account_id: None,
             credential_account_id: None,
             model: None,
@@ -3007,7 +3115,6 @@ fn forward_log_time_filter_compares_rfc3339_offsets_by_instant() {
             status: None,
             account_id: None,
             provider_id: None,
-            offering_id: None,
             route_account_id: None,
             credential_account_id: None,
             model: None,
@@ -3049,7 +3156,6 @@ fn forward_logs_can_sort_by_attempt() {
             status: None,
             account_id: None,
             provider_id: None,
-            offering_id: None,
             route_account_id: None,
             credential_account_id: None,
             model: None,
@@ -3097,7 +3203,6 @@ fn forward_logs_filter_by_key_and_unattributed_sentinel() {
             status: None,
             account_id: None,
             provider_id: None,
-            offering_id: None,
             route_account_id: None,
             credential_account_id: None,
             model: None,
@@ -3142,33 +3247,28 @@ fn forward_logs_filter_by_key_and_unattributed_sentinel() {
 fn forward_logs_filter_by_provider_attribution_before_pagination() {
     let dir = temp_data_dir("forward-provider-filter");
     let db = Database::open(dir.clone()).unwrap();
-    let insert = |model: &str,
-                  provider_id: &str,
-                  offering_id: &str,
-                  route_account_id: &str,
-                  credential_account_id: &str| {
-        let mut log = forward_log(credential_account_id, "success", 1.0);
-        log.model = model.into();
-        log.provider_id = Some(provider_id.into());
-        log.offering_id = Some(offering_id.into());
-        log.route_account_id = Some(route_account_id.into());
-        log.credential_account_id = Some(credential_account_id.into());
-        db.log_forward(&log).unwrap();
-    };
+    let insert =
+        |model: &str, provider_id: &str, route_account_id: &str, credential_account_id: &str| {
+            let mut log = forward_log(credential_account_id, "success", 1.0);
+            log.model = model.into();
+            log.provider_id = Some(provider_id.into());
+            log.route_account_id = Some(route_account_id.into());
+            log.credential_account_id = Some(credential_account_id.into());
+            db.log_forward(&log).unwrap();
+        };
 
-    insert("go-a", "opencode", "go", "go-a", "go-a");
-    insert("go-b", "opencode", "go", "go-b", "go-b");
+    insert("go-a", "opencode", "go-a", "go-a");
+    insert("go-b", "opencode", "go-b", "go-b");
     // A Zen route may deliberately debit an OpenCode credential account.
-    insert("zen", "opencode", "zen-free", "zen-free", "go-a");
+    insert("zen", "opencode-zen-free", "zen-free", "go-a");
     // These newer rows would hide OpenCode Go rows if filtering happened
     // after LIMIT/OFFSET.
-    insert("goat-a", "goat", "goat", "goat-a", "goat-a");
-    insert("goat-b", "goat", "goat", "goat-b", "goat-b");
+    insert("goat-a", "command-code", "goat-a", "goat-a");
+    insert("goat-b", "command-code", "goat-b", "goat-b");
 
     let query = |limit: i64,
                  offset: i64,
                  provider_id: Option<&str>,
-                 offering_id: Option<&str>,
                  route_account_id: Option<&str>,
                  credential_account_id: Option<&str>| {
         db.query_forward_logs(ForwardLogQueryOptions {
@@ -3177,7 +3277,6 @@ fn forward_logs_filter_by_provider_attribution_before_pagination() {
             status: None,
             account_id: None,
             provider_id,
-            offering_id,
             route_account_id,
             credential_account_id,
             model: None,
@@ -3191,14 +3290,14 @@ fn forward_logs_filter_by_provider_attribution_before_pagination() {
         .unwrap()
     };
 
-    let first_go = query(1, 0, Some("opencode"), Some("go"), None, None);
+    let first_go = query(1, 0, Some("opencode"), None, None);
     assert_eq!(first_go.summary.total_requests, 2);
     assert_eq!(first_go.items[0].model, "go-b");
-    let second_go = query(1, 1, Some("opencode"), Some("go"), None, None);
+    let second_go = query(1, 1, Some("opencode"), None, None);
     assert_eq!(second_go.summary.total_requests, 2);
     assert_eq!(second_go.items[0].model, "go-a");
 
-    let routed_zen = query(10, 0, Some("opencode"), None, Some("zen-free"), None);
+    let routed_zen = query(10, 0, Some("opencode-zen-free"), Some("zen-free"), None);
     assert_eq!(routed_zen.summary.total_requests, 1);
     assert_eq!(routed_zen.items[0].model, "zen");
     assert_eq!(
@@ -3206,7 +3305,7 @@ fn forward_logs_filter_by_provider_attribution_before_pagination() {
         Some("go-a")
     );
 
-    let credential_go_a = query(10, 0, None, None, None, Some("go-a"));
+    let credential_go_a = query(10, 0, None, None, Some("go-a"));
     assert_eq!(credential_go_a.summary.total_requests, 2);
     assert_eq!(
         credential_go_a
@@ -3217,7 +3316,7 @@ fn forward_logs_filter_by_provider_attribution_before_pagination() {
         ["zen", "go-a"]
     );
 
-    let goat = query(10, 0, Some("goat"), None, None, None);
+    let goat = query(10, 0, Some("command-code"), None, None);
     assert_eq!(goat.summary.total_requests, 2);
     assert_eq!(
         goat.items
@@ -3238,7 +3337,6 @@ fn empty_forward_query<'a>() -> ForwardLogQueryOptions<'a> {
         status: None,
         account_id: None,
         provider_id: None,
-        offering_id: None,
         route_account_id: None,
         credential_account_id: None,
         model: None,
@@ -3473,7 +3571,6 @@ fn forward_logs_model_filter_ands_other_filters_before_pagination() {
         let mut log = forward_log("acct", "success", cost);
         log.model = format!("legacy-{suffix}");
         log.provider_id = Some("opencode".into());
-        log.offering_id = Some("go".into());
         log.client_key_id = Some("key-a".into());
         log.client_key_name = Some("Key-a".into());
         log.timestamp = inside;
@@ -3493,7 +3590,6 @@ fn forward_logs_model_filter_ands_other_filters_before_pagination() {
     let mut wrong_provider = forward_log("acct", "success", 9.0);
     wrong_provider.model = "legacy-provider".into();
     wrong_provider.provider_id = Some("goat".into());
-    wrong_provider.offering_id = Some("goat".into());
     wrong_provider.client_key_id = Some("key-a".into());
     wrong_provider.timestamp = inside;
     insert_identity_log(
@@ -3507,7 +3603,6 @@ fn forward_logs_model_filter_ands_other_filters_before_pagination() {
     let mut wrong_key = forward_log("acct", "success", 8.0);
     wrong_key.model = "legacy-key".into();
     wrong_key.provider_id = Some("opencode".into());
-    wrong_key.offering_id = Some("go".into());
     wrong_key.client_key_id = Some("key-b".into());
     wrong_key.timestamp = inside;
     insert_identity_log(&db, wrong_key, None, None, Some("needle"));
@@ -3515,7 +3610,6 @@ fn forward_logs_model_filter_ands_other_filters_before_pagination() {
     let mut wrong_status = forward_log("acct", "error", 7.0);
     wrong_status.model = "needle".into();
     wrong_status.provider_id = Some("opencode".into());
-    wrong_status.offering_id = Some("go".into());
     wrong_status.client_key_id = Some("key-a".into());
     wrong_status.timestamp = inside;
     let wrong_status_id = db.log_forward(&wrong_status).unwrap();
@@ -3524,7 +3618,6 @@ fn forward_logs_model_filter_ands_other_filters_before_pagination() {
     let mut wrong_time = forward_log("acct", "success", 6.0);
     wrong_time.model = "legacy-time".into();
     wrong_time.provider_id = Some("opencode".into());
-    wrong_time.offering_id = Some("go".into());
     wrong_time.client_key_id = Some("key-a".into());
     wrong_time.timestamp = outside;
     insert_identity_log(
@@ -3539,7 +3632,6 @@ fn forward_logs_model_filter_ands_other_filters_before_pagination() {
         let mut decoy = forward_log("busy", "success", 100.0);
         decoy.model = format!("decoy-{index}");
         decoy.provider_id = Some("opencode".into());
-        decoy.offering_id = Some("go".into());
         decoy.client_key_id = Some("key-a".into());
         decoy.timestamp = inside;
         db.log_forward(&decoy).unwrap();
@@ -3550,7 +3642,6 @@ fn forward_logs_model_filter_ands_other_filters_before_pagination() {
         offset: 0,
         status: Some("success"),
         provider_id: Some("opencode"),
-        offering_id: Some("go"),
         model: Some("needle"),
         key_id: Some("key-a"),
         start_time: Some("2026-07-17T12:00:00+08:00"),
@@ -3572,7 +3663,6 @@ fn forward_logs_model_filter_ands_other_filters_before_pagination() {
             offset: 1,
             status: Some("success"),
             provider_id: Some("opencode"),
-            offering_id: Some("go"),
             model: Some("needle"),
             key_id: Some("key-a"),
             start_time: Some("2026-07-17T12:00:00+08:00"),
@@ -3592,7 +3682,6 @@ fn forward_logs_model_filter_ands_other_filters_before_pagination() {
             offset: 2,
             status: Some("success"),
             provider_id: Some("opencode"),
-            offering_id: Some("go"),
             model: Some("needle"),
             key_id: Some("key-a"),
             start_time: Some("2026-07-17T12:00:00+08:00"),
@@ -4164,6 +4253,15 @@ fn draft_v19_libraries_without_notes_gain_the_column_on_reopen() {
         .unwrap();
     assert_eq!(notes_before, 0);
     drop(db);
+    reverse_current_to_v34(&dir);
+    {
+        let conn = Connection::open(dir.join("data.sqlite")).unwrap();
+        conn.execute_batch(
+            "DELETE FROM schema_version;
+                 INSERT INTO schema_version (version) VALUES (19);",
+        )
+        .expect("draft numbering should survive reverse-to-v34");
+    }
 
     let db = open_with_host_cipher(dir.clone()).expect("draft database should reopen");
     let (version, notes_after): (i32, i64) = db
@@ -4286,7 +4384,6 @@ fn forward_log_keys_resolve_the_latest_name_per_id() {
         account_name: "a".into(),
         route_account_id: None,
         provider_id: None,
-        offering_id: None,
         credential_account_id: None,
         client_key_id: Some("sub-1".into()),
         client_key_name: Some("Laptop".into()),
@@ -4375,13 +4472,13 @@ fn create_v22_fixture(dir: &Path) {
     let mut goat = account("v22-goat");
     goat.key_cipher = fixture_account_key_cipher();
     goat.provider_id = COMMAND_CODE_PROVIDER_ID.to_string();
-    goat.offering_id = GOAT_OFFERING_ID.to_string();
     goat.enabled = false;
     db.create_account(&goat)
         .expect("representative GOAT account should save");
     db.log_forward(&forward_log("v22-account", "success", 3.5))
         .expect("representative forward log should save");
     drop(db);
+    reverse_current_to_v34(dir);
 
     let conn = Connection::open(dir.join("data.sqlite")).expect("v23 fixture should reopen");
     conn.execute_batch(
@@ -4549,17 +4646,20 @@ fn v25_to_v26_backfills_zen_catalog_into_provider_scope() {
             source_url: crate::kernel::zen::ZEN_MODELS_SOURCE_URL.into(),
         })
         .unwrap();
-        db.conn
-            .execute_batch(
-                "DROP TRIGGER IF EXISTS access_keys_protect_primary_delete;
+    }
+    reverse_current_to_v34(&dir);
+    {
+        let conn = Connection::open(dir.join("data.sqlite")).unwrap();
+        conn.execute_batch(
+            "DROP TRIGGER IF EXISTS access_keys_protect_primary_delete;
                      DROP TABLE IF EXISTS access_keys;
                      DROP TABLE IF EXISTS provider_contract_model_protocols;
                      DROP TABLE IF EXISTS provider_contract_scopes;
                      DELETE FROM schema_version;
                      INSERT INTO schema_version (version) VALUES (25);",
-            )
-            .unwrap();
-        assert_eq!(db.schema_version().unwrap(), 25);
+        )
+        .unwrap();
+        assert_eq!(schema_version_on(&conn).unwrap(), 25);
     }
     let db = Database::open(dir.clone()).expect("v25 database should migrate to v26");
     assert_eq!(db.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
@@ -4859,7 +4959,6 @@ fn v23_persists_verification_custom_config_and_capabilities() {
     let db = Database::open(dir.clone()).unwrap();
     let mut goat = account("goat-draft");
     goat.provider_id = COMMAND_CODE_PROVIDER_ID.to_string();
-    goat.offering_id = GOAT_OFFERING_ID.to_string();
     goat.enabled = false;
     db.create_account(&goat).unwrap();
     let goat_state = db
@@ -4870,7 +4969,6 @@ fn v23_persists_verification_custom_config_and_capabilities() {
 
     let mut custom = account("custom-1");
     custom.provider_id = CUSTOM_PROVIDER_ID.to_string();
-    custom.offering_id = CUSTOM_API_OFFERING_ID.to_string();
     custom.enabled = false;
     db.create_account(&custom).unwrap();
     db.upsert_account_custom_config(
@@ -4934,7 +5032,6 @@ fn v23_persists_verification_custom_config_and_capabilities() {
     let unknown = account("unknown");
     let mut unknown = unknown;
     unknown.provider_id = "no-such-provider".into();
-    unknown.offering_id = "no-such-offering".into();
     assert!(db.create_account(&unknown).is_err());
 
     drop(db);
@@ -4990,7 +5087,6 @@ fn update_forward_log_finalizes_native_usd_with_cost_fields() {
     streaming.raw_cost_usd = None;
     streaming.cost_state = "not_applicable".into();
     streaming.provider_id = Some(OPENCODE_PROVIDER_ID.to_string());
-    streaming.offering_id = Some(GO_OFFERING_ID.to_string());
     let streaming_id = db.log_forward(&streaming).unwrap();
     let preliminary = db
         .forward_log_native_attribution(streaming_id)
@@ -5007,7 +5103,6 @@ fn update_forward_log_finalizes_native_usd_with_cost_fields() {
             cost: 1.25,
             raw_cost_usd: Some(1.25),
             pricing_provider_id: Some(OPENCODE_PROVIDER_ID.to_string()),
-            pricing_offering_id: Some(GO_OFFERING_ID.to_string()),
             cost_state: "priced",
             ..ForwardMetrics::default()
         },
@@ -5069,7 +5164,6 @@ fn update_forward_log_finalizes_native_usd_with_cost_fields() {
     zen.raw_cost_usd = None;
     zen.cost_state = "not_applicable".into();
     zen.provider_id = Some(OPENCODE_ZEN_FREE_PROVIDER_ID.to_string());
-    zen.offering_id = Some(ANONYMOUS_FREE_OFFERING_ID.to_string());
     let zen_id = db.log_forward(&zen).unwrap();
     db.update_forward_log(
         zen_id,
@@ -5109,7 +5203,6 @@ fn create_account_with_contract_is_atomic_on_custom_config_failure() {
     let db = Database::open(dir.clone()).unwrap();
     let mut custom = account("custom-atomic");
     custom.provider_id = CUSTOM_PROVIDER_ID.to_string();
-    custom.offering_id = CUSTOM_API_OFFERING_ID.to_string();
     custom.enabled = false;
     db.conn
         .execute_batch(
@@ -5200,7 +5293,6 @@ fn create_account_with_contract_is_atomic_on_custom_config_failure() {
 
     let mut custom_empty = account("custom-empty-caps");
     custom_empty.provider_id = CUSTOM_PROVIDER_ID.to_string();
-    custom_empty.offering_id = CUSTOM_API_OFFERING_ID.to_string();
     custom_empty.enabled = false;
     let empty_caps = db.create_account_with_contract(
         &custom_empty,
@@ -5227,7 +5319,6 @@ fn account_migration_batch_is_atomic_and_preserves_order() {
     let go = account("migration-go");
     let mut custom = account("migration-custom");
     custom.provider_id = CUSTOM_PROVIDER_ID.to_string();
-    custom.offering_id = CUSTOM_API_OFFERING_ID.to_string();
     custom.credential_kind = CredentialKind::ApiKey;
     custom.quota_scope = QuotaScope::Key;
     custom.enabled = false;
@@ -5296,7 +5387,6 @@ fn custom_capability_protocol_must_equal_the_config_protocol() {
     let db = Database::open(dir.clone()).unwrap();
     let mut custom = account("custom-protocol");
     custom.provider_id = CUSTOM_PROVIDER_ID.to_string();
-    custom.offering_id = CUSTOM_API_OFFERING_ID.to_string();
     custom.enabled = false;
     let mismatch = db.create_account_with_contract(
         &custom,
@@ -5370,7 +5460,6 @@ fn custom_capabilities_allow_shared_upstream_but_reject_duplicate_public_names()
     let db = Database::open(dir.clone()).unwrap();
     let mut custom = account("custom-mapping");
     custom.provider_id = CUSTOM_PROVIDER_ID.to_string();
-    custom.offering_id = CUSTOM_API_OFFERING_ID.to_string();
     custom.enabled = false;
     db.create_account_with_contract(
         &custom,
@@ -5443,7 +5532,6 @@ fn custom_mutations_repend_but_keep_verified_accounts_enabled() {
     let db = Database::open(dir.clone()).unwrap();
     let mut custom = account("custom-stale");
     custom.provider_id = CUSTOM_PROVIDER_ID.to_string();
-    custom.offering_id = CUSTOM_API_OFFERING_ID.to_string();
     custom.enabled = false;
     db.create_account_with_contract(
         &custom,
@@ -5580,7 +5668,6 @@ fn custom_verification_cas_rejects_stale_key_config_caps_and_delete() {
     let mut db = Database::open(dir.clone()).unwrap();
     let mut custom = account("custom-cas");
     custom.provider_id = CUSTOM_PROVIDER_ID.to_string();
-    custom.offering_id = CUSTOM_API_OFFERING_ID.to_string();
     custom.enabled = false;
     custom.key_cipher = "cipher-a".into();
     db.create_account_with_contract(
@@ -5718,7 +5805,6 @@ fn custom_verification_cas_rejects_stale_key_config_caps_and_delete() {
 
     let mut leftover = account("custom-delete");
     leftover.provider_id = CUSTOM_PROVIDER_ID.to_string();
-    leftover.offering_id = CUSTOM_API_OFFERING_ID.to_string();
     leftover.enabled = false;
     db.create_account_with_contract(
         &leftover,
@@ -5762,17 +5848,16 @@ fn unroutable_catalog_plans_cannot_persist_enabled_true() {
     db.create_account(&go).unwrap();
     assert!(db.get_account("go-enabled").unwrap().unwrap().enabled);
 
-    for plan in BUILTIN_PLANS
+    for plan in BUILTIN_PROVIDERS
         .iter()
         .copied()
-        .filter(|plan| !plan.routable && plan.offering.singleton_account_id.is_none())
+        .filter(|plan| !plan.routable && plan.singleton_account_id.is_none())
     {
-        let id = format!("draft-{}", plan.offering.offering_id);
+        let id = format!("draft-{}", plan.provider_id);
         let mut draft = account(&id);
-        draft.provider_id = plan.offering.provider_id.to_string();
-        draft.offering_id = plan.offering.offering_id.to_string();
-        draft.credential_kind = plan.offering.credential_kind;
-        draft.quota_scope = plan.offering.quota_scope;
+        draft.provider_id = plan.provider_id.to_string();
+        draft.credential_kind = plan.credential_kind;
+        draft.quota_scope = plan.quota_scope;
         draft.enabled = true;
         let error = db
             .create_account(&draft)
@@ -5780,8 +5865,8 @@ fn unroutable_catalog_plans_cannot_persist_enabled_true() {
         assert!(
             error.to_string().contains("not routable"),
             "{}/{}: {error}",
-            plan.offering.provider_id,
-            plan.offering.offering_id
+            plan.provider_id,
+            plan.provider_id
         );
         assert!(db.get_account(&id).unwrap().is_none());
 
@@ -5881,7 +5966,7 @@ fn unroutable_catalog_plans_cannot_persist_enabled_true() {
 
 #[test]
 fn open_sanitizes_unroutable_catalog_leftovers_without_touching_go_zen_or_unknown() {
-    let unroutable: Vec<_> = BUILTIN_PLANS
+    let unroutable: Vec<_> = BUILTIN_PROVIDERS
         .iter()
         .copied()
         .filter(|plan| !plan.routable)
@@ -5889,13 +5974,11 @@ fn open_sanitizes_unroutable_catalog_leftovers_without_touching_go_zen_or_unknow
     assert_eq!(
         unroutable
             .iter()
-            .map(|plan| (plan.offering.provider_id, plan.offering.offering_id))
+            .map(|plan| (plan.provider_id, plan.provider_id))
             .collect::<Vec<_>>(),
         Vec::<(&str, &str)>::new()
     );
-    assert!(
-        builtin_plan(CUSTOM_PROVIDER_ID, CUSTOM_API_OFFERING_ID).is_some_and(|plan| plan.routable)
-    );
+    assert!(builtin_provider(CUSTOM_PROVIDER_ID).is_some_and(|plan| plan.routable));
 
     let dir = temp_data_dir("unroutable-sanitation");
     let db = Database::open(dir.clone()).unwrap();
@@ -5912,7 +5995,7 @@ fn open_sanitizes_unroutable_catalog_leftovers_without_touching_go_zen_or_unknow
     db.conn
         .execute(
             "UPDATE accounts
-                 SET provider_id = 'unknown-provider', offering_id = 'unknown-offering'
+                 SET provider_id = 'unknown-provider'
                  WHERE id = 'unknown-keep'",
             [],
         )
@@ -5920,7 +6003,7 @@ fn open_sanitizes_unroutable_catalog_leftovers_without_touching_go_zen_or_unknow
 
     persist_unroutable_draft(
         &db,
-        builtin_plan(COMMAND_CODE_PROVIDER_ID, GOAT_OFFERING_ID).unwrap(),
+        builtin_provider(COMMAND_CODE_PROVIDER_ID).unwrap(),
         "goat-pending",
         "goat-pending-notes",
     );
@@ -5928,7 +6011,7 @@ fn open_sanitizes_unroutable_catalog_leftovers_without_touching_go_zen_or_unknow
 
     persist_unroutable_draft(
         &db,
-        builtin_plan(COMMAND_CODE_PROVIDER_ID, GOAT_OFFERING_ID).unwrap(),
+        builtin_provider(COMMAND_CODE_PROVIDER_ID).unwrap(),
         "goat-verified",
         "goat-verified-notes",
     );
@@ -5943,7 +6026,7 @@ fn open_sanitizes_unroutable_catalog_leftovers_without_touching_go_zen_or_unknow
 
     persist_unroutable_draft(
         &db,
-        builtin_plan(COMMAND_CODE_PROVIDER_ID, GOAT_OFFERING_ID).unwrap(),
+        builtin_provider(COMMAND_CODE_PROVIDER_ID).unwrap(),
         "goat-failed",
         "goat-failed-notes",
     );
@@ -5958,7 +6041,7 @@ fn open_sanitizes_unroutable_catalog_leftovers_without_touching_go_zen_or_unknow
 
     persist_unroutable_draft(
         &db,
-        builtin_plan(CUSTOM_PROVIDER_ID, CUSTOM_API_OFFERING_ID).unwrap(),
+        builtin_provider(CUSTOM_PROVIDER_ID).unwrap(),
         "draft-api",
         "draft-api-notes",
     );
@@ -6071,31 +6154,18 @@ fn v22_open_sanitizes_enabled_unroutable_catalog_rows() {
     let dir = temp_data_dir("v22-unroutable-sanitation");
     create_v22_fixture(&dir);
     let conn = Connection::open(dir.join("data.sqlite")).expect("v22 fixture should reopen");
-    for plan in BUILTIN_PLANS.iter().filter(|plan| {
-        !(plan.routable
-            || plan.offering.provider_id == COMMAND_CODE_PROVIDER_ID
-                && plan.offering.offering_id == GOAT_OFFERING_ID)
-    }) {
+    for plan in BUILTIN_PROVIDERS.iter().filter(|plan| !plan.routable) {
         clone_account_row_as_enabled(
             &conn,
             "v22-goat",
-            &format!("v22-{}", plan.offering.offering_id),
-            plan.offering.provider_id,
-            plan.offering.offering_id,
+            &format!("v22-{}", plan.provider_id),
+            plan.provider_id,
         );
     }
-    clone_account_row_as_enabled(
-        &conn,
-        "v22-account",
-        "v22-unknown",
-        "unknown-provider",
-        "unknown-offering",
-    );
     drop(conn);
 
     let db = open_with_host_cipher(dir.clone()).expect("v22 database should migrate and sanitize");
     assert!(db.get_account("v22-account").unwrap().unwrap().enabled);
-    assert!(db.get_account("v22-unknown").unwrap().unwrap().enabled);
     assert!(
         db.get_account(ZEN_FREE_ACCOUNT_ID)
             .unwrap()
@@ -6103,16 +6173,12 @@ fn v22_open_sanitizes_enabled_unroutable_catalog_rows() {
             .enabled
     );
     assert!(!db.get_account("v22-goat").unwrap().unwrap().enabled);
-    for plan in BUILTIN_PLANS.iter().filter(|plan| {
-        !(plan.routable
-            || plan.offering.provider_id == COMMAND_CODE_PROVIDER_ID
-                && plan.offering.offering_id == GOAT_OFFERING_ID)
-    }) {
-        let id = format!("v22-{}", plan.offering.offering_id);
+    for plan in BUILTIN_PROVIDERS.iter().filter(|plan| !plan.routable) {
+        let id = format!("v22-{}", plan.provider_id);
         let stored = db.get_account(&id).unwrap().unwrap();
         assert!(!stored.enabled, "{id}");
-        assert_eq!(stored.provider_id, plan.offering.provider_id);
-        assert_eq!(stored.offering_id, plan.offering.offering_id);
+        assert_eq!(stored.provider_id, plan.provider_id);
+        assert_eq!(stored.provider_id, plan.provider_id);
     }
     db.update_account(
         "v22-goat",
@@ -6241,8 +6307,7 @@ fn populate_v26_source(dir: &Path) -> (String, String) {
     let config = serde_json::json!({
         "gateway_port": 9042,
         "gateway_key": "ocg-v26-primary",
-        "upstream_base_url": "https://opencode.ai/zen/go",
-    });
+        "upstream_base_url": "https://opencode.ai/zen/go" });
     db.set_config(&config.to_string())
         .expect("v26 config should persist");
     drop(db);
@@ -6311,44 +6376,42 @@ fn v28_to_v29_purges_scnet_accounts_and_acknowledgements() {
     let db = Database::open(dir.clone()).unwrap();
     let mut leftover = account("scnet-leftover");
     leftover.provider_id = OPENCODE_PROVIDER_ID.into();
-    leftover.offering_id = GO_OFFERING_ID.into();
     db.create_account(&leftover).unwrap();
-    db.conn
-        .execute(
-            "UPDATE accounts
-                 SET provider_id = 'scnet', offering_id = 'scnet-token-plan-basic'
-                 WHERE id = 'scnet-leftover'",
-            [],
-        )
-        .unwrap();
-    db.conn
-        .execute(
-            "CREATE TABLE account_acknowledgements (
-                    account_id TEXT NOT NULL,
-                    acknowledgement_id TEXT NOT NULL,
-                    version TEXT NOT NULL,
-                    content_hash TEXT NOT NULL,
-                    accepted_at TEXT NOT NULL,
-                    PRIMARY KEY (account_id, acknowledgement_id)
-                )",
-            [],
-        )
-        .unwrap();
-    db.conn
-        .execute(
-            "INSERT INTO account_acknowledgements
-                 (account_id, acknowledgement_id, version, content_hash, accepted_at)
-                 VALUES ('scnet-leftover', 'ack-scnet', '1', 'hash', ?1)",
-            [Utc::now().to_rfc3339()],
-        )
-        .unwrap();
-    db.conn
-        .execute_batch(
-            "DELETE FROM schema_version;
-                 INSERT OR REPLACE INTO schema_version (version) VALUES (28);",
-        )
-        .unwrap();
     drop(db);
+    reverse_current_to_v34(&dir);
+    let conn = Connection::open(dir.join("data.sqlite")).unwrap();
+    conn.execute(
+        "UPDATE accounts
+             SET provider_id = 'scnet', offering_id = 'scnet-token-plan-basic'
+             WHERE id = 'scnet-leftover'",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "CREATE TABLE account_acknowledgements (
+                account_id TEXT NOT NULL,
+                acknowledgement_id TEXT NOT NULL,
+                version TEXT NOT NULL,
+                content_hash TEXT NOT NULL,
+                accepted_at TEXT NOT NULL,
+                PRIMARY KEY (account_id, acknowledgement_id)
+            )",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO account_acknowledgements
+             (account_id, acknowledgement_id, version, content_hash, accepted_at)
+             VALUES ('scnet-leftover', 'ack-scnet', '1', 'hash', ?1)",
+        [Utc::now().to_rfc3339()],
+    )
+    .unwrap();
+    conn.execute_batch(
+        "DELETE FROM schema_version;
+             INSERT OR REPLACE INTO schema_version (version) VALUES (28);",
+    )
+    .unwrap();
+    drop(conn);
 
     let db = Database::open(dir.clone()).unwrap();
     assert_eq!(db.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
@@ -6381,7 +6444,6 @@ fn v31_to_v32_collapses_custom_protocols_and_disables_the_account() {
     let db = Database::open(dir.clone()).unwrap();
     let mut custom = account("custom-v31");
     custom.provider_id = CUSTOM_PROVIDER_ID.to_string();
-    custom.offering_id = CUSTOM_API_OFFERING_ID.to_string();
     custom.enabled = false;
     db.create_account_with_contract(
         &custom,
@@ -6466,7 +6528,6 @@ fn v32_to_v33_backfills_public_and_upstream_identities_for_custom_and_goat() {
 
     let mut custom = account("custom-v32");
     custom.provider_id = CUSTOM_PROVIDER_ID.to_string();
-    custom.offering_id = CUSTOM_API_OFFERING_ID.to_string();
     custom.enabled = false;
     db.create_account_with_contract(
         &custom,
@@ -6485,7 +6546,6 @@ fn v32_to_v33_backfills_public_and_upstream_identities_for_custom_and_goat() {
 
     let mut goat = account("goat-v32");
     goat.provider_id = COMMAND_CODE_PROVIDER_ID.to_string();
-    goat.offering_id = GOAT_OFFERING_ID.to_string();
     goat.enabled = false;
     db.create_account(&goat).unwrap();
     persist_goat_catalog_on(&db.conn, &goat.id, &["goat/model".into()], Some(Utc::now())).unwrap();
@@ -6564,7 +6624,6 @@ fn cpa_singleton_upsert_catalog_and_disconnect_are_idempotent_and_atomic() {
     let now = Utc::now();
     let mut cpa_account = account(CPA_ACCOUNT_ID);
     cpa_account.provider_id = CPA_PROVIDER_ID.to_string();
-    cpa_account.offering_id = CPA_OFFERING_ID.to_string();
     cpa_account.credential_kind = CredentialKind::ApiKey;
     cpa_account.quota_scope = QuotaScope::Key;
     cpa_account.name = CPA_ACCOUNT_NAME.to_string();
@@ -6899,8 +6958,7 @@ fn v27_base64_looking_plaintext_access_keys_migrate_without_cipher() {
     let config = serde_json::json!({
         "gateway_port": 9042,
         "gateway_key": primary,
-        "upstream_base_url": "https://opencode.ai/zen/go",
-    });
+        "upstream_base_url": "https://opencode.ai/zen/go" });
     db.set_config(&config.to_string()).unwrap();
     drop(db);
     reverse_current_to_v26(&dir);
@@ -7006,8 +7064,7 @@ fn v27_set_config_is_atomic_with_the_primary_row() {
         "upstream_base_url": "https://opencode.ai/zen/go",
         "connect_timeout_secs": 30,
         "non_stream_timeout_secs": 900,
-        "stream_idle_timeout_secs": 300,
-    });
+        "stream_idle_timeout_secs": 300 });
     db.set_config(&initial.to_string()).unwrap();
     db.conn
         .execute_batch(
@@ -7025,8 +7082,7 @@ fn v27_set_config_is_atomic_with_the_primary_row() {
         "upstream_base_url": "https://opencode.ai/zen/go",
         "connect_timeout_secs": 30,
         "non_stream_timeout_secs": 900,
-        "stream_idle_timeout_secs": 300,
-    });
+        "stream_idle_timeout_secs": 300 });
     assert!(db.set_config(&rotated.to_string()).is_err());
     assert_eq!(
         db.primary_access_key_value().unwrap().as_deref(),
@@ -7330,6 +7386,328 @@ fn command_catalog_reappearing_preset_returns_to_auto_enabled() {
             .any(|row| { row.model_id == extra && row.state == ProtocolOverrideState::ForceOff })
     );
 
+    drop(db);
+    fs::remove_dir_all(dir).unwrap();
+}
+
+fn v35_column_names(conn: &Connection, table: &str) -> Vec<String> {
+    let mut stmt = conn
+        .prepare(&format!("PRAGMA table_info({table})"))
+        .unwrap();
+    stmt.query_map([], |row| row.get::<_, String>(1))
+        .unwrap()
+        .map(|column| column.unwrap())
+        .collect()
+}
+
+fn v35_index_sql(conn: &Connection, name: &str) -> Option<String> {
+    conn.query_row(
+        "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?1",
+        [name],
+        |row| row.get::<_, Option<String>>(0),
+    )
+    .optional()
+    .unwrap()
+    .flatten()
+}
+
+#[test]
+fn v35_fresh_empty_database_skips_pre_v35_snapshot() {
+    let dir = temp_data_dir("v35-fresh-empty");
+    let db = open_with_host_cipher(dir.clone()).unwrap();
+    assert_eq!(schema_version_on(&db.conn).unwrap(), CURRENT_SCHEMA_VERSION);
+    assert!(pre_v35_backup_paths(&dir).is_empty());
+    let columns = v35_column_names(&db.conn, "accounts");
+    assert!(!columns.iter().any(|name| name == "offering_id"));
+    drop(db);
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn v35_maps_known_pairs_conserves_rows_and_writes_pre_v35_snapshot() {
+    let dir = temp_data_dir("v35-known-pairs");
+    let db = open_with_host_cipher(dir.clone()).unwrap();
+    let mut go = account("v35-go");
+    go.key_cipher = fixture_account_key_cipher();
+    db.create_account(&go).unwrap();
+    let cipher_before = db.get_account("v35-go").unwrap().unwrap().key_cipher;
+    db.log_forward(&forward_log("v35-go", "success", 1.25))
+        .unwrap();
+    let account_count: i64 = db
+        .conn
+        .query_row("SELECT COUNT(*) FROM accounts", [], |row| row.get(0))
+        .unwrap();
+    let log_count: i64 = db
+        .conn
+        .query_row("SELECT COUNT(*) FROM forward_logs", [], |row| row.get(0))
+        .unwrap();
+    drop(db);
+
+    reverse_current_to_v34(&dir);
+    let conn = Connection::open(dir.join("data.sqlite")).unwrap();
+    let offering: String = conn
+        .query_row(
+            "SELECT offering_id FROM accounts WHERE id = ?1",
+            ["v35-go"],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(offering, "go");
+    drop(conn);
+
+    let db = open_with_host_cipher(dir.clone()).unwrap();
+    assert_eq!(schema_version_on(&db.conn).unwrap(), CURRENT_SCHEMA_VERSION);
+    sqlite_quick_check(&db.conn).unwrap();
+    sqlite_foreign_key_check(&db.conn).unwrap();
+    let account_count_after: i64 = db
+        .conn
+        .query_row("SELECT COUNT(*) FROM accounts", [], |row| row.get(0))
+        .unwrap();
+    let log_count_after: i64 = db
+        .conn
+        .query_row("SELECT COUNT(*) FROM forward_logs", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(account_count_after, account_count);
+    assert_eq!(log_count_after, log_count);
+    let stored = db.get_account("v35-go").unwrap().unwrap();
+    assert_eq!(stored.provider_id, OPENCODE_PROVIDER_ID);
+    assert_eq!(stored.key_cipher, cipher_before);
+    assert_fixture_account_cipher(&stored.key_cipher);
+    let account_columns = v35_column_names(&db.conn, "accounts");
+    let log_columns = v35_column_names(&db.conn, "forward_logs");
+    let catalog_columns = v35_column_names(&db.conn, "provider_model_catalogs");
+    let pricing_columns = v35_column_names(&db.conn, "provider_pricing_snapshots");
+    assert!(!account_columns.iter().any(|name| name == "offering_id"));
+    assert!(!log_columns.iter().any(|name| name == "offering_id"));
+    assert!(!catalog_columns.iter().any(|name| name == "offering_id"));
+    assert!(!pricing_columns.iter().any(|name| name == "offering_id"));
+    assert!(v35_index_sql(&db.conn, "idx_forward_logs_provider_offering").is_none());
+    let backups = pre_v35_backup_paths(&dir);
+    assert_eq!(backups.len(), 1);
+    let hash_path = backups[0].with_file_name(format!(
+        "{}.sha256",
+        backups[0].file_name().unwrap().to_str().unwrap()
+    ));
+    assert!(hash_path.exists());
+    drop(db);
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn v35_unknown_pair_rolls_back_without_mutation() {
+    let dir = temp_data_dir("v35-unknown-pair");
+    let db = open_with_host_cipher(dir.clone()).unwrap();
+    let leftover = account("v35-unknown");
+    db.create_account(&leftover).unwrap();
+    drop(db);
+    reverse_current_to_v34(&dir);
+    let conn = Connection::open(dir.join("data.sqlite")).unwrap();
+    conn.execute(
+        "UPDATE accounts SET provider_id = 'unknown-provider', offering_id = 'unknown-offering'
+         WHERE id = ?1",
+        ["v35-unknown"],
+    )
+    .unwrap();
+    drop(conn);
+    let error = match open_with_host_cipher(dir.clone()) {
+        Ok(_) => panic!("unknown pair must fail closed"),
+        Err(error) => error,
+    };
+    let message = format!("{error:#}");
+    assert!(
+        message.contains("unknown provider/offering pair"),
+        "{message}"
+    );
+    let conn = Connection::open(dir.join("data.sqlite")).unwrap();
+    assert_eq!(schema_version_on(&conn).unwrap(), V34_SCHEMA_VERSION);
+    assert!(table_has_column(&conn, "accounts", "offering_id").unwrap());
+    drop(conn);
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn v35_catalog_collision_rolls_back_without_mutation() {
+    let dir = temp_data_dir("v35-catalog-collision");
+    let db = open_with_host_cipher(dir.clone()).unwrap();
+    drop(db);
+    reverse_current_to_v34(&dir);
+    let conn = Connection::open(dir.join("data.sqlite")).unwrap();
+    conn.execute(
+        "INSERT INTO provider_model_catalogs
+         (provider_id, offering_id, models_json, refreshed_at, source_url)
+         VALUES ('opencode', 'go', '[]', NULL, 'https://example.test/a')",
+        [],
+    )
+    .ok();
+    conn.execute(
+        "INSERT INTO provider_model_catalogs
+         (provider_id, offering_id, models_json, refreshed_at, source_url)
+         VALUES ('opencode', 'extra', '[]', NULL, 'https://example.test/b')",
+        [],
+    )
+    .unwrap();
+    drop(conn);
+    let error = match open_with_host_cipher(dir.clone()) {
+        Ok(_) => panic!("catalog collision must fail closed"),
+        Err(error) => error,
+    };
+    let message = format!("{error:#}");
+    assert!(
+        message.contains("unknown provider/offering pair")
+            || message.contains("collisions collapsing"),
+        "{message}"
+    );
+    let conn = Connection::open(dir.join("data.sqlite")).unwrap();
+    assert_eq!(schema_version_on(&conn).unwrap(), V34_SCHEMA_VERSION);
+    assert!(table_has_column(&conn, "provider_model_catalogs", "offering_id").unwrap());
+    drop(conn);
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn v35_dynamic_provider_tables_round_trip_and_reject_duplicate_public_models() {
+    let dir = temp_data_dir("v35-dynamic-providers");
+    let db = open_with_host_cipher(dir.clone()).unwrap();
+    assert_eq!(schema_version_on(&db.conn).unwrap(), CURRENT_SCHEMA_VERSION);
+    let columns = v35_column_names(&db.conn, "dynamic_providers");
+    for required in [
+        "id",
+        "name",
+        "endpoint_url",
+        "upstream_protocol",
+        "auth_kind",
+        "created_at",
+        "updated_at",
+    ] {
+        assert!(columns.iter().any(|name| name == required), "{required}");
+    }
+    let model_columns = v35_column_names(&db.conn, "dynamic_provider_models");
+    assert!(model_columns.iter().any(|name| name == "public_model_key"));
+    assert!(!columns.iter().any(|name| name == "offering_id"));
+
+    let now = Utc::now();
+    let provider_id = uuid::Uuid::new_v4().to_string();
+    let runtime = crate::dynamic::DynamicProviderRuntime {
+        id: provider_id.clone(),
+        name: "Lab".into(),
+        endpoint_url: "http://127.0.0.1:9".into(),
+        upstream_protocol: crate::provider::UpstreamProtocolKind::ChatCompletions,
+        auth_kind: ocg_domain::dynamic::DynamicAuthKind::Bearer,
+        mappings: vec![ocg_domain::dynamic::DynamicModelMapping {
+            public_model: "lab-opus".into(),
+            upstream_model: "vendor/opus".into(),
+        }],
+        created_at: now,
+        updated_at: now,
+    };
+    let mut first = account("dyn-acct");
+    first.provider_id = provider_id.clone();
+    first.key_cipher = fixture_account_key_cipher();
+    db.create_dynamic_provider(&runtime, &first).unwrap();
+    let loaded = db.get_dynamic_provider(&provider_id).unwrap().unwrap();
+    assert_eq!(loaded.name, "Lab");
+    assert_eq!(loaded.mappings[0].public_model, "lab-opus");
+    assert_eq!(db.count_accounts_for_provider(&provider_id).unwrap(), 1);
+
+    let duplicate = db.conn.execute(
+        "INSERT INTO dynamic_provider_models
+         (provider_id, public_model, public_model_key, upstream_model)
+         VALUES (?1, 'LAB-OPUS', 'lab-opus', 'other')",
+        [&provider_id],
+    );
+    assert!(duplicate.is_err());
+    drop(db);
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn dynamic_provider_create_fault_rolls_back_provider_and_account() {
+    let dir = temp_data_dir("dyn-create-fault");
+    let db = open_with_host_cipher(dir.clone()).unwrap();
+    let now = Utc::now();
+    let provider_id = uuid::Uuid::new_v4().to_string();
+    let runtime = crate::dynamic::DynamicProviderRuntime {
+        id: provider_id.clone(),
+        name: "Faulty".into(),
+        endpoint_url: "http://127.0.0.1:9".into(),
+        upstream_protocol: crate::provider::UpstreamProtocolKind::Responses,
+        auth_kind: ocg_domain::dynamic::DynamicAuthKind::None,
+        mappings: vec![ocg_domain::dynamic::DynamicModelMapping {
+            public_model: "free-model".into(),
+            upstream_model: "free-model".into(),
+        }],
+        created_at: now,
+        updated_at: now,
+    };
+    let mut first = account("dyn-none");
+    first.provider_id = provider_id.clone();
+    first.credential_kind = crate::provider::CredentialKind::None;
+    first.key_cipher = String::new();
+    crate::db::dynamic_provider_fault::install("after_account_insert");
+    let error = db.create_dynamic_provider(&runtime, &first).unwrap_err();
+    crate::db::dynamic_provider_fault::clear();
+    assert!(
+        error
+            .to_string()
+            .contains("injected dynamic provider fault")
+    );
+    assert!(db.get_dynamic_provider(&provider_id).unwrap().is_none());
+    assert_eq!(db.count_accounts_for_provider(&provider_id).unwrap(), 0);
+    drop(db);
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn dynamic_provider_patch_fault_rolls_back_mappings_and_runtime_state() {
+    let dir = temp_data_dir("dyn-patch-fault");
+    let db = open_with_host_cipher(dir.clone()).unwrap();
+    let now = Utc::now();
+    let provider_id = uuid::Uuid::new_v4().to_string();
+    let runtime = crate::dynamic::DynamicProviderRuntime {
+        id: provider_id.clone(),
+        name: "PatchFault".into(),
+        endpoint_url: "http://127.0.0.1:9".into(),
+        upstream_protocol: crate::provider::UpstreamProtocolKind::ChatCompletions,
+        auth_kind: ocg_domain::dynamic::DynamicAuthKind::Bearer,
+        mappings: vec![ocg_domain::dynamic::DynamicModelMapping {
+            public_model: "lab-opus".into(),
+            upstream_model: "vendor/opus".into(),
+        }],
+        created_at: now,
+        updated_at: now,
+    };
+    let mut first = account("dyn-patch");
+    first.provider_id = provider_id.clone();
+    first.key_cipher = fixture_account_key_cipher();
+    db.create_dynamic_provider(&runtime, &first).unwrap();
+    db.conn
+        .execute(
+            "UPDATE accounts SET auth_error = 'stale' WHERE id = ?1",
+            [&first.id],
+        )
+        .unwrap();
+
+    let mut updated = runtime.clone();
+    updated.endpoint_url = "http://127.0.0.1:10".into();
+    updated.mappings = vec![ocg_domain::dynamic::DynamicModelMapping {
+        public_model: "lab-opus".into(),
+        upstream_model: "vendor/opus-2".into(),
+    }];
+    crate::db::dynamic_provider_fault::install("after_mapping_replace");
+    let error = db
+        .replace_dynamic_provider(&updated, true, false, None)
+        .unwrap_err();
+    crate::db::dynamic_provider_fault::clear();
+    assert!(
+        error
+            .to_string()
+            .contains("injected dynamic provider fault")
+    );
+    let loaded = db.get_dynamic_provider(&provider_id).unwrap().unwrap();
+    assert_eq!(loaded.endpoint_url, "http://127.0.0.1:9");
+    assert_eq!(loaded.mappings[0].upstream_model, "vendor/opus");
+    let account = db.get_account(&first.id).unwrap().unwrap();
+    assert_eq!(account.auth_error.as_deref(), Some("stale"));
     drop(db);
     fs::remove_dir_all(dir).unwrap();
 }

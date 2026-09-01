@@ -10,10 +10,7 @@ use ocg_core::dashboard_v3::{
 use ocg_core::db::AccountUsageCalibrationSnapshot;
 use ocg_core::models::UsageWindowKind;
 use ocg_core::models::{CreditBalance, ForwardLog};
-use ocg_core::provider::{
-    COMMAND_CODE_PROVIDER_ID, CUSTOM_API_OFFERING_ID, CUSTOM_PROVIDER_ID, GOAT_OFFERING_ID,
-    ZEN_FREE_ACCOUNT_ID,
-};
+use ocg_core::provider::{COMMAND_CODE_PROVIDER_ID, CUSTOM_PROVIDER_ID, ZEN_FREE_ACCOUNT_ID};
 use reqwest::{Method, StatusCode};
 use serde_json::{Map, Value, json};
 
@@ -199,7 +196,6 @@ async fn create_goat(harness: &V3Harness) -> String {
                 "name": "GOAT",
                 "key": "goat-key",
                 "providerId": COMMAND_CODE_PROVIDER_ID,
-                "offeringId": GOAT_OFFERING_ID,
                 "purchaseDate": purchase_date
             }),
         ),
@@ -222,7 +218,7 @@ fn seed_priced_goat_request(harness: &V3Harness, account_id: &str, cost: f64) {
             account_name: "GOAT".into(),
             route_account_id: Some(account_id.into()),
             provider_id: Some(COMMAND_CODE_PROVIDER_ID.into()),
-            offering_id: Some(GOAT_OFFERING_ID.into()),
+
             credential_account_id: Some(account_id.into()),
             client_key_id: None,
             client_key_name: None,
@@ -620,7 +616,6 @@ async fn dashboard_v3_unsupported_provider_usage_is_unavailable_and_empty() {
                 "name": "Custom",
                 "key": "custom-key",
                 "providerId": CUSTOM_PROVIDER_ID,
-                "offeringId": CUSTOM_API_OFFERING_ID,
                 "customConfig": {
                     "endpointUrl": "https://api.example.com/v1/messages",
                     "upstreamProtocol": "messages"

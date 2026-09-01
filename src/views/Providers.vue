@@ -2,6 +2,9 @@
   <div class="providers-page">
     <header class="providers-header">
       <h1>{{ t("供应商") }}</h1>
+      <n-button type="primary" :disabled="actionLocked" @click="openCreateDynamic">
+        {{ t("新建供应商") }}
+      </n-button>
     </header>
 
     <div
@@ -25,14 +28,14 @@
     </n-alert>
 
     <n-empty
-      v-else-if="!loading && scopes.length === 0"
+      v-else-if="!loading && scopes.length === 0 && dynamicEntries.length === 0"
       :description="t('暂无供应商范围')"
     />
 
-    <div v-else-if="activeScope" class="providers-layout">
+    <div v-else-if="activeScope || selectedDynamic" class="providers-layout">
       <aside class="providers-rail">
         <n-menu
-          :value="activeScope.key"
+          :value="selectedKey"
           :options="scopeMenuOptions"
           :aria-label="t('选择供应商范围')"
           @update:value="selectScopeKey"
@@ -42,7 +45,7 @@
       <div class="providers-main">
         <div class="providers-mobile-nav">
           <n-select
-            :value="activeScope.key"
+            :value="selectedKey"
             :options="scopeSelectOptions"
             :aria-label="t('选择供应商范围')"
             :disabled="actionLocked"
@@ -61,7 +64,51 @@
           </n-button>
         </n-alert>
 
-        <n-tabs v-model:value="activeTab" class="providers-tabs" display-directive="if">
+        <section v-if="selectedDynamic" class="providers-section" aria-labelledby="dynamic-provider-title">
+          <div class="providers-catalog-head">
+            <div class="providers-catalog-heading">
+              <h2 id="dynamic-provider-title">{{ selectedDynamic.name }}</h2>
+              <div class="providers-catalog-meta">
+                <n-tag size="small" :bordered="false">{{ t("用户定义") }}</n-tag>
+                <span>{{ t("该供应商没有价格或官方用量。") }}</span>
+              </div>
+            </div>
+            <n-space>
+              <n-button secondary :disabled="actionLocked" @click="openEditDynamic">{{ t("编辑供应商") }}</n-button>
+              <n-popconfirm
+                :positive-text="t('删除')"
+                :negative-text="t('取消')"
+                @positive-click="deleteSelectedDynamic"
+              >
+                <template #trigger>
+                  <n-button type="error" secondary :disabled="actionLocked">{{ t("删除供应商") }}</n-button>
+                </template>
+                {{ t("请先删除引用该供应商的账号，再删除供应商。不会级联删除账号。") }}
+              </n-popconfirm>
+            </n-space>
+          </div>
+          <dl class="dynamic-provider-facts">
+            <div><dt>{{ t("API 地址") }}</dt><dd><code>{{ selectedDynamic.endpoint_url }}</code></dd></div>
+            <div><dt>{{ t("上游协议") }}</dt><dd>{{ protocolDisplayName(selectedDynamic.upstream_protocol) }}</dd></div>
+            <div><dt>{{ t("鉴权方式") }}</dt><dd>{{ authDisplayName(selectedDynamic.auth_kind) }}</dd></div>
+          </dl>
+          <table class="providers-alias-table">
+            <thead>
+              <tr>
+                <th>{{ t("对外模型名") }}</th>
+                <th>{{ t("上游模型 ID") }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="model in selectedDynamic.models" :key="model.public_model">
+                <td><code>{{ model.public_model }}</code></td>
+                <td><code>{{ model.upstream_model }}</code></td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <n-tabs v-else-if="activeScope" v-model:value="activeTab" class="providers-tabs" display-directive="if">
           <n-tab-pane name="catalog" :tab="t('模型目录')">
             <section class="providers-section" aria-labelledby="provider-catalog-title">
               <div class="providers-catalog-head">
@@ -170,7 +217,7 @@
                 <div class="providers-catalog-heading">
                   <h2 id="provider-alias-title">{{ t("别名") }}</h2>
                   <p class="providers-alias-hint">
-                    {{ t("只读汇总当前供应商合同与 Custom 账号映射；编辑 Custom 映射请回到账号页。") }}
+                    {{ t("只读汇总当前供应商合同、用户定义供应商与 Custom 账号映射；编辑 Custom 映射请回到账号页。") }}
                   </p>
                 </div>
               </div>
@@ -224,6 +271,12 @@
       </div>
     </div>
 
+    <DynamicProviderModal
+      v-model:show="showDynamicModal"
+      :provider="editingDynamic"
+      @saved="onDynamicSaved"
+      @conflict="onDynamicConflict"
+    />
     <span class="sr-only" aria-live="polite" aria-atomic="true">{{ actionLive }}</span>
   </div>
 </template>
@@ -237,16 +290,19 @@ import {
   NMenu,
   NPopconfirm,
   NSelect,
+  NSpace,
   NSpin,
   NTabPane,
   NTabs,
+  NTag,
   useMessage,
 } from "naive-ui";
 import type { MenuOption, SelectOption } from "naive-ui";
 import { dashboardApi, DashboardRequestError, type Account } from "../api/dashboard";
-import { providerApi } from "../api/providers.ts";
+import { isRevisionConflict, providerApi } from "../api/providers.ts";
 import { useProvidersStore } from "../stores/providers.ts";
 import type {
+  DynamicProviderView,
   ModelProtocolOverrideUpdate,
   ProviderCatalogEntry,
   ProviderContractsResponse,
@@ -255,6 +311,7 @@ import type {
 } from "../api/providers.ts";
 import ProviderModelMatrix from "../components/ProviderModelMatrix.vue";
 import PricingCatalog from "../components/PricingCatalog.vue";
+import DynamicProviderModal from "../components/DynamicProviderModal.vue";
 import { locale, t } from "../i18n/index.ts";
 import { dashboardErrorDetail } from "../utils/errors.ts";
 import { applyAppViewSearchParams, readProviderScopeQuery } from "./app-navigation.ts";
@@ -269,7 +326,8 @@ import {
   PROVIDER_PROTOCOLS,
   selectProviderScope,
 } from "../domain/provider-contracts.ts";
-import { providerAliasRows } from "../domain/provider-aliases.ts";
+import { dynamicProviderAliasRows, providerAliasRows } from "../domain/provider-aliases.ts";
+import { isDynamicCatalogEntry } from "../domain/dynamic-provider.ts";
 import {
   CATALOG_SOURCE_CUSTOM_DISCOVERY,
   CATALOG_SOURCE_DECLARED,
@@ -283,6 +341,9 @@ const message = useMessage();
 const providersStore = useProvidersStore();
 const contracts = ref<ProviderContractsResponse | null>(null);
 const catalog = ref<ProviderCatalogEntry[] | null>(null);
+const dynamicDetails = ref<DynamicProviderView[]>([]);
+const showDynamicModal = ref(false);
+const editingDynamic = ref<DynamicProviderView | null>(null);
 const aliasAccounts = ref<Account[]>([]);
 const loading = ref(false);
 const loadError = ref("");
@@ -310,11 +371,18 @@ const scopes = computed(() => (
       .filter((scope) => scope.scope_kind === "provider")
     : []
 ));
-const aliasRows = computed(() => (
-  contracts.value
+const dynamicEntries = computed(() => (catalog.value ?? []).filter(isDynamicCatalogEntry));
+const selectedDynamic = computed(() => {
+  if (!selectedKey.value?.startsWith("dynamic:")) return null;
+  const id = selectedKey.value.slice("dynamic:".length);
+  return dynamicDetails.value.find((item) => item.id === id) ?? null;
+});
+const aliasRows = computed(() => {
+  const contractRows = contracts.value
     ? providerAliasRows(flattenProviderScopes(contracts.value, catalog.value), aliasAccounts.value)
-    : []
-));
+    : [];
+  return [...contractRows, ...dynamicProviderAliasRows(dynamicDetails.value)];
+});
 const aliasGroups = computed(() => {
   const groups = new Map<string, typeof aliasRows.value>();
   for (const row of aliasRows.value) {
@@ -346,14 +414,34 @@ const matrixActionLocked = computed(() => (
   || staticProtocolResetting.value
   || probingModels.value.size > 0
 ));
-const scopeMenuOptions = computed<MenuOption[]>(() => scopes.value.map((scope) => ({
-  key: scope.key,
-  label: scope.label,
-})));
-const scopeSelectOptions = computed<SelectOption[]>(() => scopes.value.map((scope) => ({
-  value: scope.key,
-  label: scope.label,
-})));
+const scopeMenuOptions = computed<MenuOption[]>(() => {
+  const builtin: MenuOption = {
+    type: "group",
+    label: t("内置"),
+    key: "builtin",
+    children: scopes.value.map((scope) => ({ key: scope.key, label: `${scope.label}` })),
+  };
+  const userDefined: MenuOption = {
+    type: "group",
+    label: t("用户定义"),
+    key: "user-defined",
+    children: dynamicEntries.value.map((entry) => ({
+      key: `dynamic:${entry.provider_id}`,
+      label: entry.display_name,
+    })),
+  };
+  return [
+    ...(scopes.value.length ? [builtin] : []),
+    ...(dynamicEntries.value.length ? [userDefined] : []),
+  ];
+});
+const scopeSelectOptions = computed<SelectOption[]>(() => [
+  ...scopes.value.map((scope) => ({ value: scope.key, label: `${scope.label} · ${t("内置")}` })),
+  ...dynamicEntries.value.map((entry) => ({
+    value: `dynamic:${entry.provider_id}`,
+    label: `${entry.display_name} · ${t("用户定义")}`,
+  })),
+]);
 const catalogRefreshVisible = computed(() => {
   const scope = activeScope.value;
   return Boolean(scope && catalogRefreshSupported(scope));
@@ -408,8 +496,23 @@ function writeScopeToUrl(scopeKind: string, scopeId: string) {
   window.history.replaceState(null, "", url);
 }
 
-function applyScopeFromQuery(fellBackNotice = false) {
+function selectDynamicProvider(providerId: string): boolean {
+  if (!dynamicEntries.value.some((entry) => entry.provider_id === providerId)) return false;
+  selectedKey.value = `dynamic:${providerId}`;
+  writeScopeToUrl("dynamic", providerId);
+  return true;
+}
+
+function applyScopeFromQuery(fellBackNotice = false, preferDynamicId?: string) {
+  if (preferDynamicId && selectDynamicProvider(preferDynamicId)) return;
+  if (selectedKey.value?.startsWith("dynamic:")) {
+    const id = selectedKey.value.slice("dynamic:".length);
+    if (selectDynamicProvider(id)) return;
+  }
   const query = readProviderScopeQuery(window.location.search);
+  if (query.scope_kind === "dynamic" && query.scope_id && selectDynamicProvider(query.scope_id)) {
+    return;
+  }
   const selected = selectProviderScope(scopes.value, query.scope_kind, query.scope_id);
   if (!selected.scope) {
     selectedKey.value = null;
@@ -424,10 +527,21 @@ function applyScopeFromQuery(fellBackNotice = false) {
 
 function selectScopeKey(key: string | number) {
   const value = String(key);
+  if (value.startsWith("dynamic:")) {
+    selectDynamicProvider(value.slice("dynamic:".length));
+    return;
+  }
   const scope = scopes.value.find((item) => item.key === value);
   if (!scope) return;
   selectedKey.value = value;
   writeScopeToUrl(scope.scope_kind, scope.scope_id);
+}
+
+function authDisplayName(kind: string): string {
+  if (kind === "none") return t("无鉴权");
+  if (kind === "bearer") return "Bearer";
+  if (kind === "x-api-key") return "x-api-key";
+  return kind;
 }
 
 function resetScopeActions() {
@@ -437,7 +551,7 @@ function resetScopeActions() {
   probeSummary.value = null;
 }
 
-async function loadContracts(options: { retain?: boolean } = {}): Promise<{ ok: boolean; error: string }> {
+async function loadContracts(options: { retain?: boolean; preferDynamicId?: string } = {}): Promise<{ ok: boolean; error: string }> {
   if (loading.value) {
     return { ok: false, error: loadError.value };
   }
@@ -449,7 +563,12 @@ async function loadContracts(options: { retain?: boolean } = {}): Promise<{ ok: 
       providersStore.loadCatalog(),
       dashboardApi.getAccounts(),
     ]);
-    if (catalogResult.status === "fulfilled") catalog.value = catalogResult.value;
+    if (catalogResult.status === "fulfilled") {
+      catalog.value = catalogResult.value;
+      const dynamicIds = catalogResult.value.filter(isDynamicCatalogEntry).map((entry) => entry.provider_id);
+      const loaded = await Promise.allSettled(dynamicIds.map((id) => providerApi.getDynamicProvider(id)));
+      dynamicDetails.value = loaded.flatMap((item) => item.status === "fulfilled" ? [item.value] : []);
+    }
     if (accountsResult.status === "fulfilled") {
       aliasAccounts.value = accountsResult.value;
       accountsLoadError.value = "";
@@ -459,14 +578,54 @@ async function loadContracts(options: { retain?: boolean } = {}): Promise<{ ok: 
     if (contractsResult.status === "fulfilled") {
       contracts.value = normalizeProviderContractsResponse(contractsResult.value);
       loadError.value = "";
-      applyScopeFromQuery(true);
+      applyScopeFromQuery(true, options.preferDynamicId);
       return { ok: true, error: "" };
     }
+    applyScopeFromQuery(true, options.preferDynamicId);
     const error = dashboardErrorDetail(contractsResult.reason);
     loadError.value = error;
     return { ok: false, error };
   } finally {
     loading.value = false;
+  }
+}
+
+function openCreateDynamic(): void {
+  editingDynamic.value = null;
+  showDynamicModal.value = true;
+}
+
+function openEditDynamic(): void {
+  if (!selectedDynamic.value) return;
+  editingDynamic.value = selectedDynamic.value;
+  showDynamicModal.value = true;
+}
+
+async function onDynamicSaved(providerId: string): Promise<void> {
+  const created = !editingDynamic.value;
+  await loadContracts({ retain: true, preferDynamicId: providerId });
+  message.success(created ? t("供应商已创建") : t("供应商已更新"));
+}
+
+async function onDynamicConflict(): Promise<void> {
+  await loadContracts({ retain: true });
+}
+
+async function deleteSelectedDynamic(): Promise<void> {
+  const current = selectedDynamic.value;
+  if (!current) return;
+  try {
+    await providerApi.deleteDynamicProvider(current.id);
+    message.success(t("供应商已删除"));
+    selectedKey.value = scopes.value[0]?.key ?? null;
+    await loadContracts({ retain: true });
+  } catch (error) {
+    if (isRevisionConflict(error) || (error instanceof DashboardRequestError && error.status === 409)) {
+      await loadContracts({ retain: true });
+      message.warning(t("数据已更新，请检查后重新保存。不会自动重试。"));
+      return;
+    }
+    message.error(t("删除供应商失败: {error}", { error: dashboardErrorDetail(error) }));
   }
 }
 
@@ -720,10 +879,30 @@ onUnmounted(() => {
   margin: 0 auto;
   overflow-x: hidden;
 }
+.providers-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
 .providers-header h1 {
-  margin: 0 0 16px;
+  margin: 0;
   color: var(--ocg-ink);
   font: 700 var(--ocg-font-xl)/1.3 "Bahnschrift", "Segoe UI Variable Display", sans-serif;
+}
+.dynamic-provider-facts {
+  display: grid;
+  gap: 8px 16px;
+  margin: 0 0 16px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+.dynamic-provider-facts dt {
+  color: var(--ocg-muted);
+  font-size: var(--ocg-font-xs);
+}
+.dynamic-provider-facts dd {
+  margin: 0;
 }
 
 .providers-alias-hint {

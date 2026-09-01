@@ -24,7 +24,6 @@ const goSnapshot = (models: PricingSnapshot["models"] = []): PricingSnapshot => 
 
 const providerSnapshot: StoredProviderPricingSnapshot = {
   provider_id: "provider",
-  offering_id: "offering",
   revision: "r1",
   activated_at: "2026-08-21T00:00:00Z",
   document_updated_at: null,

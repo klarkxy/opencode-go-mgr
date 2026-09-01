@@ -26,12 +26,10 @@
 //! `alias` compatibility facade keeps the historical public paths.
 
 use ocg_domain::ids::{
-    ANONYMOUS_FREE_OFFERING_ID, COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_ALIAS,
-    COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM, COMMAND_CODE_PROVIDER_ID, CPA_OFFERING_ID,
-    CPA_PROVIDER_ID, CUSTOM_API_OFFERING_ID, CUSTOM_PROVIDER_ID, GO_OFFERING_ID, GOAT_OFFERING_ID,
-    KIMI_CN_OFFERING_ID, KIMI_PROVIDER_ID, MINIMAX_CN_OFFERING_ID, MINIMAX_PROVIDER_ID,
-    OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID, custom_model_id_matches, is_free_model,
-    looks_raw_shaped,
+    COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_ALIAS, COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM,
+    COMMAND_CODE_PROVIDER_ID, CPA_PROVIDER_ID, CUSTOM_PROVIDER_ID, KIMI_PROVIDER_ID,
+    MINIMAX_PROVIDER_ID, OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID,
+    custom_model_id_matches, is_free_model, looks_raw_shaped,
 };
 use ocg_domain::protocol::supported_model_ids;
 use ocg_domain::provider::is_custom_api;
@@ -69,18 +67,28 @@ pub const AMBIGUOUS_MODEL_ID: &str = "ambiguous_model_id";
 /// One provider's upstream identity for a client-facing name.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderMapping {
-    pub provider_id: &'static str,
-    pub offering_id: &'static str,
+    pub provider_id: String,
     pub upstream_model: String,
-    /// Production-routeable mappings only. Reserved offerings stay false.
+    /// Production-routeable mappings only. Reserved providers stay false.
     pub routeable: bool,
+}
+
+/// One extra (non-sealed) provider's public-to-upstream mappings.
+///
+/// Used by dynamic Providers. Built-in and Custom catalogs stay on the named
+/// fields of [`RuntimeCatalogs`]; this collection avoids adding a new optional
+/// field per Provider.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExtraProviderCatalog {
+    pub provider_id: String,
+    pub mappings: Vec<(String, String)>,
 }
 
 /// Borrowed runtime catalog inputs used to overlay the sealed Alias registry.
 ///
 /// Callers pass one value instead of extending resolver signatures whenever a
 /// new static adapter contributes a catalog. The registry remains code-owned;
-/// this is data input, not a plugin or dynamic Alias authority.
+/// extra catalogs are a generic owned-string collection, not a plugin slot.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct RuntimeCatalogs<'a> {
     pub go: &'a [String],
@@ -90,36 +98,36 @@ pub struct RuntimeCatalogs<'a> {
     pub minimax: &'a [String],
     pub kimi: &'a [String],
     pub cpa: &'a [String],
+    pub extra: &'a [ExtraProviderCatalog],
 }
 
 impl ProviderMapping {
     pub fn is_opencode_go(&self) -> bool {
-        self.provider_id == OPENCODE_PROVIDER_ID && self.offering_id == GO_OFFERING_ID
+        self.provider_id == OPENCODE_PROVIDER_ID
     }
 
     pub fn is_zen_free(&self) -> bool {
         self.provider_id == OPENCODE_ZEN_FREE_PROVIDER_ID
-            && self.offering_id == ANONYMOUS_FREE_OFFERING_ID
     }
 
     pub fn is_command_code_goat(&self) -> bool {
-        ocg_domain::provider::is_command_code_goat(self.provider_id, self.offering_id)
+        ocg_domain::provider::is_command_code_goat(&self.provider_id)
     }
 
     pub fn is_custom_api(&self) -> bool {
-        is_custom_api(self.provider_id, self.offering_id)
+        is_custom_api(&self.provider_id)
     }
 
     pub fn is_minimax_cn(&self) -> bool {
-        self.provider_id == MINIMAX_PROVIDER_ID && self.offering_id == MINIMAX_CN_OFFERING_ID
+        self.provider_id == MINIMAX_PROVIDER_ID
     }
 
     pub fn is_kimi_cn(&self) -> bool {
-        self.provider_id == KIMI_PROVIDER_ID && self.offering_id == KIMI_CN_OFFERING_ID
+        self.provider_id == KIMI_PROVIDER_ID
     }
 
     pub fn is_cpa(&self) -> bool {
-        self.provider_id == CPA_PROVIDER_ID && self.offering_id == CPA_OFFERING_ID
+        self.provider_id == CPA_PROVIDER_ID
     }
 }
 
@@ -205,12 +213,7 @@ impl ResolveError {
             } => {
                 let providers = mappings
                     .iter()
-                    .map(|mapping| {
-                        format!(
-                            "{}/{}:{}",
-                            mapping.provider_id, mapping.offering_id, mapping.upstream_model
-                        )
-                    })
+                    .map(|mapping| format!("{}:{}", mapping.provider_id, mapping.upstream_model))
                     .collect::<Vec<_>>()
                     .join(", ");
                 format!(
@@ -281,7 +284,22 @@ fn build_runtime_registry(catalogs: RuntimeCatalogs<'_>) -> Registry {
     );
     insert_goat_catalog(&mut registry, catalogs.command_code);
     insert_cpa_catalog(&mut registry, catalogs.cpa);
+    insert_extra_catalogs(&mut registry, catalogs.extra);
     registry
+}
+
+fn insert_extra_catalogs(registry: &mut Registry, extras: &[ExtraProviderCatalog]) {
+    for extra in extras {
+        for (public_model, upstream_model) in &extra.mappings {
+            let provider_mapping = mapping(&extra.provider_id, upstream_model, true);
+            insert_raw_mapping(registry, provider_mapping.clone());
+            if !looks_raw_shaped(public_model) {
+                insert_mapping(registry, public_model, provider_mapping);
+            } else {
+                insert_raw_mapping(registry, mapping(&extra.provider_id, public_model, true));
+            }
+        }
+    }
 }
 
 fn insert_goat_catalog(registry: &mut Registry, model_ids: &[String]) {
@@ -331,13 +349,16 @@ fn insert_cpa_catalog(registry: &mut Registry, model_ids: &[String]) {
     }
 }
 
-fn go_mapping(upstream_model: &str) -> ProviderMapping {
+fn mapping(provider_id: &str, upstream_model: &str, routeable: bool) -> ProviderMapping {
     ProviderMapping {
-        provider_id: OPENCODE_PROVIDER_ID,
-        offering_id: GO_OFFERING_ID,
+        provider_id: provider_id.to_string(),
         upstream_model: upstream_model.to_string(),
-        routeable: true,
+        routeable,
     }
+}
+
+fn go_mapping(upstream_model: &str) -> ProviderMapping {
+    mapping(OPENCODE_PROVIDER_ID, upstream_model, true)
 }
 
 fn goat_deepseek_v4_flash_mapping() -> ProviderMapping {
@@ -345,12 +366,7 @@ fn goat_deepseek_v4_flash_mapping() -> ProviderMapping {
 }
 
 fn goat_mapping(upstream_model: &str, routeable: bool) -> ProviderMapping {
-    ProviderMapping {
-        provider_id: COMMAND_CODE_PROVIDER_ID,
-        offering_id: GOAT_OFFERING_ID,
-        upstream_model: upstream_model.to_string(),
-        routeable,
-    }
+    mapping(COMMAND_CODE_PROVIDER_ID, upstream_model, routeable)
 }
 
 fn goat_catalog_hit(goat_model_ids: &[String], requested: &str) -> Option<String> {
@@ -404,48 +420,23 @@ fn go_alias_mappings(upstream_model: &'static str) -> Vec<ProviderMapping> {
 }
 
 fn zen_mapping(upstream_model: &str) -> ProviderMapping {
-    ProviderMapping {
-        provider_id: OPENCODE_ZEN_FREE_PROVIDER_ID,
-        offering_id: ANONYMOUS_FREE_OFFERING_ID,
-        upstream_model: upstream_model.to_string(),
-        routeable: true,
-    }
+    mapping(OPENCODE_ZEN_FREE_PROVIDER_ID, upstream_model, true)
 }
 
 fn custom_mapping(upstream_model: &str) -> ProviderMapping {
-    ProviderMapping {
-        provider_id: CUSTOM_PROVIDER_ID,
-        offering_id: CUSTOM_API_OFFERING_ID,
-        upstream_model: upstream_model.to_string(),
-        routeable: true,
-    }
+    mapping(CUSTOM_PROVIDER_ID, upstream_model, true)
 }
 
 fn minimax_mapping(upstream_model: &str) -> ProviderMapping {
-    ProviderMapping {
-        provider_id: MINIMAX_PROVIDER_ID,
-        offering_id: MINIMAX_CN_OFFERING_ID,
-        upstream_model: upstream_model.to_string(),
-        routeable: true,
-    }
+    mapping(MINIMAX_PROVIDER_ID, upstream_model, true)
 }
 
 fn kimi_mapping(upstream_model: &str) -> ProviderMapping {
-    ProviderMapping {
-        provider_id: KIMI_PROVIDER_ID,
-        offering_id: KIMI_CN_OFFERING_ID,
-        upstream_model: upstream_model.to_string(),
-        routeable: true,
-    }
+    mapping(KIMI_PROVIDER_ID, upstream_model, true)
 }
 
 fn cpa_mapping(upstream_model: &str) -> ProviderMapping {
-    ProviderMapping {
-        provider_id: CPA_PROVIDER_ID,
-        offering_id: CPA_OFFERING_ID,
-        upstream_model: upstream_model.to_string(),
-        routeable: true,
-    }
+    mapping(CPA_PROVIDER_ID, upstream_model, true)
 }
 
 /// Sentinel upstream id for Custom-only resolutions. Per-candidate materialization
@@ -492,7 +483,6 @@ fn insert_mapping(registry: &mut Registry, alias: &str, mapping: ProviderMapping
 fn upsert_mapping(registry: &mut Registry, alias: Option<&str>, mapping: ProviderMapping) {
     let same_identity = |existing: &ProviderMapping| {
         existing.provider_id == mapping.provider_id
-            && existing.offering_id == mapping.offering_id
             && existing.upstream_model == mapping.upstream_model
     };
     if let Some(alias) = alias {
@@ -671,6 +661,7 @@ pub fn resolve_with_extended_catalogs(
             minimax: minimax_model_ids,
             kimi: kimi_model_ids,
             cpa: &[],
+            extra: &[],
         },
     )
 }
@@ -705,13 +696,125 @@ pub fn resolve_with_runtime_catalogs(
         },
         other => other,
     };
-    match custom_resolved {
+    let goat_resolved = match custom_resolved {
         Ok(resolved) => overlay_goat_catalog(resolved, catalogs.command_code, &registry),
         Err(ResolveError::Unknown { requested }) => {
             overlay_unknown_goat(requested, catalogs.command_code, &registry)
         }
         other => other,
+    };
+    match goat_resolved {
+        Ok(resolved) => overlay_extra_catalogs(resolved, catalogs.extra),
+        Err(ResolveError::Unknown { requested }) => {
+            overlay_unknown_extra(requested, catalogs.extra)
+        }
+        other => other,
     }
+}
+
+fn extra_mapping(extra: &ExtraProviderCatalog, upstream_model: &str) -> ProviderMapping {
+    mapping(&extra.provider_id, upstream_model, true)
+}
+
+fn extra_public_hit<'a>(
+    extra: &'a ExtraProviderCatalog,
+    requested: &str,
+) -> Option<&'a (String, String)> {
+    extra
+        .mappings
+        .iter()
+        .find(|(public_model, upstream_model)| {
+            custom_model_id_matches(public_model, requested)
+                || upstream_model.trim() == requested.trim()
+        })
+}
+
+fn overlay_extra_catalogs(
+    resolved: ResolvedModel,
+    extras: &[ExtraProviderCatalog],
+) -> Result<ResolvedModel, ResolveError> {
+    let mut current = resolved;
+    for extra in extras {
+        current = overlay_one_extra(current, extra)?;
+    }
+    Ok(current)
+}
+
+fn overlay_one_extra(
+    resolved: ResolvedModel,
+    extra: &ExtraProviderCatalog,
+) -> Result<ResolvedModel, ResolveError> {
+    let Some((public_model, upstream_model)) = extra_public_hit(extra, resolved.requested()) else {
+        return Ok(resolved);
+    };
+    let replacement = extra_mapping(extra, upstream_model);
+    match resolved {
+        ResolvedModel::Alias {
+            requested,
+            alias,
+            mut mappings,
+        } => {
+            if let Some(existing) = mappings
+                .iter_mut()
+                .find(|mapping| mapping.provider_id.eq_ignore_ascii_case(&extra.provider_id))
+            {
+                *existing = replacement;
+            } else {
+                mappings.push(replacement);
+            }
+            let _ = public_model;
+            Ok(ResolvedModel::Alias {
+                requested,
+                alias,
+                mappings,
+            })
+        }
+        ResolvedModel::PinnedRaw { requested, mapping }
+            if !mapping.provider_id.eq_ignore_ascii_case(&extra.provider_id) =>
+        {
+            Err(ResolveError::Ambiguous {
+                requested,
+                mappings: vec![mapping, replacement],
+            })
+        }
+        other => Ok(other),
+    }
+}
+
+fn overlay_unknown_extra(
+    requested: String,
+    extras: &[ExtraProviderCatalog],
+) -> Result<ResolvedModel, ResolveError> {
+    let mut public_hits = Vec::new();
+    let mut raw_hits = Vec::new();
+    for extra in extras {
+        for (public_model, upstream_model) in &extra.mappings {
+            if custom_model_id_matches(public_model, &requested) {
+                public_hits.push((public_model.clone(), extra_mapping(extra, upstream_model)));
+            }
+            if upstream_model.trim() == requested.trim() {
+                raw_hits.push(extra_mapping(extra, upstream_model));
+            }
+        }
+    }
+    let exact_raw = raw_hits
+        .iter()
+        .any(|mapping| mapping.upstream_model.trim() == requested.trim());
+    if exact_raw && (looks_raw_shaped(&requested) || public_hits.is_empty()) {
+        return pin_or_ambiguous(requested, &raw_hits);
+    }
+    if !public_hits.is_empty() {
+        let alias = public_hits[0].0.clone();
+        return Ok(ResolvedModel::Alias {
+            requested,
+            alias,
+            mappings: public_hits
+                .into_iter()
+                .map(|(_, mapping)| mapping)
+                .collect(),
+        });
+    }
+    Err(ResolveError::Unknown { requested })
 }
 
 fn overlay_go_catalog(
@@ -839,7 +942,6 @@ fn overlay_known_provider(
             if let Some(existing) = mappings.iter_mut().find(|existing| {
                 let replacement = mapping(&canonical);
                 existing.provider_id == replacement.provider_id
-                    && existing.offering_id == replacement.offering_id
             }) {
                 *existing = mapping(&canonical);
             } else {
@@ -856,9 +958,7 @@ fn overlay_known_provider(
             mapping: existing,
         } => {
             let replacement = mapping(&canonical);
-            if existing.provider_id == replacement.provider_id
-                && existing.offering_id == replacement.offering_id
-            {
+            if existing.provider_id == replacement.provider_id {
                 Ok(ResolvedModel::PinnedRaw {
                     requested,
                     mapping: replacement,
@@ -1030,7 +1130,7 @@ pub fn published_aliases() -> Vec<String> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublishedAlias {
     pub alias: String,
-    pub owned_by: &'static str,
+    pub owned_by: String,
 }
 
 /// Routeable preferred aliases that `GET /v1/models` exposes, in deterministic
@@ -1039,7 +1139,7 @@ pub struct PublishedAlias {
 ///
 /// First-wins `owned_by` is only the client list advertisement. Catalog and
 /// application-model discovery use [`routeable_aliases_for`], which keeps an
-/// alias under every offering that currently has a routeable mapping.
+/// alias under every provider that currently has a routeable mapping.
 pub fn published_routeable_aliases() -> Vec<PublishedAlias> {
     published_routeable_in(registry())
 }
@@ -1087,6 +1187,7 @@ pub fn published_routeable_aliases_with_extended_catalogs(
         minimax: minimax_model_ids,
         kimi: kimi_model_ids,
         cpa: &[],
+        extra: &[],
     })
 }
 
@@ -1256,34 +1357,29 @@ fn published_routeable_in(registry: &Registry) -> Vec<PublishedAlias> {
                 .find(|mapping| mapping.routeable)
                 .map(|mapping| PublishedAlias {
                     alias: entry.alias.clone(),
-                    owned_by: mapping.provider_id,
+                    owned_by: mapping.provider_id.clone(),
                 })
         })
         .collect()
 }
 
 /// Preferred aliases that currently have a routeable mapping for this
-/// provider/offering, in deterministic registry order. Raw upstream IDs are
-/// never returned. Unroutable mappings (GOAT / Custom today) yield an
-/// empty list without a hardcoded per-plan alias set.
-pub fn routeable_aliases_for(provider_id: &str, offering_id: &str) -> Vec<String> {
-    routeable_aliases_for_in(registry(), provider_id, offering_id)
+/// provider, in deterministic registry order. Raw upstream IDs are
+/// never returned. Unroutable mappings yield an empty list without a
+/// hardcoded per-plan alias set.
+pub fn routeable_aliases_for(provider_id: &str) -> Vec<String> {
+    routeable_aliases_for_in(registry(), provider_id)
 }
 
-fn routeable_aliases_for_in(
-    registry: &Registry,
-    provider_id: &str,
-    offering_id: &str,
-) -> Vec<String> {
+fn routeable_aliases_for_in(registry: &Registry, provider_id: &str) -> Vec<String> {
     registry
         .aliases
         .values()
         .filter(|entry| {
-            entry.mappings.iter().any(|mapping| {
-                mapping.routeable
-                    && mapping.provider_id == provider_id
-                    && mapping.offering_id == offering_id
-            })
+            entry
+                .mappings
+                .iter()
+                .any(|mapping| mapping.routeable && mapping.provider_id == provider_id)
         })
         .map(|entry| entry.alias.clone())
         .collect()
@@ -1291,15 +1387,13 @@ fn routeable_aliases_for_in(
 
 pub fn routeable_aliases_for_with_zen(
     provider_id: &str,
-    offering_id: &str,
     zen_free_models: &[String],
 ) -> Vec<String> {
-    routeable_aliases_for_in(&build_registry(zen_free_models), provider_id, offering_id)
+    routeable_aliases_for_in(&build_registry(zen_free_models), provider_id)
 }
 
 pub fn routeable_aliases_for_with_extended_catalogs(
     provider_id: &str,
-    offering_id: &str,
     zen_free_models: &[String],
     goat_model_ids: &[String],
     minimax_model_ids: &[String],
@@ -1307,7 +1401,6 @@ pub fn routeable_aliases_for_with_extended_catalogs(
 ) -> Vec<String> {
     routeable_aliases_for_with_runtime_catalogs(
         provider_id,
-        offering_id,
         RuntimeCatalogs {
             go: &[],
             zen_free: zen_free_models,
@@ -1316,18 +1409,18 @@ pub fn routeable_aliases_for_with_extended_catalogs(
             minimax: minimax_model_ids,
             kimi: kimi_model_ids,
             cpa: &[],
+            extra: &[],
         },
     )
 }
 
-/// Routeable aliases for one sealed offering after applying all runtime
+/// Routeable aliases for one sealed provider after applying all runtime
 /// catalogs.
 pub fn routeable_aliases_for_with_runtime_catalogs(
     provider_id: &str,
-    offering_id: &str,
     catalogs: RuntimeCatalogs<'_>,
 ) -> Vec<String> {
-    routeable_aliases_for_in(&build_runtime_registry(catalogs), provider_id, offering_id)
+    routeable_aliases_for_in(&build_runtime_registry(catalogs), provider_id)
 }
 
 pub fn is_published_alias(name: &str) -> bool {
@@ -1339,13 +1432,13 @@ type ResolveCustom = fn(&str, &[String]) -> Result<ResolvedModel, ResolveError>;
 type ResolveProviderModels = fn(&str, &[String], &[String]) -> Result<ResolvedModel, ResolveError>;
 type ResolveCatalogs =
     fn(&str, &[String], &[String], &[String]) -> Result<ResolvedModel, ResolveError>;
-type RouteableWithZen = fn(&str, &str, &[String]) -> Vec<String>;
+type RouteableWithZen = fn(&str, &[String]) -> Vec<String>;
 type RouteableProviderExtendedCatalogs =
-    fn(&str, &str, &[String], &[String], &[String], &[String]) -> Vec<String>;
+    fn(&str, &[String], &[String], &[String], &[String]) -> Vec<String>;
 type ResolveRuntimeCatalogs =
     for<'a> fn(&str, RuntimeCatalogs<'a>) -> Result<ResolvedModel, ResolveError>;
 type PublishRuntimeCatalogs = for<'a> fn(RuntimeCatalogs<'a>) -> Vec<PublishedAlias>;
-type RouteableRuntimeCatalogs = for<'a> fn(&str, &str, RuntimeCatalogs<'a>) -> Vec<String>;
+type RouteableRuntimeCatalogs = for<'a> fn(&str, RuntimeCatalogs<'a>) -> Vec<String>;
 
 const _: ResolveName = resolve;
 const _: ResolveCustom = resolve_with_custom;
@@ -1357,7 +1450,7 @@ const _: fn() -> Vec<PublishedAlias> = published_routeable_aliases;
 const _: fn(&[String]) -> Vec<PublishedAlias> = published_routeable_aliases_with_zen;
 const _: fn(&[String], &[String]) -> Vec<PublishedAlias> =
     published_routeable_aliases_with_catalogs;
-const _: fn(&str, &str) -> Vec<String> = routeable_aliases_for;
+const _: fn(&str) -> Vec<String> = routeable_aliases_for;
 const _: RouteableWithZen = routeable_aliases_for_with_zen;
 const _: RouteableProviderExtendedCatalogs = routeable_aliases_for_with_extended_catalogs;
 const _: PublishRuntimeCatalogs = published_routeable_aliases_with_runtime_catalogs;

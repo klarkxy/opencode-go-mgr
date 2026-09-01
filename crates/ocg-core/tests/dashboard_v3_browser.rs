@@ -84,8 +84,7 @@ async fn fake_worker_status(
     let account_id = state.active_account.lock().unwrap().clone();
     AxumJson(json!({
         "active": account_id.is_some(),
-        "account_id": account_id,
-    }))
+        "account_id": account_id }))
     .into_response()
 }
 

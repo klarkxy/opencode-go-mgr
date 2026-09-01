@@ -11,8 +11,8 @@ use crate::models::{
     Account, AccountSetupStep, AccountType, AccountUpdate, normalize_account_notes,
 };
 use crate::provider::{
-    CPA_ACCOUNT_ID, ConnectionVerificationStatus, GO_OFFERING_ID, OPENCODE_PROVIDER_ID,
-    VerificationPolicy, ZEN_FREE_ACCOUNT_ID,
+    CPA_ACCOUNT_ID, ConnectionVerificationStatus, OPENCODE_PROVIDER_ID, VerificationPolicy,
+    ZEN_FREE_ACCOUNT_ID,
 };
 use chrono::Utc;
 use std::fmt;
@@ -179,7 +179,7 @@ fn create_go_api_key_locked(
             "name must be at most 200 characters".into(),
         ));
     }
-    let plan = crate::provider::builtin_plan(OPENCODE_PROVIDER_ID, GO_OFFERING_ID)
+    let plan = crate::provider::builtin_provider(OPENCODE_PROVIDER_ID)
         .ok_or_else(|| AccountControlError::Invalid("unknown provider offering".into()))?;
     crate::provider::validate_plan_key(plan, &key)
         .map_err(|error| AccountControlError::Invalid(error.to_string()))?;
@@ -188,7 +188,7 @@ fn create_go_api_key_locked(
     let account = Account {
         id: id.clone(),
         provider_id: OPENCODE_PROVIDER_ID.to_string(),
-        offering_id: GO_OFFERING_ID.to_string(),
+
         credential_kind: crate::provider::CredentialKind::ApiKey,
         quota_scope: crate::provider::QuotaScope::Key,
         name,
@@ -216,12 +216,8 @@ fn create_go_api_key_locked(
         created_at: now,
         updated_at: now,
     };
-    crate::provider::ensure_enabled_offering_is_routable(
-        &account.provider_id,
-        &account.offering_id,
-        account.enabled,
-    )
-    .map_err(|error| AccountControlError::Conflict(error.to_string()))?;
+    crate::provider::ensure_enabled_provider_is_routable(&account.provider_id, account.enabled)
+        .map_err(|error| AccountControlError::Conflict(error.to_string()))?;
     host.create_account_with_contract(&account)
         .map_err(map_write_error)?;
     let _ = host.log_gateway(
@@ -357,16 +353,16 @@ pub(crate) fn ensure_account_can_enable(
     host: &impl AccountControlHost,
     account: &Account,
 ) -> Result<(), AccountControlError> {
-    crate::provider::ensure_offering_can_enable(&account.provider_id, &account.offering_id)
+    crate::provider::ensure_provider_can_enable(&account.provider_id)
         .map_err(|error| AccountControlError::Conflict(error.to_string()))?;
-    let plan = crate::provider::builtin_plan(&account.provider_id, &account.offering_id)
+    let plan = crate::provider::builtin_provider(&account.provider_id)
         .ok_or_else(|| AccountControlError::Invalid("unknown provider offering".into()))?;
     // Verification blocks enablement only for Plans whose composed card
     // descriptor gates on it (GOAT). Custom keeps `VerificationPolicy::Required`
     // for status tracking, but its card flips the gate off, so a pending Custom
     // account may be enabled without verifying first.
     let verification_gates_enablement = plan.verification_policy == VerificationPolicy::Required
-        && crate::provider::ProviderRegistry::get(&account.provider_id, &account.offering_id)
+        && crate::provider::ProviderRegistry::get(&account.provider_id)
             .is_some_and(|descriptor| descriptor.card_actions.enable_requires_verification);
     if verification_gates_enablement {
         let status = host
@@ -467,7 +463,7 @@ mod tests {
     use crate::crypto::{KeyCipher, StaticKeyCipher};
     use crate::db::Database;
     use crate::models::{AccountSetupStep, AccountType};
-    use crate::provider::{CUSTOM_API_OFFERING_ID, CUSTOM_PROVIDER_ID};
+    use crate::provider::CUSTOM_PROVIDER_ID;
     use crate::state::CoreStateInner;
     use std::sync::Arc;
 
@@ -491,7 +487,7 @@ mod tests {
         Account {
             id: id.to_string(),
             provider_id: CUSTOM_PROVIDER_ID.to_string(),
-            offering_id: CUSTOM_API_OFFERING_ID.to_string(),
+
             credential_kind: crate::provider::CredentialKind::ApiKey,
             quota_scope: crate::provider::QuotaScope::Key,
             name: id.to_string(),
@@ -532,7 +528,7 @@ mod tests {
         .unwrap();
         assert!(created.enabled);
         assert_eq!(created.provider_id, OPENCODE_PROVIDER_ID);
-        assert_eq!(created.offering_id, GO_OFFERING_ID);
+        assert_eq!(created.provider_id, OPENCODE_PROVIDER_ID);
         assert_eq!(created.username.as_deref(), Some("alice"));
         assert_eq!(state.settings_revision(), before + 1);
 
@@ -577,13 +573,9 @@ mod tests {
         // Custom keeps required verification for status tracking while its
         // card does not gate enablement. Command Code's public model catalog
         // is not Key verification, so its Plan and card are both ungated.
-        let custom_plan =
-            crate::provider::builtin_plan(CUSTOM_PROVIDER_ID, CUSTOM_API_OFFERING_ID).unwrap();
-        let goat_plan = crate::provider::builtin_plan(
-            crate::provider::COMMAND_CODE_PROVIDER_ID,
-            crate::provider::GOAT_OFFERING_ID,
-        )
-        .unwrap();
+        let custom_plan = crate::provider::builtin_provider(CUSTOM_PROVIDER_ID).unwrap();
+        let goat_plan =
+            crate::provider::builtin_provider(crate::provider::COMMAND_CODE_PROVIDER_ID).unwrap();
         assert_eq!(
             custom_plan.verification_policy,
             crate::provider::VerificationPolicy::Required
@@ -592,15 +584,11 @@ mod tests {
             goat_plan.verification_policy,
             crate::provider::VerificationPolicy::NotRequired
         );
-        let custom_card =
-            crate::provider::ProviderRegistry::get(CUSTOM_PROVIDER_ID, CUSTOM_API_OFFERING_ID)
-                .unwrap();
+        let custom_card = crate::provider::ProviderRegistry::get(CUSTOM_PROVIDER_ID).unwrap();
         assert!(!custom_card.card_actions.enable_requires_verification);
-        let goat_card = crate::provider::ProviderRegistry::get(
-            crate::provider::COMMAND_CODE_PROVIDER_ID,
-            crate::provider::GOAT_OFFERING_ID,
-        )
-        .unwrap();
+        let goat_card =
+            crate::provider::ProviderRegistry::get(crate::provider::COMMAND_CODE_PROVIDER_ID)
+                .unwrap();
         assert!(!goat_card.card_actions.enable_requires_verification);
     }
 

@@ -32,6 +32,7 @@ test("Providers excludes account-scoped Custom API contracts from its supplier n
 test("Providers exposes a read-only Alias tab from existing contracts and accounts", () => {
   assert.match(providers, /<n-tab-pane name="aliases"/);
   assert.match(providers, /providerAliasRows\(flattenProviderScopes\(contracts\.value, catalog\.value\), aliasAccounts\.value\)/);
+  assert.match(providers, /dynamicProviderAliasRows\(dynamicDetails\.value\)/);
   assert.match(providers, /const aliasGroups = computed/);
   assert.match(providers, /v-for="group in aliasGroups"/);
   assert.match(providers, /dashboardApi\.getAccounts\(\)/);

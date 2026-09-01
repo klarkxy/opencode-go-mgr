@@ -2,23 +2,28 @@
 
 # Providers
 
-Want to connect another upstream or contribute a built-in integration? Start with [Add a Provider](add-provider.md), which includes the upstream HTTP contract and the sealed-registry path.
+Want to connect another upstream or contribute a built-in integration? Start with [Add a Provider](add-provider.md), which includes user-defined Providers, Custom API, and the sealed Adapter Registry path.
 
 **Providers** is the supplier control plane — the page you land on when an old
 bookmark still ends in `?view=pricing`.
 
-Under the hood it is a static Provider Registry plus a handful of
-capability-specific adapters. Custom API is a Configurable HTTP adapter, not a base class
-everyone inherits from. Scopes are split like this:
+The Adapter Registry stays static and sealed. Built-in Providers and
+user-defined Providers share this page, labelled **Built-in** or
+**User-defined**. Custom API is a Configurable HTTP adapter used as an
+account-owned path, not a base class everyone inherits from. Scopes are split
+like this:
 
-- `Provider(contract_scope_id)` for one exact built-in Provider/Offering
-  contract. Existing scope IDs keep their historical Provider-shaped values.
+- `Provider(contract_scope_id)` for one exact built-in Provider contract.
+  Existing scope IDs keep their historical Provider-shaped values.
+- User-defined Providers persist as typed definitions and bind Configurable
+  HTTP. Their Endpoint, protocol, auth kind, and mappings are edited here.
 - `CustomEndpoint(account_id)` scopes keep Custom mappings account-owned and
   never editable from this page.
 
-The left rail lists the built-in Provider/Offering contract scopes. The main pane has three tabs:
-**Model catalog**, **Pricing**, and **Alias**. The old catalog and
-model-contract views are merged into one matrix on the Model catalog tab.
+The left rail lists built-in contract scopes and user-defined Providers. Built-in
+main panes keep three tabs: **Model catalog**, **Pricing**, and **Alias**.
+User-defined panes show configuration, mappings, and edit/delete. User-defined
+Providers are unpriced.
 
 **Alias** is read-only. It aggregates the existing Provider contracts and
 account capabilities into public names, with

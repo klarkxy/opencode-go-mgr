@@ -3,9 +3,8 @@
 
 use chrono::Utc;
 use ocg_core::provider::{
-    COMMAND_CODE_PROVIDER_ID, CUSTOM_API_OFFERING_ID, CUSTOM_PROVIDER_ID,
-    ConnectionVerificationStatus, GOAT_OFFERING_ID, OPENCODE_PROVIDER_ID,
-    OPENCODE_ZEN_FREE_PROVIDER_ID, ZEN_FREE_ACCOUNT_ID,
+    COMMAND_CODE_PROVIDER_ID, CUSTOM_PROVIDER_ID, ConnectionVerificationStatus,
+    OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID, ZEN_FREE_ACCOUNT_ID,
 };
 use reqwest::header::CACHE_CONTROL;
 use reqwest::{Method, StatusCode};
@@ -87,7 +86,6 @@ async fn create_source_accounts(harness: &V3Harness) {
                 "name": "Migrated Custom",
                 "key": CUSTOM_KEY,
                 "providerId": CUSTOM_PROVIDER_ID,
-                "offeringId": CUSTOM_API_OFFERING_ID,
                 "customConfig": {
                     "endpointUrl": "https://api.example.com/v1/messages",
                     "upstreamProtocol": "messages"
@@ -112,7 +110,6 @@ async fn create_source_accounts(harness: &V3Harness) {
                 "name": "Migrated GOAT",
                 "key": GOAT_KEY,
                 "providerId": COMMAND_CODE_PROVIDER_ID,
-                "offeringId": GOAT_OFFERING_ID
             }),
         ),
     )

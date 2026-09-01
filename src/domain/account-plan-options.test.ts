@@ -5,13 +5,11 @@ import { buildPlanChooserGroups, buildPlanOptions } from "./account-plan-options
 
 function catalogEntry(
   provider_id: string,
-  offering_id: string,
   extra: Partial<ProviderCatalogEntry> = {},
 ): ProviderCatalogEntry {
   return {
     provider_id,
-    offering_id,
-    display_name: `${provider_id}/${offering_id}`,
+    display_name: provider_id,
     display_family: provider_id,
     credential_kind: "api_key",
     quota_scope: "key",
@@ -47,13 +45,13 @@ test("empty or failed catalogs keep the explicit OpenCode Go import option", () 
 
 test("add-account chooser omits singleton Zen Free and groups remaining families", () => {
   const catalog = [
-    catalogEntry("opencode", "go", {
+    catalogEntry("opencode", {
       display_name: "OpenCode Go Catalog",
       routable: true,
       creation_availability: "available",
     }),
-    catalogEntry("command-code", "goat", { routable: false, creation_availability: "available" }),
-    catalogEntry("custom", "api", { routable: true, creation_availability: "available" }),
+    catalogEntry("command-code", { routable: false, creation_availability: "available" }),
+    catalogEntry("custom", { routable: true, creation_availability: "available" }),
   ];
   const options = buildPlanOptions(catalog);
   assert.equal(
@@ -77,9 +75,37 @@ test("add-account chooser omits singleton Zen Free and groups remaining families
   );
 });
 
+test("user-defined Providers appear in Add Account and none-auth stays a singleton", () => {
+  const catalog = [
+    catalogEntry("opencode", { routable: true, creation_availability: "available" }),
+    catalogEntry("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", {
+      display_name: "Lab",
+      model_source: "dynamic_provider",
+      routable: true,
+      creation_availability: "available",
+      singleton: false,
+    }),
+    catalogEntry("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", {
+      display_name: "Open",
+      model_source: "dynamic_provider",
+      credential_kind: "none",
+      singleton: true,
+      creation_availability: "unavailable",
+    }),
+  ];
+  const options = buildPlanOptions(catalog);
+  const lab = options.find((option) => option.optionId === "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")!;
+  const open = options.find((option) => option.optionId === "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")!;
+  assert.equal(lab.source, "user-defined");
+  assert.equal(lab.disabled, false);
+  assert.equal(lab.plan.id, "dynamic-http");
+  assert.equal(open.disabled, true);
+  assert.equal(open.disabledReason, "无鉴权供应商只能有一个账号。");
+});
+
 test("GOAT follows the catalog without inventing a Key-verification gate", () => {
   const routable = buildPlanChooserGroups([
-    catalogEntry("command-code", "goat", { routable: true, creation_availability: "available" }),
+    catalogEntry("command-code", { routable: true, creation_availability: "available" }),
   ]);
   const available = routable.find((group) => group.id === "available")!;
   const goat = available.options.find(({ plan }) => plan.id === "command-code-goat")!;
@@ -87,7 +113,7 @@ test("GOAT follows the catalog without inventing a Key-verification gate", () =>
   assert.equal(goat.creationHint, "");
 
   const draft = buildPlanChooserGroups([
-    catalogEntry("command-code", "goat", { routable: false, creation_availability: "available" }),
+    catalogEntry("command-code", { routable: false, creation_availability: "available" }),
   ]);
   const draftGoat = draft
     .find((group) => group.id === "draft")!
@@ -98,7 +124,7 @@ test("GOAT follows the catalog without inventing a Key-verification gate", () =>
 
 test("plan hints and disabled reasons are translation keys", () => {
   const catalog = [
-    catalogEntry("opencode", "go", { display_name: "OpenCode Go Catalog" }),
+    catalogEntry("opencode", { display_name: "OpenCode Go Catalog" }),
   ];
   const options = buildPlanOptions(catalog);
   const go = options.find(({ plan }) => plan.id === "opencode-go")!;
@@ -108,7 +134,7 @@ test("plan hints and disabled reasons are translation keys", () => {
   assert.equal(custom.disabledReason, "服务商目录未提供该方案");
 
   const unavailable = buildPlanOptions([
-    catalogEntry("command-code", "goat", {
+    catalogEntry("command-code", {
       creation_availability: "unavailable",
       creation_unavailable_reason: "Raw backend English must not leak",
     }),

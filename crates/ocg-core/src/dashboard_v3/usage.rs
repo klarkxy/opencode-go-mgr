@@ -71,11 +71,8 @@ pub(super) async fn refresh_provider_usage(
         check_expectation(&state, &expectation)?;
         let db = state.db.lock();
         let account = load_account(&db, &state, &id)?;
-        let adapter =
-            ProviderAdapterKind::from_offering(&account.provider_id, &account.offering_id)
-                .ok_or_else(|| {
-                    V3ApiError::invalid_request_at(&state, "unknown provider offering")
-                })?;
+        let adapter = ProviderAdapterKind::from_provider_id(&account.provider_id)
+            .ok_or_else(|| V3ApiError::invalid_request_at(&state, "unknown provider offering"))?;
         if !matches!(
             adapter,
             ProviderAdapterKind::MiniMaxCn | ProviderAdapterKind::KimiCn
@@ -121,7 +118,7 @@ pub(super) async fn refresh_provider_usage(
         if current.updated_at != account_snapshot.updated_at
             || current.key_cipher != account_snapshot.key_cipher
             || current.provider_id != account_snapshot.provider_id
-            || current.offering_id != account_snapshot.offering_id
+            || current.provider_id != account_snapshot.provider_id
         {
             return Err(V3ApiError::conflict_at(
                 &state,
@@ -228,7 +225,21 @@ pub(super) fn provider_usage_locked(
     let _settings_update = state.settings_update.lock();
     let db = state.db.lock();
     let account = load_account(&db, state, id)?;
-    let descriptor = ProviderRegistry::get(&account.provider_id, &account.offering_id)
+    if crate::dynamic::find_runtime(&state.dynamic_providers(), &account.provider_id).is_some() {
+        return Ok(provider_usage_from_parts(
+            state,
+            id,
+            &account,
+            UsageAvailability::Unavailable,
+            false,
+            None,
+            Vec::new(),
+            Vec::new(),
+            None,
+            None,
+        ));
+    }
+    let descriptor = ProviderRegistry::get(&account.provider_id)
         .ok_or_else(|| V3ApiError::invalid_request_at(state, "unknown provider offering"))?;
     let availability = map_usage_availability(descriptor.usage.catalog_availability)
         .map_err(V3ApiError::internal)?;
@@ -334,7 +345,7 @@ fn account_usage_limits(
     account: &ModelAccount,
     pricing: &CapturedPricing,
 ) -> Result<(PricingLimits, Option<String>), V3ApiError> {
-    match ProviderAdapterKind::from_offering(&account.provider_id, &account.offering_id) {
+    match ProviderAdapterKind::from_provider_id(&account.provider_id) {
         Some(ProviderAdapterKind::OpenCodeGo) => {
             return Ok((pricing.limits.clone(), Some(pricing.revision.clone())));
         }
@@ -412,7 +423,7 @@ fn provider_usage_from_parts(
     ProviderUsage {
         account_id: id.to_string(),
         provider_id: account.provider_id.clone(),
-        offering_id: account.offering_id.clone(),
+
         availability,
         experimental,
         free_cooldown_until: rfc3339_opt(free_cooldown_until),

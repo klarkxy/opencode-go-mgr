@@ -13,8 +13,7 @@ use ocg_core::gateway::provider_adapter::{
 };
 use ocg_core::provider::{
     COMMAND_CODE_GOAT_BASE_URL, COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_ALIAS,
-    COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM, COMMAND_CODE_PROVIDER_ID, GOAT_OFFERING_ID,
-    builtin_plan,
+    COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM, COMMAND_CODE_PROVIDER_ID,
 };
 
 #[test]
@@ -33,7 +32,7 @@ fn official_base_path_auth_and_public_catalog_contract_stay_fixed() {
     );
     assert!(command_code_goat_official_url(ApiFormat::Responses).is_err());
 
-    let plan = builtin_plan(COMMAND_CODE_PROVIDER_ID, GOAT_OFFERING_ID).unwrap();
+    let plan = ocg_core::provider::builtin_provider(COMMAND_CODE_PROVIDER_ID).unwrap();
     assert!(plan.routable);
     assert_eq!(plan.verification_runtime_availability, "not_applicable");
 }

@@ -4,10 +4,8 @@ use crate::catalog::{
     UpstreamProtocolKind,
 };
 use crate::ids::{
-    ANONYMOUS_FREE_OFFERING_ID, COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM,
-    COMMAND_CODE_PROVIDER_ID, CPA_ACCOUNT_ID, CPA_OFFERING_ID, CPA_PROVIDER_ID,
-    CUSTOM_API_OFFERING_ID, CUSTOM_PROVIDER_ID, GO_OFFERING_ID, GOAT_OFFERING_ID,
-    KIMI_CN_OFFERING_ID, KIMI_PROVIDER_ID, MINIMAX_CN_OFFERING_ID, MINIMAX_PROVIDER_ID,
+    COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM, COMMAND_CODE_PROVIDER_ID, CPA_ACCOUNT_ID,
+    CPA_PROVIDER_ID, CUSTOM_PROVIDER_ID, KIMI_PROVIDER_ID, MINIMAX_PROVIDER_ID,
     OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID, ZEN_FREE_ACCOUNT_ID,
 };
 
@@ -32,17 +30,17 @@ fn catalog_parse_errors_map_to_provider_binding_errors() {
 }
 
 #[test]
-fn builtin_pairs_derive_credential_and_quota_scope() {
-    let goat = builtin_offering(COMMAND_CODE_PROVIDER_ID, GOAT_OFFERING_ID).unwrap();
+fn builtin_providers_derive_credential_and_quota_scope() {
+    let goat = builtin_provider(COMMAND_CODE_PROVIDER_ID).unwrap();
     assert_eq!(goat.credential_kind, CredentialKind::ApiKey);
     assert_eq!(goat.quota_scope, QuotaScope::Key);
 
-    let free = builtin_offering(OPENCODE_ZEN_FREE_PROVIDER_ID, ANONYMOUS_FREE_OFFERING_ID).unwrap();
+    let free = builtin_provider(OPENCODE_ZEN_FREE_PROVIDER_ID).unwrap();
     assert_eq!(free.credential_kind, CredentialKind::None);
     assert_eq!(free.quota_scope, QuotaScope::EgressIp);
     assert_eq!(free.singleton_account_id, Some(ZEN_FREE_ACCOUNT_ID));
 
-    let cpa = builtin_offering(CPA_PROVIDER_ID, CPA_OFFERING_ID).unwrap();
+    let cpa = builtin_provider(CPA_PROVIDER_ID).unwrap();
     assert_eq!(cpa.credential_kind, CredentialKind::ApiKey);
     assert_eq!(cpa.quota_scope, QuotaScope::Key);
     assert_eq!(cpa.singleton_account_id, Some(CPA_ACCOUNT_ID));
@@ -68,12 +66,11 @@ fn goat_included_model_set_is_exact_unique_and_mode_gated() {
 }
 
 #[test]
-fn singleton_and_pair_validation_is_fail_closed() {
+fn singleton_and_provider_validation_is_fail_closed() {
     assert!(
         validate_account_binding(
             "account-1",
             OPENCODE_PROVIDER_ID,
-            GO_OFFERING_ID,
             CredentialKind::ApiKey,
             QuotaScope::Key,
         )
@@ -83,7 +80,6 @@ fn singleton_and_pair_validation_is_fail_closed() {
         validate_account_binding(
             "account-1",
             OPENCODE_ZEN_FREE_PROVIDER_ID,
-            ANONYMOUS_FREE_OFFERING_ID,
             CredentialKind::None,
             QuotaScope::EgressIp,
         )
@@ -93,7 +89,6 @@ fn singleton_and_pair_validation_is_fail_closed() {
         validate_account_binding(
             CPA_ACCOUNT_ID,
             CPA_PROVIDER_ID,
-            CPA_OFFERING_ID,
             CredentialKind::ApiKey,
             QuotaScope::Key,
         )
@@ -103,7 +98,6 @@ fn singleton_and_pair_validation_is_fail_closed() {
         validate_account_binding(
             "account-1",
             CPA_PROVIDER_ID,
-            CPA_OFFERING_ID,
             CredentialKind::ApiKey,
             QuotaScope::Key,
         )
@@ -113,7 +107,6 @@ fn singleton_and_pair_validation_is_fail_closed() {
         validate_account_binding(
             ZEN_FREE_ACCOUNT_ID,
             OPENCODE_PROVIDER_ID,
-            GO_OFFERING_ID,
             CredentialKind::ApiKey,
             QuotaScope::Key,
         )
@@ -123,7 +116,6 @@ fn singleton_and_pair_validation_is_fail_closed() {
         validate_account_binding(
             "account-1",
             "unknown-provider",
-            "unknown-offering",
             CredentialKind::ApiKey,
             QuotaScope::Key,
         )
@@ -132,9 +124,9 @@ fn singleton_and_pair_validation_is_fail_closed() {
 }
 
 #[test]
-fn catalog_hardcodes_plans_and_keeps_unverified_offerings_unroutable() {
-    assert_eq!(BUILTIN_PLANS.len(), 7);
-    let goat = builtin_plan(COMMAND_CODE_PROVIDER_ID, GOAT_OFFERING_ID).unwrap();
+fn catalog_hardcodes_providers_and_keeps_unverified_providers_unroutable() {
+    assert_eq!(BUILTIN_PROVIDERS.len(), 7);
+    let goat = builtin_provider(COMMAND_CODE_PROVIDER_ID).unwrap();
     assert!(goat.routable);
     assert_eq!(goat.verification_policy, VerificationPolicy::NotRequired);
     assert_eq!(goat.verification_runtime_availability, "not_applicable");
@@ -162,23 +154,20 @@ fn catalog_hardcodes_plans_and_keeps_unverified_offerings_unroutable() {
         COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM,
         "deepseek/deepseek-v4-flash"
     );
-    assert!(is_command_code_goat(
-        COMMAND_CODE_PROVIDER_ID,
-        GOAT_OFFERING_ID
-    ));
-    assert!(!is_command_code_goat(OPENCODE_PROVIDER_ID, GO_OFFERING_ID));
+    assert!(is_command_code_goat(COMMAND_CODE_PROVIDER_ID));
+    assert!(!is_command_code_goat(OPENCODE_PROVIDER_ID));
 
-    let custom = builtin_plan(CUSTOM_PROVIDER_ID, CUSTOM_API_OFFERING_ID).unwrap();
+    let custom = builtin_provider(CUSTOM_PROVIDER_ID).unwrap();
     assert!(custom.routable);
     assert_eq!(custom.verification_runtime_availability, "available");
     assert_eq!(custom.verification_policy, VerificationPolicy::Required);
     assert_eq!(custom.pricing_availability, "unpriced");
     assert_eq!(custom.usage_availability, "unavailable");
     assert!(plan_requires_custom_config(custom));
-    assert!(is_custom_api(CUSTOM_PROVIDER_ID, CUSTOM_API_OFFERING_ID));
-    assert!(!is_custom_api(OPENCODE_PROVIDER_ID, GO_OFFERING_ID));
+    assert!(is_custom_api(CUSTOM_PROVIDER_ID));
+    assert!(!is_custom_api(OPENCODE_PROVIDER_ID));
 
-    let cpa = builtin_plan(CPA_PROVIDER_ID, CPA_OFFERING_ID).unwrap();
+    let cpa = builtin_provider(CPA_PROVIDER_ID).unwrap();
     assert!(cpa.routable);
     assert_eq!(
         cpa.product_surface,
@@ -186,38 +175,32 @@ fn catalog_hardcodes_plans_and_keeps_unverified_offerings_unroutable() {
     );
     assert!(cpa.product_surface.is_external_integration());
     assert_eq!(cpa.creation_availability, CreationAvailability::Unavailable);
-    assert_eq!(cpa.offering.singleton_account_id, Some(CPA_ACCOUNT_ID));
+    assert_eq!(cpa.singleton_account_id, Some(CPA_ACCOUNT_ID));
     assert_eq!(cpa.auth_schemes, &BEARER_AUTH);
     assert_eq!(cpa.upstream_protocols, &CUSTOM_PROTOCOLS);
     assert!(cpa.form_fields.is_empty());
-    assert!(is_cpa_external_integration(
-        CPA_PROVIDER_ID,
-        CPA_OFFERING_ID
-    ));
-    assert!(!is_cpa_external_integration(
-        OPENCODE_PROVIDER_ID,
-        GO_OFFERING_ID
-    ));
+    assert!(is_cpa_external_integration(CPA_PROVIDER_ID));
+    assert!(!is_cpa_external_integration(OPENCODE_PROVIDER_ID));
 
-    let go = builtin_plan(OPENCODE_PROVIDER_ID, GO_OFFERING_ID).unwrap();
+    let go = builtin_provider(OPENCODE_PROVIDER_ID).unwrap();
     assert!(go.routable);
     assert_eq!(
         default_verification_status(go),
         ConnectionVerificationStatus::NotRequired
     );
 
-    for (provider_id, offering_id) in [
-        (OPENCODE_PROVIDER_ID, GO_OFFERING_ID),
-        (COMMAND_CODE_PROVIDER_ID, GOAT_OFFERING_ID),
-        (MINIMAX_PROVIDER_ID, MINIMAX_CN_OFFERING_ID),
-        (KIMI_PROVIDER_ID, KIMI_CN_OFFERING_ID),
+    for provider_id in [
+        OPENCODE_PROVIDER_ID,
+        COMMAND_CODE_PROVIDER_ID,
+        MINIMAX_PROVIDER_ID,
+        KIMI_PROVIDER_ID,
     ] {
-        let plan = builtin_plan(provider_id, offering_id).unwrap();
+        let plan = builtin_provider(provider_id).unwrap();
         assert!(
             plan.form_fields
                 .iter()
                 .any(|field| field.id == "purchase_date"),
-            "{provider_id}/{offering_id} must collect its subscription purchase date"
+            "{provider_id} must collect its subscription purchase date"
         );
     }
     assert!(
@@ -230,38 +213,31 @@ fn catalog_hardcodes_plans_and_keeps_unverified_offerings_unroutable() {
 
 #[test]
 fn catalog_enablement_gate_is_fail_closed_for_unroutable_plans() {
-    for plan in BUILTIN_PLANS {
-        let provider_id = plan.offering.provider_id;
-        let offering_id = plan.offering.offering_id;
+    for plan in BUILTIN_PROVIDERS {
+        let provider_id = plan.provider_id;
+        assert_eq!(plan_allows_enablement(plan), plan.routable, "{provider_id}");
         assert_eq!(
-            plan_allows_enablement(plan),
+            provider_allows_enablement(provider_id),
             plan.routable,
-            "{provider_id}/{offering_id}"
-        );
-        assert_eq!(
-            offering_allows_enablement(provider_id, offering_id),
-            plan.routable,
-            "{provider_id}/{offering_id}"
+            "{provider_id}"
         );
         assert!(
-            ensure_enabled_offering_is_routable(provider_id, offering_id, false).is_ok(),
-            "disabled drafts must stay writable: {provider_id}/{offering_id}"
+            ensure_enabled_provider_is_routable(provider_id, false).is_ok(),
+            "disabled drafts must stay writable: {provider_id}"
         );
-        let enabled = ensure_enabled_offering_is_routable(provider_id, offering_id, true);
+        let enabled = ensure_enabled_provider_is_routable(provider_id, true);
         if plan.routable {
-            enabled.expect("routable offerings may enable");
-            ensure_offering_can_enable(provider_id, offering_id).unwrap();
+            enabled.expect("routable providers may enable");
+            ensure_provider_can_enable(provider_id).unwrap();
         } else {
-            let error = enabled.expect_err("unroutable offerings must reject enabled=true");
+            let error = enabled.expect_err("unroutable providers must reject enabled=true");
             assert!(
                 matches!(
                     error,
                     ProviderBindingError::EnablementNotRoutable {
                         provider_id: rejected_provider,
-                        offering_id: rejected_offering,
                         display_name,
                     } if rejected_provider == provider_id
-                        && rejected_offering == offering_id
                         && display_name == plan.display_name
                 ),
                 "{error:?}"
@@ -269,17 +245,14 @@ fn catalog_enablement_gate_is_fail_closed_for_unroutable_plans() {
             assert!(error.to_string().contains("not routable"), "{}", error);
         }
     }
-    assert!(!offering_allows_enablement(
-        "unknown-provider",
-        "unknown-offering"
-    ));
+    assert!(!provider_allows_enablement("unknown-provider"));
     assert!(matches!(
-        ensure_offering_can_enable("unknown-provider", "unknown-offering"),
-        Err(ProviderBindingError::UnknownOffering { .. })
+        ensure_provider_can_enable("unknown-provider"),
+        Err(ProviderBindingError::UnknownProvider { .. })
     ));
-    let zen = builtin_plan(OPENCODE_ZEN_FREE_PROVIDER_ID, ANONYMOUS_FREE_OFFERING_ID).unwrap();
+    let zen = builtin_provider(OPENCODE_ZEN_FREE_PROVIDER_ID).unwrap();
     assert!(plan_allows_enablement(zen));
-    let go = builtin_plan(OPENCODE_PROVIDER_ID, GO_OFFERING_ID).unwrap();
+    let go = builtin_provider(OPENCODE_PROVIDER_ID).unwrap();
     assert!(plan_allows_enablement(go));
 }
 
@@ -321,26 +294,18 @@ fn custom_model_ids_stay_stable() {
 #[test]
 fn provider_registry_is_exhaustive_for_plans_and_adapter_kinds() {
     let mut seen = std::collections::HashSet::new();
-    assert_eq!(ProviderRegistry::iter().count(), BUILTIN_PLANS.len());
-    for plan in BUILTIN_PLANS {
-        let kind = ProviderAdapterKind::from_offering(
-            plan.offering.provider_id,
-            plan.offering.offering_id,
-        )
-        .expect("every catalog plan has an adapter kind");
+    assert_eq!(ProviderRegistry::iter().count(), BUILTIN_PROVIDERS.len());
+    for plan in BUILTIN_PROVIDERS {
+        let kind = ProviderAdapterKind::from_provider_id(plan.provider_id)
+            .expect("every catalog plan has an adapter kind");
         seen.insert(kind);
-        let descriptor =
-            ProviderRegistry::get(plan.offering.provider_id, plan.offering.offering_id)
-                .expect("every catalog plan has a composed descriptor");
+        let descriptor = ProviderRegistry::get(plan.provider_id)
+            .expect("every catalog plan has a composed descriptor");
         assert_eq!(descriptor.kind, kind);
-        assert_eq!(descriptor.provider_id, plan.offering.provider_id);
-        assert_eq!(descriptor.offering_id, plan.offering.offering_id);
+        assert_eq!(descriptor.provider_id, plan.provider_id);
         assert_eq!(descriptor.inference.catalog_routable, plan.routable);
-        assert_eq!(
-            descriptor.inference.credential_kind,
-            plan.offering.credential_kind
-        );
-        assert_eq!(descriptor.inference.quota_scope, plan.offering.quota_scope);
+        assert_eq!(descriptor.inference.credential_kind, plan.credential_kind);
+        assert_eq!(descriptor.inference.quota_scope, plan.quota_scope);
         assert_eq!(descriptor.verification.policy, plan.verification_policy);
         assert_eq!(
             descriptor.verification.runtime_availability,
@@ -418,18 +383,18 @@ fn provider_registry_is_exhaustive_for_plans_and_adapter_kinds() {
     for kind in ProviderAdapterKind::ALL {
         assert!(
             seen.contains(&kind),
-            "{kind:?} must be wired to at least one catalog offering"
+            "{kind:?} must be wired to at least one catalog provider"
         );
     }
     assert_eq!(seen.len(), ProviderAdapterKind::ALL.len());
-    assert!(ProviderAdapterKind::from_offering("unknown", "unknown").is_none());
-    assert!(ProviderRegistry::get("unknown", "unknown").is_none());
+    assert!(ProviderAdapterKind::from_provider_id("unknown").is_none());
+    assert!(ProviderRegistry::get("unknown").is_none());
     assert_eq!(ProviderAdapterKind::ALL.len(), 7);
 }
 
 #[test]
 fn adapter_descriptors_preserve_current_capability_decisions() {
-    let go = ProviderRegistry::get(OPENCODE_PROVIDER_ID, GO_OFFERING_ID).unwrap();
+    let go = ProviderRegistry::get(OPENCODE_PROVIDER_ID).unwrap();
     assert_eq!(go.kind, ProviderAdapterKind::OpenCodeGo);
     assert_eq!(
         go.inference.auth,
@@ -461,8 +426,7 @@ fn adapter_descriptors_preserve_current_capability_decisions() {
     assert!(go.card_actions.protocol_probe);
     assert!(go.card_actions.catalog_refresh);
 
-    let zen =
-        ProviderRegistry::get(OPENCODE_ZEN_FREE_PROVIDER_ID, ANONYMOUS_FREE_OFFERING_ID).unwrap();
+    let zen = ProviderRegistry::get(OPENCODE_ZEN_FREE_PROVIDER_ID).unwrap();
     assert_eq!(zen.kind, ProviderAdapterKind::ZenFree);
     assert_eq!(zen.inference.auth, InferenceAuthDescriptor::None);
     assert_eq!(zen.inference.credential_kind, CredentialKind::None);
@@ -486,7 +450,7 @@ fn adapter_descriptors_preserve_current_capability_decisions() {
         CardVerifyAction::NotApplicable
     );
 
-    let goat = ProviderRegistry::get(COMMAND_CODE_PROVIDER_ID, GOAT_OFFERING_ID).unwrap();
+    let goat = ProviderRegistry::get(COMMAND_CODE_PROVIDER_ID).unwrap();
     assert_eq!(goat.kind, ProviderAdapterKind::CommandCodeGoat);
     assert!(!goat.inference.loopback_test_seam_only);
     assert!(goat.inference.production_inference);
@@ -517,8 +481,8 @@ fn adapter_descriptors_preserve_current_capability_decisions() {
     assert!(!goat.verification.never_auto_enable);
 
     for fixed_chat in [
-        ProviderRegistry::get(MINIMAX_PROVIDER_ID, MINIMAX_CN_OFFERING_ID).unwrap(),
-        ProviderRegistry::get(KIMI_PROVIDER_ID, KIMI_CN_OFFERING_ID).unwrap(),
+        ProviderRegistry::get(MINIMAX_PROVIDER_ID).unwrap(),
+        ProviderRegistry::get(KIMI_PROVIDER_ID).unwrap(),
     ] {
         assert!(fixed_chat.protocol_probe.explicit_probe);
         assert_eq!(
@@ -528,7 +492,7 @@ fn adapter_descriptors_preserve_current_capability_decisions() {
         assert!(fixed_chat.card_actions.protocol_probe);
     }
 
-    let custom = ProviderRegistry::get(CUSTOM_PROVIDER_ID, CUSTOM_API_OFFERING_ID).unwrap();
+    let custom = ProviderRegistry::get(CUSTOM_PROVIDER_ID).unwrap();
     assert_eq!(custom.kind, ProviderAdapterKind::ConfigurableHttp);
     assert_eq!(
         custom.inference.auth,
@@ -562,11 +526,11 @@ fn adapter_descriptors_preserve_current_capability_decisions() {
     assert_ne!(zen.kind, ProviderAdapterKind::ConfigurableHttp);
     assert_ne!(goat.kind, ProviderAdapterKind::ConfigurableHttp);
     assert_eq!(
-        ProviderAdapterKind::from_offering(CUSTOM_PROVIDER_ID, CUSTOM_API_OFFERING_ID),
+        ProviderAdapterKind::from_provider_id(CUSTOM_PROVIDER_ID),
         Some(ProviderAdapterKind::ConfigurableHttp)
     );
 
-    let cpa = ProviderRegistry::get(CPA_PROVIDER_ID, CPA_OFFERING_ID).unwrap();
+    let cpa = ProviderRegistry::get(CPA_PROVIDER_ID).unwrap();
     assert_eq!(cpa.kind, ProviderAdapterKind::Cpa);
     assert_eq!(
         cpa.product_surface,
@@ -600,15 +564,11 @@ fn adapter_descriptors_preserve_current_capability_decisions() {
 
 #[test]
 fn descriptor_capabilities_are_built_once_from_the_sealed_kind() {
-    for plan in BUILTIN_PLANS {
-        let kind = ProviderAdapterKind::from_offering(
-            plan.offering.provider_id,
-            plan.offering.offering_id,
-        )
-        .expect("every catalog plan has an adapter kind");
-        let descriptor =
-            ProviderRegistry::get(plan.offering.provider_id, plan.offering.offering_id)
-                .expect("every catalog plan has a composed descriptor");
+    for plan in BUILTIN_PROVIDERS {
+        let kind = ProviderAdapterKind::from_provider_id(plan.provider_id)
+            .expect("every catalog plan has an adapter kind");
+        let descriptor = ProviderRegistry::get(plan.provider_id)
+            .expect("every catalog plan has a composed descriptor");
         assert_eq!(descriptor.kind, kind);
         assert!(!descriptor.protocol_probe.request_path_may_trial);
         assert!(!descriptor.protocol_probe.fallback_priority.is_empty());
@@ -620,22 +580,19 @@ fn descriptor_capabilities_are_built_once_from_the_sealed_kind() {
 #[test]
 fn contract_scopes_are_unique_and_limited_to_ordinary_providers() {
     let mut scopes = std::collections::HashSet::new();
-    for plan in BUILTIN_PLANS {
+    for plan in BUILTIN_PROVIDERS {
         let descriptor =
-            ProviderRegistry::get(plan.offering.provider_id, plan.offering.offering_id)
-                .expect("every built-in plan has a descriptor");
+            ProviderRegistry::get(plan.provider_id).expect("every built-in plan has a descriptor");
         assert_eq!(descriptor.contract_scope_id, plan.contract_scope_id);
         match plan.product_surface {
-            ProviderProductSurface::Provider
-                if is_custom_api(plan.offering.provider_id, plan.offering.offering_id) =>
-            {
+            ProviderProductSurface::Provider if is_custom_api(plan.provider_id) => {
                 assert_eq!(plan.contract_scope_id, None)
             }
             ProviderProductSurface::Provider => {
                 let scope = plan.contract_scope_id.expect("ordinary Provider scope");
                 assert!(!scope.is_empty());
                 assert!(scopes.insert(scope), "duplicate contract scope `{scope}`");
-                assert_eq!(scope, plan.offering.provider_id);
+                assert_eq!(scope, plan.provider_id);
             }
             ProviderProductSurface::ExternalIntegration => {
                 assert_eq!(plan.contract_scope_id, None)
@@ -647,7 +604,6 @@ fn contract_scopes_are_unique_and_limited_to_ordinary_providers() {
 #[test]
 fn defaults_verification_status_and_binding_error_messages_stay_stable() {
     assert_eq!(default_provider_id(), OPENCODE_PROVIDER_ID);
-    assert_eq!(default_offering_id(), GO_OFFERING_ID);
     assert_eq!(default_credential_kind(), CredentialKind::ApiKey);
     assert_eq!(default_quota_scope(), QuotaScope::Key);
     assert_eq!(CreationAvailability::Available.as_str(), "available");
@@ -671,11 +627,10 @@ fn defaults_verification_status_and_binding_error_messages_stay_stable() {
         Err(ProviderBindingError::UnknownVerificationStatus(value)) if value == "unknown"
     ));
 
-    let unknown = ProviderBindingError::UnknownOffering {
+    let unknown = ProviderBindingError::UnknownProvider {
         provider_id: "p".into(),
-        offering_id: "o".into(),
     };
-    assert_eq!(unknown.to_string(), "unknown provider offering `p/o`");
+    assert_eq!(unknown.to_string(), "unknown provider `p`");
     assert_eq!(
         ProviderBindingError::UnknownCredentialKind("cookie".into()).to_string(),
         "unknown credential kind `cookie`"
@@ -687,14 +642,13 @@ fn defaults_verification_status_and_binding_error_messages_stay_stable() {
     assert_eq!(
         ProviderBindingError::BindingMismatch {
             provider_id: "p".into(),
-            offering_id: "o".into(),
         }
         .to_string(),
-        "provider binding does not match `p/o`"
+        "provider binding does not match `p`"
     );
     assert_eq!(
         ProviderBindingError::SingletonAccountRequired(ZEN_FREE_ACCOUNT_ID).to_string(),
-        format!("provider offering requires singleton account `{ZEN_FREE_ACCOUNT_ID}`")
+        format!("provider requires singleton account `{ZEN_FREE_ACCOUNT_ID}`")
     );
     assert_eq!(
         ProviderBindingError::ReservedAccountId(ZEN_FREE_ACCOUNT_ID).to_string(),
@@ -719,11 +673,10 @@ fn defaults_verification_status_and_binding_error_messages_stay_stable() {
     assert_eq!(
         ProviderBindingError::KeyPrefixMismatch {
             provider_id: "custom".into(),
-            offering_id: "api".into(),
             prefix: "x-".into(),
         }
         .to_string(),
-        "provider offering `custom/api` requires key prefix `x-`"
+        "provider `custom` requires key prefix `x-`"
     );
     assert_eq!(
         ProviderBindingError::InvalidCustomBaseUrl("base URL is required".into()).to_string(),
@@ -736,7 +689,6 @@ fn defaults_verification_status_and_binding_error_messages_stay_stable() {
     assert_eq!(
         ProviderBindingError::EnablementNotRoutable {
             provider_id: COMMAND_CODE_PROVIDER_ID,
-            offering_id: GOAT_OFFERING_ID,
             display_name: "Command Code GOAT",
         }
         .to_string(),
@@ -779,16 +731,16 @@ fn command_code_models_catalog_parses_openai_list_and_rejects_empty() {
         parse_command_code_models_catalog(br#"{"models":[{"model":"gpt-5.4"}]}"#)
             .is_ok_and(|models| models == ["gpt-5.4"])
     );
-    assert!(ensure_offering_can_enable(COMMAND_CODE_PROVIDER_ID, GOAT_OFFERING_ID).is_ok());
+    assert!(ensure_provider_can_enable(COMMAND_CODE_PROVIDER_ID).is_ok());
 }
 
 #[test]
 fn zen_free_key_validation_skips_empty_secret() {
-    let zen = builtin_plan(OPENCODE_ZEN_FREE_PROVIDER_ID, ANONYMOUS_FREE_OFFERING_ID).unwrap();
-    assert_eq!(zen.offering.credential_kind, CredentialKind::None);
+    let zen = builtin_provider(OPENCODE_ZEN_FREE_PROVIDER_ID).unwrap();
+    assert_eq!(zen.credential_kind, CredentialKind::None);
     assert!(validate_plan_key(zen, "").is_ok());
     assert!(validate_plan_key(zen, "   ").is_ok());
-    let go = builtin_plan(OPENCODE_PROVIDER_ID, GO_OFFERING_ID).unwrap();
+    let go = builtin_provider(OPENCODE_PROVIDER_ID).unwrap();
     assert!(matches!(
         validate_plan_key(go, "   "),
         Err(ProviderBindingError::KeyRequired)

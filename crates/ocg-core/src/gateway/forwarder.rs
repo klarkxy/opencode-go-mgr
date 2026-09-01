@@ -268,19 +268,13 @@ impl From<Arc<PricingSnapshot>> for RequestPricingSnapshot {
 
 impl RequestPricingSnapshot {
     fn for_account(state: &CoreState, account: &Account, go: Arc<PricingSnapshot>) -> Self {
-        if account.provider_id == crate::provider::OPENCODE_PROVIDER_ID
-            && account.offering_id == crate::provider::GO_OFFERING_ID
-        {
+        if account.provider_id == crate::provider::OPENCODE_PROVIDER_ID {
             return Self::OpenCode(go);
         }
-        if !crate::provider::is_command_code_goat(&account.provider_id, &account.offering_id) {
+        if !crate::provider::is_command_code_goat(&account.provider_id) {
             return Self::Unpriced;
         }
-        let loaded = latest_provider_pricing_snapshot(
-            &state.db.lock(),
-            &account.provider_id,
-            &account.offering_id,
-        );
+        let loaded = latest_provider_pricing_snapshot(&state.db.lock(), &account.provider_id);
         match loaded {
             Ok(Some(snapshot)) if snapshot.evidence() == ProviderPricingEvidence::Verified => {
                 Self::Provider(Arc::new(snapshot))
@@ -289,7 +283,7 @@ impl RequestPricingSnapshot {
             Err(error) => {
                 eprintln!(
                     "warning: failed to load provider pricing for {}/{}: {error}",
-                    account.provider_id, account.offering_id
+                    account.provider_id, account.provider_id
                 );
                 Self::Unpriced
             }
@@ -344,13 +338,10 @@ impl RequestPricingSnapshot {
         }
     }
 
-    fn provider_identity(&self) -> Option<(&str, &str)> {
+    fn provider_identity(&self) -> Option<&str> {
         match self {
-            Self::OpenCode(_) => Some((
-                crate::provider::OPENCODE_PROVIDER_ID,
-                crate::provider::GO_OFFERING_ID,
-            )),
-            Self::Provider(snapshot) => Some((snapshot.provider_id(), snapshot.offering_id())),
+            Self::OpenCode(_) => Some(crate::provider::OPENCODE_PROVIDER_ID),
+            Self::Provider(snapshot) => Some(snapshot.provider_id()),
             Self::Unpriced => None,
         }
     }
@@ -375,7 +366,7 @@ struct ForwardAttemptContext {
     known_secret: Option<String>,
     route_account_id: Option<String>,
     provider_id: Option<String>,
-    offering_id: Option<String>,
+
     credential_account_id: Option<String>,
     client_key_id: Option<String>,
     client_key_name: Option<String>,
@@ -406,7 +397,7 @@ impl ForwardAttemptContext {
             known_secret: None,
             route_account_id: None,
             provider_id: None,
-            offering_id: None,
+
             credential_account_id: None,
             client_key_id: None,
             client_key_name: None,
@@ -429,7 +420,6 @@ impl ForwardAttemptContext {
     fn set_provider_route(&mut self, account: &Account, spec: &AttemptSpec) {
         self.route_account_id = Some(account.id.clone());
         self.provider_id = Some(account.provider_id.clone());
-        self.offering_id = Some(account.offering_id.clone());
         self.credential_account_id = spec.credential_account_id().map(str::to_string);
     }
 
@@ -534,6 +524,7 @@ pub(crate) async fn forward_request(
     headers: HeaderMap,
     pricing_snapshot: Arc<PricingSnapshot>,
     client_key_id: Option<&str>,
+    dynamics: &[crate::dynamic::DynamicProviderRuntime],
 ) -> Result<ForwardResult> {
     forward_request_impl(
         client,
@@ -549,6 +540,7 @@ pub(crate) async fn forward_request(
         headers,
         pricing_snapshot,
         client_key_id,
+        dynamics,
     )
     .await
 }
@@ -568,48 +560,50 @@ async fn forward_request_impl(
     headers: HeaderMap,
     pricing_snapshot: Arc<PricingSnapshot>,
     client_key_id: Option<&str>,
+    dynamics: &[crate::dynamic::DynamicProviderRuntime],
 ) -> Result<ForwardResult> {
     let mut attempt_context =
         ForwardAttemptContext::new(trace, client_body.len(), attempt, plan, route);
     let pricing_snapshot = RequestPricingSnapshot::for_account(state, account, pricing_snapshot);
     attempt_context.set_client_key(client_key_id, state);
-    let attempt_spec = match provider_adapter::resolve_route(account, config, plan) {
-        Ok(spec) => spec,
-        Err(error) => {
-            let class = classify_preflight(PreflightKind::Route);
-            let message = format!("provider route is unavailable: {error}");
-            let failure = attempt_context.failure(FailureSpec {
-                error_source: "gateway",
-                error_stage: "provider_route",
-                downstream_status: Some(StatusCode::BAD_GATEWAY.as_u16()),
-                upstream_status: None,
-                upstream_wait_ms: None,
-                retry_action: Some(retry_action_name(forward_action_for_class(
-                    class,
-                    allow_same_account_retry,
+    let attempt_spec =
+        match provider_adapter::resolve_route_with_dynamics(account, config, plan, dynamics) {
+            Ok(spec) => spec,
+            Err(error) => {
+                let class = classify_preflight(PreflightKind::Route);
+                let message = format!("provider route is unavailable: {error}");
+                let failure = attempt_context.failure(FailureSpec {
+                    error_source: "gateway",
+                    error_stage: "provider_route",
+                    downstream_status: Some(StatusCode::BAD_GATEWAY.as_u16()),
+                    upstream_status: None,
+                    upstream_wait_ms: None,
+                    retry_action: Some(retry_action_name(forward_action_for_class(
+                        class,
+                        allow_same_account_retry,
+                        None,
+                    ))),
+                    upstream_headers: None,
+                    upstream_error: None,
+                    request_body: Some(client_body),
+                });
+                DbAttemptSink::new(&state.db.lock()).insert(
+                    account,
+                    &plan.model,
+                    "error",
                     None,
-                ))),
-                upstream_headers: None,
-                upstream_error: None,
-                request_body: Some(client_body),
-            });
-            DbAttemptSink::new(&state.db.lock()).insert(
-                account,
-                &plan.model,
-                "error",
-                None,
-                metadata_metrics(
-                    &pricing_snapshot,
-                    plan.service_tier.as_deref(),
-                    "not_applicable",
-                ),
-                Some(&message),
-                &attempt_context,
-                Some(failure),
-            )?;
-            return Ok(account_preflight_failure(plan, message));
-        }
-    };
+                    metadata_metrics(
+                        &pricing_snapshot,
+                        plan.service_tier.as_deref(),
+                        "not_applicable",
+                    ),
+                    Some(&message),
+                    &attempt_context,
+                    Some(failure),
+                )?;
+                return Ok(account_preflight_failure(plan, message));
+            }
+        };
     attempt_context.set_provider_route(account, &attempt_spec);
     if attempt_spec.is_local_external_integration() {
         crate::cpa::normalize_base_url(&attempt_spec.base_url, true)
@@ -946,7 +940,6 @@ async fn forward_request_impl(
         let class = classify_http(
             status.as_u16(),
             &account.provider_id,
-            &account.offering_id,
             plan.channel,
             attempt_spec.auth == UpstreamAuth::None,
         );
@@ -1006,7 +999,6 @@ async fn forward_request_impl(
         let class = super::classify::classify_http_response(
             status.as_u16(),
             &account.provider_id,
-            &account.offering_id,
             plan.channel,
             attempt_spec.auth == UpstreamAuth::None,
             &text,
@@ -2559,7 +2551,6 @@ fn log_forward(
 ) -> Result<i64> {
     metrics.scope_to_provider(
         Some(account.provider_id.as_str()),
-        Some(account.offering_id.as_str()),
         status.starts_with("success"),
     );
     let cost_state = match (metrics.cost_state, status) {
@@ -2579,7 +2570,7 @@ fn log_forward(
         account_name: account.name.clone(),
         route_account_id: context.route_account_id.clone(),
         provider_id: context.provider_id.clone(),
-        offering_id: context.offering_id.clone(),
+
         credential_account_id: context.credential_account_id.clone(),
         client_key_id: context.client_key_id.clone(),
         client_key_name: context.client_key_name.clone(),
@@ -2679,8 +2670,8 @@ fn pricing_metrics(
         pricing_revision_id: estimate.pricing_revision_id,
         quota_multiplier: estimate.quota_multiplier,
         local_adjustment_multiplier: estimate.local_adjustment_multiplier,
-        pricing_provider_id: provider_identity.map(|(provider_id, _)| provider_id.to_string()),
-        pricing_offering_id: provider_identity.map(|(_, offering_id)| offering_id.to_string()),
+        pricing_provider_id: provider_identity.map(str::to_string),
+
         service_tier: service_tier.map(str::to_string),
         cost_state: estimate.cost_state,
     }
@@ -2694,8 +2685,8 @@ fn metadata_metrics(
     let provider_identity = snapshot.provider_identity();
     ForwardMetrics {
         pricing_revision_id: snapshot.revision().map(str::to_string),
-        pricing_provider_id: provider_identity.map(|(provider_id, _)| provider_id.to_string()),
-        pricing_offering_id: provider_identity.map(|(_, offering_id)| offering_id.to_string()),
+        pricing_provider_id: provider_identity.map(str::to_string),
+
         service_tier: service_tier.map(str::to_string),
         cost_state,
         ..ForwardMetrics::default()
@@ -2884,7 +2875,7 @@ mod stream_usage_tests {
             known_secret: Some(secret.clone()),
             route_account_id: None,
             provider_id: None,
-            offering_id: None,
+
             credential_account_id: None,
             client_key_id: None,
             client_key_name: None,
@@ -3028,8 +3019,7 @@ mod stream_usage_tests {
                 Some(model) => format!(
                     "{{\"model\":\"{model}\",\"usage\":{{\"input_tokens\":0,\"output_tokens\":5,\"cache_read_input_tokens\":40500}}}}"
                 ),
-                None => "{\"usage\":{\"input_tokens\":0,\"output_tokens\":5,\"cache_read_input_tokens\":40500}}".to_string(),
-            };
+                None => "{\"usage\":{\"input_tokens\":0,\"output_tokens\":5,\"cache_read_input_tokens\":40500}}".to_string() };
             let start = Bytes::from(format!(
                 "event: message_start\ndata: {{\"type\":\"message_start\",\"message\":{message}}}\n\n"
             ));
@@ -3180,7 +3170,7 @@ mod stream_outcome_guard_tests {
         Account {
             id: "acct-1".into(),
             provider_id: crate::provider::default_provider_id(),
-            offering_id: crate::provider::default_offering_id(),
+
             credential_kind: crate::provider::default_credential_kind(),
             quota_scope: crate::provider::default_quota_scope(),
             name: "acct-1".into(),
@@ -3224,7 +3214,7 @@ mod stream_outcome_guard_tests {
             known_secret: None,
             route_account_id: Some("acct-1".into()),
             provider_id: Some(crate::provider::default_provider_id()),
-            offering_id: Some(crate::provider::default_offering_id()),
+
             credential_account_id: Some("acct-1".into()),
             client_key_id: None,
             client_key_name: None,
@@ -3256,7 +3246,6 @@ mod stream_outcome_guard_tests {
         let (dir, state) = test_state("goat-pricing");
         let mut goat = account(&state);
         goat.provider_id = crate::provider::COMMAND_CODE_PROVIDER_ID.into();
-        goat.offering_id = crate::provider::GOAT_OFFERING_ID.into();
         let missing = RequestPricingSnapshot::for_account(&state, &goat, state.pricing_snapshot());
         let mut missing_metrics = pricing_metrics(
             &missing,
@@ -3267,14 +3256,13 @@ mod stream_outcome_guard_tests {
             0,
             None,
         );
-        missing_metrics.scope_to_provider(Some(&goat.provider_id), Some(&goat.offering_id), true);
+        missing_metrics.scope_to_provider(Some(&goat.provider_id), true);
         assert_eq!(missing_metrics.cost_state, "unpriced");
         assert_eq!(missing_metrics.raw_cost_usd, None);
         assert_eq!(missing_metrics.pricing_revision_id, None);
 
         let snapshot = crate::pricing::ProviderScopedPricingSnapshot::new(
             crate::provider::COMMAND_CODE_PROVIDER_ID,
-            crate::provider::GOAT_OFFERING_ID,
             "goat-runtime-test",
             "2030-01-01T00:00:00Z",
             None,
@@ -3313,7 +3301,7 @@ mod stream_outcome_guard_tests {
             0,
             None,
         );
-        metrics.scope_to_provider(Some(&goat.provider_id), Some(&goat.offering_id), true);
+        metrics.scope_to_provider(Some(&goat.provider_id), true);
 
         assert_eq!(metrics.cost_state, "priced");
         assert!((metrics.raw_cost_usd.unwrap() - 0.286).abs() < 1e-12);
@@ -3518,7 +3506,7 @@ mod host_credential_resolver_tests {
         Account {
             id: id.into(),
             provider_id: crate::provider::default_provider_id(),
-            offering_id: crate::provider::default_offering_id(),
+
             credential_kind: crate::provider::default_credential_kind(),
             quota_scope: crate::provider::default_quota_scope(),
             name: id.into(),

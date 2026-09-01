@@ -1,12 +1,10 @@
 use super::*;
 use crate::custom::CustomAccountRuntime;
 use crate::kernel::ids::{
-    ANONYMOUS_FREE_OFFERING_ID, COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM, GO_OFFERING_ID,
-    GOAT_OFFERING_ID, KIMI_CN_OFFERING_ID, KIMI_PROVIDER_ID, MINIMAX_CN_OFFERING_ID,
-    MINIMAX_PROVIDER_ID,
+    COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM, KIMI_PROVIDER_ID, MINIMAX_PROVIDER_ID,
 };
 use crate::models::{AccountCustomConfig, AccountModelCapability};
-use crate::provider::{CUSTOM_API_OFFERING_ID, ConnectionVerificationStatus};
+use crate::provider::ConnectionVerificationStatus;
 
 fn empty_persisted() -> PersistedContracts {
     PersistedContracts::default()
@@ -23,18 +21,16 @@ fn go_contract() -> EffectiveScopeContract {
         .unwrap()
 }
 
-fn probe_for(provider_id: &str, offering_id: &str) -> ProtocolProbeDescriptor {
-    ProviderRegistry::get(provider_id, offering_id)
+fn probe_for(provider_id: &str) -> ProtocolProbeDescriptor {
+    ProviderRegistry::get(provider_id)
         .expect("test provider scope")
         .protocol_probe
 }
 
 #[test]
 fn custom_endpoints_are_isolated_by_account() {
-    let left =
-        ContractScope::from_offering(CUSTOM_PROVIDER_ID, CUSTOM_API_OFFERING_ID, Some("one"));
-    let right =
-        ContractScope::from_offering(CUSTOM_PROVIDER_ID, CUSTOM_API_OFFERING_ID, Some("two"));
+    let left = ContractScope::from_provider_id(CUSTOM_PROVIDER_ID, Some("one"));
+    let right = ContractScope::from_provider_id(CUSTOM_PROVIDER_ID, Some("two"));
     assert_ne!(left, right);
     assert!(matches!(left, Some(ContractScope::CustomEndpoint(id)) if id == "one"));
 }
@@ -48,7 +44,7 @@ fn provider_scopes_identify_one_exact_registered_offering() {
             .expect("effective provider scope must identify a registered offering");
         assert_eq!(descriptor.kind, contract.adapter_kind);
         assert_eq!(descriptor.provider_id, contract.provider_id);
-        assert_eq!(descriptor.offering_id, contract.offering_id);
+        assert_eq!(descriptor.provider_id, contract.provider_id);
     }
     assert!(ContractScope::parse("provider", "unknown-scope").is_err());
 }
@@ -111,59 +107,52 @@ fn probe_success_adds_inside_ceiling_and_failure_does_not_remove_static() {
 
 #[test]
 fn opencode_ceiling_is_constructable_paths_not_static_model_protocols() {
-    let grok_ceiling = safety_ceiling_protocols(
-        probe_for(OPENCODE_PROVIDER_ID, GO_OFFERING_ID),
-        "grok-4.5",
-        &[],
-    );
+    let grok_ceiling = safety_ceiling_protocols(probe_for(OPENCODE_PROVIDER_ID), "grok-4.5", &[]);
     let grok_static = static_verified_protocols(ProviderAdapterKind::OpenCodeGo, "grok-4.5", &[]);
     assert!(grok_ceiling.contains(&UpstreamProtocolKind::ChatCompletions));
     assert!(grok_ceiling.contains(&UpstreamProtocolKind::Responses));
     assert!(grok_ceiling.contains(&UpstreamProtocolKind::Messages));
     assert_eq!(grok_static, vec![UpstreamProtocolKind::Responses]);
     assert!(probe_may_add(
-        probe_for(OPENCODE_PROVIDER_ID, GO_OFFERING_ID),
+        probe_for(OPENCODE_PROVIDER_ID),
         "grok-4.5",
         UpstreamProtocolKind::ChatCompletions,
         &[],
     ));
 
     let unknown_zen = safety_ceiling_protocols(
-        probe_for(OPENCODE_ZEN_FREE_PROVIDER_ID, ANONYMOUS_FREE_OFFERING_ID),
+        probe_for(OPENCODE_ZEN_FREE_PROVIDER_ID),
         "brand-new-promo-free",
         &[],
     );
     assert_eq!(unknown_zen, vec![UpstreamProtocolKind::ChatCompletions]);
     assert!(probe_may_add(
-        probe_for(COMMAND_CODE_PROVIDER_ID, GOAT_OFFERING_ID),
+        probe_for(COMMAND_CODE_PROVIDER_ID),
         COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM,
         UpstreamProtocolKind::ChatCompletions,
         &[],
     ));
     assert!(!probe_may_add(
-        probe_for(COMMAND_CODE_PROVIDER_ID, GOAT_OFFERING_ID),
+        probe_for(COMMAND_CODE_PROVIDER_ID),
         COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM,
         UpstreamProtocolKind::Messages,
         &[],
     ));
     assert!(probe_may_add(
-        probe_for(COMMAND_CODE_PROVIDER_ID, GOAT_OFFERING_ID),
+        probe_for(COMMAND_CODE_PROVIDER_ID),
         "claude-sonnet-5",
         UpstreamProtocolKind::Messages,
         &[],
     ));
-    for (provider_id, offering_id) in [
-        (MINIMAX_PROVIDER_ID, MINIMAX_CN_OFFERING_ID),
-        (KIMI_PROVIDER_ID, KIMI_CN_OFFERING_ID),
-    ] {
+    for provider_id in [MINIMAX_PROVIDER_ID, KIMI_PROVIDER_ID] {
         assert!(probe_may_add(
-            probe_for(provider_id, offering_id),
+            probe_for(provider_id),
             "new-catalog-model",
             UpstreamProtocolKind::ChatCompletions,
             &[],
         ));
         assert!(!probe_may_add(
-            probe_for(provider_id, offering_id),
+            probe_for(provider_id),
             "new-catalog-model",
             UpstreamProtocolKind::Responses,
             &[],
@@ -499,7 +488,7 @@ fn goat_is_production_routable_after_probe_success() {
             .routable
     );
     assert!(
-        ProviderRegistry::get(COMMAND_CODE_PROVIDER_ID, GOAT_OFFERING_ID)
+        ProviderRegistry::get(COMMAND_CODE_PROVIDER_ID)
             .unwrap()
             .card_actions
             .protocol_probe
@@ -580,11 +569,8 @@ fn custom_declared_protocol_is_preferred_and_other_clients_fall_back_to_it() {
             })
             .collect(),
     };
-    let ceiling = safety_ceiling_protocols(
-        probe_for(CUSTOM_PROVIDER_ID, CUSTOM_API_OFFERING_ID),
-        "declared-model",
-        &declared,
-    );
+    let ceiling =
+        safety_ceiling_protocols(probe_for(CUSTOM_PROVIDER_ID), "declared-model", &declared);
     assert!(ceiling.contains(&UpstreamProtocolKind::Messages));
     assert!(!ceiling.contains(&UpstreamProtocolKind::ChatCompletions));
     assert!(!ceiling.contains(&UpstreamProtocolKind::Responses));

@@ -24,9 +24,8 @@ use ocg_core::kernel::zen::ZEN_MODELS_SOURCE_URL;
 #[cfg(debug_assertions)]
 use ocg_core::models::ProxyMode;
 use ocg_core::provider::{
-    BUILTIN_PLANS, COMMAND_CODE_PROVIDER_ID, CUSTOM_API_OFFERING_ID, CUSTOM_PROVIDER_ID,
-    GO_OFFERING_ID, GOAT_OFFERING_ID, KIMI_PROVIDER_ID, MINIMAX_PROVIDER_ID, OPENCODE_PROVIDER_ID,
-    OPENCODE_ZEN_FREE_PROVIDER_ID, ZEN_FREE_ACCOUNT_ID,
+    BUILTIN_PROVIDERS, COMMAND_CODE_PROVIDER_ID, CUSTOM_PROVIDER_ID, KIMI_PROVIDER_ID,
+    MINIMAX_PROVIDER_ID, OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID, ZEN_FREE_ACCOUNT_ID,
 };
 use ocg_core::provider_contracts::{
     CATALOG_SOURCE_COMMAND_CODE_MODELS, CATALOG_SOURCE_KIMI_CN_MODELS,
@@ -306,7 +305,6 @@ fn custom_create_body() -> Value {
         "name": "Lan",
         "key": "custom-secret-key",
         "providerId": CUSTOM_PROVIDER_ID,
-        "offeringId": CUSTOM_API_OFFERING_ID,
         "customConfig": {
             "endpointUrl": "https://api.example.com/v1/messages",
             "upstreamProtocol": "messages"
@@ -389,7 +387,7 @@ async fn dashboard_v3_v2_login_cookie_authorizes_provider_reads() {
     let parsed: ProviderCatalog = serde_json::from_value(body.clone()).unwrap();
     assert_eq!(
         parsed.entries.len(),
-        BUILTIN_PLANS
+        BUILTIN_PROVIDERS
             .iter()
             .filter(|plan| !plan.product_surface.is_external_integration())
             .count()
@@ -411,22 +409,18 @@ async fn dashboard_v3_providers_catalog_covers_all_plan_facts_nulls_and_camel_ca
     assert!(body.get("provider_id").is_none());
 
     let parsed: ProviderCatalog = serde_json::from_value(body.clone()).expect("ProviderCatalog");
-    let provider_plans = BUILTIN_PLANS
+    let provider_plans = BUILTIN_PROVIDERS
         .iter()
         .filter(|plan| !plan.product_surface.is_external_integration())
         .collect::<Vec<_>>();
     assert_eq!(parsed.entries.len(), provider_plans.len());
 
     for (plan, entry) in provider_plans.into_iter().zip(parsed.entries.iter()) {
-        assert_eq!(entry.provider_id, plan.offering.provider_id);
-        assert_eq!(entry.offering_id, plan.offering.offering_id);
+        assert_eq!(entry.provider_id, plan.provider_id);
         assert_eq!(entry.display_name, plan.display_name);
         assert_eq!(entry.display_family, plan.display_family);
         assert_eq!(entry.routable, plan.routable);
-        assert_eq!(
-            entry.singleton,
-            plan.offering.singleton_account_id.is_some()
-        );
+        assert_eq!(entry.singleton, plan.singleton_account_id.is_some());
         assert_eq!(
             entry.creation_availability,
             plan.creation_availability.as_str()
@@ -447,8 +441,8 @@ async fn dashboard_v3_providers_catalog_covers_all_plan_facts_nulls_and_camel_ca
             assert!(
                 entry.model_aliases.is_empty(),
                 "{} / {} must keep empty aliases",
-                plan.offering.provider_id,
-                plan.offering.offering_id
+                plan.provider_id,
+                plan.provider_id
             );
         }
     }
@@ -459,7 +453,6 @@ async fn dashboard_v3_providers_catalog_covers_all_plan_facts_nulls_and_camel_ca
             "creationUnavailableReason",
             "keyPrefix",
             "providerId",
-            "offeringId",
             "modelAliases",
         ] {
             assert!(
@@ -476,10 +469,7 @@ async fn dashboard_v3_providers_catalog_covers_all_plan_facts_nulls_and_camel_ca
 
     let goat = entries
         .iter()
-        .find(|entry| {
-            entry["providerId"] == COMMAND_CODE_PROVIDER_ID
-                && entry["offeringId"] == GOAT_OFFERING_ID
-        })
+        .find(|entry| entry["providerId"] == COMMAND_CODE_PROVIDER_ID)
         .unwrap();
     assert_eq!(goat["routable"], true);
     assert_eq!(goat["verificationRuntimeAvailability"], "not_applicable");
@@ -492,10 +482,7 @@ async fn dashboard_v3_providers_catalog_covers_all_plan_facts_nulls_and_camel_ca
 
     let custom = entries
         .iter()
-        .find(|entry| {
-            entry["providerId"] == CUSTOM_PROVIDER_ID
-                && entry["offeringId"] == CUSTOM_API_OFFERING_ID
-        })
+        .find(|entry| entry["providerId"] == CUSTOM_PROVIDER_ID)
         .unwrap();
     assert_eq!(custom["routable"], true);
     assert_eq!(custom["pricingAvailability"], "unpriced");
@@ -658,7 +645,11 @@ async fn dashboard_v3_model_capabilities_are_go_protocol_rows_including_grok_45(
             .iter()
             .all(|row| row.provider_id == OPENCODE_PROVIDER_ID)
     );
-    assert!(parsed.iter().all(|row| row.offering_id == GO_OFFERING_ID));
+    assert!(
+        parsed
+            .iter()
+            .all(|row| row.provider_id == OPENCODE_PROVIDER_ID)
+    );
     let grok = parsed
         .iter()
         .find(|row| row.model_id == "grok-4.5")
@@ -1552,7 +1543,7 @@ async fn dashboard_v3_provider_routes_coexist_with_v2_and_omit_v2_aliases() {
     assert!(v3_catalog.get("entries").is_some());
     assert_eq!(
         v3_catalog["entries"].as_array().unwrap().len(),
-        BUILTIN_PLANS
+        BUILTIN_PROVIDERS
             .iter()
             .filter(|plan| !plan.product_surface.is_external_integration())
             .count()

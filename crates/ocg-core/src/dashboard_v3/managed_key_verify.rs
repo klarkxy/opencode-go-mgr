@@ -237,7 +237,7 @@ fn require_waiting_managed(state: &CoreState, account: &ModelAccount) -> Result<
 }
 
 fn ensure_plan_can_enable(state: &CoreState, account: &ModelAccount) -> Result<(), V3ApiError> {
-    provider::ensure_offering_can_enable(&account.provider_id, &account.offering_id)
+    provider::ensure_provider_can_enable(&account.provider_id)
         .map_err(|error| map_enablement_error(state, error))
 }
 
@@ -245,7 +245,7 @@ fn ensure_managed_registration(
     state: &CoreState,
     account: &ModelAccount,
 ) -> Result<(), V3ApiError> {
-    let is_managed = provider::builtin_plan(&account.provider_id, &account.offering_id)
+    let is_managed = provider::builtin_provider(&account.provider_id)
         .is_some_and(|plan| plan.managed_registration);
     if !is_managed {
         return Err(V3ApiError::conflict_at(
@@ -619,11 +619,11 @@ fn account_from_state(state: &CoreState, account: ModelAccount) -> Result<Accoun
                 .map(|secret| redact_known_secret(&error, secret))
         })
     };
-    let plan = provider::builtin_plan(&account.provider_id, &account.offering_id);
+    let plan = provider::builtin_provider(&account.provider_id);
     Ok(Account {
         id: account.id.clone(),
         provider_id: account.provider_id.clone(),
-        offering_id: account.offering_id.clone(),
+
         credential_kind: account.credential_kind.into(),
         quota_scope: account.quota_scope.into(),
         name: account.name,

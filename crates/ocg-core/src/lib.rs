@@ -13,6 +13,7 @@ pub(crate) mod dashboard_session;
 pub mod dashboard_v3;
 pub mod db;
 pub mod desktop;
+pub mod dynamic;
 pub mod gateway;
 pub(crate) mod gateway_clock;
 pub mod gateway_keys;

@@ -229,7 +229,7 @@ fn forward_log_read_query(query: ForwardLogQuery) -> ForwardLogReadQuery {
         status: query.status,
         account_id: query.account_id,
         provider_id: query.provider_id,
-        offering_id: query.offering_id,
+
         route_account_id: query.route_account_id,
         credential_account_id: query.credential_account_id,
         model: query.model,
@@ -268,7 +268,7 @@ fn forward_log_from_enriched(item: EnrichedForwardLog) -> ForwardLog {
         account_name: log.account_name,
         route_account_id: log.route_account_id,
         provider_id: log.provider_id,
-        offering_id: log.offering_id,
+
         credential_account_id: log.credential_account_id,
         client_key_id: log.client_key_id,
         client_key_name: log.client_key_name,

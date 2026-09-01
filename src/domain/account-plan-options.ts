@@ -3,10 +3,12 @@ import type { MessageKey } from "../i18n/index.ts";
 import type { PlanDefinition } from "./plans.ts";
 import {
   PLAN_DEFINITIONS,
+  dynamicPlanDefinition,
   findCatalogEntry,
   planFamilyLabel,
   planCreateDisabledReason,
 } from "./plans.ts";
+import { isDynamicCatalogEntry } from "./dynamic-provider.ts";
 
 /**
  * Plan-option list for the Add Account chooser. Backend-owned singletons
@@ -17,8 +19,10 @@ import {
  */
 
 export interface PlanOption {
+  optionId: string;
   plan: PlanDefinition;
   label: string;
+  source: "builtin" | "user-defined";
   disabled: boolean;
   disabledReason: MessageKey | "";
   /** Honest copy for selectable-but-not-yet-routable families. */
@@ -55,43 +59,60 @@ function planCreationHint(
   return "";
 }
 
-/** True when any family offering is routable according to the catalog. */
+/** True when the family's provider is routable according to the catalog. */
 function planFamilyRoutable(
   plan: PlanDefinition,
   catalog: readonly ProviderCatalogEntry[] | null | undefined,
 ): boolean {
   if (!catalog?.length) return false;
-  return plan.offering_ids.some((offeringId) => {
-    const entry = findCatalogEntry(catalog, plan.provider_id, offeringId);
-    return entry?.routable === true;
-  });
+  return findCatalogEntry(catalog, plan.provider_id)?.routable === true;
+}
+
+function builtinOption(
+  plan: PlanDefinition,
+  catalog: readonly ProviderCatalogEntry[] | null | undefined,
+): PlanOption {
+  const reason = planCreateDisabledReason(plan, catalog);
+  return {
+    optionId: plan.id,
+    plan,
+    label: planFamilyLabel(plan, catalog),
+    source: "builtin",
+    disabled: Boolean(reason),
+    disabledReason: reason ?? "",
+    creationHint: reason ? "" : planCreationHint(plan, catalog),
+    managed: !reason && plan.managed_registration,
+  };
+}
+
+function dynamicOption(entry: ProviderCatalogEntry): PlanOption {
+  const plan = dynamicPlanDefinition(entry);
+  const blocked = entry.singleton || entry.creation_availability !== "available";
+  const noAuthSingleton = entry.singleton || entry.credential_kind === "none";
+  return {
+    optionId: entry.provider_id,
+    plan,
+    label: entry.display_name || entry.provider_id,
+    source: "user-defined",
+    disabled: blocked,
+    disabledReason: blocked
+      ? (noAuthSingleton ? "无鉴权供应商只能有一个账号。" : "该方案暂不可用")
+      : "",
+    creationHint: blocked ? "" : "账号不拥有 Endpoint、协议或模型映射。",
+    managed: false,
+  };
 }
 
 export function buildPlanOptions(
   catalog: readonly ProviderCatalogEntry[] | null | undefined,
 ): PlanOption[] {
-  return PLAN_DEFINITIONS.filter((plan) => !plan.singleton).map((plan) => {
-    const reason = planCreateDisabledReason(plan, catalog);
-    if (reason) {
-      return {
-        plan,
-        label: planFamilyLabel(plan, catalog),
-        disabled: true,
-        disabledReason: reason,
-        creationHint: "",
-        managed: false,
-      };
-    }
-
-    return {
-      plan,
-      label: planFamilyLabel(plan, catalog),
-      disabled: false,
-      disabledReason: "",
-      creationHint: planCreationHint(plan, catalog),
-      managed: plan.managed_registration,
-    };
-  });
+  const builtin = PLAN_DEFINITIONS.filter((plan) => !plan.singleton).map((plan) => (
+    builtinOption(plan, catalog)
+  ));
+  const dynamic = (catalog ?? [])
+    .filter(isDynamicCatalogEntry)
+    .map(dynamicOption);
+  return [...builtin, ...dynamic];
 }
 
 export function planChooserGroupId(

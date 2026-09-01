@@ -105,7 +105,7 @@ fn stored_custom_api_key(
 }
 
 fn require_custom_plan(state: &CoreState, account: &ModelAccount) -> Result<(), V3ApiError> {
-    let plan = crate::provider::builtin_plan(&account.provider_id, &account.offering_id)
+    let plan = crate::provider::builtin_provider(&account.provider_id)
         .ok_or_else(|| V3ApiError::invalid_request_at(state, "unknown provider offering"))?;
     if crate::provider::plan_requires_custom_config(plan) {
         Ok(())

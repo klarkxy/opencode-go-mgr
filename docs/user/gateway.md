@@ -53,7 +53,7 @@ Forward logs separate the request identity from the upstream identity. There is 
 - `resolved_alias` — the resolved public Alias when one exists
 - `upstream_model` — the exact model ID actually sent to that account's upstream
 
-plus `provider_id` and `offering_id`. Native cost fields are optional.
+plus `provider_id`. Native cost fields are optional.
 
 Claude Desktop keeps its own three-role alias layer (`claude-sonnet-4-6`, `claude-opus-4-6`, and `claude-haiku-4-5-20251001`). These are rewritten to the mapping saved in **Applications** before Alias resolution. `GET /claude-desktop/v1/models` still advertises only those three role aliases, not the Plan model union.
 

@@ -211,16 +211,16 @@ test("pricing catalog keeps refresh explicit and exposes accessible grouped mult
   assert.doesNotMatch(catalog, /plan\.id !== "command-code-goat"/);
 });
 
-test("legacy offering sections expose the GOAT pricing table", () => {
+test("legacy provider sections expose the GOAT pricing table", () => {
   const sections = buildPricingOfferingSections(null);
   assert.deepEqual(
-    sections.map(({ provider_id, offering_id, presentation }) => (
-      `${provider_id}/${offering_id}:${presentation}`
+    sections.map(({ provider_id, presentation }) => (
+      `${provider_id}:${presentation}`
     )),
     [
-      "opencode/go:table",
-      "command-code/goat:table",
-      "opencode-zen-free/anonymous-free:free",
+      "opencode:table",
+      "command-code:table",
+      "opencode-zen-free:free",
     ],
   );
 });
@@ -236,5 +236,4 @@ test("GOAT usage helper exposes local log-estimate windows", () => {
   const retry = usage.slice(usage.indexOf("async function retryQuotaLimits"));
   assert.doesNotMatch(retry, /isCommandCodeGoatAccount/);
   assert.match(retry, /account\.provider_id === "opencode"/);
-  assert.match(retry, /account\.offering_id === "go"/);
 });

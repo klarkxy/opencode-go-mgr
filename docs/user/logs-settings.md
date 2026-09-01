@@ -6,10 +6,10 @@
 
 The **Logs** view opens on **Request Logs** and is the rolling receipt tape for
 requests the gateway forwards plus explicit provider protocol probes: timestamp,
-selected provider/offering, route account, credential account, model, status
+selected provider, route account, credential account, model, status
 code, the upstream error if any, and the streamed usage when the upstream emits
 a usage chunk. Probe rows carry zero token values and no applicable cost, have no client Key
-attribution, and never appear in Runtime Logs. Filters cover provider, offering, route
+attribution, and never appear in Runtime Logs. Filters cover provider, route
 account, credential account, model, status, time range, and client Key. It will
 not fix your prompt, but it will tell you exactly which account took the fall.
 Authenticated parse, validation, or routing failures that happen before account
@@ -22,20 +22,20 @@ identity. There is no `requested_alias` field:
 - `resolved_alias` — the resolved public Alias when one exists
 - `upstream_model` — the exact model ID actually sent to that account's upstream
 
-plus `provider_id` and `offering_id`. The existing model filter exact-matches
+plus `provider_id`. The existing model filter exact-matches
 any of those identities or the legacy `model` column. Native cost
 (`native_cost_value`, `native_cost_unit`, `native_cost_currency`) is optional
-and present only when the offering supplies enough pricing evidence.
+and present only when the provider supplies enough pricing evidence.
 
 Each row also stores raw supplier cost, quota debit, and effective paid cost
-when the selected offering supplies enough pricing evidence. An allowance only
+when the selected provider supplies enough pricing evidence. An allowance only
 changes the quota-debit multiplier; it does not make a model or provider routable.
 
 - Chat streaming requests set `stream_options.include_usage` so OpenAI-compatible
   upstreams emit a usage chunk. Rows with `success_no_usage` mean the stream
   still finished without one. A usage chunk makes token counts accurate; the
   summary shows total tokens (input + output). Quota use is estimated from the
-  selected offering's verified pricing snapshot: OpenCode Go uses its active
+  selected provider's verified pricing snapshot: OpenCode Go uses its active
   snapshot, while Command Code GOAT uses its separately refreshed model prices
   and multipliers. Existing rows are not retroactively repriced. Registered
   Zen free models (`big-pickle`, `mimo-v2.5-free`, and other ids on the Zen

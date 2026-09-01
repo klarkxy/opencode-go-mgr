@@ -12,7 +12,6 @@ function customAccount(id: string) {
     name: "Custom",
     enabled: false,
     providerId: "custom",
-    offeringId: "api",
     purchaseDate: "",
     expiresOn: "",
     createdAt: "2026-08-21T00:00:00Z",

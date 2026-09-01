@@ -29,11 +29,9 @@ import {
 
 const catalogEntry = (
   provider_id: string,
-  offering_id: string,
   display_name: string,
 ): ProviderCatalogEntry => ({
   provider_id,
-  offering_id,
   display_name,
   display_family: provider_id,
   credential_kind: "api_key",
@@ -114,12 +112,7 @@ function providerGroup(overrides: Partial<ProviderContractGroup> = {}): Provider
     scope_id: "opencode",
     provider_id: "opencode",
     static_protocol_snapshot_date: "2026-08-14",
-    offerings: [{
-      offering_id: "go",
-      display_name: "OpenCode Go",
-      routable: true,
-      accounts: [{ id: "go-1", name: "Go 1", enabled: true, verification_status: "not_required" }],
-    }],
+    accounts: [{ id: "go-1", name: "Go 1", enabled: true, verification_status: "not_required" }],
     catalog: {
       source: "static",
       source_url: "https://opencode.ai/docs/go/",
@@ -194,7 +187,6 @@ function account(overrides: Partial<Account> = {}): Account {
     account_type: "key",
     setup_step: "ready",
     provider_id: "opencode",
-    offering_id: "go",
     credential_kind: "api_key",
     quota_scope: "key",
     purchase_date: "2026-01-01",
@@ -233,41 +225,34 @@ test("scope keys round-trip and accounts match backend-owned exact scopes", () =
   assert.equal(findAccountScopeView(scopes, account({
     id: "c1",
     provider_id: "custom",
-    offering_id: "api",
   })), undefined);
   assert.equal(findAccountScopeView(scopes, account({
     id: "custom-1",
     provider_id: "custom",
-    offering_id: "api",
   }))?.scope_id, "custom-1");
 });
 
-test("account scope matching distinguishes offerings under one provider", () => {
+test("account scope matching distinguishes providers", () => {
   const scopes = flattenProviderScopes(normalizeProviderContractsResponse(contracts({
     providers: [
       providerGroup(),
       providerGroup({
-        scope_id: "opencode-go-plus",
-        offerings: [{
-          offering_id: "go-plus",
-          display_name: "OpenCode Go Plus",
-          routable: true,
-          accounts: [{ id: "plus-1", name: "Plus 1", enabled: true, verification_status: "not_required" }],
-        }],
+        scope_id: "command-code",
+        provider_id: "command-code",
+        accounts: [{ id: "goat-1", name: "GOAT 1", enabled: true, verification_status: "not_required" }],
       }),
     ],
   })));
   assert.equal(findAccountScopeView(scopes, account({
-    id: "plus-1",
-    provider_id: "opencode",
-    offering_id: "go-plus",
-  }))?.scope_id, "opencode-go-plus");
+    id: "goat-1",
+    provider_id: "command-code",
+  }))?.scope_id, "command-code");
 });
 
 test("flatten keeps built-in providers grouped and Custom endpoints unflattened", () => {
   const catalog = [
-    catalogEntry("opencode", "go", "OpenCode Go"),
-    catalogEntry("custom", "api", "Custom API"),
+    catalogEntry("opencode", "OpenCode Go"),
+    catalogEntry("custom", "Custom API"),
   ];
   const scopes = flattenProviderScopes(normalizeProviderContractsResponse(contracts({
     providers: [
@@ -344,7 +329,6 @@ test("account summaries use contract facts for protocol availability and unrouta
     id: "custom-1",
     name: "Home Lab",
     provider_id: "custom",
-    offering_id: "api",
   }), contracts());
   assert.ok(custom);
   assert.equal(custom.scope_kind, "custom_endpoint");

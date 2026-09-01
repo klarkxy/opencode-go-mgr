@@ -51,7 +51,7 @@ export interface PlanPricingDisplay {
 }
 
 /**
- * Per-plan provider-pricing responses fetched from `/providers/{provider}/{offering}/pricing`.
+ * Per-plan provider-pricing responses fetched from `/providers/{provider}/pricing`.
  * Plans that have not been fetched (or whose fetch failed) are simply absent.
  */
 export type ProviderSnapshots = Partial<Record<PlanId, ProviderPricingResponse>>;
@@ -189,11 +189,7 @@ function groupForPlan(
   opencodeSnapshot: PricingSnapshot | null,
   providerSnapshots: ProviderSnapshots,
 ): PlanPricingGroup {
-  // For families with multiple offerings, the catalog should list all of them
-  // with the same pricing_availability; read the first present entry.
-  const entry = plan.offering_ids
-    .map((offeringId) => findCatalogEntry(catalog, plan.provider_id, offeringId))
-    .find(Boolean);
+  const entry = findCatalogEntry(catalog, plan.provider_id);
   const response = providerSnapshots[plan.id];
   const pricingAvailability = response?.availability
     ?? entry?.pricing_availability

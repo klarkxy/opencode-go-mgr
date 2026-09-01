@@ -55,6 +55,14 @@ import type {
   DailyTokensByModel,
   DashboardSummary,
   DesktopUpdate,
+  DynamicProvider,
+  DynamicProviderCreate,
+  DynamicProviderDiscoverRequest,
+  DynamicProviderDiscoverResponse,
+  DynamicProviderMutation,
+  DynamicProviderTestRequest,
+  DynamicProviderTestResponse,
+  DynamicProviderUpdate,
   ForwardLogKeys,
   ForwardLogModels,
   ForwardLogQuery,
@@ -521,24 +529,23 @@ export const dashboardV3 = {
     update: WithoutExpectation<PricingMultipliersUpdate>,
     expectation: MutationExpectation,
   ) =>
-    requestV3<PricingSnapshot>("/providers/opencode/go/pricing/multipliers", {
+    requestV3<PricingSnapshot>("/providers/opencode/pricing/multipliers", {
       method: "PUT",
       body: withExpectation(update, expectation),
     }),
   putProviderPricingMultipliers: (
     providerId: string,
-    offeringId: string,
     update: WithoutExpectation<PricingMultipliersUpdate>,
     expectation: MutationExpectation,
   ) => requestV3<ProviderPricing>(
-    `/providers/${encode(providerId)}/${encode(offeringId)}/pricing/multipliers`,
+    `/providers/${encode(providerId)}/pricing/multipliers`,
     {
       method: "PUT",
       body: withExpectation(update, expectation),
     },
   ),
-  getProviderPricing: (providerId: string, offeringId: string) =>
-    requestV3<ProviderPricing>(`/providers/${encode(providerId)}/${encode(offeringId)}/pricing`),
+  getProviderPricing: (providerId: string) =>
+    requestV3<ProviderPricing>(`/providers/${encode(providerId)}/pricing`),
 
   // --- accounts ---
   listAccounts: () => requestV3<AccountList>("/accounts"),
@@ -660,6 +667,38 @@ export const dashboardV3 = {
 
   // --- providers ---
   getProviders: () => requestV3<ProviderCatalog>("/providers"),
+  getDynamicProvider: (providerId: string) =>
+    requestV3<DynamicProvider>(`/providers/${encode(providerId)}`),
+  createDynamicProvider: (
+    input: WithoutExpectation<DynamicProviderCreate>,
+    expectation: MutationExpectation,
+  ) => requestV3<DynamicProviderMutation>("/providers", {
+    method: "POST",
+    body: withExpectation(input, expectation),
+  }),
+  updateDynamicProvider: (
+    providerId: string,
+    input: WithoutExpectation<DynamicProviderUpdate>,
+    expectation: MutationExpectation,
+  ) => requestV3<DynamicProviderMutation>(`/providers/${encode(providerId)}`, {
+    method: "PATCH",
+    body: withExpectation(input, expectation),
+  }),
+  deleteDynamicProvider: (providerId: string, expectation: MutationExpectation) =>
+    requestV3<MutationAck>(`/providers/${encode(providerId)}`, {
+      method: "DELETE",
+      body: mutation(expectation),
+    }),
+  discoverDynamicProviderModels: (input: DynamicProviderDiscoverRequest) =>
+    requestV3<DynamicProviderDiscoverResponse>("/providers/models/discover", {
+      method: "POST",
+      body: json(input),
+    }),
+  testDynamicProvider: (input: DynamicProviderTestRequest) =>
+    requestV3<DynamicProviderTestResponse>("/providers/test", {
+      method: "POST",
+      body: json(input),
+    }),
   getProviderModelCapabilities: () =>
     requestV3<ProviderModelCapability[]>("/providers/model-capabilities"),
   refreshProviderModels: (
@@ -744,7 +783,6 @@ export const dashboardV3 = {
     if (query.requestId) params.set("requestId", query.requestId);
     if (query.keyId) params.set("keyId", query.keyId);
     if (query.providerId) params.set("providerId", query.providerId);
-    if (query.offeringId) params.set("offeringId", query.offeringId);
     if (query.routeAccountId) params.set("routeAccountId", query.routeAccountId);
     if (query.credentialAccountId) params.set("credentialAccountId", query.credentialAccountId);
     if (query.startTime) params.set("startTime", query.startTime);

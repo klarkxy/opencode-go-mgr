@@ -75,9 +75,9 @@ test("public models are case-insensitively unique while upstream IDs are reusabl
 });
 
 test("verification state only applies to Custom accounts", () => {
-  const account = { provider_id: "custom", offering_id: "api", verification_status: "pending" } as Pick<
+  const account = { provider_id: "custom", verification_status: "pending" } as Pick<
     Account,
-    "provider_id" | "offering_id" | "verification_status"
+    "provider_id" | "verification_status"
   >;
   assert.ok(customAccountNeedsVerification(account));
   assert.ok(!customAccountNeedsVerification({ ...account, verification_status: "verified" }));

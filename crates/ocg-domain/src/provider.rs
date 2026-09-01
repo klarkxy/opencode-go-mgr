@@ -1,5 +1,5 @@
-//! Pure immutable Provider/Offering catalog, adapter identities, capability
-//! registry, and binding/enablement validation.
+//! Pure immutable Provider catalog, adapter identities, capability registry,
+//! and binding/enablement validation.
 //!
 //! Custom URL parsing (`reqwest`) and persistence-shaped quota, credit, pricing,
 //! and usage-sync records stay in the host crate.
@@ -9,10 +9,9 @@ use crate::catalog::{
     UpstreamProtocolKind,
 };
 use crate::ids::{
-    ANONYMOUS_FREE_OFFERING_ID, COMMAND_CODE_PROVIDER_ID, CPA_ACCOUNT_ID, CPA_OFFERING_ID,
-    CPA_PROVIDER_ID, CUSTOM_API_OFFERING_ID, CUSTOM_PROVIDER_ID, GO_OFFERING_ID, GOAT_OFFERING_ID,
-    KIMI_CN_OFFERING_ID, KIMI_PROVIDER_ID, MINIMAX_CN_OFFERING_ID, MINIMAX_PROVIDER_ID,
-    OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID, ZEN_FREE_ACCOUNT_ID,
+    COMMAND_CODE_PROVIDER_ID, CPA_ACCOUNT_ID, CPA_PROVIDER_ID, CUSTOM_PROVIDER_ID,
+    KIMI_PROVIDER_ID, MINIMAX_PROVIDER_ID, OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID,
+    ZEN_FREE_ACCOUNT_ID,
 };
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -111,15 +110,6 @@ pub const QUOTA_WINDOW_WEEK: &str = "week";
 pub const QUOTA_WINDOW_MONTH: &str = "month";
 pub const QUOTA_WINDOW_FREE: &str = "free";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct BuiltinOffering {
-    pub provider_id: &'static str,
-    pub offering_id: &'static str,
-    pub credential_kind: CredentialKind,
-    pub quota_scope: QuotaScope,
-    pub singleton_account_id: Option<&'static str>,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CreationAvailability {
@@ -127,7 +117,7 @@ pub enum CreationAvailability {
     Unavailable,
 }
 
-/// Product location for a sealed offering. Registry validation applies to both
+/// Product location for a sealed Provider. Registry validation applies to both
 /// surfaces; callers use this marker to keep external integrations out of the
 /// Providers catalog and generic Add Account flow.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -235,8 +225,11 @@ pub struct PlanFormField {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct BuiltinPlan {
-    pub offering: BuiltinOffering,
+pub struct BuiltinProvider {
+    pub provider_id: &'static str,
+    pub credential_kind: CredentialKind,
+    pub quota_scope: QuotaScope,
+    pub singleton_account_id: Option<&'static str>,
     /// Stable identifier for the persisted Provider-contract scope. External
     /// integrations and account-configured Custom API intentionally have none.
     pub contract_scope_id: Option<&'static str>,
@@ -341,19 +334,12 @@ const CUSTOM_PROTOCOLS: [UpstreamProtocolKind; 3] = [
     UpstreamProtocolKind::Messages,
 ];
 
-const fn key_offering(provider_id: &'static str, offering_id: &'static str) -> BuiltinOffering {
-    BuiltinOffering {
-        provider_id,
-        offering_id,
+pub const BUILTIN_PROVIDERS: [BuiltinProvider; 7] = [
+    BuiltinProvider {
+        provider_id: OPENCODE_PROVIDER_ID,
         credential_kind: CredentialKind::ApiKey,
         quota_scope: QuotaScope::Key,
         singleton_account_id: None,
-    }
-}
-
-pub const BUILTIN_PLANS: [BuiltinPlan; 7] = [
-    BuiltinPlan {
-        offering: key_offering(OPENCODE_PROVIDER_ID, GO_OFFERING_ID),
         contract_scope_id: Some(OPENCODE_PROVIDER_ID),
         display_name: "OpenCode Go",
         display_family: "OpenCode",
@@ -374,14 +360,11 @@ pub const BUILTIN_PLANS: [BuiltinPlan; 7] = [
         upstream_protocols: &GO_PROTOCOLS,
         form_fields: &GO_FORM_FIELDS,
     },
-    BuiltinPlan {
-        offering: BuiltinOffering {
-            provider_id: OPENCODE_ZEN_FREE_PROVIDER_ID,
-            offering_id: ANONYMOUS_FREE_OFFERING_ID,
-            credential_kind: CredentialKind::None,
-            quota_scope: QuotaScope::EgressIp,
-            singleton_account_id: Some(ZEN_FREE_ACCOUNT_ID),
-        },
+    BuiltinProvider {
+        provider_id: OPENCODE_ZEN_FREE_PROVIDER_ID,
+        credential_kind: CredentialKind::None,
+        quota_scope: QuotaScope::EgressIp,
+        singleton_account_id: Some(ZEN_FREE_ACCOUNT_ID),
         contract_scope_id: Some(OPENCODE_ZEN_FREE_PROVIDER_ID),
         display_name: "OpenCode Zen Free",
         display_family: "OpenCode",
@@ -404,8 +387,11 @@ pub const BUILTIN_PLANS: [BuiltinPlan; 7] = [
         upstream_protocols: &GO_PROTOCOLS,
         form_fields: &[],
     },
-    BuiltinPlan {
-        offering: key_offering(COMMAND_CODE_PROVIDER_ID, GOAT_OFFERING_ID),
+    BuiltinProvider {
+        provider_id: COMMAND_CODE_PROVIDER_ID,
+        credential_kind: CredentialKind::ApiKey,
+        quota_scope: QuotaScope::Key,
+        singleton_account_id: None,
         contract_scope_id: Some(COMMAND_CODE_PROVIDER_ID),
         display_name: "Command Code GOAT",
         display_family: "Command Code",
@@ -426,8 +412,11 @@ pub const BUILTIN_PLANS: [BuiltinPlan; 7] = [
         upstream_protocols: &GOAT_PROTOCOLS,
         form_fields: &GOAT_FORM_FIELDS,
     },
-    BuiltinPlan {
-        offering: key_offering(MINIMAX_PROVIDER_ID, MINIMAX_CN_OFFERING_ID),
+    BuiltinProvider {
+        provider_id: MINIMAX_PROVIDER_ID,
+        credential_kind: CredentialKind::ApiKey,
+        quota_scope: QuotaScope::Key,
+        singleton_account_id: None,
         contract_scope_id: Some(MINIMAX_PROVIDER_ID),
         display_name: "MiniMax CN Token Plan",
         display_family: "MiniMax",
@@ -448,8 +437,11 @@ pub const BUILTIN_PLANS: [BuiltinPlan; 7] = [
         upstream_protocols: &CHAT_PROTOCOLS,
         form_fields: &MINIMAX_CN_FORM_FIELDS,
     },
-    BuiltinPlan {
-        offering: key_offering(KIMI_PROVIDER_ID, KIMI_CN_OFFERING_ID),
+    BuiltinProvider {
+        provider_id: KIMI_PROVIDER_ID,
+        credential_kind: CredentialKind::ApiKey,
+        quota_scope: QuotaScope::Key,
+        singleton_account_id: None,
         contract_scope_id: Some(KIMI_PROVIDER_ID),
         display_name: "Kimi Code CN",
         display_family: "Kimi",
@@ -470,8 +462,11 @@ pub const BUILTIN_PLANS: [BuiltinPlan; 7] = [
         upstream_protocols: &CHAT_PROTOCOLS,
         form_fields: &KIMI_CN_FORM_FIELDS,
     },
-    BuiltinPlan {
-        offering: key_offering(CUSTOM_PROVIDER_ID, CUSTOM_API_OFFERING_ID),
+    BuiltinProvider {
+        provider_id: CUSTOM_PROVIDER_ID,
+        credential_kind: CredentialKind::ApiKey,
+        quota_scope: QuotaScope::Key,
+        singleton_account_id: None,
         contract_scope_id: None,
         display_name: "Custom API",
         display_family: "Custom",
@@ -492,14 +487,11 @@ pub const BUILTIN_PLANS: [BuiltinPlan; 7] = [
         upstream_protocols: &CUSTOM_PROTOCOLS,
         form_fields: &CUSTOM_FORM_FIELDS,
     },
-    BuiltinPlan {
-        offering: BuiltinOffering {
-            provider_id: CPA_PROVIDER_ID,
-            offering_id: CPA_OFFERING_ID,
-            credential_kind: CredentialKind::ApiKey,
-            quota_scope: QuotaScope::Key,
-            singleton_account_id: Some(CPA_ACCOUNT_ID),
-        },
+    BuiltinProvider {
+        provider_id: CPA_PROVIDER_ID,
+        credential_kind: CredentialKind::ApiKey,
+        quota_scope: QuotaScope::Key,
+        singleton_account_id: Some(CPA_ACCOUNT_ID),
         contract_scope_id: None,
         display_name: "CPA Subscription Pool",
         display_family: "CPA",
@@ -524,22 +516,8 @@ pub const BUILTIN_PLANS: [BuiltinPlan; 7] = [
     },
 ];
 
-pub const BUILTIN_OFFERINGS: [BuiltinOffering; 7] = [
-    BUILTIN_PLANS[0].offering,
-    BUILTIN_PLANS[1].offering,
-    BUILTIN_PLANS[2].offering,
-    BUILTIN_PLANS[3].offering,
-    BUILTIN_PLANS[4].offering,
-    BUILTIN_PLANS[5].offering,
-    BUILTIN_PLANS[6].offering,
-];
-
 pub fn default_provider_id() -> String {
     OPENCODE_PROVIDER_ID.to_string()
-}
-
-pub fn default_offering_id() -> String {
-    GO_OFFERING_ID.to_string()
 }
 
 pub fn default_credential_kind() -> CredentialKind {
@@ -550,14 +528,11 @@ pub fn default_quota_scope() -> QuotaScope {
     QuotaScope::Key
 }
 
-pub fn builtin_offering(provider_id: &str, offering_id: &str) -> Option<BuiltinOffering> {
-    builtin_plan(provider_id, offering_id).map(|plan| plan.offering)
-}
-
-pub fn builtin_plan(provider_id: &str, offering_id: &str) -> Option<BuiltinPlan> {
-    BUILTIN_PLANS.iter().copied().find(|plan| {
-        plan.offering.provider_id == provider_id && plan.offering.offering_id == offering_id
-    })
+pub fn builtin_provider(provider_id: &str) -> Option<BuiltinProvider> {
+    BUILTIN_PROVIDERS
+        .iter()
+        .copied()
+        .find(|provider| provider.provider_id == provider_id)
 }
 
 /// Exhaustive, code-owned adapter identity. Not a plugin slot, JSON DSL, or
@@ -585,15 +560,15 @@ impl ProviderAdapterKind {
         Self::Cpa,
     ];
 
-    pub fn from_offering(provider_id: &str, offering_id: &str) -> Option<Self> {
-        match (provider_id, offering_id) {
-            (OPENCODE_PROVIDER_ID, GO_OFFERING_ID) => Some(Self::OpenCodeGo),
-            (OPENCODE_ZEN_FREE_PROVIDER_ID, ANONYMOUS_FREE_OFFERING_ID) => Some(Self::ZenFree),
-            (COMMAND_CODE_PROVIDER_ID, GOAT_OFFERING_ID) => Some(Self::CommandCodeGoat),
-            (MINIMAX_PROVIDER_ID, MINIMAX_CN_OFFERING_ID) => Some(Self::MiniMaxCn),
-            (KIMI_PROVIDER_ID, KIMI_CN_OFFERING_ID) => Some(Self::KimiCn),
-            (CUSTOM_PROVIDER_ID, CUSTOM_API_OFFERING_ID) => Some(Self::ConfigurableHttp),
-            (CPA_PROVIDER_ID, CPA_OFFERING_ID) => Some(Self::Cpa),
+    pub fn from_provider_id(provider_id: &str) -> Option<Self> {
+        match provider_id {
+            OPENCODE_PROVIDER_ID => Some(Self::OpenCodeGo),
+            OPENCODE_ZEN_FREE_PROVIDER_ID => Some(Self::ZenFree),
+            COMMAND_CODE_PROVIDER_ID => Some(Self::CommandCodeGoat),
+            MINIMAX_PROVIDER_ID => Some(Self::MiniMaxCn),
+            KIMI_PROVIDER_ID => Some(Self::KimiCn),
+            CUSTOM_PROVIDER_ID => Some(Self::ConfigurableHttp),
+            CPA_PROVIDER_ID => Some(Self::Cpa),
             _ => None,
         }
     }
@@ -623,9 +598,9 @@ impl ProviderAdapterKind {
     }
 }
 
-pub fn is_command_code_goat(provider_id: &str, offering_id: &str) -> bool {
+pub fn is_command_code_goat(provider_id: &str) -> bool {
     matches!(
-        ProviderAdapterKind::from_offering(provider_id, offering_id),
+        ProviderAdapterKind::from_provider_id(provider_id),
         Some(ProviderAdapterKind::CommandCodeGoat)
     )
 }
@@ -688,35 +663,32 @@ pub fn parse_provider_models_catalog(
     Ok(models)
 }
 
-pub fn is_custom_api(provider_id: &str, offering_id: &str) -> bool {
-    matches!(
-        ProviderAdapterKind::from_offering(provider_id, offering_id),
-        Some(ProviderAdapterKind::ConfigurableHttp)
-    )
+pub fn is_custom_api(provider_id: &str) -> bool {
+    provider_id == CUSTOM_PROVIDER_ID
 }
 
-pub fn is_cpa_external_integration(provider_id: &str, offering_id: &str) -> bool {
+pub fn is_cpa_external_integration(provider_id: &str) -> bool {
     matches!(
-        ProviderAdapterKind::from_offering(provider_id, offering_id),
+        ProviderAdapterKind::from_provider_id(provider_id),
         Some(ProviderAdapterKind::Cpa)
     )
 }
 
-/// Static code-owned registry of built-in provider offerings. Lookup is by
-/// `(provider_id, offering_id)`; unknown pairs fail closed.
+/// Static code-owned registry of built-in providers. Lookup is by
+/// `provider_id`; unknown identities fail closed.
 pub struct ProviderRegistry;
 
 impl ProviderRegistry {
-    pub fn get(provider_id: &str, offering_id: &str) -> Option<ProviderDescriptor> {
-        let plan = builtin_plan(provider_id, offering_id)?;
-        let kind = ProviderAdapterKind::from_offering(provider_id, offering_id)?;
+    pub fn get(provider_id: &str) -> Option<ProviderDescriptor> {
+        let plan = builtin_provider(provider_id)?;
+        let kind = ProviderAdapterKind::from_provider_id(provider_id)?;
         Some(ProviderDescriptor::from_plan(kind, plan))
     }
 
     pub fn iter() -> impl Iterator<Item = ProviderDescriptor> {
-        BUILTIN_PLANS
+        BUILTIN_PROVIDERS
             .iter()
-            .filter_map(|plan| Self::get(plan.offering.provider_id, plan.offering.offering_id))
+            .filter_map(|plan| Self::get(plan.provider_id))
     }
 }
 
@@ -732,13 +704,12 @@ struct ProviderCapabilities {
     pub card_actions: CardActionsDescriptor,
 }
 
-/// Composed capability surfaces for one catalog offering. These are facts for
+/// Composed capability surfaces for one catalog Provider. These are facts for
 /// later persistence/UI; this slice does not change dashboard DTOs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ProviderDescriptor {
     pub kind: ProviderAdapterKind,
     pub provider_id: &'static str,
-    pub offering_id: &'static str,
     pub contract_scope_id: Option<&'static str>,
     pub product_surface: ProviderProductSurface,
     pub model_catalog: ModelCatalogDescriptor,
@@ -751,19 +722,18 @@ pub struct ProviderDescriptor {
 }
 
 impl ProviderDescriptor {
-    fn from_plan(kind: ProviderAdapterKind, plan: BuiltinPlan) -> Self {
+    fn from_plan(kind: ProviderAdapterKind, plan: BuiltinProvider) -> Self {
         Self::from_capabilities(kind, plan, kind.capabilities(plan))
     }
 
     fn from_capabilities(
         kind: ProviderAdapterKind,
-        plan: BuiltinPlan,
+        plan: BuiltinProvider,
         capabilities: ProviderCapabilities,
     ) -> Self {
         Self {
             kind,
-            provider_id: plan.offering.provider_id,
-            offering_id: plan.offering.offering_id,
+            provider_id: plan.provider_id,
             contract_scope_id: plan.contract_scope_id,
             product_surface: plan.product_surface,
             model_catalog: capabilities.model_catalog,
@@ -939,7 +909,7 @@ pub struct CardActionsDescriptor {
 impl ProviderAdapterKind {
     /// Single sealed construction path for each adapter kind. This stays
     /// private so callers consume the immutable [`ProviderDescriptor`].
-    fn capabilities(self, plan: BuiltinPlan) -> ProviderCapabilities {
+    fn capabilities(self, plan: BuiltinProvider) -> ProviderCapabilities {
         match self {
             Self::OpenCodeGo => open_code_go_capabilities(plan),
             Self::ZenFree => zen_free_capabilities(plan),
@@ -952,13 +922,13 @@ impl ProviderAdapterKind {
     }
 }
 
-fn catalog_pricing(plan: BuiltinPlan) -> PricingDescriptor {
+fn catalog_pricing(plan: BuiltinProvider) -> PricingDescriptor {
     PricingDescriptor {
         availability: plan.pricing_availability,
     }
 }
 
-fn open_code_go_capabilities(plan: BuiltinPlan) -> ProviderCapabilities {
+fn open_code_go_capabilities(plan: BuiltinProvider) -> ProviderCapabilities {
     ProviderCapabilities {
         model_catalog: ModelCatalogDescriptor {
             kind: ModelCatalogKind::BuiltinGoProtocolTable,
@@ -972,8 +942,8 @@ fn open_code_go_capabilities(plan: BuiltinPlan) -> ProviderCapabilities {
             catalog_routable: plan.routable,
             production_inference: true,
             channel: Some(InferenceChannelKind::Go),
-            credential_kind: plan.offering.credential_kind,
-            quota_scope: plan.offering.quota_scope,
+            credential_kind: plan.credential_kind,
+            quota_scope: plan.quota_scope,
             auth: InferenceAuthDescriptor::OpenCodeProtocolDefault,
             follow_redirects: true,
             origin: InferenceOriginKind::ConfigUpstreamBase,
@@ -1023,7 +993,7 @@ fn open_code_go_capabilities(plan: BuiltinPlan) -> ProviderCapabilities {
     }
 }
 
-fn zen_free_capabilities(plan: BuiltinPlan) -> ProviderCapabilities {
+fn zen_free_capabilities(plan: BuiltinProvider) -> ProviderCapabilities {
     ProviderCapabilities {
         model_catalog: ModelCatalogDescriptor {
             kind: ModelCatalogKind::ZenFreePersistedSnapshot,
@@ -1037,8 +1007,8 @@ fn zen_free_capabilities(plan: BuiltinPlan) -> ProviderCapabilities {
             catalog_routable: plan.routable,
             production_inference: true,
             channel: Some(InferenceChannelKind::Free),
-            credential_kind: plan.offering.credential_kind,
-            quota_scope: plan.offering.quota_scope,
+            credential_kind: plan.credential_kind,
+            quota_scope: plan.quota_scope,
             auth: InferenceAuthDescriptor::None,
             follow_redirects: true,
             origin: InferenceOriginKind::DerivedZenBase,
@@ -1088,7 +1058,7 @@ fn zen_free_capabilities(plan: BuiltinPlan) -> ProviderCapabilities {
     }
 }
 
-fn command_code_goat_capabilities(plan: BuiltinPlan) -> ProviderCapabilities {
+fn command_code_goat_capabilities(plan: BuiltinProvider) -> ProviderCapabilities {
     ProviderCapabilities {
         model_catalog: ModelCatalogDescriptor {
             kind: ModelCatalogKind::BuiltinCommandCodeProtocolTable,
@@ -1102,8 +1072,8 @@ fn command_code_goat_capabilities(plan: BuiltinPlan) -> ProviderCapabilities {
             catalog_routable: plan.routable,
             production_inference: true,
             channel: Some(InferenceChannelKind::Go),
-            credential_kind: plan.offering.credential_kind,
-            quota_scope: plan.offering.quota_scope,
+            credential_kind: plan.credential_kind,
+            quota_scope: plan.quota_scope,
             auth: InferenceAuthDescriptor::Bearer,
             follow_redirects: false,
             origin: InferenceOriginKind::OfficialFixed,
@@ -1153,7 +1123,7 @@ fn command_code_goat_capabilities(plan: BuiltinPlan) -> ProviderCapabilities {
     }
 }
 
-fn minimax_cn_capabilities(plan: BuiltinPlan) -> ProviderCapabilities {
+fn minimax_cn_capabilities(plan: BuiltinProvider) -> ProviderCapabilities {
     ProviderCapabilities {
         model_catalog: ModelCatalogDescriptor {
             kind: ModelCatalogKind::ProviderPersistedSnapshot,
@@ -1167,8 +1137,8 @@ fn minimax_cn_capabilities(plan: BuiltinPlan) -> ProviderCapabilities {
             catalog_routable: plan.routable,
             production_inference: true,
             channel: Some(InferenceChannelKind::Go),
-            credential_kind: plan.offering.credential_kind,
-            quota_scope: plan.offering.quota_scope,
+            credential_kind: plan.credential_kind,
+            quota_scope: plan.quota_scope,
             auth: InferenceAuthDescriptor::Bearer,
             follow_redirects: false,
             origin: InferenceOriginKind::OfficialFixed,
@@ -1218,7 +1188,7 @@ fn minimax_cn_capabilities(plan: BuiltinPlan) -> ProviderCapabilities {
     }
 }
 
-fn kimi_cn_capabilities(plan: BuiltinPlan) -> ProviderCapabilities {
+fn kimi_cn_capabilities(plan: BuiltinProvider) -> ProviderCapabilities {
     ProviderCapabilities {
         model_catalog: ModelCatalogDescriptor {
             kind: ModelCatalogKind::ProviderPersistedSnapshot,
@@ -1232,8 +1202,8 @@ fn kimi_cn_capabilities(plan: BuiltinPlan) -> ProviderCapabilities {
             catalog_routable: plan.routable,
             production_inference: true,
             channel: Some(InferenceChannelKind::Go),
-            credential_kind: plan.offering.credential_kind,
-            quota_scope: plan.offering.quota_scope,
+            credential_kind: plan.credential_kind,
+            quota_scope: plan.quota_scope,
             auth: InferenceAuthDescriptor::Bearer,
             follow_redirects: false,
             origin: InferenceOriginKind::OfficialFixed,
@@ -1283,7 +1253,7 @@ fn kimi_cn_capabilities(plan: BuiltinPlan) -> ProviderCapabilities {
     }
 }
 
-fn configurable_http_capabilities(plan: BuiltinPlan) -> ProviderCapabilities {
+fn configurable_http_capabilities(plan: BuiltinProvider) -> ProviderCapabilities {
     ProviderCapabilities {
         model_catalog: ModelCatalogDescriptor {
             kind: ModelCatalogKind::AccountDeclaredCapabilities,
@@ -1297,8 +1267,8 @@ fn configurable_http_capabilities(plan: BuiltinPlan) -> ProviderCapabilities {
             catalog_routable: plan.routable,
             production_inference: true,
             channel: Some(InferenceChannelKind::Go),
-            credential_kind: plan.offering.credential_kind,
-            quota_scope: plan.offering.quota_scope,
+            credential_kind: plan.credential_kind,
+            quota_scope: plan.quota_scope,
             auth: InferenceAuthDescriptor::ProtocolDerivedBearerOrXApiKey,
             follow_redirects: false,
             origin: InferenceOriginKind::AccountConfigured,
@@ -1348,7 +1318,7 @@ fn configurable_http_capabilities(plan: BuiltinPlan) -> ProviderCapabilities {
     }
 }
 
-fn cpa_capabilities(plan: BuiltinPlan) -> ProviderCapabilities {
+fn cpa_capabilities(plan: BuiltinProvider) -> ProviderCapabilities {
     ProviderCapabilities {
         model_catalog: ModelCatalogDescriptor {
             kind: ModelCatalogKind::ProviderPersistedSnapshot,
@@ -1364,8 +1334,8 @@ fn cpa_capabilities(plan: BuiltinPlan) -> ProviderCapabilities {
             // CPA participates in ordinary keyed account selection rather than
             // the Zen egress-IP special channel.
             channel: Some(InferenceChannelKind::Go),
-            credential_kind: plan.offering.credential_kind,
-            quota_scope: plan.offering.quota_scope,
+            credential_kind: plan.credential_kind,
+            quota_scope: plan.quota_scope,
             auth: InferenceAuthDescriptor::Bearer,
             follow_redirects: false,
             origin: InferenceOriginKind::LocalExternalIntegration,
@@ -1415,63 +1385,57 @@ fn cpa_capabilities(plan: BuiltinPlan) -> ProviderCapabilities {
     }
 }
 
-pub fn default_verification_status(plan: BuiltinPlan) -> ConnectionVerificationStatus {
+pub fn default_verification_status(plan: BuiltinProvider) -> ConnectionVerificationStatus {
     match plan.verification_policy {
         VerificationPolicy::NotRequired => ConnectionVerificationStatus::NotRequired,
         VerificationPolicy::Required => ConnectionVerificationStatus::Pending,
     }
 }
 
-/// Catalog-backed enablement capability. Only `routable` offerings may persist
-/// `enabled=true`. Unknown offerings fail closed.
-pub const fn plan_allows_enablement(plan: BuiltinPlan) -> bool {
+/// Catalog-backed enablement capability. Only `routable` providers may persist
+/// `enabled=true`. Unknown providers fail closed.
+pub const fn plan_allows_enablement(plan: BuiltinProvider) -> bool {
     plan.routable
 }
 
-pub fn offering_allows_enablement(provider_id: &str, offering_id: &str) -> bool {
-    builtin_plan(provider_id, offering_id).is_some_and(plan_allows_enablement)
+pub fn provider_allows_enablement(provider_id: &str) -> bool {
+    builtin_provider(provider_id).is_some_and(plan_allows_enablement)
 }
 
-/// Reject `enabled=true` for catalogued-but-unroutable offerings. Disabled
+/// Reject `enabled=true` for catalogued-but-unroutable providers. Disabled
 /// drafts skip the check so they can still be created and edited.
-pub fn ensure_enabled_offering_is_routable(
+pub fn ensure_enabled_provider_is_routable(
     provider_id: &str,
-    offering_id: &str,
     enabled: bool,
 ) -> Result<(), ProviderBindingError> {
     if !enabled {
         return Ok(());
     }
-    ensure_offering_can_enable(provider_id, offering_id)
+    ensure_provider_can_enable(provider_id)
 }
 
-pub fn ensure_offering_can_enable(
-    provider_id: &str,
-    offering_id: &str,
-) -> Result<(), ProviderBindingError> {
-    match builtin_plan(provider_id, offering_id) {
+pub fn ensure_provider_can_enable(provider_id: &str) -> Result<(), ProviderBindingError> {
+    match builtin_provider(provider_id) {
         Some(plan) if plan_allows_enablement(plan) => Ok(()),
         Some(plan) => Err(ProviderBindingError::EnablementNotRoutable {
-            provider_id: plan.offering.provider_id,
-            offering_id: plan.offering.offering_id,
+            provider_id: plan.provider_id,
             display_name: plan.display_name,
         }),
-        None => Err(ProviderBindingError::UnknownOffering {
+        None => Err(ProviderBindingError::UnknownProvider {
             provider_id: provider_id.to_string(),
-            offering_id: offering_id.to_string(),
         }),
     }
 }
 
-pub fn plan_requires_custom_config(plan: BuiltinPlan) -> bool {
+pub fn plan_requires_custom_config(plan: BuiltinProvider) -> bool {
     matches!(
-        ProviderAdapterKind::from_offering(plan.offering.provider_id, plan.offering.offering_id),
+        ProviderAdapterKind::from_provider_id(plan.provider_id),
         Some(ProviderAdapterKind::ConfigurableHttp)
     )
 }
 
-pub fn validate_plan_key(plan: BuiltinPlan, key: &str) -> Result<(), ProviderBindingError> {
-    if plan.offering.credential_kind == CredentialKind::None {
+pub fn validate_plan_key(plan: BuiltinProvider, key: &str) -> Result<(), ProviderBindingError> {
+    if plan.credential_kind == CredentialKind::None {
         return Ok(());
     }
     let trimmed = key.trim();
@@ -1481,8 +1445,7 @@ pub fn validate_plan_key(plan: BuiltinPlan, key: &str) -> Result<(), ProviderBin
     if let Some(prefix) = plan.key_prefix {
         if !trimmed.starts_with(prefix) {
             return Err(ProviderBindingError::KeyPrefixMismatch {
-                provider_id: plan.offering.provider_id.to_string(),
-                offering_id: plan.offering.offering_id.to_string(),
+                provider_id: plan.provider_id.to_string(),
                 prefix: prefix.to_string(),
             });
         }
@@ -1513,23 +1476,19 @@ pub fn validate_custom_model_id(model_id: &str) -> Result<String, ProviderBindin
 pub fn validate_account_binding(
     account_id: &str,
     provider_id: &str,
-    offering_id: &str,
     credential_kind: CredentialKind,
     quota_scope: QuotaScope,
 ) -> Result<(), ProviderBindingError> {
-    let offering = builtin_offering(provider_id, offering_id).ok_or_else(|| {
-        ProviderBindingError::UnknownOffering {
+    let provider =
+        builtin_provider(provider_id).ok_or_else(|| ProviderBindingError::UnknownProvider {
             provider_id: provider_id.to_string(),
-            offering_id: offering_id.to_string(),
-        }
-    })?;
-    if offering.credential_kind != credential_kind || offering.quota_scope != quota_scope {
+        })?;
+    if provider.credential_kind != credential_kind || provider.quota_scope != quota_scope {
         return Err(ProviderBindingError::BindingMismatch {
             provider_id: provider_id.to_string(),
-            offering_id: offering_id.to_string(),
         });
     }
-    match offering.singleton_account_id {
+    match provider.singleton_account_id {
         Some(singleton) if account_id != singleton => {
             Err(ProviderBindingError::SingletonAccountRequired(singleton))
         }
@@ -1546,15 +1505,13 @@ pub fn validate_account_binding(
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProviderBindingError {
-    UnknownOffering {
+    UnknownProvider {
         provider_id: String,
-        offering_id: String,
     },
     UnknownCredentialKind(String),
     UnknownQuotaScope(String),
     BindingMismatch {
         provider_id: String,
-        offering_id: String,
     },
     SingletonAccountRequired(&'static str),
     ReservedAccountId(&'static str),
@@ -1564,14 +1521,13 @@ pub enum ProviderBindingError {
     KeyRequired,
     KeyPrefixMismatch {
         provider_id: String,
-        offering_id: String,
         prefix: String,
     },
     InvalidCustomBaseUrl(String),
+    InvalidProviderName(String),
     InvalidModelId(String),
     EnablementNotRoutable {
         provider_id: &'static str,
-        offering_id: &'static str,
         display_name: &'static str,
     },
 }
@@ -1579,23 +1535,18 @@ pub enum ProviderBindingError {
 impl fmt::Display for ProviderBindingError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::UnknownOffering {
-                provider_id,
-                offering_id,
-            } => write!(f, "unknown provider offering `{provider_id}/{offering_id}`"),
+            Self::UnknownProvider { provider_id } => {
+                write!(f, "unknown provider `{provider_id}`")
+            }
             Self::UnknownCredentialKind(value) => {
                 write!(f, "unknown credential kind `{value}`")
             }
             Self::UnknownQuotaScope(value) => write!(f, "unknown quota scope `{value}`"),
-            Self::BindingMismatch {
-                provider_id,
-                offering_id,
-            } => write!(
-                f,
-                "provider binding does not match `{provider_id}/{offering_id}`"
-            ),
+            Self::BindingMismatch { provider_id } => {
+                write!(f, "provider binding does not match `{provider_id}`")
+            }
             Self::SingletonAccountRequired(id) => {
-                write!(f, "provider offering requires singleton account `{id}`")
+                write!(f, "provider requires singleton account `{id}`")
             }
             Self::ReservedAccountId(id) => write!(f, "account id `{id}` is reserved"),
             Self::UnknownVerificationStatus(value) => {
@@ -1608,15 +1559,11 @@ impl fmt::Display for ProviderBindingError {
             Self::KeyRequired => write!(f, "key is required"),
             Self::KeyPrefixMismatch {
                 provider_id,
-                offering_id,
                 prefix,
-            } => write!(
-                f,
-                "provider offering `{provider_id}/{offering_id}` requires key prefix `{prefix}`"
-            ),
-            Self::InvalidCustomBaseUrl(message) | Self::InvalidModelId(message) => {
-                f.write_str(message)
-            }
+            } => write!(f, "provider `{provider_id}` requires key prefix `{prefix}`"),
+            Self::InvalidCustomBaseUrl(message)
+            | Self::InvalidProviderName(message)
+            | Self::InvalidModelId(message) => f.write_str(message),
             Self::EnablementNotRoutable { display_name, .. } => write!(
                 f,
                 "{display_name} is catalogued but is not routable in this release"

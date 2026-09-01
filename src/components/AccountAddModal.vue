@@ -31,17 +31,17 @@
           <h3 class="account-add-group__label">{{ t(group.label) }}</h3>
           <button
             v-for="option in group.options"
-            :id="`account-add-option-${option.plan.id}`"
-            :key="option.plan.id"
+            :id="`account-add-option-${option.optionId}`"
+            :key="option.optionId"
             type="button"
             class="account-add-item"
             :class="{
-              'account-add-item--active': option.plan.id === selectedPlanId,
+              'account-add-item--active': option.optionId === selectedPlanId,
               'account-add-item--disabled': option.disabled,
             }"
-            :aria-pressed="option.plan.id === selectedPlanId"
-            :aria-current="option.plan.id === selectedPlanId ? 'true' : undefined"
-            @click="selectPlanId(option.plan.id)"
+            :aria-pressed="option.optionId === selectedPlanId"
+            :aria-current="option.optionId === selectedPlanId ? 'true' : undefined"
+            @click="selectPlanId(option.optionId)"
           >
             <n-icon :component="planIcon(option.plan.id)" size="16" aria-hidden="true" />
             <span class="account-add-item__label">{{ option.label }}</span>
@@ -55,7 +55,14 @@
           <div class="account-add-detail__titles">
             <h2>{{ selectedOption.label }}</h2>
             <n-tag
-              v-if="planKindTag(selectedOption.plan)"
+              v-if="selectedOption.source === 'user-defined'"
+              size="small"
+              :bordered="false"
+            >
+              {{ t("用户定义") }}
+            </n-tag>
+            <n-tag
+              v-else-if="planKindTag(selectedOption.plan)"
               size="small"
               :bordered="false"
               :type="planKindTag(selectedOption.plan)!.type"
@@ -162,7 +169,7 @@ import {
   planChooserGroupId,
   type PlanOption,
 } from "../domain/account-plan-options.ts";
-import type { PlanDefinition, PlanId } from "../domain/plans.ts";
+import type { PlanDefinition } from "../domain/plans.ts";
 import type { ProviderCatalogEntry } from "../api/providers.ts";
 
 const props = defineProps<{
@@ -184,12 +191,12 @@ const emit = defineEmits<{
 
 useLocalizedModalCloseLabel(toRef(props, "show"), "account-add-modal");
 
-const selectedPlanId = ref<PlanId | "">("");
+const selectedPlanId = ref<string>("");
 
 const groups = computed(() => buildPlanChooserGroups(props.catalog));
 const flatOptions = computed(() => groups.value.flatMap((group) => group.options));
 const selectedOption = computed(() => (
-  flatOptions.value.find((option) => option.plan.id === selectedPlanId.value) ?? null
+  flatOptions.value.find((option) => option.optionId === selectedPlanId.value) ?? null
 ));
 
 const selectOptions = computed<Array<SelectOption | SelectGroupOption>>(() => (
@@ -198,21 +205,21 @@ const selectOptions = computed<Array<SelectOption | SelectGroupOption>>(() => (
     key: group.id,
     label: t(group.label),
     children: group.options.map((option) => ({
-      label: option.label,
-      value: option.plan.id,
+      label: option.source === "user-defined" ? `${option.label} · ${t("用户定义")}` : option.label,
+      value: option.optionId,
     })),
   }))
 ));
 
-function defaultPlanId(): PlanId | "" {
-  return flatOptions.value.find((option) => !option.disabled)?.plan.id
-    ?? flatOptions.value[0]?.plan.id
+function defaultPlanId(): string {
+  return flatOptions.value.find((option) => !option.disabled)?.optionId
+    ?? flatOptions.value[0]?.optionId
     ?? "";
 }
 
 function selectPlanId(value: string): void {
-  if (flatOptions.value.some((option) => option.plan.id === value)) {
-    selectedPlanId.value = value as PlanId;
+  if (flatOptions.value.some((option) => option.optionId === value)) {
+    selectedPlanId.value = value;
   }
 }
 
@@ -220,7 +227,7 @@ watch(
   () => [props.show, flatOptions.value] as const,
   ([visible, options]) => {
     if (!visible) return;
-    if (!options.some((option) => option.plan.id === selectedPlanId.value)) {
+    if (!options.some((option) => option.optionId === selectedPlanId.value)) {
       selectedPlanId.value = defaultPlanId();
     }
   },
@@ -229,10 +236,10 @@ watch(
 
 function onRailKeydown(event: KeyboardEvent): void {
   if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
-  const ids = flatOptions.value.map((option) => option.plan.id);
+  const ids = flatOptions.value.map((option) => option.optionId);
   if (ids.length === 0) return;
   event.preventDefault();
-  const current = ids.indexOf(selectedPlanId.value as PlanId);
+  const current = ids.indexOf(selectedPlanId.value);
   const delta = event.key === "ArrowDown" ? 1 : -1;
   const next = ids[(current + delta + ids.length) % ids.length];
   if (next) selectedPlanId.value = next;
@@ -252,6 +259,7 @@ function planIcon(planId: string): Component {
 
 function planKindTag(plan: PlanDefinition): { label: string; type: "warning" | "default" } | null {
   if (plan.kind === "custom") return { label: t("自定义端点"), type: "default" };
+  if (plan.id === "dynamic-http") return { label: t("用户定义"), type: "default" };
   return null;
 }
 
@@ -265,6 +273,8 @@ function planDescription(plan: PlanDefinition): string {
       return `${t("API Key")} · ${t("刷新模型目录")}`;
     case "custom-endpoint":
       return t("自定义端点由你自行维护，Gateway 无法验证其价格、额度与协议兼容性。");
+    case "dynamic-http":
+      return t("账号不拥有 Endpoint、协议或模型映射。");
     default:
       return "";
   }

@@ -34,11 +34,11 @@ export function forwardLogLatencyMs(
 
 /** Plan label for the row's provider attribution, or null when unattributed. */
 export function forwardLogPlanLabel(
-  row: Pick<ForwardLog, "provider_id" | "offering_id">,
+  row: Pick<ForwardLog, "provider_id">,
   catalog?: readonly ProviderCatalogEntry[] | null,
 ): string | null {
-  if (!row.provider_id || !row.offering_id) return null;
-  return planLabel({ provider_id: row.provider_id, offering_id: row.offering_id }, catalog);
+  if (!row.provider_id) return null;
+  return planLabel({ provider_id: row.provider_id }, catalog);
 }
 
 /** Technical detail only: the alias that resolved for this request. */

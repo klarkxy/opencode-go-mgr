@@ -36,7 +36,7 @@ fn alias_types_are_owned_by_this_module() {
     let _: fn() -> Vec<String> = published_aliases;
     let _: fn() -> Vec<PublishedAlias> = published_routeable_aliases;
     let _: fn(&[String]) -> Vec<PublishedAlias> = published_routeable_aliases_with_zen;
-    let _: fn(&str, &str) -> Vec<String> = routeable_aliases_for;
+    let _: fn(&str) -> Vec<String> = routeable_aliases_for;
     let _: RouteableWithZen = routeable_aliases_for_with_zen;
     let _: fn(&str) -> bool = is_published_alias;
 }
@@ -252,7 +252,6 @@ fn command_catalog_shortens_only_code_owned_long_names() {
     assert_eq!(
         routeable_aliases_for_with_extended_catalogs(
             COMMAND_CODE_PROVIDER_ID,
-            GOAT_OFFERING_ID,
             &[],
             &command,
             &[],
@@ -604,8 +603,7 @@ fn unique_raw_id_pins_to_one_mapping() {
         AliasEntry {
             alias: "gadget".into(),
             mappings: vec![ProviderMapping {
-                provider_id: OPENCODE_PROVIDER_ID,
-                offering_id: GO_OFFERING_ID,
+                provider_id: OPENCODE_PROVIDER_ID.to_string(),
                 upstream_model: "vendor.gadget-v1".into(),
                 routeable: true,
             }],
@@ -627,8 +625,7 @@ fn unique_raw_id_pins_to_one_mapping() {
     let slash_registry = registry_from_entries(vec![AliasEntry {
         alias: "widget".into(),
         mappings: vec![ProviderMapping {
-            provider_id: OPENCODE_PROVIDER_ID,
-            offering_id: GO_OFFERING_ID,
+            provider_id: OPENCODE_PROVIDER_ID.to_string(),
             upstream_model: "vendor/widget-v1".into(),
             routeable: true,
         }],
@@ -667,7 +664,7 @@ fn overlapping_raw_ids_return_ambiguous_model_id() {
             let message = error.message();
             assert!(message.contains(AMBIGUOUS_MODEL_ID));
             assert!(message.contains("shared-raw"));
-            assert!(message.contains("opencode/go"));
+            assert!(message.contains("opencode:"));
             assert!(message.contains("opencode-zen-free"));
         }
         other => panic!("expected ambiguous, got {other:?}"),
@@ -684,8 +681,7 @@ fn fail_closed_raw_mapping_is_not_routeable() {
     let registry = registry_from_entries(vec![AliasEntry {
         alias: "visible".into(),
         mappings: vec![ProviderMapping {
-            provider_id: "command-code",
-            offering_id: "goat",
+            provider_id: "command-code".to_string(),
             upstream_model: "goat-only-raw".into(),
             routeable: false,
         }],
@@ -730,8 +726,8 @@ fn fail_closed_raw_mapping_is_not_routeable() {
 
 #[test]
 fn catalog_aliases_are_routeable_mappings_in_registry_order() {
-    let go = routeable_aliases_for(OPENCODE_PROVIDER_ID, GO_OFFERING_ID);
-    let zen = routeable_aliases_for(OPENCODE_ZEN_FREE_PROVIDER_ID, ANONYMOUS_FREE_OFFERING_ID);
+    let go = routeable_aliases_for(OPENCODE_PROVIDER_ID);
+    let zen = routeable_aliases_for(OPENCODE_ZEN_FREE_PROVIDER_ID);
     let free_models = seeded_free_models();
     assert!(!go.is_empty());
     assert!(!zen.is_empty());
@@ -788,15 +784,15 @@ fn catalog_aliases_are_routeable_mappings_in_registry_order() {
         );
     }
 
-    assert!(routeable_aliases_for(COMMAND_CODE_PROVIDER_ID, GOAT_OFFERING_ID).is_empty());
+    assert!(routeable_aliases_for(COMMAND_CODE_PROVIDER_ID).is_empty());
     assert!(
-        routeable_aliases_for(CUSTOM_PROVIDER_ID, CUSTOM_API_OFFERING_ID).is_empty(),
+        routeable_aliases_for(CUSTOM_PROVIDER_ID).is_empty(),
         "Custom catalog aliases stay empty; client IDs come from account capabilities"
     );
 }
 
 #[test]
-fn catalog_aliases_keep_every_routeable_offering_not_first_wins_owner() {
+fn catalog_aliases_keep_every_routeable_provider_not_first_wins_owner() {
     let registry = registry_from_entries(vec![AliasEntry {
         alias: "shared".into(),
         mappings: vec![zen_mapping("shared"), go_mapping("shared")],
@@ -809,20 +805,14 @@ fn catalog_aliases_keep_every_routeable_offering_not_first_wins_owner() {
         "GET /v1/models owned_by stays first-wins"
     );
     assert_eq!(
-        routeable_aliases_for_in(&registry, OPENCODE_PROVIDER_ID, GO_OFFERING_ID),
+        routeable_aliases_for_in(&registry, OPENCODE_PROVIDER_ID),
         ["shared"]
     );
     assert_eq!(
-        routeable_aliases_for_in(
-            &registry,
-            OPENCODE_ZEN_FREE_PROVIDER_ID,
-            ANONYMOUS_FREE_OFFERING_ID
-        ),
+        routeable_aliases_for_in(&registry, OPENCODE_ZEN_FREE_PROVIDER_ID),
         ["shared"]
     );
-    assert!(
-        routeable_aliases_for_in(&registry, COMMAND_CODE_PROVIDER_ID, GOAT_OFFERING_ID).is_empty()
-    );
+    assert!(routeable_aliases_for_in(&registry, COMMAND_CODE_PROVIDER_ID).is_empty());
 }
 
 #[test]
@@ -864,8 +854,8 @@ fn custom_overlay_does_not_steal_published_aliases_and_resolves_unknown_ids() {
     ) {
         Err(error) => {
             assert_eq!(error.code(), Some(AMBIGUOUS_MODEL_ID));
-            assert!(error.message().contains("command-code/goat"));
-            assert!(error.message().contains("custom/api"));
+            assert!(error.message().contains("command-code:"));
+            assert!(error.message().contains("custom:"));
         }
         other => panic!("GOAT raw overlapping Custom must be ambiguous, got {other:?}"),
     }
@@ -971,7 +961,6 @@ fn sealed_cn_catalogs_join_static_aliases_and_preserve_raw_ambiguity() {
     assert_eq!(
         routeable_aliases_for_with_extended_catalogs(
             MINIMAX_PROVIDER_ID,
-            MINIMAX_CN_OFFERING_ID,
             &[],
             &[],
             &minimax,
@@ -985,14 +974,7 @@ fn sealed_cn_catalogs_join_static_aliases_and_preserve_raw_ambiguity() {
         .collect::<Vec<_>>();
     expected_kimi.sort();
     assert_eq!(
-        routeable_aliases_for_with_extended_catalogs(
-            KIMI_PROVIDER_ID,
-            KIMI_CN_OFFERING_ID,
-            &[],
-            &[],
-            &minimax,
-            &kimi,
-        ),
+        routeable_aliases_for_with_extended_catalogs(KIMI_PROVIDER_ID, &[], &[], &minimax, &kimi,),
         expected_kimi
     );
 
@@ -1104,7 +1086,7 @@ fn cpa_catalog_joins_code_owned_aliases_and_keeps_raw_ids_exact_and_fail_closed(
     assert!(!published.iter().any(|item| item.alias == "cpa-raw-model"));
     assert!(!published.iter().any(|item| item.alias == "vendor/cpa-raw"));
     assert_eq!(
-        routeable_aliases_for_with_runtime_catalogs(CPA_PROVIDER_ID, CPA_OFFERING_ID, catalogs,),
+        routeable_aliases_for_with_runtime_catalogs(CPA_PROVIDER_ID, catalogs),
         ["glm-5.2"]
     );
 
@@ -1119,4 +1101,55 @@ fn cpa_catalog_joins_code_owned_aliases_and_keeps_raw_ids_exact_and_fail_closed(
     )
     .unwrap_err();
     assert_eq!(conflict.code(), Some(AMBIGUOUS_MODEL_ID));
+}
+
+#[test]
+fn extra_catalogs_aggregate_public_aliases_and_fail_closed_on_raw_ambiguity() {
+    let one = ExtraProviderCatalog {
+        provider_id: "11111111-1111-4111-8111-111111111111".into(),
+        mappings: vec![("lab-opus".into(), "vendor/opus".into())],
+    };
+    let two = ExtraProviderCatalog {
+        provider_id: "22222222-2222-4222-8222-222222222222".into(),
+        mappings: vec![("lab-opus".into(), "other/opus".into())],
+    };
+    let extras = [one.clone(), two.clone()];
+    match resolve_with_runtime_catalogs(
+        "lab-opus",
+        RuntimeCatalogs {
+            extra: &extras,
+            ..RuntimeCatalogs::default()
+        },
+    )
+    .unwrap()
+    {
+        ResolvedModel::Alias { mappings, .. } => {
+            assert_eq!(mappings.len(), 2);
+            assert!(
+                mappings
+                    .iter()
+                    .any(|mapping| mapping.provider_id == one.provider_id)
+            );
+            assert!(
+                mappings
+                    .iter()
+                    .any(|mapping| mapping.provider_id == two.provider_id)
+            );
+        }
+        other => panic!("expected aggregated alias, got {other:?}"),
+    }
+
+    let raw_conflict = ExtraProviderCatalog {
+        provider_id: "33333333-3333-4333-8333-333333333333".into(),
+        mappings: vec![("other-public".into(), "vendor/opus".into())],
+    };
+    let err = resolve_with_runtime_catalogs(
+        "vendor/opus",
+        RuntimeCatalogs {
+            extra: &[one, raw_conflict],
+            ..RuntimeCatalogs::default()
+        },
+    )
+    .unwrap_err();
+    assert_eq!(err.code(), Some(AMBIGUOUS_MODEL_ID));
 }

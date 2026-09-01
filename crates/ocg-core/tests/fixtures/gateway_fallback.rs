@@ -16,10 +16,7 @@ use ocg_core::gateway::provider_adapter::{
 use ocg_core::models::{
     Account, AccountUpdate, AppConfig, ForwardLog, ProxyListDirection, ProxyMode, RoutingMode,
 };
-use ocg_core::provider::{
-    COMMAND_CODE_PROVIDER_ID, GO_OFFERING_ID, GOAT_OFFERING_ID, OPENCODE_PROVIDER_ID,
-    ZEN_FREE_ACCOUNT_ID,
-};
+use ocg_core::provider::{COMMAND_CODE_PROVIDER_ID, OPENCODE_PROVIDER_ID, ZEN_FREE_ACCOUNT_ID};
 use ocg_core::state::{CoreStateInner, GatewayHandle};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
@@ -167,7 +164,7 @@ pub(crate) fn build_state_with_routing(
         let account = Account {
             id: format!("acct-{}", idx + 1),
             provider_id: ocg_core::provider::default_provider_id(),
-            offering_id: ocg_core::provider::default_offering_id(),
+
             credential_kind: ocg_core::provider::default_credential_kind(),
             quota_scope: ocg_core::provider::default_quota_scope(),
             name: format!("acct-{}", idx + 1),
@@ -602,7 +599,6 @@ pub(crate) fn create_goat_account(
         .expect("source account");
     account.id = account_id.to_string();
     account.provider_id = COMMAND_CODE_PROVIDER_ID.to_string();
-    account.offering_id = GOAT_OFFERING_ID.to_string();
     account.name = account_id.to_string();
     account.key_cipher = state.encrypt_key(key).unwrap();
     account.cooldown_until = None;
@@ -895,7 +891,7 @@ pub(crate) fn expected_local_application_models(state: &Arc<CoreStateInner>) -> 
         .iter()
         .map(|model| model.model_id.clone())
         .collect::<HashSet<_>>();
-    alias::routeable_aliases_for(OPENCODE_PROVIDER_ID, GO_OFFERING_ID)
+    alias::routeable_aliases_for(OPENCODE_PROVIDER_ID)
         .into_iter()
         .filter(|alias| alias_has_enabled_protocol(state, alias))
         .filter(|alias| {
@@ -1039,8 +1035,7 @@ pub(crate) async fn dashboard_protocol_probe(
             "processGeneration": state.process_generation(),
             "accountId": account_id,
             "modelId": model_id,
-            "protocols": protocols,
-        }))
+            "protocols": protocols }))
         .send()
         .await
         .unwrap();
@@ -1096,7 +1091,7 @@ pub(crate) fn legacy_forward_log() -> ForwardLog {
         account_name: "acct".into(),
         route_account_id: None,
         provider_id: None,
-        offering_id: None,
+
         credential_account_id: None,
         client_key_id: None,
         client_key_name: None,
@@ -1133,7 +1128,7 @@ pub(crate) fn empty_forward_query() -> ForwardLogQueryOptions<'static> {
         status: None,
         account_id: None,
         provider_id: None,
-        offering_id: None,
+
         route_account_id: None,
         credential_account_id: None,
         model: None,

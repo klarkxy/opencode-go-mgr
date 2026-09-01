@@ -288,11 +288,7 @@ async function loadProviderCatalog() {
 // endpoint or an in-flight backend change never breaks the page.
 async function loadProviderSnapshots(catalogValue: ProviderCatalogEntry[]) {
   const availablePlans = PRICING_PLAN_DEFINITIONS.map((plan) => {
-    const entry = plan.offering_ids
-      .map((offeringId) => catalogValue.find((item) => (
-        item.provider_id === plan.provider_id && item.offering_id === offeringId
-      )))
-      .find(Boolean);
+    const entry = catalogValue.find((item) => item.provider_id === plan.provider_id);
     return { plan, entry };
   }).filter(({ plan, entry }) => (
     plan.id !== "opencode-go"
@@ -300,10 +296,7 @@ async function loadProviderSnapshots(catalogValue: ProviderCatalogEntry[]) {
   ));
 
   const results = await Promise.allSettled(
-    availablePlans.map(({ plan, entry }) => providerApi.getProviderPricing(
-      plan.provider_id,
-      entry!.offering_id,
-    )),
+    availablePlans.map(({ plan }) => providerApi.getProviderPricing(plan.provider_id)),
   );
   const next: ProviderSnapshots = {};
   const nextErrors: Partial<Record<PlanId, string>> = {};
@@ -484,7 +477,6 @@ async function saveProviderMultiplier(
   try {
     const result = await providerApi.updateProviderPricingMultipliers(
       group.plan.provider_id,
-      group.plan.offering_ids[0]!,
       group.content.snapshot.revision,
       [{ model_id: modelId, multiplier }],
     );

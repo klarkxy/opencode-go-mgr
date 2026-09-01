@@ -7,7 +7,7 @@ use axum::http::{HeaderMap, Method as HttpMethod};
 use axum::routing::any;
 use chrono::Utc;
 use ocg_core::models::ProxyMode;
-use ocg_core::provider::{CUSTOM_API_OFFERING_ID, CUSTOM_PROVIDER_ID};
+use ocg_core::provider::CUSTOM_PROVIDER_ID;
 use reqwest::{Method, StatusCode};
 use serde_json::{Map, Value, json};
 use std::sync::{Arc, Mutex};
@@ -250,7 +250,6 @@ async fn custom_model_test_uses_the_declared_protocol_and_route_without_secrets(
                 "name":"Custom",
                 "key": CUSTOM_KEY,
                 "providerId": CUSTOM_PROVIDER_ID,
-                "offeringId": CUSTOM_API_OFFERING_ID,
                 "customConfig": {
                     "endpointUrl": origin.url,
                     "upstreamProtocol": "responses"

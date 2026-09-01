@@ -5,8 +5,8 @@ use crate::models::{
     Account, AccountSetupStep, AccountType, AppConfig, CreditBalance, QuotaWindow,
 };
 use crate::provider::{
-    COMMAND_CODE_PROVIDER_ID, GOAT_OFFERING_ID, QUOTA_WINDOW_FIVE_HOURS, QUOTA_WINDOW_MONTH,
-    QUOTA_WINDOW_WEEK, ZEN_FREE_ACCOUNT_ID,
+    COMMAND_CODE_PROVIDER_ID, QUOTA_WINDOW_FIVE_HOURS, QUOTA_WINDOW_MONTH, QUOTA_WINDOW_WEEK,
+    ZEN_FREE_ACCOUNT_ID,
 };
 use crate::state::{CoreState, CoreStateInner};
 use std::path::PathBuf;
@@ -395,29 +395,26 @@ fn inference_429_delay_stays_within_one_to_two_minutes() {
 #[test]
 fn auto_sync_excludes_disabled_non_ready_empty_key() {
     let provider = crate::provider::OPENCODE_PROVIDER_ID;
-    let offering = crate::provider::GO_OFFERING_ID;
     assert!(!provider_account_is_auto_sync_candidate(
-        provider, offering, false, true, true
+        provider, false, true, true
     ));
     assert!(!provider_account_is_auto_sync_candidate(
-        provider, offering, true, false, true
+        provider, true, false, true
     ));
     assert!(!provider_account_is_auto_sync_candidate(
-        provider, offering, true, true, false
+        provider, true, true, false
     ));
     assert!(provider_account_is_auto_sync_candidate(
-        provider, offering, true, true, true
+        provider, true, true, true
     ));
     assert!(!provider_account_is_auto_sync_candidate(
         crate::provider::COMMAND_CODE_PROVIDER_ID,
-        crate::provider::GOAT_OFFERING_ID,
         true,
         true,
         true,
     ));
     assert!(!provider_account_is_auto_sync_candidate(
         crate::provider::OPENCODE_ZEN_FREE_PROVIDER_ID,
-        crate::provider::ANONYMOUS_FREE_OFFERING_ID,
         true,
         true,
         false,
@@ -444,7 +441,7 @@ fn ready_account(state: &CoreState, id: &str, key: &str) -> Account {
     Account {
         id: id.to_string(),
         provider_id: crate::provider::default_provider_id(),
-        offering_id: crate::provider::default_offering_id(),
+
         credential_kind: crate::provider::default_credential_kind(),
         quota_scope: crate::provider::default_quota_scope(),
         name: id.to_string(),
@@ -1054,7 +1051,7 @@ fn eligibility_lists_active_hourly_vs_inactive_daily_and_exclusions() {
             account_name: "active".into(),
             route_account_id: None,
             provider_id: None,
-            offering_id: None,
+
             credential_account_id: None,
             client_key_id: None,
             client_key_name: None,
@@ -1492,7 +1489,7 @@ fn inactive_to_active_pulls_hourly_without_overriding_failure_backoff() {
             account_name: "wake".into(),
             route_account_id: None,
             provider_id: None,
-            offering_id: None,
+
             credential_account_id: None,
             client_key_id: None,
             client_key_name: None,
@@ -1596,11 +1593,9 @@ async fn goat_key_windows_are_independent_and_usage_failure_is_fail_soft() {
     let (dir, state) = test_state("goat-independent");
     let mut first = ready_account(&state, "goat-a", "goat-key-a");
     first.provider_id = COMMAND_CODE_PROVIDER_ID.to_string();
-    first.offering_id = GOAT_OFFERING_ID.to_string();
     first.enabled = false;
     let mut second = ready_account(&state, "goat-b", "goat-key-b");
     second.provider_id = COMMAND_CODE_PROVIDER_ID.to_string();
-    second.offering_id = GOAT_OFFERING_ID.to_string();
     second.enabled = false;
     {
         let db = state.db.lock();
@@ -1755,7 +1750,7 @@ impl FakeUsageHost {
         let account = Account {
             id: id.to_string(),
             provider_id: crate::provider::default_provider_id(),
-            offering_id: crate::provider::default_offering_id(),
+
             credential_kind: crate::provider::default_credential_kind(),
             quota_scope: crate::provider::default_quota_scope(),
             name: id.to_string(),

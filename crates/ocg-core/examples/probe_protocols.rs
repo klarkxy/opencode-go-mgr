@@ -15,9 +15,8 @@ use ocg_core::gateway::free_models::resolve_upstream_base;
 use ocg_core::kernel::protocol::supported_model_protocol_profiles;
 use ocg_core::models::{AppConfig, UpstreamChannel};
 use ocg_core::provider::{
-    ANONYMOUS_FREE_OFFERING_ID, COMMAND_CODE_GOAT_BASE_URL, COMMAND_CODE_GOAT_INCLUDED_MODEL_IDS,
-    COMMAND_CODE_PROVIDER_ID, GO_OFFERING_ID, GOAT_OFFERING_ID, OPENCODE_PROVIDER_ID,
-    OPENCODE_ZEN_FREE_PROVIDER_ID,
+    COMMAND_CODE_GOAT_BASE_URL, COMMAND_CODE_GOAT_INCLUDED_MODEL_IDS, COMMAND_CODE_PROVIDER_ID,
+    OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID,
 };
 use rusqlite::{Connection, OpenFlags, OptionalExtension};
 use serde::Serialize;
@@ -75,7 +74,7 @@ struct StoredAccount {
     id: String,
     name: String,
     provider_id: String,
-    offering_id: String,
+
     key_cipher: String,
     enabled: bool,
 }
@@ -191,10 +190,9 @@ fn enabled_provider(options: &Options, provider: &str) -> bool {
     options.providers.iter().any(|item| item == provider)
 }
 
-fn matches(account: &StoredAccount, provider: &str, offering: &str, filter: Option<&str>) -> bool {
+fn matches(account: &StoredAccount, provider: &str, filter: Option<&str>) -> bool {
     account.enabled
         && account.provider_id == provider
-        && account.offering_id == offering
         && filter.is_none_or(|value| account.name.contains(value) || account.id.starts_with(value))
 }
 
@@ -211,15 +209,14 @@ async fn main() -> anyhow::Result<()> {
     )?;
     let config: AppConfig = serde_json::from_str(&config_json)?;
     let accounts = conn
-        .prepare("SELECT id, name, provider_id, offering_id, key_cipher, enabled FROM accounts")?
+        .prepare("SELECT id, name, provider_id, key_cipher, enabled FROM accounts")?
         .query_map([], |row| {
             Ok(StoredAccount {
                 id: row.get(0)?,
                 name: row.get(1)?,
                 provider_id: row.get(2)?,
-                offering_id: row.get(3)?,
-                key_cipher: row.get(4)?,
-                enabled: row.get::<_, i64>(5)? != 0,
+                key_cipher: row.get(3)?,
+                enabled: row.get::<_, i64>(4)? != 0,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -245,7 +242,6 @@ async fn main() -> anyhow::Result<()> {
             matches(
                 account,
                 OPENCODE_PROVIDER_ID,
-                GO_OFFERING_ID,
                 options.account_filter.as_deref(),
             )
         })
@@ -256,7 +252,6 @@ async fn main() -> anyhow::Result<()> {
             matches(
                 account,
                 COMMAND_CODE_PROVIDER_ID,
-                GOAT_OFFERING_ID,
                 options.account_filter.as_deref(),
             )
         })
@@ -267,7 +262,6 @@ async fn main() -> anyhow::Result<()> {
             matches(
                 account,
                 OPENCODE_ZEN_FREE_PROVIDER_ID,
-                ANONYMOUS_FREE_OFFERING_ID,
                 options.account_filter.as_deref(),
             )
         })

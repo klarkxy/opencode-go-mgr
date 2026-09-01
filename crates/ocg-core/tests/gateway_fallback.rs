@@ -1885,7 +1885,7 @@ async fn zen_free_is_anonymous_across_all_client_formats_and_logs_route_identity
     assert!(logs.iter().all(|log| {
         log.route_account_id.as_deref() == Some(ZEN_FREE_ACCOUNT_ID)
             && log.provider_id.as_deref() == Some("opencode-zen-free")
-            && log.offering_id.as_deref() == Some("anonymous-free")
+            && log.provider_id.as_deref() == Some("opencode-zen-free")
             && log.credential_account_id.is_none()
             && log.account_id == ZEN_FREE_ACCOUNT_ID
     }));
@@ -2090,7 +2090,7 @@ async fn goat_loopback_adapter_routes_all_client_formats_with_its_own_auth_contr
     assert!(logs.iter().all(|log| {
         log.route_account_id.as_deref() == Some(goat_id.as_str())
             && log.provider_id.as_deref() == Some(COMMAND_CODE_PROVIDER_ID)
-            && log.offering_id.as_deref() == Some(ocg_core::provider::GOAT_OFFERING_ID)
+            && log.provider_id.as_deref() == Some(ocg_core::provider::COMMAND_CODE_PROVIDER_ID)
             && log.credential_account_id.as_deref() == Some(goat_id.as_str())
             && log.model == COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM
     }));
@@ -2699,7 +2699,7 @@ async fn forwarded_requests_are_attributed_to_the_authenticating_key() {
             status: None,
             account_id: None,
             provider_id: None,
-            offering_id: None,
+
             route_account_id: None,
             credential_account_id: None,
             model: None,
@@ -2787,7 +2787,7 @@ async fn gateway_stays_available_while_large_backfill_runs() {
             status: None,
             account_id: None,
             provider_id: None,
-            offering_id: None,
+
             route_account_id: None,
             credential_account_id: None,
             model: None,
@@ -2812,7 +2812,7 @@ async fn gateway_stays_available_while_large_backfill_runs() {
             status: None,
             account_id: None,
             provider_id: None,
-            offering_id: None,
+
             route_account_id: None,
             credential_account_id: None,
             model: Some("deepseek-v4-flash"),

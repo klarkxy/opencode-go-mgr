@@ -166,7 +166,7 @@ fn sample_account() -> Account {
     Account {
         id: "acct-route".into(),
         provider_id: ocg_core::provider::default_provider_id(),
-        offering_id: ocg_core::provider::default_offering_id(),
+
         credential_kind: ocg_core::provider::default_credential_kind(),
         quota_scope: ocg_core::provider::default_quota_scope(),
         name: "route".into(),

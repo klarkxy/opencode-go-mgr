@@ -25,7 +25,7 @@
 use ocg_domain::protocol::ApiFormat;
 use std::time::Duration;
 
-/// Authentication belongs to the provider/offering adapter, not to the wire
+/// Authentication belongs to the provider adapter, not to the wire
 /// protocol. In particular, a Messages endpoint does not imply `x-api-key`
 /// for every future provider.
 ///

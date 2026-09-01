@@ -47,6 +47,7 @@ pub(crate) type DelayedResponses = Arc<Mutex<VecDeque<DelayedChunks>>>;
 struct FakeState {
     replies: Replies,
     calls: FakeCalls,
+    delay: Duration,
 }
 
 #[derive(Clone)]
@@ -65,12 +66,20 @@ struct DelayedState {
 pub(crate) async fn start_fake_upstream(
     replies: HashMap<String, VecDeque<FakeReply>>,
 ) -> (String, FakeCalls, tokio::sync::oneshot::Sender<()>) {
+    start_fake_upstream_with_delay(replies, Duration::ZERO).await
+}
+
+pub(crate) async fn start_fake_upstream_with_delay(
+    replies: HashMap<String, VecDeque<FakeReply>>,
+    delay: Duration,
+) -> (String, FakeCalls, tokio::sync::oneshot::Sender<()>) {
     let calls = Arc::new(Mutex::new(Vec::new()));
     let app = Router::new()
         .fallback(any(fake_reply))
         .with_state(FakeState {
             replies: Arc::new(Mutex::new(replies)),
             calls: calls.clone(),
+            delay,
         });
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
         .await
@@ -192,6 +201,10 @@ async fn fake_reply(
             accept_encoding: header(&headers, axum::http::header::ACCEPT_ENCODING),
             conversation_header: header(&headers, "x-ocg-conversation-id"),
         });
+
+    if !state.delay.is_zero() {
+        tokio::time::sleep(state.delay).await;
+    }
 
     let reply = {
         let mut replies = state.replies.lock().expect("fake reply queue lock");

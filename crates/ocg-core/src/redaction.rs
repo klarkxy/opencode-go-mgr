@@ -19,14 +19,12 @@ pub(crate) fn sanitize_upstream_error_value(text: &str) -> Value {
         }
         return json!({
             "summary": truncate_text(&encoded, MAX_UPSTREAM_ERROR_BYTES.saturating_sub(64)),
-            "truncated": true,
-        });
+            "truncated": true });
     }
     let redacted = redact_text(text);
     json!({
         "text": truncate_text(&redacted, MAX_UPSTREAM_ERROR_BYTES.saturating_sub(64)),
-        "truncated": redacted.len() > MAX_UPSTREAM_ERROR_BYTES.saturating_sub(64),
-    })
+        "truncated": redacted.len() > MAX_UPSTREAM_ERROR_BYTES.saturating_sub(64) })
 }
 
 /// Redact the exact credential selected for an upstream attempt before applying
@@ -107,8 +105,7 @@ fn redact_value(value: &mut Value, key_hint: Option<&str>) {
         };
         *value = json!({
             "bytes": encoded.len(),
-            "sha256": &sha256_hex(&encoded)[..12],
-        });
+            "sha256": &sha256_hex(&encoded)[..12] });
         return;
     }
     match value {

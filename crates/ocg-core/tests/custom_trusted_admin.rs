@@ -102,7 +102,6 @@ async fn create_verified_enabled_custom(
     let (status, draft) = harness
         .create_account(json!({
             "provider_id": CUSTOM_PROVIDER_ID,
-            "offering_id": CUSTOM_OFFERING_ID,
             "name": name,
             "key": key,
             "expected_revision": harness.settings_revision().await,
@@ -145,7 +144,6 @@ async fn create_verified_enabled_custom_mapping(
     let (status, draft) = harness
         .create_account(json!({
             "provider_id": CUSTOM_PROVIDER_ID,
-            "offering_id": CUSTOM_OFFERING_ID,
             "name": name,
             "key": key,
             "expected_revision": harness.settings_revision().await,
@@ -171,7 +169,7 @@ async fn create_verified_enabled_custom_mapping(
 async fn custom_catalog_is_routable_with_available_verification() {
     let harness = V2Harness::start().await;
     let catalog = harness.catalog().await;
-    let custom = catalog_entry(&catalog, CUSTOM_PROVIDER_ID, CUSTOM_OFFERING_ID).unwrap();
+    let custom = catalog_entry(&catalog, CUSTOM_PROVIDER_ID).unwrap();
     assert_eq!(custom["routable"], true, "{custom}");
     assert_eq!(
         custom["verification_runtime_availability"].as_str(),
@@ -282,7 +280,6 @@ async fn chat_bearer_verifies_lists_resolves_and_logs_unknown_cost() {
         .and_then(|items| items.first())
         .unwrap();
     assert_eq!(item["provider_id"].as_str(), Some(CUSTOM_PROVIDER_ID));
-    assert_eq!(item["offering_id"].as_str(), Some(CUSTOM_OFFERING_ID));
     assert_eq!(item["account_id"], account["id"]);
     assert_eq!(item["requested_model"].as_str(), Some(CUSTOM_MODEL));
     assert_eq!(item["upstream_model"].as_str(), Some(CUSTOM_MODEL));
@@ -617,7 +614,6 @@ async fn custom_stream_does_not_cross_account_retry_after_output() {
         let (status, draft) = harness
             .create_account(json!({
                 "provider_id": CUSTOM_PROVIDER_ID,
-                "offering_id": CUSTOM_OFFERING_ID,
                 "name": "custom-one",
                 "key": CUSTOM_ACCOUNT_KEY,
                 "expected_revision": harness.settings_revision().await,
@@ -652,7 +648,6 @@ async fn custom_stream_does_not_cross_account_retry_after_output() {
         let (status, draft) = harness
             .create_account(json!({
                 "provider_id": CUSTOM_PROVIDER_ID,
-                "offering_id": CUSTOM_OFFERING_ID,
                 "name": "custom-two",
                 "key": CUSTOM_KEY_2,
                 "expected_revision": harness.settings_revision().await,
@@ -765,7 +760,6 @@ async fn create_pending_custom(
     let (status, draft) = harness
         .create_account(json!({
             "provider_id": CUSTOM_PROVIDER_ID,
-            "offering_id": CUSTOM_OFFERING_ID,
             "name": name,
             "key": key,
             "expected_revision": harness.settings_revision().await,

@@ -2,14 +2,30 @@
 
 # Add a Provider
 
-Use this guide when you want OCG Manager to route to another upstream service. There are two different integration paths:
+Use this guide when you want OCG Manager to route to another upstream service. There are three different integration paths:
 
 | Goal | Path | Repository change |
 | --- | --- | --- |
-| Connect an OpenAI- or Anthropic-compatible endpoint for your own node | Add a **Custom API** account | No |
+| Add a named Provider this node can reuse across accounts | **Providers** → **New Provider** (user-defined) | No |
+| Connect one OpenAI- or Anthropic-compatible endpoint on a single account | Add a **Custom API** account | No |
 | Ship a named Provider/Plan to every OCG Manager user | Add a sealed built-in Provider | Yes, reviewed code and tests |
 
-OCG Manager has no runtime Provider plugin API. The built-in Provider Registry is static and sealed; unknown `provider_id` + `offering_id` pairs fail closed. Custom API is the supported user-configurable HTTP path, not a base class for built-ins.
+The **Adapter Registry** stays static and sealed. User-defined Providers are typed persisted definitions; every one binds the code-owned Configurable HTTP adapter. OCG never loads user scripts, plugins, or binaries. Unknown `provider_id` values fail closed unless they match a saved definition. Custom API remains a distinct account-owned path: it keeps Endpoint, protocol, and model mappings on the account card.
+
+## Create a user-defined Provider
+
+1. Open **Providers** and choose **New Provider**.
+2. Enter a name, one API Endpoint, one upstream protocol (Chat Completions, Responses, or Messages), and one auth kind (Bearer, `x-api-key`, or none).
+3. Add at least one public-model → exact-upstream-ID mapping. **Fetch models** is optional and does not save.
+4. If auth requires a Key, enter the first account name and a write-only Key. A no-auth Provider creates one singleton account without a Key.
+5. **Test model** is optional. Confirm the warning first: a real test can consume upstream quota or incur charges.
+6. Save. The write is one atomic `POST /providers` and does not require a successful probe.
+
+Edit replaces the whole Provider configuration through `PATCH /providers/{id}`. The Provider id is immutable. Changing none-auth to keyed auth requires an explicit replacement Key. Delete is allowed only after every referencing account is removed; there is no cascade.
+
+Provider-owned fields stay on **Providers**. Account **Key**, enablement, order, notes, cooldown, and tests stay on **Accounts**. User-defined Providers are always unpriced: no official usage, quota estimate, or pricing rows. Request logs still attribute provider, account, and model.
+
+Backups use payload V4 with `providerId` only. Schema v35 stores `dynamic_providers` and `dynamic_provider_models`.
 
 ## Connect a compatible upstream now
 

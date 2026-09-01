@@ -3,6 +3,132 @@ import test from "node:test";
 import { providerApi } from "./providers.ts";
 import { installFetchMock, setupControlPlane } from "../test-helpers/dashboard-v3-fetch.ts";
 
+test("dynamic Provider create omits Key from the presented response and does not replay 409", async () => {
+  setupControlPlane(4, 11, "p1");
+  let createCalls = 0;
+  const requests = installFetchMock(({ url, method }) => {
+    if (url.endsWith("/providers") && method === "POST") {
+      createCalls += 1;
+      if (createCalls === 1) {
+        return new Response(JSON.stringify({
+          code: "revisionConflict",
+          message: "revision conflict",
+          currentRevision: 5,
+          processGeneration: 11,
+        }), { status: 409, headers: { "Content-Type": "application/json" } });
+      }
+      throw new Error("create must not auto-replay");
+    }
+    if (url.endsWith("/providers") && method === "GET") {
+      return { entries: [], revision: 5, processGeneration: 11, pricingRevision: "p1" };
+    }
+    if (url.endsWith("/contract") && method === "GET") {
+      return { revision: 5, processGeneration: 11, pricingRevision: "p1" };
+    }
+    throw new Error(`unexpected request ${url}`);
+  });
+
+  await assert.rejects(
+    () => providerApi.createDynamicProvider({
+      name: "Lab",
+      endpointUrl: "http://127.0.0.1:9",
+      upstreamProtocol: "chat_completions",
+      authKind: "bearer",
+      models: [{ publicModel: "lab-opus", upstreamModel: "vendor/opus" }],
+      key: "sk-lab",
+    }),
+    (error: unknown) => error instanceof Error && error.message.includes("revision conflict"),
+  );
+  assert.equal(requests.filter((request) => request.method === "POST").length, 1);
+  assert.equal(requests[0]?.body?.key, "sk-lab");
+  assert.ok(requests.some((request) => request.url.endsWith("/providers") && request.method === "GET"));
+});
+
+test("dynamic Provider update 409 refreshes catalog and provider without replaying PATCH", async () => {
+  setupControlPlane(4, 11, "p1");
+  let patchCalls = 0;
+  const requests = installFetchMock(({ url, method }) => {
+    if (url.endsWith("/providers/lab-id") && method === "PATCH") {
+      patchCalls += 1;
+      if (patchCalls === 1) {
+        return new Response(JSON.stringify({
+          code: "revisionConflict",
+          message: "revision conflict",
+          currentRevision: 5,
+          processGeneration: 11,
+        }), { status: 409, headers: { "Content-Type": "application/json" } });
+      }
+      throw new Error("update must not auto-replay");
+    }
+    if (url.endsWith("/providers") && method === "GET") {
+      return { entries: [], revision: 5, processGeneration: 11, pricingRevision: "p1" };
+    }
+    if (url.endsWith("/providers/lab-id") && method === "GET") {
+      return {
+        id: "lab-id",
+        name: "Lab",
+        endpointUrl: "http://127.0.0.1:9",
+        upstreamProtocol: "chat_completions",
+        authKind: "bearer",
+        models: [{ publicModel: "lab-opus", upstreamModel: "vendor/opus" }],
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+        revision: 5,
+        processGeneration: 11,
+      };
+    }
+    if (url.endsWith("/contract") && method === "GET") {
+      return { revision: 5, processGeneration: 11, pricingRevision: "p1" };
+    }
+    throw new Error(`unexpected request ${method} ${url}`);
+  });
+
+  await assert.rejects(
+    () => providerApi.updateDynamicProvider("lab-id", {
+      name: "Lab",
+      endpointUrl: "http://127.0.0.1:9",
+      upstreamProtocol: "chat_completions",
+      authKind: "bearer",
+      models: [{ publicModel: "lab-opus", upstreamModel: "vendor/opus" }],
+    }),
+    (error: unknown) => error instanceof Error && error.message.includes("revision conflict"),
+  );
+  assert.equal(requests.filter((request) => request.method === "PATCH").length, 1);
+  assert.ok(requests.some((request) => request.url.endsWith("/providers") && request.method === "GET"));
+  assert.ok(requests.some((request) => request.url.endsWith("/providers/lab-id") && request.method === "GET"));
+});
+
+test("dynamic Provider discover and test never persist a Key in the presented result", async () => {
+  setupControlPlane(4, 11, "p1");
+  installFetchMock(({ url }) => {
+    if (url.endsWith("/providers/models/discover")) {
+      return { models: ["vendor/opus"], truncated: false, revision: 4, processGeneration: 11 };
+    }
+    if (url.endsWith("/providers/test")) {
+      return { ok: true, error: null, revision: 4, processGeneration: 11 };
+    }
+    throw new Error(`unexpected request ${url}`);
+  });
+  const discovered = await providerApi.discoverDynamicProviderModels({
+    endpoint_url: "http://127.0.0.1:9",
+    upstream_protocol: "chat_completions",
+    auth_kind: "bearer",
+    key: "sk-probe",
+  });
+  const tested = await providerApi.testDynamicProvider({
+    endpoint_url: "http://127.0.0.1:9",
+    upstream_protocol: "chat_completions",
+    auth_kind: "bearer",
+    public_model: "lab-opus",
+    upstream_model: "vendor/opus",
+    key: "sk-probe",
+  });
+  assert.deepEqual(discovered, { models: ["vendor/opus"], truncated: false });
+  assert.deepEqual(tested, { ok: true, error: null });
+  assert.equal("key" in discovered, false);
+  assert.equal("key" in tested, false);
+});
+
 test("Go protocol probe sends only provider, model, and protocol intent", async () => {
   setupControlPlane(12, 42, "p1");
   const requests = installFetchMock(({ url }) => {
@@ -167,7 +293,6 @@ function zenFreeAccountDto(overrides: Record<string, unknown> = {}) {
     accountType: "key",
     setupStep: "ready",
     providerId: "opencode-zen-free",
-    offeringId: "anonymous-free",
     credentialKind: "none",
     quotaScope: "egress-ip",
     revision: 12,

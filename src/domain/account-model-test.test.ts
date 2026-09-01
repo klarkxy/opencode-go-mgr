@@ -8,7 +8,6 @@ import { accountTestModels, filterAccountTestModels } from "./account-model-test
 const account = {
   id: "account-1",
   provider_id: "provider-1",
-  offering_id: "offering-1",
 } as Account;
 
 const contracts = {
@@ -18,16 +17,11 @@ const contracts = {
     scope_id: "provider-1",
     provider_id: "provider-1",
     static_protocol_snapshot_date: null,
-    offerings: [{
-      offering_id: "offering-1",
-      display_name: "Provider One",
-      routable: true,
-      accounts: [{
-        id: "account-1",
-        name: "Account One",
-        enabled: true,
-        verification_status: "not_required",
-      }],
+    accounts: [{
+      id: "account-1",
+      name: "Account One",
+      enabled: true,
+      verification_status: "not_required",
     }],
     catalog: { source: "test", source_url: "", refreshed_at: null, models: [], refresh_supported: false },
     models: [

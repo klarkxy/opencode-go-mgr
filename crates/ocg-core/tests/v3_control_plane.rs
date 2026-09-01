@@ -11,8 +11,7 @@ use ocg_core::db::Database;
 use ocg_core::gateway;
 use ocg_core::models::{Account, AccountSetupStep, AccountType, AccountUpdate, ProxyMode};
 use ocg_core::provider::{
-    COMMAND_CODE_PROVIDER_ID, CUSTOM_API_OFFERING_ID, CUSTOM_PROVIDER_ID, GO_OFFERING_ID,
-    GOAT_OFFERING_ID, OPENCODE_PROVIDER_ID, offering_allows_enablement,
+    COMMAND_CODE_PROVIDER_ID, CUSTOM_PROVIDER_ID, OPENCODE_PROVIDER_ID, provider_allows_enablement,
 };
 use ocg_core::state::CoreStateInner;
 use reqwest::StatusCode;
@@ -55,7 +54,7 @@ fn go_account(state: &CoreStateInner, id: &str, enabled: bool) -> Account {
     Account {
         id: id.to_string(),
         provider_id: OPENCODE_PROVIDER_ID.to_string(),
-        offering_id: GO_OFFERING_ID.to_string(),
+
         credential_kind: ocg_core::provider::default_credential_kind(),
         quota_scope: ocg_core::provider::default_quota_scope(),
         name: id.to_string(),
@@ -99,7 +98,6 @@ async fn dashboard_cas_is_not_shared_with_cli_or_tauri_shaped_db_writes() {
             "expectedRevision": revision_after_config,
             "processGeneration": generation,
             "providerId": OPENCODE_PROVIDER_ID,
-            "offeringId": GO_OFFERING_ID,
             "name": "dashboard-go",
             "key": "sk-dashboard"
         }))
@@ -120,7 +118,6 @@ async fn dashboard_cas_is_not_shared_with_cli_or_tauri_shaped_db_writes() {
             "expectedRevision": revision_after_config,
             "processGeneration": generation,
             "providerId": OPENCODE_PROVIDER_ID,
-            "offeringId": GO_OFFERING_ID,
             "name": "stale-go",
             "key": "sk-stale"
         }))
@@ -168,18 +165,9 @@ fn direct_db_creates_respect_catalog_enablement_without_dashboard_cas() {
     let state = state("mutation-shapes");
     let dir = state.data_dir();
 
-    assert!(offering_allows_enablement(
-        OPENCODE_PROVIDER_ID,
-        GO_OFFERING_ID
-    ));
-    assert!(offering_allows_enablement(
-        CUSTOM_PROVIDER_ID,
-        CUSTOM_API_OFFERING_ID
-    ));
-    assert!(offering_allows_enablement(
-        COMMAND_CODE_PROVIDER_ID,
-        GOAT_OFFERING_ID
-    ));
+    assert!(provider_allows_enablement(OPENCODE_PROVIDER_ID));
+    assert!(provider_allows_enablement(CUSTOM_PROVIDER_ID));
+    assert!(provider_allows_enablement(COMMAND_CODE_PROVIDER_ID));
 
     state
         .db
@@ -189,7 +177,6 @@ fn direct_db_creates_respect_catalog_enablement_without_dashboard_cas() {
 
     let mut goat = go_account(&state, "tauri-goat", true);
     goat.provider_id = COMMAND_CODE_PROVIDER_ID.into();
-    goat.offering_id = GOAT_OFFERING_ID.into();
     goat.credential_kind = ocg_core::provider::CredentialKind::ApiKey;
     state
         .db
@@ -207,13 +194,12 @@ fn direct_db_creates_respect_catalog_enablement_without_dashboard_cas() {
 
     let mut custom = go_account(&state, "tauri-custom", true);
     custom.provider_id = CUSTOM_PROVIDER_ID.into();
-    custom.offering_id = CUSTOM_API_OFFERING_ID.into();
     state
         .db
         .lock()
         .create_account(&custom)
         .expect(
-            "Tauri-shaped Custom create uses offering_allows_enablement and can persist enabled=true without dashboard verification",
+            "Tauri-shaped Custom create uses provider_allows_enablement and can persist enabled=true without dashboard verification",
         );
     let stored = state
         .db
@@ -279,7 +265,6 @@ async fn dashboard_custom_create_defaults_enabled_while_verification_is_pending(
             "expectedRevision": revision,
             "processGeneration": state.process_generation(),
             "providerId": CUSTOM_PROVIDER_ID,
-            "offeringId": CUSTOM_API_OFFERING_ID,
             "name": "dash-custom",
             "key": "custom-key",
             "customConfig": {

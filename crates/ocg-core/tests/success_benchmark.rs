@@ -52,7 +52,7 @@ fn benchmark_state(base_url: String) -> (Arc<CoreStateInner>, std::path::PathBuf
         .create_account(&Account {
             id: "bench-account".to_string(),
             provider_id: ocg_core::provider::default_provider_id(),
-            offering_id: ocg_core::provider::default_offering_id(),
+
             credential_kind: ocg_core::provider::default_credential_kind(),
             quota_scope: ocg_core::provider::default_quota_scope(),
             name: "Benchmark".to_string(),
@@ -136,8 +136,7 @@ async fn successful_gateway_requests_have_a_repeatable_release_benchmark() {
                 "round": round,
                 "requests": durations.len(),
                 "throughput_rps": durations.len() as f64 / elapsed.as_secs_f64(),
-                "p95_ms": p95.as_secs_f64() * 1000.0,
-            })
+                "p95_ms": p95.as_secs_f64() * 1000.0 })
         );
     }
 

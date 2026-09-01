@@ -1,4 +1,4 @@
-//! Stable provider, offering, account, key, and model identity constants.
+//! Stable provider, account, key, and model identity constants.
 //!
 //! These values are the first crate-split seam: they do not depend on
 //! persistence, HTTP, or gateway execution. Custom capability matching lives
@@ -16,14 +16,6 @@ pub const KIMI_PROVIDER_ID: &str = "kimi";
 /// Reserved sealed provider identity for the local CPA external integration.
 /// This is not a user-defined Provider row or plugin identifier.
 pub const CPA_PROVIDER_ID: &str = "cpa";
-
-pub const GO_OFFERING_ID: &str = "go";
-pub const GOAT_OFFERING_ID: &str = "goat";
-pub const ANONYMOUS_FREE_OFFERING_ID: &str = "anonymous-free";
-pub const CUSTOM_API_OFFERING_ID: &str = "api";
-pub const MINIMAX_CN_OFFERING_ID: &str = "cn";
-pub const KIMI_CN_OFFERING_ID: &str = "cn";
-pub const CPA_OFFERING_ID: &str = "local";
 
 /// Client-facing Alias. Go still owns the published kebab alias; GOAT maps it
 /// internally to the slash raw ID and stays non-routeable.

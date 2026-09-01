@@ -75,62 +75,56 @@ async fn providers_catalog_is_the_only_plan_source() {
         .unwrap_or_default();
     for plan in &expected_plans {
         let provider_id = plan["provider_id"].as_str().unwrap();
-        let offering_id = plan["offering_id"].as_str().unwrap();
-        let entry = catalog_entry(&catalog, provider_id, offering_id).unwrap_or_else(|| {
-            panic!(
-                "catalog is the only Plan source and must include {provider_id}/{offering_id}: {catalog}"
-            )
+        let entry = catalog_entry(&catalog, provider_id).unwrap_or_else(|| {
+            panic!("catalog is the only Plan source and must include {provider_id}: {catalog}")
         });
         let missing = missing_fields(entry, &required);
         assert!(
             missing.is_empty(),
-            "v2-contract: {provider_id}/{offering_id} missing catalog fields {missing:?}: {entry}"
+            "v2-contract: {provider_id} missing catalog fields {missing:?}: {entry}"
         );
         if let Some(policy) = plan["verification_policy"].as_str() {
             assert_eq!(
                 entry["verification_policy"].as_str(),
                 Some(policy),
-                "{provider_id}/{offering_id} verification_policy"
+                "{provider_id} verification_policy"
             );
         }
         if let Some(runtime) = plan["verification_runtime_availability"].as_str() {
             assert_eq!(
                 entry["verification_runtime_availability"].as_str(),
                 Some(runtime),
-                "{provider_id}/{offering_id} verification_runtime_availability"
+                "{provider_id} verification_runtime_availability"
             );
         }
         if let Some(availability) = plan["creation_availability"].as_str() {
             assert_eq!(
                 entry["creation_availability"].as_str(),
                 Some(availability),
-                "{provider_id}/{offering_id} creation_availability"
+                "{provider_id} creation_availability"
             );
         }
         if let Some(routable) = plan["routable"].as_bool() {
-            assert_eq!(
-                entry["routable"], routable,
-                "{provider_id}/{offering_id} routable"
-            );
+            assert_eq!(entry["routable"], routable, "{provider_id} routable");
         }
         if plan["singleton"] == true {
             assert_eq!(
                 entry["singleton"], true,
-                "{provider_id}/{offering_id} must be a singleton: {entry}"
+                "{provider_id} must be a singleton: {entry}"
             );
         }
         if plan["model_aliases_empty"] == true {
             let published = alias_names(entry);
             assert!(
                 published.is_empty(),
-                "{provider_id}/{offering_id} is unroutable and must not publish client aliases: {published:?}"
+                "{provider_id} is unroutable and must not publish client aliases: {published:?}"
             );
         }
         if plan["requires_risk_notice"] == true {
             let notice = &entry["risk_notice"];
             assert!(
                 notice.is_object(),
-                "{provider_id}/{offering_id} must publish risk_notice: {entry}"
+                "{provider_id} must publish risk_notice: {entry}"
             );
             for field in risk_notice_fields() {
                 assert!(
@@ -145,7 +139,7 @@ async fn providers_catalog_is_the_only_plan_source() {
             assert_eq!(
                 entry["key_prefix"].as_str(),
                 Some(prefix),
-                "{provider_id}/{offering_id} key_prefix"
+                "{provider_id} key_prefix"
             );
         }
         if let Some(required_ids) = plan["required_form_field_ids"].as_array() {
@@ -154,7 +148,7 @@ async fn providers_catalog_is_the_only_plan_source() {
                 let field_id = field_id.as_str().unwrap();
                 assert!(
                     published.contains(field_id),
-                    "{provider_id}/{offering_id} must publish form field {field_id}, got {published:?}"
+                    "{provider_id} must publish form field {field_id}, got {published:?}"
                 );
             }
         }
@@ -164,7 +158,7 @@ async fn providers_catalog_is_the_only_plan_source() {
                 let alias = alias.as_str().unwrap();
                 assert!(
                     published.contains(alias),
-                    "{provider_id}/{offering_id} must publish alias {alias}, got {published:?}"
+                    "{provider_id} must publish alias {alias}, got {published:?}"
                 );
             }
         }
@@ -194,19 +188,18 @@ async fn providers_catalog_is_the_only_plan_source() {
             published_list,
             ocg_core::alias::routeable_aliases_for_with_extended_catalogs(
                 provider_id,
-                offering_id,
                 zen_models,
                 goat_models,
                 minimax_models,
                 kimi_models,
             ),
-            "{provider_id}/{offering_id} catalog aliases must match the routeable Alias registry"
+            "{provider_id} catalog aliases must match the routeable Alias registry"
         );
         assert!(
             published_list.iter().all(|alias| !alias.contains('/')),
-            "{provider_id}/{offering_id} must not publish raw upstream ids: {published_list:?}"
+            "{provider_id} must not publish raw upstream ids: {published_list:?}"
         );
-        if provider_id == OPENCODE_PROVIDER_ID && offering_id == GO_OFFERING_ID {
+        if provider_id == OPENCODE_PROVIDER_ID {
             assert!(!published_list.iter().any(|alias| alias == FREE_MODEL));
             assert!(
                 !published_list
@@ -235,7 +228,6 @@ async fn unknown_offering_create_fails_closed() {
     let (status, body) = harness
         .create_account(json!({
             "provider_id": "not-a-provider",
-            "offering_id": "not-an-offering",
             "name": "should-not-exist",
             "key": GO_ACCOUNT_KEY,
             "expected_revision": harness.settings_revision().await
@@ -300,7 +292,7 @@ async fn client_models_list_exposes_aliases_not_raw_upstream_ids() {
             .position(|alias| alias == &published.alias)
             .unwrap_or_else(|| panic!("missing base Alias {} in {ids:?}", published.alias));
         let item = &body["data"].as_array().expect("OpenAI list data")[index];
-        assert_eq!(item["owned_by"].as_str(), Some(published.owned_by));
+        assert_eq!(item["owned_by"].as_str(), Some(published.owned_by.as_str()));
     }
     assert!(ids.iter().all(|alias| !alias.contains('/')));
     assert!(!ids.iter().any(|alias| alias == "mimo-v2.5-free"));
@@ -482,8 +474,8 @@ async fn ambiguous_raw_upstream_id_is_rejected() {
     let _go = harness.create_go_account("go-main", GO_ACCOUNT_KEY).await;
     let catalog = harness.catalog().await;
     let overlaps = overlapping_raw_ids(&catalog);
-    let custom = catalog_entry(&catalog, CUSTOM_PROVIDER_ID, CUSTOM_OFFERING_ID)
-        .expect("catalog must include custom/api");
+    let custom =
+        catalog_entry(&catalog, CUSTOM_PROVIDER_ID).expect("catalog must include custom/api");
     assert_eq!(
         custom["routable"], true,
         "v2-contract: custom/api is catalog-routable: {custom}"
@@ -552,7 +544,6 @@ async fn go_alias_request_still_routes_and_logs_opencode_go() {
         .and_then(|items| items.first())
         .unwrap_or_else(|| panic!("expected a forward log: {logs}"));
     assert_eq!(item["provider_id"].as_str(), Some(OPENCODE_PROVIDER_ID));
-    assert_eq!(item["offering_id"].as_str(), Some(GO_OFFERING_ID));
     assert_eq!(item["account_id"], go["id"]);
     harness.shutdown();
 }
@@ -619,7 +610,7 @@ async fn goat_creates_live_while_custom_creates_a_pending_draft() {
     let harness = V2Harness::start().await;
     let catalog = harness.catalog().await;
 
-    let goat = catalog_entry(&catalog, COMMAND_CODE_PROVIDER_ID, GOAT_OFFERING_ID)
+    let goat = catalog_entry(&catalog, COMMAND_CODE_PROVIDER_ID)
         .expect("catalog must include command-code/goat");
     assert_eq!(
         goat["verification_policy"].as_str(),
@@ -634,7 +625,6 @@ async fn goat_creates_live_while_custom_creates_a_pending_draft() {
     let (status, body) = harness
         .create_account(json!({
             "provider_id": COMMAND_CODE_PROVIDER_ID,
-            "offering_id": GOAT_OFFERING_ID,
             "name": "goat-live",
             "key": GOAT_ACCOUNT_KEY,
             "expected_revision": harness.settings_revision().await
@@ -707,7 +697,6 @@ async fn disabled_goat_is_not_selected_for_alias_routing() {
     let (status, goat) = harness
         .create_account(json!({
             "provider_id": COMMAND_CODE_PROVIDER_ID,
-            "offering_id": GOAT_OFFERING_ID,
             "name": "goat-disabled",
             "key": GOAT_ACCOUNT_KEY,
             "expected_revision": harness.settings_revision().await
@@ -745,7 +734,6 @@ async fn goat_account_reports_verification_not_applicable() {
     let (status, account) = harness
         .create_account(json!({
             "provider_id": COMMAND_CODE_PROVIDER_ID,
-            "offering_id": GOAT_OFFERING_ID,
             "name": "goat-verify",
             "key": GOAT_ACCOUNT_KEY,
             "expected_revision": harness.settings_revision().await
@@ -760,7 +748,7 @@ async fn goat_account_reports_verification_not_applicable() {
     );
     let goat_id = account["id"].as_str().expect("account id").to_string();
     let catalog = harness.catalog().await;
-    let goat = catalog_entry(&catalog, COMMAND_CODE_PROVIDER_ID, GOAT_OFFERING_ID).unwrap();
+    let goat = catalog_entry(&catalog, COMMAND_CODE_PROVIDER_ID).unwrap();
     assert_eq!(
         goat["verification_runtime_availability"].as_str(),
         Some("not_applicable")
@@ -841,7 +829,6 @@ async fn forward_logs_distinguish_requested_alias_and_upstream_model() {
         "resolved_alias",
         "upstream_model",
         "provider_id",
-        "offering_id",
     ] {
         assert!(
             item.get(field).is_some() && !item[field].is_null(),
@@ -855,7 +842,6 @@ async fn forward_logs_distinguish_requested_alias_and_upstream_model() {
         Some(OPENCODE_PROVIDER_ID),
         "{item}"
     );
-    assert_eq!(item["offering_id"].as_str(), Some(GO_OFFERING_ID), "{item}");
     assert_eq!(item["account_id"], go["id"]);
     assert_ne!(
         item["upstream_model"].as_str(),

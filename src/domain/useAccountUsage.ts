@@ -56,7 +56,7 @@ export function useAccountUsage(accounts: Ref<Account[]>, now: Ref<number>) {
   function usageLimitsFor(account: Account): UsageLimitView[] {
     const providerLimits = providerUsageLimits.value[account.id];
     if (providerLimits?.length) return providerLimits;
-    const limits = account.provider_id === "opencode" && account.offering_id === "go"
+    const limits = account.provider_id === "opencode"
       ? quotaLimits.value
       : null;
     if (!limits) return [];
@@ -351,7 +351,6 @@ export function useAccountUsage(accounts: Ref<Account[]>, now: Ref<number>) {
       accounts.value.filter((account) => (
         accountIsReady(account)
         && account.provider_id === "opencode"
-        && account.offering_id === "go"
       )),
       4,
       (account) => loadAccountUsage(account.id),

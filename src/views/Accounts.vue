@@ -299,9 +299,11 @@ import {
 import {
   OPENCODE_GO_PLAN,
   PLAN_DEFINITIONS,
+  dynamicPlanDefinition,
   planFamilyLabel,
   type PlanDefinition,
 } from "../domain/plans.ts";
+import { isDynamicCatalogEntry } from "../domain/dynamic-provider.ts";
 import { t, type MessageKey } from "../i18n/index.ts";
 import { dashboardErrorDetail } from "../utils/errors.ts";
 import { mapWithConcurrency } from "../utils/async.ts";
@@ -449,8 +451,12 @@ const displayedAccounts = computed(() => (
 
 const planFilterOptions = computed(() => [
   { value: "all", label: t("全部方案") },
-  ...plansInUse(accounts.value, PLAN_DEFINITIONS).map((plan) => ({
-    value: plan.id,
+  ...plansInUse(
+    accounts.value,
+    PLAN_DEFINITIONS,
+    (providerCatalog.value ?? []).filter(isDynamicCatalogEntry).map(dynamicPlanDefinition),
+  ).map((plan) => ({
+    value: plan.id === "dynamic-http" ? plan.provider_id : plan.id,
     label: planFamilyLabel(plan, providerCatalog.value),
   })),
 ]);
@@ -785,7 +791,7 @@ function removeAccountState(id: string): void {
 function accountHasUsageDisplay(account: Account): boolean {
   return isCommandCodeGoatAccount(account)
     || isOfficialCnPlanAccount(account)
-    || (account.provider_id === "opencode" && account.offering_id === "go");
+    || account.provider_id === "opencode";
 }
 
 async function refreshAccountState(id: string): Promise<Account | null> {
@@ -845,7 +851,6 @@ async function loadAccounts() {
             || (
               quotaLimits.value
               && account.provider_id === "opencode"
-              && account.offering_id === "go"
             )
           )
         )),

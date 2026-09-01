@@ -13,7 +13,7 @@ const goatPlan = PLAN_DEFINITIONS.find((p) => p.id === "command-code-goat")!;
 const customPlan = PLAN_DEFINITIONS.find((p) => p.id === "custom-endpoint")!;
 
 test("Custom payload uses one API URL and expands every model to its protocol", () => {
-  const payload = buildCreateAccountPayload(customPlan, undefined, {
+  const payload = buildCreateAccountPayload(customPlan, {
     name: "Custom",
     key: "custom-key",
     endpoint_url: "https://api.example.com/v1/responses",
@@ -48,7 +48,7 @@ test("Custom payload rejects missing or malformed Endpoint fields", () => {
   ];
   for (const { endpoint_url, code } of cases) {
     assert.throws(
-      () => buildCreateAccountPayload(customPlan, undefined, { ...base, endpoint_url }),
+      () => buildCreateAccountPayload(customPlan, { ...base, endpoint_url }),
       (error) => error instanceof AccountCreatePayloadError && error.code === code,
     );
   }
@@ -62,11 +62,11 @@ test("Custom payload requires one upstream protocol and valid model IDs", () => 
     model_capabilities: [{ public_model: "m", upstream_model: "provider/m" }],
   };
   assert.throws(
-    () => buildCreateAccountPayload(customPlan, undefined, base),
+    () => buildCreateAccountPayload(customPlan, base),
     (error) => error instanceof AccountCreatePayloadError && error.code === "missing_upstream_protocol",
   );
   assert.throws(
-    () => buildCreateAccountPayload(customPlan, undefined, {
+    () => buildCreateAccountPayload(customPlan, {
       ...base,
       upstream_protocol: "messages",
       model_capabilities: [
@@ -80,7 +80,7 @@ test("Custom payload requires one upstream protocol and valid model IDs", () => 
 
 test("non-Custom plans reject Custom-only fields", () => {
   assert.throws(
-    () => buildCreateAccountPayload(goatPlan, undefined, {
+    () => buildCreateAccountPayload(goatPlan, {
       name: "GOAT",
       key: "key",
       endpoint_url: "https://api.example.com/v1/messages",
@@ -88,9 +88,34 @@ test("non-Custom plans reject Custom-only fields", () => {
     }),
     (error) => error instanceof AccountCreatePayloadError && error.code === "custom_fields_not_allowed",
   );
-  const payload = buildCreateAccountPayload(goPlan, undefined, { name: "Go", key: "key" });
+  const payload = buildCreateAccountPayload(goPlan, { name: "Go", key: "key" });
   assert.equal(payload.custom_config, undefined);
   assert.equal(payload.model_capabilities, undefined);
+});
+
+test("dynamic Provider accounts omit Endpoint/protocol/models and skip Key when none-auth", () => {
+  const dynamicKeyed = {
+    ...goatPlan,
+    id: "dynamic-http" as const,
+    provider_id: "11111111-1111-4111-8111-111111111111",
+    label: "Lab",
+  };
+  assert.throws(
+    () => buildCreateAccountPayload(dynamicKeyed, {
+      name: "Second",
+      key: "sk-second",
+      endpoint_url: "http://127.0.0.1:9",
+      upstream_protocol: "chat_completions",
+      model_capabilities: [{ public_model: "x", upstream_model: "y" }],
+    }),
+    (error) => error instanceof AccountCreatePayloadError && error.code === "custom_fields_not_allowed",
+  );
+  const payload = buildCreateAccountPayload(dynamicKeyed, { name: "Second", key: "sk-second" });
+  assert.equal(payload.provider_id, dynamicKeyed.provider_id);
+  assert.equal(payload.custom_config, undefined);
+  const dynamicNone = { ...dynamicKeyed, credential_kind: "none" as const };
+  const nonePayload = buildCreateAccountPayload(dynamicNone, { name: "Singleton", key: "" });
+  assert.equal(nonePayload.key, "");
 });
 
 test("payload error messages remain usable without a legacy config vocabulary", () => {

@@ -102,9 +102,6 @@
             "null"
           ]
         },
-        "offeringId": {
-          "type": "string"
-        },
         "planRoutable": {
           "type": "boolean"
         },
@@ -164,7 +161,6 @@
       "required": [
         "id",
         "providerId",
-        "offeringId",
         "credentialKind",
         "quotaScope",
         "name",
@@ -238,12 +234,6 @@
           "type": "string"
         },
         "notes": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "offeringId": {
           "type": [
             "string",
             "null"
@@ -509,9 +499,6 @@
         "name": {
           "type": "string"
         },
-        "offeringId": {
-          "type": "string"
-        },
         "providerId": {
           "type": "string"
         },
@@ -526,7 +513,6 @@
         "index",
         "name",
         "providerId",
-        "offeringId",
         "accountType",
         "disposition",
         "reason"
@@ -2849,6 +2835,351 @@
       ],
       "type": "string"
     },
+    "DynamicProvider": {
+      "additionalProperties": false,
+      "description": "Secret-free dynamic Provider definition.",
+      "properties": {
+        "authKind": {
+          "$ref": "#/$defs/DynamicProviderAuthKind"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "endpointUrl": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "models": {
+          "items": {
+            "$ref": "#/$defs/DynamicProviderModel"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        },
+        "processGeneration": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "updatedAt": {
+          "type": "string"
+        },
+        "upstreamProtocol": {
+          "$ref": "#/$defs/AccountUpstreamProtocol"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "endpointUrl",
+        "upstreamProtocol",
+        "authKind",
+        "models",
+        "createdAt",
+        "updatedAt",
+        "revision",
+        "processGeneration"
+      ],
+      "type": "object"
+    },
+    "DynamicProviderAuthKind": {
+      "description": "Auth kind owned by a dynamic Provider. Independent of protocol.",
+      "enum": [
+        "bearer",
+        "x-api-key",
+        "none"
+      ],
+      "type": "string"
+    },
+    "DynamicProviderCreate": {
+      "additionalProperties": false,
+      "description": "POST `/providers` body. Creates the definition, mappings, and first account.",
+      "properties": {
+        "accountName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "authKind": {
+          "$ref": "#/$defs/DynamicProviderAuthKind"
+        },
+        "endpointUrl": {
+          "type": "string"
+        },
+        "expectedRevision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "key": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "models": {
+          "items": {
+            "$ref": "#/$defs/DynamicProviderModel"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        },
+        "notes": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "processGeneration": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "upstreamProtocol": {
+          "$ref": "#/$defs/AccountUpstreamProtocol"
+        }
+      },
+      "required": [
+        "expectedRevision",
+        "processGeneration",
+        "name",
+        "endpointUrl",
+        "upstreamProtocol",
+        "authKind",
+        "models"
+      ],
+      "type": "object"
+    },
+    "DynamicProviderDiscoverRequest": {
+      "additionalProperties": false,
+      "description": "POST `/providers/models/discover` body. Operational probe; no CAS bump.",
+      "properties": {
+        "authKind": {
+          "$ref": "#/$defs/DynamicProviderAuthKind"
+        },
+        "endpointUrl": {
+          "type": "string"
+        },
+        "key": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "upstreamProtocol": {
+          "$ref": "#/$defs/AccountUpstreamProtocol"
+        }
+      },
+      "required": [
+        "endpointUrl",
+        "upstreamProtocol",
+        "authKind"
+      ],
+      "type": "object"
+    },
+    "DynamicProviderDiscoverResponse": {
+      "additionalProperties": false,
+      "description": "Discovery result. Never includes the submitted Key.",
+      "properties": {
+        "models": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "processGeneration": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "models",
+        "truncated",
+        "revision",
+        "processGeneration"
+      ],
+      "type": "object"
+    },
+    "DynamicProviderModel": {
+      "additionalProperties": false,
+      "description": "One public-to-upstream mapping owned by a dynamic Provider.",
+      "properties": {
+        "publicModel": {
+          "type": "string"
+        },
+        "upstreamModel": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "publicModel",
+        "upstreamModel"
+      ],
+      "type": "object"
+    },
+    "DynamicProviderMutation": {
+      "additionalProperties": false,
+      "description": "Mutation result for a dynamic Provider write.",
+      "properties": {
+        "processGeneration": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "provider": {
+          "$ref": "#/$defs/DynamicProvider"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "provider",
+        "revision",
+        "processGeneration"
+      ],
+      "type": "object"
+    },
+    "DynamicProviderTestRequest": {
+      "additionalProperties": false,
+      "description": "POST `/providers/test` body. Operational probe; no CAS bump.",
+      "properties": {
+        "authKind": {
+          "$ref": "#/$defs/DynamicProviderAuthKind"
+        },
+        "endpointUrl": {
+          "type": "string"
+        },
+        "key": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "publicModel": {
+          "type": "string"
+        },
+        "upstreamModel": {
+          "type": "string"
+        },
+        "upstreamProtocol": {
+          "$ref": "#/$defs/AccountUpstreamProtocol"
+        }
+      },
+      "required": [
+        "endpointUrl",
+        "upstreamProtocol",
+        "authKind",
+        "publicModel",
+        "upstreamModel"
+      ],
+      "type": "object"
+    },
+    "DynamicProviderTestResponse": {
+      "additionalProperties": false,
+      "description": "Model-test result. Never includes the submitted Key.",
+      "properties": {
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "processGeneration": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "ok",
+        "error",
+        "revision",
+        "processGeneration"
+      ],
+      "type": "object"
+    },
+    "DynamicProviderUpdate": {
+      "additionalProperties": false,
+      "description": "PATCH `/providers/{providerId}` body. Full replacement of mutable config.",
+      "properties": {
+        "authKind": {
+          "$ref": "#/$defs/DynamicProviderAuthKind"
+        },
+        "endpointUrl": {
+          "type": "string"
+        },
+        "expectedRevision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "key": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "models": {
+          "items": {
+            "$ref": "#/$defs/DynamicProviderModel"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        },
+        "processGeneration": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "upstreamProtocol": {
+          "$ref": "#/$defs/AccountUpstreamProtocol"
+        }
+      },
+      "required": [
+        "expectedRevision",
+        "processGeneration",
+        "name",
+        "endpointUrl",
+        "upstreamProtocol",
+        "authKind",
+        "models"
+      ],
+      "type": "object"
+    },
     "EffectiveCatalog": {
       "additionalProperties": false,
       "description": "Merged model-id catalog for one contract scope.",
@@ -3160,12 +3491,6 @@
             "null"
           ]
         },
-        "offeringId": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "pricingRevisionId": {
           "type": [
             "string",
@@ -3257,7 +3582,6 @@
         "accountName",
         "routeAccountId",
         "providerId",
-        "offeringId",
         "credentialAccountId",
         "clientKeyId",
         "clientKeyName",
@@ -3410,12 +3734,6 @@
           ]
         },
         "model": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "offeringId": {
           "type": [
             "string",
             "null"
@@ -4061,7 +4379,7 @@
     },
     "PricingMultipliersUpdate": {
       "additionalProperties": false,
-      "description": "PUT provider pricing-multipliers body. CAS tokens,\n`expectedPricingRevision` (the selected offering's active revision), and\n`multipliers` are required.",
+      "description": "PUT provider pricing-multipliers body. CAS tokens,\n`expectedPricingRevision` (the selected provider's active revision), and\n`multipliers` are required.",
       "properties": {
         "expectedPricingRevision": {
           "type": "string"
@@ -4467,7 +4785,7 @@
     },
     "ProviderCatalogEntry": {
       "additionalProperties": false,
-      "description": "One Provider Registry offering as a wire catalog row. Identity strings are\ndata copied from the static registry; this DTO does not define them.",
+      "description": "One Provider Registry entry as a wire catalog row. Identity strings are\ndata copied from the static registry; this DTO does not define them.",
       "properties": {
         "authSchemes": {
           "items": {
@@ -4520,9 +4838,6 @@
         "modelSource": {
           "type": "string"
         },
-        "offeringId": {
-          "type": "string"
-        },
         "pricingAvailability": {
           "type": "string"
         },
@@ -4559,7 +4874,6 @@
       },
       "required": [
         "providerId",
-        "offeringId",
         "displayName",
         "displayFamily",
         "credentialKind",
@@ -4586,7 +4900,7 @@
     },
     "ProviderCatalogFormField": {
       "additionalProperties": false,
-      "description": "One create-form field advertised by a catalog offering.",
+      "description": "One create-form field advertised by a catalog provider.",
       "properties": {
         "id": {
           "type": "string"
@@ -4611,8 +4925,14 @@
     },
     "ProviderContractGroup": {
       "additionalProperties": false,
-      "description": "One built-in Provider/Offering contract scope.",
+      "description": "One built-in Provider contract scope.",
       "properties": {
+        "accounts": {
+          "items": {
+            "$ref": "#/$defs/ProviderAccountChoice"
+          },
+          "type": "array"
+        },
         "card": {
           "$ref": "#/$defs/CardCapabilitySummary"
         },
@@ -4631,12 +4951,6 @@
         "models": {
           "items": {
             "$ref": "#/$defs/EffectiveModelContract"
-          },
-          "type": "array"
-        },
-        "offerings": {
-          "items": {
-            "$ref": "#/$defs/ProviderOfferingChoice"
           },
           "type": "array"
         },
@@ -4677,7 +4991,7 @@
         "scopeId",
         "providerId",
         "staticProtocolSnapshotDate",
-        "offerings",
+        "accounts",
         "catalog",
         "models",
         "pricing",
@@ -4736,9 +5050,6 @@
         "modelId": {
           "type": "string"
         },
-        "offeringId": {
-          "type": "string"
-        },
         "preferredProtocol": {
           "$ref": "#/$defs/AccountUpstreamProtocol"
         },
@@ -4755,7 +5066,6 @@
       "required": [
         "modelId",
         "providerId",
-        "offeringId",
         "preferredProtocol",
         "supportedProtocols"
       ],
@@ -4838,43 +5148,12 @@
       ],
       "type": "object"
     },
-    "ProviderOfferingChoice": {
-      "additionalProperties": false,
-      "description": "One offering under a provider scope, with current account cards.",
-      "properties": {
-        "accounts": {
-          "items": {
-            "$ref": "#/$defs/ProviderAccountChoice"
-          },
-          "type": "array"
-        },
-        "displayName": {
-          "type": "string"
-        },
-        "offeringId": {
-          "type": "string"
-        },
-        "routable": {
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "offeringId",
-        "displayName",
-        "routable",
-        "accounts"
-      ],
-      "type": "object"
-    },
     "ProviderPricing": {
       "additionalProperties": false,
       "description": "Provider-scoped pricing. `snapshot` is required `T | null` and never\ncarries a raw stored pricing blob.",
       "properties": {
         "availability": {
           "$ref": "#/$defs/PricingAvailability"
-        },
-        "offeringId": {
-          "type": "string"
         },
         "pricingRevision": {
           "type": "string"
@@ -4918,7 +5197,6 @@
       },
       "required": [
         "providerId",
-        "offeringId",
         "availability",
         "snapshot",
         "providerSnapshot",
@@ -4931,7 +5209,7 @@
     },
     "ProviderPricingRefresh": {
       "additionalProperties": false,
-      "description": "Result of refreshing every priced offering owned by one Provider. Provider\nfailures are isolated: this response never represents a cross-Provider\ntransaction.",
+      "description": "Result of refreshing the priced snapshot owned by one Provider. Provider\nfailures are isolated: this response never represents a cross-Provider\ntransaction.",
       "properties": {
         "error": {
           "type": [
@@ -4942,12 +5220,6 @@
         "multiplierChanges": {
           "items": {
             "$ref": "#/$defs/PricingMultiplierChange"
-          },
-          "type": "array"
-        },
-        "offeringIds": {
-          "items": {
-            "type": "string"
           },
           "type": "array"
         },
@@ -4993,7 +5265,6 @@
       },
       "required": [
         "providerId",
-        "offeringIds",
         "refreshStatus",
         "multiplierChanges",
         "officialContentHash",
@@ -5222,9 +5493,6 @@
             "null"
           ]
         },
-        "offeringId": {
-          "type": "string"
-        },
         "pricingRevision": {
           "type": [
             "string",
@@ -5264,7 +5532,6 @@
       "required": [
         "accountId",
         "providerId",
-        "offeringId",
         "availability",
         "experimental",
         "freeCooldownUntil",
@@ -6278,9 +6545,6 @@
       "$ref": "#/$defs/CustomEndpointContract"
     },
     {
-      "$ref": "#/$defs/ProviderOfferingChoice"
-    },
-    {
       "$ref": "#/$defs/ProviderAccountChoice"
     },
     {
@@ -6615,6 +6879,36 @@
     },
     {
       "$ref": "#/$defs/CpaOAuthSessionDelete"
+    },
+    {
+      "$ref": "#/$defs/DynamicProviderAuthKind"
+    },
+    {
+      "$ref": "#/$defs/DynamicProviderModel"
+    },
+    {
+      "$ref": "#/$defs/DynamicProvider"
+    },
+    {
+      "$ref": "#/$defs/DynamicProviderCreate"
+    },
+    {
+      "$ref": "#/$defs/DynamicProviderUpdate"
+    },
+    {
+      "$ref": "#/$defs/DynamicProviderMutation"
+    },
+    {
+      "$ref": "#/$defs/DynamicProviderDiscoverRequest"
+    },
+    {
+      "$ref": "#/$defs/DynamicProviderDiscoverResponse"
+    },
+    {
+      "$ref": "#/$defs/DynamicProviderTestRequest"
+    },
+    {
+      "$ref": "#/$defs/DynamicProviderTestResponse"
     }
   ],
   "title": "DashboardApiV3"

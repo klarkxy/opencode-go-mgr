@@ -276,8 +276,7 @@ async fn proxy_browser_websocket(
                     AxumWsMessage::Binary(value) => WorkerWsMessage::Binary(value),
                     AxumWsMessage::Ping(value) => WorkerWsMessage::Ping(value),
                     AxumWsMessage::Pong(value) => WorkerWsMessage::Pong(value),
-                    AxumWsMessage::Close(_) => break,
-                };
+                    AxumWsMessage::Close(_) => break };
                 if worker_tx.send(message).await.is_err() { break; }
             }
             message = worker_rx.next() => {
@@ -289,8 +288,7 @@ async fn proxy_browser_websocket(
                     WorkerWsMessage::Ping(value) => AxumWsMessage::Ping(value),
                     WorkerWsMessage::Pong(value) => AxumWsMessage::Pong(value),
                     WorkerWsMessage::Close(_) => break,
-                    WorkerWsMessage::Frame(_) => continue,
-                };
+                    WorkerWsMessage::Frame(_) => continue };
                 if client_tx.send(message).await.is_err() { break; }
             }
         }

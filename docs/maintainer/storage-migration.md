@@ -33,7 +33,7 @@ Downgrades are not supported: never point an older binary at a migrated database
 
 ## Schema v27 and the pre-v3 snapshot
 
-`CURRENT_SCHEMA_VERSION = 34` (`crates/ocg-core/src/db.rs`). Opening a historical database first migrates canonically to v26, then the v27 rewrite copies the primary Key and every `sub_gateway_keys` row into one `access_keys` table (live primary id `00000000-0000-0000-0000-000000000001`), drops `sub_gateway_keys`, and drops the five legacy `accounts.usage_sync_*` columns (usage-sync metadata lives in `provider_usage_sync_state`). v33 adds the exact Custom upstream model identity; v34 adds the singleton CPA configuration table without importing or exporting CPA state. Account `key_cipher` / `password_cipher` bytes are validated with the Host cipher and never re-encrypted.
+`CURRENT_SCHEMA_VERSION = 35` (`crates/ocg-core/src/db.rs`). Opening a historical database first migrates canonically to v26, then the v27 rewrite copies the primary Key and every `sub_gateway_keys` row into one `access_keys` table (live primary id `00000000-0000-0000-0000-000000000001`), drops `sub_gateway_keys`, and drops the five legacy `accounts.usage_sync_*` columns (usage-sync metadata lives in `provider_usage_sync_state`). v33 adds the exact Custom upstream model identity; v34 adds the singleton CPA configuration table without importing or exporting CPA state. v35 collapses Provider/Plan identity to `provider_id` only: it preflights every known v34 provider/offering pair, refuses unknown pairs and lossy composite-key collisions before mutation, then rebuilds affected tables so offering columns are absent. Account `key_cipher` / `password_cipher` bytes are validated with the Host cipher and never re-encrypted.
 
 ## Schema v31 — per-model/per-protocol overrides
 
@@ -42,6 +42,24 @@ v31 creates the `provider_contract_model_protocol_overrides` table. It stores on
 ## Schema v32 — single-protocol Custom Endpoint
 
 v32 replaces `account_custom_configs.base_url`, JSON `upstream_protocols`, and `auth_scheme` with `endpoint_url` and one `upstream_protocol`. Historical rows choose Chat Completions, then Responses, then Messages, append that protocol's standard inference suffix, and are disabled with verification reset to `pending`. Capabilities, evidence, and overrides for non-selected protocols are removed in the same transaction. Administrators must review and explicitly re-enable migrated Custom accounts.
+
+## Schema v35 — Provider single identity
+
+v35 removes the offering dimension. Provider and Plan are one product identity keyed by `provider_id`. Known v34 pairs map as `opencode/go`, `opencode-zen-free/anonymous-free`, `command-code/goat`, `minimax/cn`, `kimi/cn`, `custom/api`, and `cpa/local`. Unknown pairs and composite-key collisions fail closed before any write. The rebuild preserves accounts, ciphertext bytes, logs, pricing/catalog rows, contracts, Custom configs/capabilities, settings, and access keys. The same schema version also stores typed user-defined Providers in `dynamic_providers` and `dynamic_provider_models`. Node backups export payload V4 with `providerId` only.
+
+Before any destructive v35 rebuild on a non-empty v34 database, the process writes a unique never-overwritten sibling snapshot:
+
+```text
+data.sqlite.pre-v35.<timestamp>.bak
+data.sqlite.pre-v35.<timestamp>.bak.sha256
+```
+
+The snapshot is a standalone v34 SQLite file (`VACUUM INTO`, `quick_check` on both sides); the sidecar's first field is the lowercase SHA-256 of the `.bak`. A brand-new empty directory creates the current schema directly and does not write this copy. Verify the sidecar from the data directory before any restore:
+
+```bash
+sha256sum -c data.sqlite.pre-v35.<timestamp>.bak.sha256      # Linux
+shasum -a 256 -c data.sqlite.pre-v35.<timestamp>.bak.sha256  # macOS
+```
 
 ## Schema v33 — Custom upstream model identity
 

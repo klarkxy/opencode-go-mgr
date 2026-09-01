@@ -220,21 +220,20 @@ fn custom_endpoint_url_errors_keep_existing_variants_and_messages() {
 #[test]
 fn custom_runtime_identity_is_configurable_http_not_a_base_class() {
     use crate::provider::{
-        ANONYMOUS_FREE_OFFERING_ID, COMMAND_CODE_PROVIDER_ID, GO_OFFERING_ID, GOAT_OFFERING_ID,
-        OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID, ProviderAdapterKind, ProviderRegistry,
-        builtin_plan,
+        COMMAND_CODE_PROVIDER_ID, OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID,
+        ProviderAdapterKind, ProviderRegistry,
     };
     assert_eq!(
-        ProviderAdapterKind::from_offering(CUSTOM_PROVIDER_ID, CUSTOM_API_OFFERING_ID),
+        ProviderAdapterKind::from_provider_id(CUSTOM_PROVIDER_ID),
         Some(ProviderAdapterKind::ConfigurableHttp)
     );
-    for (provider_id, offering_id) in [
-        (OPENCODE_PROVIDER_ID, GO_OFFERING_ID),
-        (OPENCODE_ZEN_FREE_PROVIDER_ID, ANONYMOUS_FREE_OFFERING_ID),
-        (COMMAND_CODE_PROVIDER_ID, GOAT_OFFERING_ID),
+    for provider_id in [
+        OPENCODE_PROVIDER_ID,
+        OPENCODE_ZEN_FREE_PROVIDER_ID,
+        COMMAND_CODE_PROVIDER_ID,
     ] {
         assert_ne!(
-            ProviderAdapterKind::from_offering(provider_id, offering_id),
+            ProviderAdapterKind::from_provider_id(provider_id),
             Some(ProviderAdapterKind::ConfigurableHttp)
         );
     }
@@ -254,8 +253,8 @@ fn custom_runtime_identity_is_configurable_http_not_a_base_class() {
         capabilities: Vec::new(),
     };
     assert!(runtime.eligible());
-    let plan = builtin_plan(CUSTOM_PROVIDER_ID, CUSTOM_API_OFFERING_ID).unwrap();
-    let verification = ProviderRegistry::get(CUSTOM_PROVIDER_ID, CUSTOM_API_OFFERING_ID)
+    let plan = crate::provider::builtin_provider(CUSTOM_PROVIDER_ID).unwrap();
+    let verification = ProviderRegistry::get(CUSTOM_PROVIDER_ID)
         .expect("Custom API has a sealed descriptor")
         .verification;
     assert!(verification.never_auto_enable);

@@ -9,12 +9,11 @@ use crate::models::{
     Account, AccountCustomConfig, AccountModelCapability, AccountSetupStep, AccountType, AppConfig,
 };
 use crate::provider::{
-    ANONYMOUS_FREE_OFFERING_ID, COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_ALIAS,
-    COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM, COMMAND_CODE_PROVIDER_ID, CPA_ACCOUNT_ID,
-    CPA_OFFERING_ID, CPA_PROVIDER_ID, CUSTOM_API_OFFERING_ID, CUSTOM_PROVIDER_ID,
-    ConnectionVerificationStatus, CredentialKind, GO_OFFERING_ID, GOAT_OFFERING_ID,
-    OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID, ProviderAdapterKind, QuotaScope,
-    UpstreamProtocolKind, ZEN_FREE_ACCOUNT_ID, ZEN_FREE_ACCOUNT_NAME,
+    COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_ALIAS, COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM,
+    COMMAND_CODE_PROVIDER_ID, CPA_ACCOUNT_ID, CPA_PROVIDER_ID, CUSTOM_PROVIDER_ID,
+    ConnectionVerificationStatus, CredentialKind, OPENCODE_PROVIDER_ID,
+    OPENCODE_ZEN_FREE_PROVIDER_ID, ProviderAdapterKind, QuotaScope, UpstreamProtocolKind,
+    ZEN_FREE_ACCOUNT_ID, ZEN_FREE_ACCOUNT_NAME,
 };
 use chrono::Utc;
 use serde_json::json;
@@ -33,7 +32,7 @@ fn chat_body(model: &str) -> Bytes {
 fn account(
     id: &str,
     provider_id: &str,
-    offering_id: &str,
+
     credential_kind: CredentialKind,
     quota_scope: QuotaScope,
 ) -> Account {
@@ -41,7 +40,7 @@ fn account(
     Account {
         id: id.into(),
         provider_id: provider_id.into(),
-        offering_id: offering_id.into(),
+
         credential_kind,
         quota_scope,
         name: id.into(),
@@ -72,7 +71,6 @@ fn go_account(id: &str) -> Account {
     account(
         id,
         OPENCODE_PROVIDER_ID,
-        GO_OFFERING_ID,
         CredentialKind::ApiKey,
         QuotaScope::Key,
     )
@@ -82,7 +80,6 @@ fn zen_account() -> Account {
     let mut item = account(
         ZEN_FREE_ACCOUNT_ID,
         OPENCODE_ZEN_FREE_PROVIDER_ID,
-        ANONYMOUS_FREE_OFFERING_ID,
         CredentialKind::None,
         QuotaScope::EgressIp,
     );
@@ -94,7 +91,6 @@ fn cpa_account() -> Account {
     account(
         CPA_ACCOUNT_ID,
         CPA_PROVIDER_ID,
-        CPA_OFFERING_ID,
         CredentialKind::ApiKey,
         QuotaScope::Key,
     )
@@ -123,7 +119,6 @@ fn goat_account(id: &str) -> Account {
     account(
         id,
         COMMAND_CODE_PROVIDER_ID,
-        GOAT_OFFERING_ID,
         CredentialKind::ApiKey,
         QuotaScope::Key,
     )
@@ -219,6 +214,7 @@ fn routes_for_with_contracts(
         &std::collections::HashMap::new(),
         None,
         contracts,
+        &[],
     )
     .unwrap()
 }
@@ -271,6 +267,7 @@ fn unknown_cpa_raw_model_defaults_to_chat_and_uses_local_base() {
         &std::collections::HashMap::new(),
         Some(crate::cpa::DEFAULT_CPA_BASE_URL),
         &static_contracts(),
+        &[],
     )
     .unwrap();
     assert_eq!(set.routes.len(), 1);
@@ -338,8 +335,8 @@ fn pinned_raw_stays_pinned_to_its_provider() {
     let resolved = ResolvedModel::PinnedRaw {
         requested: "vendor.gadget-v1".into(),
         mapping: crate::alias::ProviderMapping {
-            provider_id: OPENCODE_PROVIDER_ID,
-            offering_id: GO_OFFERING_ID,
+            provider_id: OPENCODE_PROVIDER_ID.to_string(),
+
             upstream_model: "deepseek-v4-flash".into(),
             routeable: true,
         },
@@ -357,6 +354,7 @@ fn pinned_raw_stays_pinned_to_its_provider() {
         &std::collections::HashMap::new(),
         None,
         &static_contracts(),
+        &[],
     )
     .unwrap();
     assert_eq!(set.routes.len(), 1);
@@ -385,14 +383,14 @@ fn mapping_plans_follow_registry_order_while_candidates_keep_account_order() {
         alias: "widget".into(),
         mappings: vec![
             crate::alias::ProviderMapping {
-                provider_id: OPENCODE_ZEN_FREE_PROVIDER_ID,
-                offering_id: ANONYMOUS_FREE_OFFERING_ID,
+                provider_id: OPENCODE_ZEN_FREE_PROVIDER_ID.to_string(),
+
                 upstream_model: "hy3-free".into(),
                 routeable: true,
             },
             crate::alias::ProviderMapping {
-                provider_id: OPENCODE_PROVIDER_ID,
-                offering_id: GO_OFFERING_ID,
+                provider_id: OPENCODE_PROVIDER_ID.to_string(),
+
                 upstream_model: "glm-5.2".into(),
                 routeable: true,
             },
@@ -411,6 +409,7 @@ fn mapping_plans_follow_registry_order_while_candidates_keep_account_order() {
         &std::collections::HashMap::new(),
         None,
         &static_contracts(),
+        &[],
     )
     .unwrap();
     assert_eq!(set.routes.len(), 2);
@@ -430,8 +429,8 @@ fn pinned_raw_unverified_goat_is_fail_closed_through_adapter() {
     let resolved = ResolvedModel::PinnedRaw {
         requested: COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM.into(),
         mapping: crate::alias::ProviderMapping {
-            provider_id: COMMAND_CODE_PROVIDER_ID,
-            offering_id: GOAT_OFFERING_ID,
+            provider_id: COMMAND_CODE_PROVIDER_ID.to_string(),
+
             upstream_model: COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM.into(),
             routeable: true,
         },
@@ -449,6 +448,7 @@ fn pinned_raw_unverified_goat_is_fail_closed_through_adapter() {
         &std::collections::HashMap::new(),
         None,
         &goat_contracts(&[COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM]),
+        &[],
     )
     .unwrap();
     assert!(set.routes.is_empty());
@@ -524,6 +524,7 @@ fn goat_slash_raw_pins_through_loopback_as_chat() {
         ),
         None,
         &goat_contracts(&[COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM]),
+        &[],
     )
     .unwrap();
     assert_eq!(set.routes.len(), 1);
@@ -573,6 +574,7 @@ fn goat_anthropic_alias_uses_messages_and_converts_client_responses() {
         &runtimes,
         None,
         &goat_contracts(&["claude-sonnet-4-6"]),
+        &[],
     )
     .unwrap();
     assert_eq!(set.routes.len(), 1);
@@ -605,14 +607,14 @@ fn resolve_error_exposes_ambiguous_code() {
         requested: "shared-raw".into(),
         mappings: vec![
             crate::alias::ProviderMapping {
-                provider_id: OPENCODE_PROVIDER_ID,
-                offering_id: GO_OFFERING_ID,
+                provider_id: OPENCODE_PROVIDER_ID.to_string(),
+
                 upstream_model: "shared-raw".into(),
                 routeable: true,
             },
             crate::alias::ProviderMapping {
-                provider_id: OPENCODE_ZEN_FREE_PROVIDER_ID,
-                offering_id: ANONYMOUS_FREE_OFFERING_ID,
+                provider_id: OPENCODE_ZEN_FREE_PROVIDER_ID.to_string(),
+
                 upstream_model: "shared-raw".into(),
                 routeable: true,
             },
@@ -677,7 +679,6 @@ fn custom_account(id: &str) -> Account {
     account(
         id,
         CUSTOM_PROVIDER_ID,
-        CUSTOM_API_OFFERING_ID,
         CredentialKind::ApiKey,
         QuotaScope::Key,
     )
@@ -721,37 +722,37 @@ fn custom_runtime(
 fn materialize_dispatches_builtin_and_custom_through_adapter_kinds() {
     assert_eq!(
         mapping_adapter_kind(&crate::alias::ProviderMapping {
-            provider_id: OPENCODE_PROVIDER_ID,
-            offering_id: GO_OFFERING_ID,
+            provider_id: OPENCODE_PROVIDER_ID.to_string(),
+
             upstream_model: "glm-5.2".into(),
-            routeable: true,
+            routeable: true
         }),
         Some(ProviderAdapterKind::OpenCodeGo)
     );
     assert_eq!(
         mapping_adapter_kind(&crate::alias::ProviderMapping {
-            provider_id: OPENCODE_ZEN_FREE_PROVIDER_ID,
-            offering_id: ANONYMOUS_FREE_OFFERING_ID,
+            provider_id: OPENCODE_ZEN_FREE_PROVIDER_ID.to_string(),
+
             upstream_model: "mimo-v2.5-free".into(),
-            routeable: true,
+            routeable: true
         }),
         Some(ProviderAdapterKind::ZenFree)
     );
     assert_eq!(
         mapping_adapter_kind(&crate::alias::ProviderMapping {
-            provider_id: CUSTOM_PROVIDER_ID,
-            offering_id: CUSTOM_API_OFFERING_ID,
+            provider_id: CUSTOM_PROVIDER_ID.to_string(),
+
             upstream_model: "local".into(),
-            routeable: true,
+            routeable: true
         }),
         Some(ProviderAdapterKind::ConfigurableHttp)
     );
     assert!(!mapping_is_configurable_http(
         &crate::alias::ProviderMapping {
-            provider_id: COMMAND_CODE_PROVIDER_ID,
-            offering_id: GOAT_OFFERING_ID,
+            provider_id: COMMAND_CODE_PROVIDER_ID.to_string(),
+
             upstream_model: COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM.into(),
-            routeable: false,
+            routeable: false
         }
     ));
 }
@@ -831,6 +832,7 @@ fn custom_native_responses_structured_format_does_not_guess_chat() {
         &std::collections::HashMap::new(),
         None,
         &contracts,
+        &[],
     )
     .expect("native Responses structured output must not be rejected via Chat conversion");
     assert_eq!(set.routes.len(), 1);
@@ -873,6 +875,7 @@ fn custom_native_messages_structured_format_does_not_guess_chat() {
         &std::collections::HashMap::new(),
         None,
         &contracts,
+        &[],
     )
     .expect("native Messages structured output must not be rejected via Chat conversion");
     assert_eq!(set.routes.len(), 1);
@@ -913,6 +916,7 @@ fn custom_single_protocol_converts_other_client_wire_formats() {
             &std::collections::HashMap::new(),
             None,
             &contracts,
+            &[],
         )
         .expect("single-protocol account must convert supported client formats");
         assert_eq!(set.routes.len(), 1);
@@ -985,6 +989,7 @@ fn custom_without_scope_contract_does_not_produce_a_candidate() {
         &std::collections::HashMap::new(),
         None,
         &static_contracts(),
+        &[],
     )
     .expect(
         "missing custom contract must fail closed without a protocol error for mixed resolution",
@@ -1017,6 +1022,7 @@ fn probed_opencode_protocol_is_selected_after_contract_evidence() {
         &std::collections::HashMap::new(),
         None,
         &static_contracts(),
+        &[],
     )
     .unwrap();
     assert_eq!(before.routes.len(), 1);
@@ -1057,6 +1063,7 @@ fn probed_opencode_protocol_is_selected_after_contract_evidence() {
         &std::collections::HashMap::new(),
         None,
         &contracts,
+        &[],
     )
     .unwrap();
     assert_eq!(after.routes.len(), 1);

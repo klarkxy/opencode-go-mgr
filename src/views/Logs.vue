@@ -115,16 +115,6 @@
             />
           </div>
           <div class="filter-field">
-            <span class="filter-label">{{ t("服务方案") }}</span>
-            <n-select
-              v-model:value="offeringFilter"
-              :options="offeringOptions"
-              :placeholder="t('服务方案')"
-              :aria-label="t('服务方案')"
-              :consistent-menu-width="false"
-            />
-          </div>
-          <div class="filter-field">
             <span class="filter-label">{{ t("路由账号") }}</span>
             <n-select
               v-model:value="routeAccountFilter"
@@ -300,7 +290,6 @@ import { dashboardErrorDetail } from "../utils/errors.ts";
 import { computeTimeRange, resolveTimeRange, timePresetValues } from "./log-time-range.ts";
 import type { TimePreset } from "./log-time-range.ts";
 import { gatewayLogMessage } from "./gateway-log-message.ts";
-import { providerOfferingLabel } from "../domain/account-providers.ts";
 import { providerApi, type ProviderCatalogEntry } from "../api/providers.ts";
 import {
   forwardLogAlias,
@@ -344,7 +333,6 @@ const accountFilter = ref<string>(query.get("account") ?? "");
 const modelFilter = ref<string>(query.get("model") ?? "");
 const keyFilter = ref<string>(query.get("key") ?? "");
 const providerFilter = ref<string>(query.get("provider") ?? "");
-const offeringFilter = ref<string>(query.get("offering") ?? "");
 const routeAccountFilter = ref<string>(query.get("route_account") ?? "");
 const credentialAccountFilter = ref<string>(query.get("credential_account") ?? "");
 const requestIdFilter = ref<string>(query.get("request_id") ?? "");
@@ -456,25 +444,13 @@ const sortOptions = computed(() => [
   { label: t("缓存"), value: "cached_tokens" },
   { label: t("额度消耗（估算）"), value: "cost" },
 ]);
-// Provider/offering options come from the loaded accounts' provider pairs;
-// route/credential account options reuse the same account list. All four are
+// Provider options come from the loaded accounts' provider ids;
+// route/credential account options reuse the same account list. All three are
 // sent as exact remote query params — rows are never filtered client-side.
 const providerOptions = computed(() => [
   allOption.value,
   ...[...new Set(accounts.value.map((account) => account.provider_id).filter(Boolean))]
     .map((providerId) => ({ label: providerId, value: providerId })),
-]);
-const offeringOptions = computed(() => [
-  allOption.value,
-  ...[...new Map(accounts.value
-    .filter((account) => account.provider_id && account.offering_id)
-    .map((account) => [
-      account.offering_id,
-      {
-        label: providerOfferingLabel(account),
-        value: account.offering_id,
-      },
-    ])).values()],
 ]);
 const routeAccountOptions = computed(() => accountOptions.value);
 const credentialAccountOptions = computed(() => accountOptions.value);
@@ -484,7 +460,6 @@ const hasFilters = computed(() =>
   || !!modelFilter.value
   || !!keyFilter.value
   || !!providerFilter.value
-  || !!offeringFilter.value
   || !!routeAccountFilter.value
   || !!credentialAccountFilter.value
   || !!requestIdFilter.value
@@ -654,7 +629,6 @@ function renderProviderCost(row: ForwardLog) {
   };
   const items: Array<[string, string]> = [
     [t("服务商"), row.provider_id ?? t("未知")],
-    [t("服务方案"), row.offering_id ?? t("未知")],
     [t("路由账号"), accountLabel(row.route_account_id)],
     [t("凭证账号"), accountLabel(row.credential_account_id)],
     [t("原始供应商成本"), costValue(row.raw_cost_usd)],
@@ -797,7 +771,6 @@ function clearFilters() {
   modelFilter.value = "";
   keyFilter.value = "";
   providerFilter.value = "";
-  offeringFilter.value = "";
   routeAccountFilter.value = "";
   credentialAccountFilter.value = "";
   requestIdFilter.value = "";
@@ -824,8 +797,6 @@ function syncQueryState() {
   else url.searchParams.delete("key");
   if (providerFilter.value) url.searchParams.set("provider", providerFilter.value);
   else url.searchParams.delete("provider");
-  if (offeringFilter.value) url.searchParams.set("offering", offeringFilter.value);
-  else url.searchParams.delete("offering");
   if (routeAccountFilter.value) url.searchParams.set("route_account", routeAccountFilter.value);
   else url.searchParams.delete("route_account");
   if (credentialAccountFilter.value) url.searchParams.set("credential_account", credentialAccountFilter.value);
@@ -887,7 +858,6 @@ async function loadForwardLogs() {
       model: modelFilter.value,
       key_id: keyFilter.value,
       provider_id: providerFilter.value,
-      offering_id: offeringFilter.value,
       route_account_id: routeAccountFilter.value,
       credential_account_id: credentialAccountFilter.value,
       request_id: requestIdFilter.value,
@@ -959,7 +929,7 @@ function changeGatewayPage(page: number) {
 
 watch(activeTab, syncQueryState);
 watch(
-  [statusFilter, accountFilter, modelFilter, keyFilter, providerFilter, offeringFilter, routeAccountFilter, credentialAccountFilter, timeRange, activePreset, sortBy, sortOrder],
+  [statusFilter, accountFilter, modelFilter, keyFilter, providerFilter, routeAccountFilter, credentialAccountFilter, timeRange, activePreset, sortBy, sortOrder],
   () => {
     forwardPage.value = 1;
     syncQueryState();

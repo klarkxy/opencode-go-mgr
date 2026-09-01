@@ -19,7 +19,7 @@ pub(crate) use ocg_gateway::classify::{
     schedule_go_usage_sync,
 };
 
-const _: fn(&str, &str) -> ProviderErrorPolicy = provider_error_policy;
+const _: fn(&str) -> ProviderErrorPolicy = provider_error_policy;
 const _: fn(ProviderErrorPolicy) -> (Auth401Policy, RateLimit429Policy) = split_provider_policy;
 
 const fn split_provider_policy(policy: ProviderErrorPolicy) -> (Auth401Policy, RateLimit429Policy) {
@@ -31,14 +31,12 @@ const fn split_provider_policy(policy: ProviderErrorPolicy) -> (Auth401Policy, R
 pub(crate) fn classify_http(
     status: u16,
     provider_id: &str,
-    offering_id: &str,
     channel: UpstreamChannel,
     anonymous: bool,
 ) -> ProviderErrorClass {
     ocg_gateway::classify::classify_http(
         status,
         provider_id,
-        offering_id,
         channel == UpstreamChannel::Free,
         anonymous,
     )
@@ -48,7 +46,6 @@ pub(crate) fn classify_http(
 pub(crate) fn classify_http_response(
     status: u16,
     provider_id: &str,
-    offering_id: &str,
     channel: UpstreamChannel,
     anonymous: bool,
     response_body: &str,
@@ -56,7 +53,6 @@ pub(crate) fn classify_http_response(
     ocg_gateway::classify::classify_http_response(
         status,
         provider_id,
-        offering_id,
         channel == UpstreamChannel::Free,
         anonymous,
         response_body,
@@ -136,8 +132,8 @@ mod tests {
             TypeId::of::<TransportClassifyInput>(),
             TypeId::of::<ocg_gateway::classify::TransportClassifyInput>()
         );
-        let _: fn(&str, &str) -> ProviderErrorPolicy = provider_error_policy;
-        let _: fn(&str, &str) -> ProviderErrorPolicy = ocg_gateway::classify::provider_error_policy;
+        let _: fn(&str) -> ProviderErrorPolicy = provider_error_policy;
+        let _: fn(&str) -> ProviderErrorPolicy = ocg_gateway::classify::provider_error_policy;
         let _: fn(PreflightKind) -> ProviderErrorClass = classify_preflight;
         let _: fn(ProviderErrorClass) -> bool = schedule_go_usage_sync;
     }

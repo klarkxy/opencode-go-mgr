@@ -8,8 +8,7 @@ use ocg_core::dashboard_v3::{
 };
 use ocg_core::kernel::pricing::SOURCE_URL;
 use ocg_core::provider::{
-    ANONYMOUS_FREE_OFFERING_ID, COMMAND_CODE_PROVIDER_ID, CUSTOM_API_OFFERING_ID,
-    CUSTOM_PROVIDER_ID, GO_OFFERING_ID, GOAT_OFFERING_ID, OPENCODE_PROVIDER_ID,
+    COMMAND_CODE_PROVIDER_ID, CUSTOM_PROVIDER_ID, OPENCODE_PROVIDER_ID,
     OPENCODE_ZEN_FREE_PROVIDER_ID,
 };
 use reqwest::{Method, StatusCode};
@@ -275,9 +274,9 @@ async fn dashboard_v3_pricing_routes_require_the_v3_session() {
     let harness = start_public("pricing-auth").await;
 
     for path in [
-        "/providers/opencode/go/pricing",
-        "/providers/opencode/go/pricing",
-        "/providers/command-code/goat/pricing",
+        "/providers/opencode/pricing",
+        "/providers/opencode/pricing",
+        "/providers/command-code/pricing",
     ] {
         let response = harness
             .client
@@ -294,7 +293,7 @@ async fn dashboard_v3_pricing_routes_require_the_v3_session() {
 
     for (method, path) in [
         (Method::POST, "/providers/opencode/pricing/refresh"),
-        (Method::PUT, "/providers/opencode/go/pricing/multipliers"),
+        (Method::PUT, "/providers/opencode/pricing/multipliers"),
     ] {
         let response = harness
             .client
@@ -318,7 +317,7 @@ async fn dashboard_v3_pricing_routes_require_the_v3_session() {
 
     let v2 = harness
         .client
-        .get(format!("{}/providers/opencode/go/pricing", harness.v2_base))
+        .get(format!("{}/providers/opencode/pricing", harness.v2_base))
         .send()
         .await
         .unwrap();
@@ -378,7 +377,7 @@ async fn dashboard_v3_v2_login_cookie_authorizes_pricing_routes() {
 
     let pricing = harness
         .client
-        .get(format!("{}/providers/opencode/go/pricing", harness.v3_base))
+        .get(format!("{}/providers/opencode/pricing", harness.v3_base))
         .header(reqwest::header::COOKIE, &cookie)
         .send()
         .await
@@ -387,7 +386,7 @@ async fn dashboard_v3_v2_login_cookie_authorizes_pricing_routes() {
     let provider = harness
         .client
         .get(format!(
-            "{}/providers/{OPENCODE_PROVIDER_ID}/{GO_OFFERING_ID}/pricing",
+            "{}/providers/{OPENCODE_PROVIDER_ID}/pricing",
             harness.v3_base
         ))
         .header(reqwest::header::COOKIE, &cookie)
@@ -409,10 +408,7 @@ async fn dashboard_v3_get_pricing_is_local_only_camelcase_and_secret_free() {
     let primary = harness.state.config().gateway_key.clone();
 
     let (status, provider) = harness
-        .get_json(&format!(
-            "{}/providers/opencode/go/pricing",
-            harness.v3_base
-        ))
+        .get_json(&format!("{}/providers/opencode/pricing", harness.v3_base))
         .await;
     assert_eq!(status, StatusCode::OK, "{provider}");
     let body = provider["snapshot"].clone();
@@ -458,7 +454,7 @@ async fn dashboard_v3_pricing_mutations_require_cas_tokens() {
         ),
         (
             Method::PUT,
-            "/providers/opencode/go/pricing/multipliers",
+            "/providers/opencode/pricing/multipliers",
             json!({ "multipliers": [{ "modelId": "grok-4.5", "multiplier": 4.0 }] }),
         ),
     ] {
@@ -497,7 +493,7 @@ async fn dashboard_v3_pricing_mutations_require_cas_tokens() {
         ),
         (
             Method::PUT,
-            "/providers/opencode/go/pricing/multipliers",
+            "/providers/opencode/pricing/multipliers",
             json!({ "multipliers": [{ "modelId": "grok-4.5", "multiplier": 4.0 }] }),
         ),
     ] {
@@ -558,7 +554,7 @@ async fn dashboard_v3_stale_revision_generation_or_pricing_revision_is_409() {
     let (status, body) = send_json(
         &harness,
         Method::PUT,
-        "/providers/opencode/go/pricing/multipliers",
+        "/providers/opencode/pricing/multipliers",
         &stale_revision,
     )
     .await;
@@ -580,7 +576,7 @@ async fn dashboard_v3_stale_revision_generation_or_pricing_revision_is_409() {
     let (status, body) = send_json(
         &harness,
         Method::PUT,
-        "/providers/opencode/go/pricing/multipliers",
+        "/providers/opencode/pricing/multipliers",
         &stale_generation,
     )
     .await;
@@ -600,7 +596,7 @@ async fn dashboard_v3_stale_revision_generation_or_pricing_revision_is_409() {
     let (status, body) = send_json(
         &harness,
         Method::PUT,
-        "/providers/opencode/go/pricing/multipliers",
+        "/providers/opencode/pricing/multipliers",
         &stale_pricing,
     )
     .await;
@@ -643,7 +639,7 @@ async fn dashboard_v3_v2_write_conflicts_on_pricing_revision_without_bumping_u64
     harness
         .assert_v2_path_removed(
             Method::PUT,
-            "/providers/opencode/go/pricing/multipliers",
+            "/providers/opencode/pricing/multipliers",
             Some(json!({
                 "expected_revision": pricing_revision,
                 "multipliers": [{ "model_id": "grok-4.5", "multiplier": 3.25 }]
@@ -656,7 +652,7 @@ async fn dashboard_v3_v2_write_conflicts_on_pricing_revision_without_bumping_u64
     let (status, written) = send_json(
         &harness,
         Method::PUT,
-        "/providers/opencode/go/pricing/multipliers",
+        "/providers/opencode/pricing/multipliers",
         &json!({
             "expectedRevision": revision,
             "processGeneration": generation,
@@ -675,10 +671,7 @@ async fn dashboard_v3_v2_write_conflicts_on_pricing_revision_without_bumping_u64
     );
 
     let (status, provider) = harness
-        .get_json(&format!(
-            "{}/providers/opencode/go/pricing",
-            harness.v3_base
-        ))
+        .get_json(&format!("{}/providers/opencode/pricing", harness.v3_base))
         .await;
     assert_eq!(status, StatusCode::OK, "{provider}");
     let v3 = &provider["snapshot"];
@@ -695,7 +688,7 @@ async fn dashboard_v3_v2_write_conflicts_on_pricing_revision_without_bumping_u64
     let (status, body) = send_json(
         &harness,
         Method::PUT,
-        "/providers/opencode/go/pricing/multipliers",
+        "/providers/opencode/pricing/multipliers",
         &json!({
             "expectedRevision": revision,
             "processGeneration": generation,
@@ -732,7 +725,7 @@ async fn dashboard_v3_noop_multiplier_does_not_bump_either_token() {
     let (status, body) = send_json(
         &harness,
         Method::PUT,
-        "/providers/opencode/go/pricing/multipliers",
+        "/providers/opencode/pricing/multipliers",
         &cas_pricing(
             &harness,
             json!({ "multipliers": [{ "modelId": "grok-4.5", "multiplier": current }] }),
@@ -747,7 +740,7 @@ async fn dashboard_v3_noop_multiplier_does_not_bump_either_token() {
     let (status, empty) = send_json(
         &harness,
         Method::PUT,
-        "/providers/opencode/go/pricing/multipliers",
+        "/providers/opencode/pricing/multipliers",
         &cas_pricing(&harness, json!({ "multipliers": [] })),
     )
     .await;
@@ -758,7 +751,7 @@ async fn dashboard_v3_noop_multiplier_does_not_bump_either_token() {
     let (status, unknown) = send_json(
         &harness,
         Method::PUT,
-        "/providers/opencode/go/pricing/multipliers",
+        "/providers/opencode/pricing/multipliers",
         &cas_pricing(
             &harness,
             json!({ "multipliers": [{ "modelId": "not-a-model", "multiplier": 2.0 }] }),
@@ -780,7 +773,7 @@ async fn dashboard_v3_successful_multiplier_write_bumps_both_once() {
     let (status, body) = send_json(
         &harness,
         Method::PUT,
-        "/providers/opencode/go/pricing/multipliers",
+        "/providers/opencode/pricing/multipliers",
         &cas_pricing(
             &harness,
             json!({ "multipliers": [{ "modelId": "qwen3.7-plus", "multiplier": 0.75 }] }),
@@ -808,7 +801,7 @@ async fn dashboard_v3_successful_multiplier_write_bumps_both_once() {
     assert_snapshot_shape(&body, &harness);
 
     harness
-        .assert_v2_path_removed(Method::GET, "/providers/opencode/go/pricing", None)
+        .assert_v2_path_removed(Method::GET, "/providers/opencode/pricing", None)
         .await;
 
     harness.stop();
@@ -1024,7 +1017,7 @@ async fn dashboard_v3_provider_scoped_pricing_follows_catalog_facts() {
 
     let (status, go) = harness
         .get_json(&format!(
-            "{}/providers/{OPENCODE_PROVIDER_ID}/{GO_OFFERING_ID}/pricing",
+            "{}/providers/{OPENCODE_PROVIDER_ID}/pricing",
             harness.v3_base
         ))
         .await;
@@ -1033,7 +1026,6 @@ async fn dashboard_v3_provider_scoped_pricing_follows_catalog_facts() {
     assert_eq!(parsed.availability, PricingAvailability::Available);
     assert_eq!(go["availability"], "available");
     assert_eq!(go["providerId"], OPENCODE_PROVIDER_ID);
-    assert_eq!(go["offeringId"], GO_OFFERING_ID);
     assert_eq!(go["revision"], revision);
     assert_eq!(go["processGeneration"], generation);
     assert_eq!(go["pricingRevision"], pricing_revision);
@@ -1046,7 +1038,7 @@ async fn dashboard_v3_provider_scoped_pricing_follows_catalog_facts() {
 
     let (status, zen) = harness
         .get_json(&format!(
-            "{}/providers/{OPENCODE_ZEN_FREE_PROVIDER_ID}/{ANONYMOUS_FREE_OFFERING_ID}/pricing",
+            "{}/providers/{OPENCODE_ZEN_FREE_PROVIDER_ID}/pricing",
             harness.v3_base
         ))
         .await;
@@ -1059,7 +1051,7 @@ async fn dashboard_v3_provider_scoped_pricing_follows_catalog_facts() {
 
     let (status, goat) = harness
         .get_json(&format!(
-            "{}/providers/{COMMAND_CODE_PROVIDER_ID}/{GOAT_OFFERING_ID}/pricing",
+            "{}/providers/{COMMAND_CODE_PROVIDER_ID}/pricing",
             harness.v3_base
         ))
         .await;
@@ -1073,7 +1065,7 @@ async fn dashboard_v3_provider_scoped_pricing_follows_catalog_facts() {
 
     let (status, custom) = harness
         .get_json(&format!(
-            "{}/providers/{CUSTOM_PROVIDER_ID}/{CUSTOM_API_OFFERING_ID}/pricing",
+            "{}/providers/{CUSTOM_PROVIDER_ID}/pricing",
             harness.v3_base
         ))
         .await;
@@ -1083,7 +1075,7 @@ async fn dashboard_v3_provider_scoped_pricing_follows_catalog_facts() {
     assert_secret_free(&custom);
 
     let (status, missing) = harness
-        .get_json(&format!("{}/providers/unknown/go/pricing", harness.v3_base))
+        .get_json(&format!("{}/providers/unknown/pricing", harness.v3_base))
         .await;
     assert_eq!(status, StatusCode::NOT_FOUND, "{missing}");
     assert_v3_error(&missing, ERROR_NOT_FOUND);
@@ -1092,7 +1084,7 @@ async fn dashboard_v3_provider_scoped_pricing_follows_catalog_facts() {
     harness
         .assert_v2_path_removed(
             Method::GET,
-            &format!("/providers/{COMMAND_CODE_PROVIDER_ID}/{GOAT_OFFERING_ID}/pricing"),
+            &format!("/providers/{COMMAND_CODE_PROVIDER_ID}/pricing"),
             None,
         )
         .await;
@@ -1118,7 +1110,6 @@ async fn dashboard_v3_provider_refreshes_are_independent_and_keep_separate_lkg()
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["providerId"], OPENCODE_PROVIDER_ID);
-    assert_eq!(body["offeringIds"], json!([GO_OFFERING_ID]));
     assert_eq!(body["refreshStatus"], "failed_no_change");
     assert_eq!(body["pricingRevision"], before.2);
     assert_eq!(body["providerPricingRevision"], before.2);
@@ -1139,7 +1130,6 @@ async fn dashboard_v3_provider_refreshes_are_independent_and_keep_separate_lkg()
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["providerId"], COMMAND_CODE_PROVIDER_ID);
-    assert_eq!(body["offeringIds"], json!([GOAT_OFFERING_ID]));
     assert_eq!(body["refreshStatus"], "success");
     assert_eq!(body["pricingRevision"], before.2);
     let goat_revision = body["providerPricingRevision"]
@@ -1173,7 +1163,7 @@ async fn dashboard_v3_provider_refreshes_are_independent_and_keep_separate_lkg()
 
     let (status, goat) = harness
         .get_json(&format!(
-            "{}/providers/{COMMAND_CODE_PROVIDER_ID}/{GOAT_OFFERING_ID}/pricing",
+            "{}/providers/{COMMAND_CODE_PROVIDER_ID}/pricing",
             harness.v3_base
         ))
         .await;
@@ -1210,7 +1200,7 @@ async fn dashboard_v3_goat_multiplier_write_is_provider_scoped_and_persistent() 
 
     let (status, before) = harness
         .get_json(&format!(
-            "{}/providers/{COMMAND_CODE_PROVIDER_ID}/{GOAT_OFFERING_ID}/pricing",
+            "{}/providers/{COMMAND_CODE_PROVIDER_ID}/pricing",
             harness.v3_base
         ))
         .await;
@@ -1223,7 +1213,7 @@ async fn dashboard_v3_goat_multiplier_write_is_provider_scoped_and_persistent() 
     let (status, written) = send_json(
         &harness,
         Method::PUT,
-        &format!("/providers/{COMMAND_CODE_PROVIDER_ID}/{GOAT_OFFERING_ID}/pricing/multipliers"),
+        &format!("/providers/{COMMAND_CODE_PROVIDER_ID}/pricing/multipliers"),
         &json!({
             "expectedRevision": revision_before_write,
             "processGeneration": harness.state.process_generation(),
@@ -1234,7 +1224,6 @@ async fn dashboard_v3_goat_multiplier_write_is_provider_scoped_and_persistent() 
     .await;
     assert_eq!(status, StatusCode::OK, "{written}");
     assert_eq!(written["providerId"], COMMAND_CODE_PROVIDER_ID);
-    assert_eq!(written["offeringId"], GOAT_OFFERING_ID);
     assert_eq!(written["revision"], revision_before_write + 1);
     assert_eq!(written["pricingRevision"], global_pricing_revision);
     assert_ne!(written["providerPricingRevision"], provider_revision);
@@ -1249,7 +1238,7 @@ async fn dashboard_v3_goat_multiplier_write_is_provider_scoped_and_persistent() 
 
     let (status, persisted) = harness
         .get_json(&format!(
-            "{}/providers/{COMMAND_CODE_PROVIDER_ID}/{GOAT_OFFERING_ID}/pricing",
+            "{}/providers/{COMMAND_CODE_PROVIDER_ID}/pricing",
             harness.v3_base
         ))
         .await;
@@ -1456,7 +1445,7 @@ async fn dashboard_v3_provider_pricing_stays_internally_equal_under_concurrent_v
     for _ in 0..40 {
         let (status, go) = harness
             .get_json(&format!(
-                "{}/providers/{OPENCODE_PROVIDER_ID}/{GO_OFFERING_ID}/pricing",
+                "{}/providers/{OPENCODE_PROVIDER_ID}/pricing",
                 harness.v3_base
             ))
             .await;

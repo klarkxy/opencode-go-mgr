@@ -41,7 +41,7 @@ pub(crate) struct ForwardLogReadQuery {
     pub status: Option<String>,
     pub account_id: Option<String>,
     pub provider_id: Option<String>,
-    pub offering_id: Option<String>,
+
     pub route_account_id: Option<String>,
     pub credential_account_id: Option<String>,
     pub model: Option<String>,
@@ -132,16 +132,13 @@ pub(crate) fn application_models_from_snapshot(
         .iter()
         .map(|model| model.model_id.as_str())
         .collect::<HashSet<_>>();
-    alias::routeable_aliases_for(
-        crate::provider::OPENCODE_PROVIDER_ID,
-        crate::provider::GO_OFFERING_ID,
-    )
-    .into_iter()
-    .filter(|alias| {
-        application_alias_is_priced(alias, &priced)
-            && contracts.is_none_or(|contracts| go_alias_has_enabled_protocol(alias, contracts))
-    })
-    .collect()
+    alias::routeable_aliases_for(crate::provider::OPENCODE_PROVIDER_ID)
+        .into_iter()
+        .filter(|alias| {
+            application_alias_is_priced(alias, &priced)
+                && contracts.is_none_or(|contracts| go_alias_has_enabled_protocol(alias, contracts))
+        })
+        .collect()
 }
 
 fn go_alias_has_enabled_protocol(alias: &str, contracts: &EffectiveContractSet) -> bool {
@@ -276,10 +273,6 @@ pub(crate) fn query_forward_logs(
         account_id: query.account_id.as_deref(),
         provider_id: query
             .provider_id
-            .as_deref()
-            .filter(|value| !value.is_empty()),
-        offering_id: query
-            .offering_id
             .as_deref()
             .filter(|value| !value.is_empty()),
         route_account_id: query

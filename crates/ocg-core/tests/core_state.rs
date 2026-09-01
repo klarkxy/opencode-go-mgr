@@ -36,7 +36,7 @@ fn core_state_persists_account_through_static_cipher() {
     let account = Account {
         id: "acct-1".into(),
         provider_id: ocg_core::provider::default_provider_id(),
-        offering_id: ocg_core::provider::default_offering_id(),
+
         credential_kind: ocg_core::provider::default_credential_kind(),
         quota_scope: ocg_core::provider::default_quota_scope(),
         name: "main".into(),
@@ -85,7 +85,7 @@ fn core_state_with_wrong_cipher_cannot_decrypt_existing_account() {
         let account = Account {
             id: "acct-2".into(),
             provider_id: ocg_core::provider::default_provider_id(),
-            offering_id: ocg_core::provider::default_offering_id(),
+
             credential_kind: ocg_core::provider::default_credential_kind(),
             quota_scope: ocg_core::provider::default_quota_scope(),
             name: "alt".into(),
@@ -303,7 +303,7 @@ fn query_forward_logs_filters_before_limit_and_summarizes_all_matches() {
             account_name: "selected".into(),
             route_account_id: None,
             provider_id: None,
-            offering_id: None,
+
             credential_account_id: None,
             client_key_id: None,
             client_key_name: None,
@@ -344,7 +344,7 @@ fn query_forward_logs_filters_before_limit_and_summarizes_all_matches() {
             account_name: format!("busy-{index}"),
             route_account_id: None,
             provider_id: None,
-            offering_id: None,
+
             credential_account_id: None,
             client_key_id: None,
             client_key_name: None,
@@ -382,7 +382,7 @@ fn query_forward_logs_filters_before_limit_and_summarizes_all_matches() {
             status: Some("success"),
             account_id: Some("selected"),
             provider_id: None,
-            offering_id: None,
+
             route_account_id: None,
             credential_account_id: None,
             model: None,
@@ -409,7 +409,7 @@ fn query_forward_logs_filters_before_limit_and_summarizes_all_matches() {
             status: Some("success"),
             account_id: Some("selected"),
             provider_id: None,
-            offering_id: None,
+
             route_account_id: None,
             credential_account_id: None,
             model: None,
@@ -432,7 +432,7 @@ fn query_forward_logs_filters_before_limit_and_summarizes_all_matches() {
             status: None,
             account_id: None,
             provider_id: None,
-            offering_id: None,
+
             route_account_id: None,
             credential_account_id: None,
             model: None,
@@ -476,7 +476,7 @@ fn daily_tokens_by_model_counts_all_rows_with_tokens_regardless_of_cost_state() 
             account_name: "main".into(),
             route_account_id: None,
             provider_id: None,
-            offering_id: None,
+
             credential_account_id: None,
             client_key_id: None,
             client_key_name: None,
@@ -546,7 +546,7 @@ fn single_key_upgrade_drill_backfills_logs_to_the_primary_key_id() {
             account_name: "acct".into(),
             route_account_id: None,
             provider_id: None,
-            offering_id: None,
+
             credential_account_id: None,
             client_key_id: None,
             client_key_name: None,
@@ -630,7 +630,7 @@ fn single_key_upgrade_drill_backfills_logs_to_the_primary_key_id() {
             status: None,
             account_id: None,
             provider_id: None,
-            offering_id: None,
+
             route_account_id: None,
             credential_account_id: None,
             model: None,
@@ -759,7 +759,7 @@ fn backfill_restarts_when_rows_appear_after_completion() {
         account_name: "acct".into(),
         route_account_id: None,
         provider_id: None,
-        offering_id: None,
+
         credential_account_id: None,
         client_key_id: None,
         client_key_name: None,
@@ -802,7 +802,7 @@ fn backfill_restarts_when_rows_appear_after_completion() {
             status: None,
             account_id: None,
             provider_id: None,
-            offering_id: None,
+
             route_account_id: None,
             credential_account_id: None,
             model: None,

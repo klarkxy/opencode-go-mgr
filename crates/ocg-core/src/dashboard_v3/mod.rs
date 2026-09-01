@@ -30,6 +30,7 @@ mod claude_desktop;
 mod connection;
 mod cpa;
 mod custom_discovery;
+mod dynamic_providers;
 mod keys;
 mod managed_key_verify;
 mod observability;
@@ -86,7 +87,10 @@ pub use types::{
     CpaOAuthStartRequest, CpaOAuthStatus, CpaQuotaReset, CpaTestRequest, CreditBalance,
     CustomEndpointContract, CustomModelDiscoveryRequest, CustomModelDiscoveryResponse,
     DailyModelTokens, DailyTokensByModel, DailyTokensQuery, DashboardSummary, DesktopUpdate,
-    DesktopUpdatePhase, ERROR_CONFLICT, ERROR_FORBIDDEN, ERROR_GATEWAY_TIMEOUT, ERROR_GONE,
+    DesktopUpdatePhase, DynamicProvider, DynamicProviderAuthKind, DynamicProviderCreate,
+    DynamicProviderDiscoverRequest, DynamicProviderDiscoverResponse, DynamicProviderModel,
+    DynamicProviderMutation, DynamicProviderTestRequest, DynamicProviderTestResponse,
+    DynamicProviderUpdate, ERROR_CONFLICT, ERROR_FORBIDDEN, ERROR_GATEWAY_TIMEOUT, ERROR_GONE,
     ERROR_INTERNAL, ERROR_INVALID_JSON, ERROR_INVALID_REQUEST, ERROR_MISSING_EXPECTED_REVISION,
     ERROR_NOT_FOUND, ERROR_NOT_IMPLEMENTED, ERROR_OUTBOUND_FAILED, ERROR_PRECONDITION_FAILED,
     ERROR_REVISION_CONFLICT, ERROR_SERVICE_UNAVAILABLE, ERROR_THROTTLED, ERROR_UNAUTHORIZED,
@@ -100,13 +104,13 @@ pub use types::{
     PricingRevision, PricingSnapshot, PricingTimeWindow, ProtocolOverrideState,
     ProtocolProbeRequest, ProtocolProbeResponse, ProtocolProbeResult, ProviderAccountChoice,
     ProviderCatalog, ProviderCatalogEntry, ProviderCatalogFormField, ProviderCatalogRiskNotice,
-    ProviderContractGroup, ProviderContracts, ProviderModelCapability, ProviderOfferingChoice,
-    ProviderPricing, ProviderPricingRefresh, ProviderPricingRefreshUpdate, ProviderUsage,
-    ProxyListDirection, ProxyMode, ProxySupportedModel, ProxyTestRequest, ProxyTestResponse,
-    QuotaWindow, RoutingMode, Settings, SettingsUpdate, UpdateCheck, UsageAvailability,
-    UsageMutation, UsageRefresh, UsageRefreshThrottleError, UsageRefreshUpdate, UsageSyncState,
-    UsageWindow, V3Error, ZenFreeModel, ZenFreeModels, ZenFreeSettings, ZenFreeSettingsUpdate,
-    contract_schema, contract_schema_pretty,
+    ProviderContractGroup, ProviderContracts, ProviderModelCapability, ProviderPricing,
+    ProviderPricingRefresh, ProviderPricingRefreshUpdate, ProviderUsage, ProxyListDirection,
+    ProxyMode, ProxySupportedModel, ProxyTestRequest, ProxyTestResponse, QuotaWindow, RoutingMode,
+    Settings, SettingsUpdate, UpdateCheck, UsageAvailability, UsageMutation, UsageRefresh,
+    UsageRefreshThrottleError, UsageRefreshUpdate, UsageSyncState, UsageWindow, V3Error,
+    ZenFreeModel, ZenFreeModels, ZenFreeSettings, ZenFreeSettingsUpdate, contract_schema,
+    contract_schema_pretty,
 };
 pub use updater::{GITHUB_LATEST_RELEASE_API, GITHUB_LATEST_RELEASE_URL};
 
@@ -213,11 +217,11 @@ pub fn api_router(state: CoreState) -> Router<CoreState> {
             post(pricing::refresh_provider_pricing),
         )
         .route(
-            "/providers/{provider_id}/{offering_id}/pricing/multipliers",
+            "/providers/{provider_id}/pricing/multipliers",
             put(pricing::put_pricing_multipliers),
         )
         .route(
-            "/providers/{provider_id}/{offering_id}/pricing",
+            "/providers/{provider_id}/pricing",
             get(pricing::get_provider_pricing),
         )
         .route(
@@ -291,7 +295,21 @@ pub fn api_router(state: CoreState) -> Router<CoreState> {
             "/accounts/{id}/model-tests",
             post(account_model_test::test_account_model),
         )
-        .route("/providers", get(providers::get_providers))
+        .route(
+            "/providers",
+            get(providers::get_providers).post(dynamic_providers::create_provider),
+        )
+        .route(
+            "/providers/models/discover",
+            post(dynamic_providers::discover_models),
+        )
+        .route("/providers/test", post(dynamic_providers::test_provider))
+        .route(
+            "/providers/{provider_id}",
+            get(dynamic_providers::get_provider)
+                .patch(dynamic_providers::update_provider)
+                .delete(dynamic_providers::delete_provider),
+        )
         .route(
             "/providers/model-capabilities",
             get(providers::get_model_capabilities),

@@ -12,9 +12,8 @@ use ocg_core::models::{
     ForwardLog, ForwardLogNativeAttribution, SubGatewayKey, UNATTRIBUTED_KEY_FILTER,
 };
 use ocg_core::provider::{
-    COMMAND_CODE_PROVIDER_ID, CUSTOM_API_OFFERING_ID, CUSTOM_PROVIDER_ID, GO_OFFERING_ID,
-    GOAT_OFFERING_ID, OPENCODE_PROVIDER_ID, UpstreamProtocolKind, default_credential_kind,
-    default_quota_scope,
+    COMMAND_CODE_PROVIDER_ID, CUSTOM_PROVIDER_ID, OPENCODE_PROVIDER_ID, UpstreamProtocolKind,
+    default_credential_kind, default_quota_scope,
 };
 use reqwest::StatusCode;
 use serde_json::{Value, json};
@@ -133,7 +132,7 @@ fn go_account(harness: &V3Harness, id: &str, key: &str) -> Account {
     Account {
         id: id.into(),
         provider_id: OPENCODE_PROVIDER_ID.into(),
-        offering_id: GO_OFFERING_ID.into(),
+
         credential_kind: default_credential_kind(),
         quota_scope: default_quota_scope(),
         name: id.into(),
@@ -169,7 +168,7 @@ fn forward_log(account_id: &str, model: &str, cost: Option<f64>, cost_state: &st
         account_name: account_id.into(),
         route_account_id: Some(account_id.into()),
         provider_id: Some(OPENCODE_PROVIDER_ID.into()),
-        offering_id: Some(GO_OFFERING_ID.into()),
+
         credential_account_id: Some(account_id.into()),
         client_key_id: None,
         client_key_name: None,
@@ -213,7 +212,6 @@ async fn dashboard_summary_counts_routable_goat_and_custom_accounts() {
 
     let mut goat = go_account(&harness, "acct-goat", "sk-goat");
     goat.provider_id = COMMAND_CODE_PROVIDER_ID.into();
-    goat.offering_id = GOAT_OFFERING_ID.into();
     let mut disabled_goat = goat.clone();
     disabled_goat.id = "acct-goat-disabled".into();
     disabled_goat.name = disabled_goat.id.clone();
@@ -225,7 +223,6 @@ async fn dashboard_summary_counts_routable_goat_and_custom_accounts() {
 
     let mut custom = go_account(&harness, "acct-custom", "sk-custom");
     custom.provider_id = CUSTOM_PROVIDER_ID.into();
-    custom.offering_id = CUSTOM_API_OFFERING_ID.into();
     {
         let db = harness.state.db.lock();
         db.create_account(&goat).unwrap();

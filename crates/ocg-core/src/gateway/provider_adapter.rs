@@ -166,6 +166,7 @@ pub(crate) fn supports_production_plan(
     config: &AppConfig,
     plan: &RequestPlan,
     contracts: &EffectiveContractSet,
+    dynamics: &[crate::dynamic::DynamicProviderRuntime],
 ) -> Result<(), String> {
     resolve_route_with_policy(
         account,
@@ -174,20 +175,32 @@ pub(crate) fn supports_production_plan(
         RoutePolicy::Production {
             contracts: Some(contracts),
         },
+        dynamics,
     )
     .map(|_| ())
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn resolve_route(
     account: &Account,
     config: &AppConfig,
     plan: &RequestPlan,
+) -> Result<AttemptSpec, String> {
+    resolve_route_with_dynamics(account, config, plan, &[])
+}
+
+pub(crate) fn resolve_route_with_dynamics(
+    account: &Account,
+    config: &AppConfig,
+    plan: &RequestPlan,
+    dynamics: &[crate::dynamic::DynamicProviderRuntime],
 ) -> Result<AttemptSpec, String> {
     resolve_route_with_policy(
         account,
         config,
         plan,
         RoutePolicy::Production { contracts: None },
+        dynamics,
     )
 }
 
@@ -196,7 +209,7 @@ pub(crate) fn resolve_probe_route(
     config: &AppConfig,
     plan: &RequestPlan,
 ) -> Result<AttemptSpec, String> {
-    resolve_route_with_policy(account, config, plan, RoutePolicy::Probe)
+    resolve_route_with_policy(account, config, plan, RoutePolicy::Probe, &[])
 }
 
 pub(crate) fn resolve_account_test_route(
@@ -204,7 +217,7 @@ pub(crate) fn resolve_account_test_route(
     config: &AppConfig,
     plan: &RequestPlan,
 ) -> Result<AttemptSpec, String> {
-    resolve_route_with_policy(account, config, plan, RoutePolicy::AccountTest)
+    resolve_route_with_policy(account, config, plan, RoutePolicy::AccountTest, &[])
 }
 
 fn resolve_route_with_policy(
@@ -212,8 +225,9 @@ fn resolve_route_with_policy(
     config: &AppConfig,
     plan: &RequestPlan,
     policy: RoutePolicy<'_>,
+    dynamics: &[crate::dynamic::DynamicProviderRuntime],
 ) -> Result<AttemptSpec, String> {
-    match ProviderAdapterKind::from_offering(&account.provider_id, &account.offering_id) {
+    match crate::dynamic::adapter_kind_for(&account.provider_id, dynamics) {
         Some(ProviderAdapterKind::OpenCodeGo) => {
             resolve_open_code_go(account, config, plan, policy)
         }
@@ -223,13 +237,18 @@ fn resolve_route_with_policy(
         }
         Some(ProviderAdapterKind::MiniMaxCn) => resolve_minimax_cn(account, config, plan, policy),
         Some(ProviderAdapterKind::KimiCn) => resolve_kimi_cn(account, config, plan, policy),
-        Some(ProviderAdapterKind::ConfigurableHttp) => {
+        Some(ProviderAdapterKind::ConfigurableHttp)
+            if crate::provider::is_custom_api(&account.provider_id) =>
+        {
             resolve_configurable_http(account, config, plan, policy)
+        }
+        Some(ProviderAdapterKind::ConfigurableHttp) => {
+            resolve_dynamic_http(account, plan, policy, dynamics)
         }
         Some(ProviderAdapterKind::Cpa) => resolve_cpa(account, config, plan, policy),
         None => Err(format!(
             "unsupported provider offering `{}/{}`",
-            account.provider_id, account.offering_id
+            account.provider_id, account.provider_id
         )),
     }
 }
@@ -467,6 +486,62 @@ fn resolve_configurable_http(
     })
 }
 
+fn resolve_dynamic_http(
+    account: &Account,
+    plan: &RequestPlan,
+    policy: RoutePolicy<'_>,
+    dynamics: &[crate::dynamic::DynamicProviderRuntime],
+) -> Result<AttemptSpec, String> {
+    let runtime =
+        crate::dynamic::find_runtime(dynamics, &account.provider_id).ok_or_else(|| {
+            format!(
+                "dynamic provider `{}` is not in the request snapshot",
+                account.provider_id
+            )
+        })?;
+    if matches!(policy, RoutePolicy::Probe) {
+        return Err("dynamic provider protocol probes use POST /providers/test".to_string());
+    }
+    if runtime.auth_kind.requires_key() && account.key_cipher.trim().is_empty() {
+        return Err(format!("account `{}` has no stored Key", account.name));
+    }
+    let protocol = protocol_kind_for(plan.upstream)?;
+    if protocol != runtime.upstream_protocol {
+        return Err(format!(
+            "dynamic provider `{}` only supports {:?}",
+            runtime.name, runtime.upstream_protocol
+        ));
+    }
+    let endpoint = resolve_custom_endpoints(&runtime.endpoint_url, protocol)
+        .map_err(|error| error.to_string())?
+        .inference;
+    let endpoint_path = endpoint.path().to_string();
+    let mut base = endpoint;
+    base.set_path("");
+    base.set_query(None);
+    base.set_fragment(None);
+    let auth = match runtime.auth_kind {
+        ocg_domain::dynamic::DynamicAuthKind::Bearer => UpstreamAuth::Bearer,
+        ocg_domain::dynamic::DynamicAuthKind::XApiKey => UpstreamAuth::XApiKey,
+        ocg_domain::dynamic::DynamicAuthKind::None => UpstreamAuth::None,
+    };
+    Ok(AttemptSpec {
+        base_url: base.as_str().trim_end_matches('/').to_string(),
+        path: endpoint_path,
+        upstream: plan.upstream,
+        auth,
+        follow_redirects: false,
+        credential: if runtime.auth_kind.requires_key() {
+            CredentialHandle::Account {
+                id: account.id.clone(),
+            }
+        } else {
+            CredentialHandle::None
+        },
+        proxy_routing: ProxyRoutingModel::IsolatedTrustedAdmin,
+    })
+}
+
 fn resolve_cpa(
     account: &Account,
     _config: &AppConfig,
@@ -512,17 +587,16 @@ fn registered_descriptor(
     expected: ProviderAdapterKind,
     account: &Account,
 ) -> Result<crate::provider::ProviderDescriptor, String> {
-    let descriptor =
-        ProviderRegistry::get(&account.provider_id, &account.offering_id).ok_or_else(|| {
-            format!(
-                "unsupported provider offering `{}/{}`",
-                account.provider_id, account.offering_id
-            )
-        })?;
+    let descriptor = ProviderRegistry::get(&account.provider_id).ok_or_else(|| {
+        format!(
+            "unsupported provider offering `{}/{}`",
+            account.provider_id, account.provider_id
+        )
+    })?;
     if descriptor.kind != expected {
         return Err(format!(
             "unsupported provider offering `{}/{}`",
-            account.provider_id, account.offering_id
+            account.provider_id, account.provider_id
         ));
     }
     Ok(descriptor)

@@ -4,9 +4,7 @@ use chrono::{DateTime, Datelike, Local, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::provider::{
-    ConnectionVerificationStatus, UpstreamProtocolKind, default_offering_id, default_provider_id,
-};
+use crate::provider::{ConnectionVerificationStatus, UpstreamProtocolKind, default_provider_id};
 
 pub use crate::kernel::ids::DEFAULT_ACCOUNT_TEST_MODEL;
 pub use ocg_domain::account::{Account, AccountSetupStep, AccountType, UpstreamChannel};
@@ -18,8 +16,6 @@ pub const MAX_ACCOUNT_NOTES_CHARS: usize = 4000;
 pub struct AccountInput {
     #[serde(default = "default_provider_id")]
     pub provider_id: String,
-    #[serde(default = "default_offering_id")]
-    pub offering_id: String,
     pub name: String,
     pub username: Option<String>,
     pub password: Option<String>,
@@ -629,8 +625,6 @@ pub struct ForwardLog {
     #[serde(default)]
     pub provider_id: Option<String>,
     #[serde(default)]
-    pub offering_id: Option<String>,
-    #[serde(default)]
     pub credential_account_id: Option<String>,
     #[serde(default)]
     pub client_key_id: Option<String>,
@@ -683,7 +677,6 @@ pub struct ForwardMetrics {
     /// Ephemeral source identity used to prove that token-derived pricing
     /// belongs to the selected provider before it is persisted.
     pub pricing_provider_id: Option<String>,
-    pub pricing_offering_id: Option<String>,
     pub service_tier: Option<String>,
     pub cost_state: &'static str,
 }
@@ -703,7 +696,6 @@ impl Default for ForwardMetrics {
             quota_multiplier: None,
             local_adjustment_multiplier: None,
             pricing_provider_id: None,
-            pricing_offering_id: None,
             service_tier: None,
             cost_state: "not_applicable",
         }
@@ -715,18 +707,11 @@ impl ForwardMetrics {
     /// verified pricing contract. Legacy rows without provider attribution are
     /// intentionally left alone, while an explicitly attributed provider can
     /// never inherit OpenCode Go pricing by accident.
-    pub(crate) fn scope_to_provider(
-        &mut self,
-        provider_id: Option<&str>,
-        offering_id: Option<&str>,
-        successful: bool,
-    ) {
+    pub(crate) fn scope_to_provider(&mut self, provider_id: Option<&str>, successful: bool) {
         let Some(provider_id) = provider_id else {
             return;
         };
-        if self.pricing_provider_id.as_deref() == Some(provider_id)
-            && self.pricing_offering_id.as_deref() == offering_id
-        {
+        if self.pricing_provider_id.as_deref() == Some(provider_id) {
             return;
         }
 
@@ -736,17 +721,15 @@ impl ForwardMetrics {
         self.quota_multiplier = None;
         self.local_adjustment_multiplier = None;
         self.pricing_provider_id = None;
-        self.pricing_offering_id = None;
 
         if provider_id == crate::kernel::ids::OPENCODE_ZEN_FREE_PROVIDER_ID
-            && offering_id == Some(crate::provider::ANONYMOUS_FREE_OFFERING_ID)
             && (successful || has_cost_outcome)
         {
             self.raw_cost_usd = Some(0.0);
             self.quota_debit = Some(0.0);
             self.effective_paid_cost_usd = Some(0.0);
             self.cost_state = "free";
-        } else if crate::provider::is_custom_api(provider_id, offering_id.unwrap_or("")) {
+        } else if crate::provider::is_custom_api(provider_id) {
             self.raw_cost_usd = None;
             self.quota_debit = None;
             self.effective_paid_cost_usd = None;

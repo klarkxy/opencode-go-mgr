@@ -73,7 +73,7 @@ pub(crate) fn build_go_state(base_url: String, keys: &[&str]) -> (Arc<CoreStateI
         let account = Account {
             id: format!("acct-{}", idx + 1),
             provider_id: ocg_core::provider::default_provider_id(),
-            offering_id: ocg_core::provider::default_offering_id(),
+
             credential_kind: ocg_core::provider::default_credential_kind(),
             quota_scope: ocg_core::provider::default_quota_scope(),
             name: format!("acct-{}", idx + 1),

@@ -1,4 +1,5 @@
 import type { Account } from "../api/dashboard.ts";
+import type { DynamicProviderView } from "../api/providers.ts";
 import type { ProviderScopeView } from "./provider-contracts.ts";
 
 export interface ProviderAliasRow {
@@ -12,9 +13,7 @@ export interface ProviderAliasRow {
 }
 
 function providerPlanLabel(scope: ProviderScopeView): string {
-  const plans = [...new Set((scope.offerings ?? []).map((offering) => offering.display_name))]
-    .filter(Boolean);
-  return plans.length > 0 ? `${scope.label} / ${plans.join(", ")}` : scope.label;
+  return scope.label;
 }
 
 /**
@@ -49,7 +48,7 @@ export function providerAliasRows(
   }
 
   for (const account of accounts) {
-    if (account.provider_id !== "custom" || account.offering_id !== "api") continue;
+    if (account.provider_id !== "custom") continue;
     const scope = scopes.find((candidate) => (
       candidate.scope_kind === "custom_endpoint" && candidate.scope_id === account.id
     ));
@@ -62,7 +61,7 @@ export function providerAliasRows(
       rows.push({
         key: `custom:${account.id}:${capability.public_model}:${capability.upstream_model}`,
         public_model: capability.public_model,
-        provider_plan: scope?.offerings?.[0]?.display_name || "Custom API",
+        provider_plan: scope?.label || "Custom API",
         custom_account: account.name,
         upstream_model: capability.upstream_model,
         routable: !conflictsWithProviderRaw
@@ -75,4 +74,18 @@ export function providerAliasRows(
     }
   }
   return rows;
+}
+
+export function dynamicProviderAliasRows(
+  providers: readonly DynamicProviderView[],
+): ProviderAliasRow[] {
+  return providers.flatMap((provider) => provider.models.map((model) => ({
+    key: `dynamic:${provider.id}:${model.public_model}:${model.upstream_model}`,
+    public_model: model.public_model,
+    provider_plan: provider.name,
+    custom_account: null,
+    upstream_model: model.upstream_model,
+    routable: true,
+    custom_account_id: null,
+  })));
 }

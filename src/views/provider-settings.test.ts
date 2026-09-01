@@ -12,14 +12,12 @@ import type { ProviderCatalogEntry } from "../api/providers.ts";
 
 const catalogEntry = (
   provider_id: string,
-  offering_id: string,
 ): ProviderCatalogEntry => ({
   provider_id,
-  offering_id,
   credential_kind: "api_key",
   quota_scope: "key",
   singleton: false,
-  display_name: `${provider_id} ${offering_id}`,
+  display_name: provider_id,
   display_family: provider_id,
   creation_availability: "available",
   verification_policy: "not_required",
@@ -39,9 +37,9 @@ const catalogEntry = (
 
 test("catalog entries augment listed flags without inventing sections", () => {
   const sections = buildPricingOfferingSections([
-    catalogEntry("opencode", "go"),
-    catalogEntry("opencode-zen-free", "anonymous-free"),
-    catalogEntry("unknown-provider", "unknown-offering"),
+    catalogEntry("opencode"),
+    catalogEntry("opencode-zen-free"),
+    catalogEntry("unknown-provider"),
   ]);
 
   assert.equal(sections.length, 3);
@@ -105,7 +103,7 @@ test("account form uses the catalog display name and does not invent GOAT availa
   const chooser = readFileSync(new URL("../components/AccountAddModal.vue", import.meta.url), "utf8");
   const providerQuota = readFileSync(new URL("../components/ProviderQuotaSummary.vue", import.meta.url), "utf8");
 
-  assert.match(accountForm, /label: entry\.display_name/);
+  assert.match(accountForm, /planFamilyLabel\(plan, props\.catalog\)/);
   assert.match(accountForm, /t\("添加 \{plan\} 账号"/);
   assert.match(accountForm, /:aria-label="t\('模型映射'\)"/);
   assert.match(accountForm, /v-model:value="form\.upstreamProtocol"/);
@@ -185,7 +183,6 @@ test("GOAT account states are live without a verification phase", () => {
     account_type: "key",
     setup_step: "ready",
     provider_id: "command-code",
-    offering_id: "goat",
     credential_kind: "api_key",
     quota_scope: "key",
     purchase_date: "",

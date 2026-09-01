@@ -18,7 +18,7 @@ state unless explicitly authorized.
 | Dashboard/API contract | [dashboard V3](../../../crates/ocg-core/src/dashboard_v3/), [V3 schema](../../../schema/dashboard-api-v3.schema.json), [V3 client](../../../src/api/dashboard-v3.ts) | Use only `/dashboard/api/v3`; update schema/types and run the contract check. Do not revive retired V2 REST. |
 | Vue UI | [views](../../../src/views/), [components](../../../src/components/), [domain](../../../src/domain/), [DESIGN.md](../../../DESIGN.md) | Reuse the V3 client and theme; retain the fixed rail and the **Key** name. |
 | Desktop capability | [Desktop Host](../../../src-tauri/src/host/), [Tauri startup](../../../src-tauri/src/lib.rs), [host router](../../../crates/ocg-core/src/host_router.rs) | Register a local, process-owned capability in `CoreState`; never add a Tauri `invoke` command or a second desktop control path. |
-| Provider or Plan | [registry](../../../crates/ocg-domain/src/provider.rs), [protocol table](../../../crates/ocg-domain/src/protocol.rs), [alias resolver](../../../crates/ocg-gateway/src/alias.rs) | Keep the registry static and sealed. Unknown pairs fail closed; do not add plugins or runtime discovery. |
+| Provider or Plan | [registry](../../../crates/ocg-domain/src/provider.rs), [protocol table](../../../crates/ocg-domain/src/protocol.rs), [alias resolver](../../../crates/ocg-gateway/src/alias.rs), [dynamic definitions](../../../crates/ocg-domain/src/dynamic.rs) | Provider and Plan are one identity (`provider_id` only). **Adapter Registry stays static and sealed**; typed Provider definitions may be dynamically extended and bind Configurable HTTP. Unknown IDs fail closed. Do not load user scripts, plugins, or binaries. Custom API remains account-owned and separate. |
 | Application guide/connector | [guide registry](../../../src/views/application-guides.ts), [Applications view](../../../src/views/Applications.vue), [Desktop connector Host](../../../src-tauri/src/host/application_connectors.rs), [native packages](../../../integrations/), [user guide](../../../docs/user/applications.md) | Treat it as a local Desktop capability. Use field-owned configuration for supported config clients and client-native packages for Pi/DSH; never add a connector service, daemon, remote sync, or dynamic Provider registry. |
 | Static external integration | [runtime invariants](../../../docs/maintainer/runtime-invariants.md), [extending](../../../docs/maintainer/extending.md), [Dashboard V3](../../../crates/ocg-core/src/dashboard_v3/) | Keep it a typed, product-approved local-service adapter. It is neither a Provider/Plan nor a dynamic plugin; OCG may manage it but never hosts, upgrades, or reads its private auth files. |
 
@@ -54,7 +54,7 @@ state unless explicitly authorized.
 
 ## Native application packages
 
-- Keep the Provider/Plan registry sealed. Pi and DSH packages are integrations
+- Keep adapter implementations sealed. Pi and DSH packages are integrations
   installed by those client applications, not runtime Provider plugins for OCG
   Manager.
 - Generate packages only from checked-in templates, the fixed loopback Gateway

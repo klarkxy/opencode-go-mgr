@@ -1128,7 +1128,7 @@ test("settings expose the downstream display root and bounded request timeouts",
   assert.match(dashboard, /computed\(\(\) => connectionStore\.info \?\? EMPTY_CONNECTION\)/);
   assert.doesNotMatch(dashboard, /ref<AppConfig>/);
   assert.doesNotMatch(settings, /PricingCatalog/);
-  assert.match(api, /dashboardV3\.getProviderPricing\("opencode", "go"\)/);
+  assert.match(api, /dashboardV3\.getProviderPricing\("opencode"\)/);
   assert.match(api, /refreshProviderPricing: async/);
   assert.match(api, /expectedPricingRevision/);
   assert.match(api, /official_content_hash\?: string/);

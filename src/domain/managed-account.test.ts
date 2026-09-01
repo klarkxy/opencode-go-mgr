@@ -80,7 +80,7 @@ test("managed account UI isolates pending controls and renders noVNC in a dedica
   assert.doesNotMatch(wizard, /托管注册与独立浏览器 Profile 为 Beta 功能/);
   assert.match(card, /v-if="\(isGo \|\| isOfficialCn\) && accountIsReady\(account\)"[\s\S]*?@click="emit\('refresh-usage'\)/);
   assert.match(card, /v-if="accountIsReady\(account\)"[\s\S]*?<n-switch/);
-  assert.match(accounts, /loaded\.filter\(\(account\) => \([\s\S]*?accountIsReady\(account\)[\s\S]*?account\.provider_id === "opencode"[\s\S]*?account\.offering_id === "go"[\s\S]*?\)\)/);
+  assert.match(accounts, /loaded\.filter\(\(account\) => \([\s\S]*?accountIsReady\(account\)[\s\S]*?account\.provider_id === "opencode"[\s\S]*?\)\)/);
   assert.match(accounts, /window\.open\("", "_blank"\)[\s\S]*?remoteTab\.location\.replace/);
   assert.match(wizard, /google_account[\s\S]*?opencode_registration[\s\S]*?payment[\s\S]*?key_verification/);
   assert.doesNotMatch(wizard, /重新打开页面/);

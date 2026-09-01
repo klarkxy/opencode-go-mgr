@@ -5,12 +5,11 @@ import {
   accountFormFieldIsImmutable,
   resolveAccountFormFields,
 } from "./account-form-fields.ts";
-import { OPENCODE_GO_PLAN } from "./plans.ts";
+import { OPENCODE_GO_PLAN, type PlanDefinition } from "./plans.ts";
 
 function goCatalog(form_fields: ProviderCatalogEntry["form_fields"]): ProviderCatalogEntry {
   return {
     provider_id: "opencode",
-    offering_id: "go",
     display_name: "OpenCode Go",
     display_family: "OpenCode",
     credential_kind: "api_key",
@@ -52,6 +51,19 @@ test("OpenCode Go import always keeps a required Key field across catalog states
 test("non-legacy plans never invent fields when their catalog entry is absent", () => {
   const custom = { ...OPENCODE_GO_PLAN, id: "custom-endpoint", legacy: false } as const;
   assert.deepEqual(resolveAccountFormFields(custom, undefined), []);
+});
+
+test("dynamic Provider account fields are name/Key/notes and never Endpoint or mappings", () => {
+  const plan: PlanDefinition = {
+    ...OPENCODE_GO_PLAN,
+    id: "dynamic-http",
+    provider_id: "11111111-1111-4111-8111-111111111111",
+    legacy: false,
+  };
+  const fields = resolveAccountFormFields(plan, undefined);
+  assert.deepEqual(fields.map((field) => field.id), ["name", "key", "notes"]);
+  const nonePlan = { ...plan, credential_kind: "none" as const };
+  assert.deepEqual(resolveAccountFormFields(nonePlan, undefined).map((field) => field.id), ["name", "notes"]);
 });
 
 test("catalog immutable fields lock only while editing", () => {

@@ -44,7 +44,6 @@ export type DashboardApiV3 =
   | ProviderContracts
   | ProviderContractGroup
   | CustomEndpointContract
-  | ProviderOfferingChoice
   | ProviderAccountChoice
   | EffectiveCatalog
   | EffectiveModelContract
@@ -156,7 +155,17 @@ export type DashboardApiV3 =
   | CpaOAuthStartRequest
   | CpaOAuthStart
   | CpaOAuthStatus
-  | CpaOAuthSessionDelete;
+  | CpaOAuthSessionDelete
+  | DynamicProviderAuthKind
+  | DynamicProviderModel
+  | DynamicProvider
+  | DynamicProviderCreate
+  | DynamicProviderUpdate
+  | DynamicProviderMutation
+  | DynamicProviderDiscoverRequest
+  | DynamicProviderDiscoverResponse
+  | DynamicProviderTestRequest
+  | DynamicProviderTestResponse;
 /**
  * Which listed models take the list-mode exception leg.
  */
@@ -265,6 +274,10 @@ export type ApplicationConnectorAction = "connect" | "restore";
 export type ApplicationConnectorStatus =
   "unsupported_runtime" | "not_detected" | "manual_only" | "ready" | "connected" | "conflict" | "partial";
 export type CpaOAuthProvider = "codex" | "anthropic" | "antigravity" | "kimi" | "xai";
+/**
+ * Auth kind owned by a dynamic Provider. Independent of protocol.
+ */
+export type DynamicProviderAuthKind = "bearer" | "x-api-key" | "none";
 
 /**
  * Live CAS token, process generation, and pricing snapshot id.
@@ -434,7 +447,6 @@ export interface Account {
   modelCapabilities: AccountModelCapability[];
   name: string;
   notes: string | null;
-  offeringId: string;
   planRoutable: boolean;
   processGeneration: number;
   providerId: string;
@@ -496,7 +508,6 @@ export interface AccountCreate {
   modelCapabilities?: AccountModelCapabilityWrite[];
   name: string;
   notes?: string | null;
-  offeringId?: string | null;
   password?: string | null;
   processGeneration: number;
   providerId?: string | null;
@@ -616,7 +627,7 @@ export interface ProviderCatalog {
   revision: number;
 }
 /**
- * One Provider Registry offering as a wire catalog row. Identity strings are
+ * One Provider Registry entry as a wire catalog row. Identity strings are
  * data copied from the static registry; this DTO does not define them.
  */
 export interface ProviderCatalogEntry {
@@ -632,7 +643,6 @@ export interface ProviderCatalogEntry {
   manualUsageCalibration: boolean;
   modelAliases: string[];
   modelSource: string;
-  offeringId: string;
   pricingAvailability: string;
   providerId: string;
   quotaScope: AccountQuotaScope;
@@ -645,7 +655,7 @@ export interface ProviderCatalogEntry {
   verificationRuntimeAvailability: string;
 }
 /**
- * One create-form field advertised by a catalog offering.
+ * One create-form field advertised by a catalog provider.
  */
 export interface ProviderCatalogFormField {
   id: string;
@@ -658,7 +668,6 @@ export interface ProviderCatalogFormField {
  */
 export interface ProviderModelCapability {
   modelId: string;
-  offeringId: string;
   preferredProtocol: AccountUpstreamProtocol;
   providerId: string;
   supportedProtocols: AccountUpstreamProtocol[];
@@ -805,15 +814,15 @@ export interface CapabilitySummary {
   availability: string;
 }
 /**
- * One built-in Provider/Offering contract scope.
+ * One built-in Provider contract scope.
  */
 export interface ProviderContractGroup {
+  accounts: ProviderAccountChoice[];
   card: CardCapabilitySummary;
   catalog: EffectiveCatalog;
   catalogRoutable: boolean;
   disabledReasons: string[];
   models: EffectiveModelContract[];
-  offerings: ProviderOfferingChoice[];
   pricing: CapabilitySummary;
   productionInference: boolean;
   providerId: string;
@@ -830,15 +839,6 @@ export interface ProviderContractGroup {
    */
   staticProtocolSnapshotDate: string | null;
   usage: CapabilitySummary;
-}
-/**
- * One offering under a provider scope, with current account cards.
- */
-export interface ProviderOfferingChoice {
-  accounts: ProviderAccountChoice[];
-  displayName: string;
-  offeringId: string;
-  routable: boolean;
 }
 /**
  * PUT a batch of per-model/per-protocol overrides for one contract scope.
@@ -979,7 +979,7 @@ export interface PricingRefreshUpdate {
 }
 /**
  * PUT provider pricing-multipliers body. CAS tokens,
- * `expectedPricingRevision` (the selected offering's active revision), and
+ * `expectedPricingRevision` (the selected provider's active revision), and
  * `multipliers` are required.
  */
 export interface PricingMultipliersUpdate {
@@ -1001,7 +1001,6 @@ export interface PricingMultiplierWrite {
  */
 export interface ProviderPricing {
   availability: PricingAvailability;
-  offeringId: string;
   pricingRevision: string;
   processGeneration: number;
   providerId: string;
@@ -1147,7 +1146,6 @@ export interface ForwardLog {
   nativeCostCurrency: string | null;
   nativeCostUnit: string | null;
   nativeCostValue: number | null;
-  offeringId: string | null;
   pricingRevisionId: string | null;
   promptTokens: number;
   providerId: string | null;
@@ -1228,7 +1226,6 @@ export interface ForwardLogQuery {
   keyId?: string | null;
   limit?: number | null;
   model?: string | null;
-  offeringId?: string | null;
   offset?: number | null;
   providerId?: string | null;
   requestId?: string | null;
@@ -1295,7 +1292,6 @@ export interface ProviderUsage {
   creditBalances: CreditBalance[];
   experimental: boolean;
   freeCooldownUntil: string | null;
-  offeringId: string;
   pricingRevision: string | null;
   processGeneration: number;
   providerId: string;
@@ -1596,14 +1592,13 @@ export interface ProviderModels {
   sourceUrl: string;
 }
 /**
- * Result of refreshing every priced offering owned by one Provider. Provider
+ * Result of refreshing the priced snapshot owned by one Provider. Provider
  * failures are isolated: this response never represents a cross-Provider
  * transaction.
  */
 export interface ProviderPricingRefresh {
   error: string | null;
   multiplierChanges: PricingMultiplierChange[];
-  offeringIds: string[];
   officialContentHash: string | null;
   pricingRevision: string;
   processGeneration: number;
@@ -1676,7 +1671,6 @@ export interface AccountImportPreviewItem {
   disposition: AccountImportDisposition;
   index: number;
   name: string;
-  offeringId: string;
   providerId: string;
   reason: string | null;
 }
@@ -1935,4 +1929,100 @@ export interface CpaOAuthSessionDelete {
   expectedRevision: number;
   processGeneration: number;
   state: string;
+}
+/**
+ * One public-to-upstream mapping owned by a dynamic Provider.
+ */
+export interface DynamicProviderModel {
+  publicModel: string;
+  upstreamModel: string;
+}
+/**
+ * Secret-free dynamic Provider definition.
+ */
+export interface DynamicProvider {
+  authKind: DynamicProviderAuthKind;
+  createdAt: string;
+  endpointUrl: string;
+  id: string;
+  models: DynamicProviderModel[];
+  name: string;
+  processGeneration: number;
+  revision: number;
+  updatedAt: string;
+  upstreamProtocol: AccountUpstreamProtocol;
+}
+/**
+ * POST `/providers` body. Creates the definition, mappings, and first account.
+ */
+export interface DynamicProviderCreate {
+  accountName?: string | null;
+  authKind: DynamicProviderAuthKind;
+  endpointUrl: string;
+  expectedRevision: number;
+  key?: string | null;
+  models: DynamicProviderModel[];
+  name: string;
+  notes?: string | null;
+  processGeneration: number;
+  upstreamProtocol: AccountUpstreamProtocol;
+}
+/**
+ * PATCH `/providers/{providerId}` body. Full replacement of mutable config.
+ */
+export interface DynamicProviderUpdate {
+  authKind: DynamicProviderAuthKind;
+  endpointUrl: string;
+  expectedRevision: number;
+  key?: string | null;
+  models: DynamicProviderModel[];
+  name: string;
+  processGeneration: number;
+  upstreamProtocol: AccountUpstreamProtocol;
+}
+/**
+ * Mutation result for a dynamic Provider write.
+ */
+export interface DynamicProviderMutation {
+  processGeneration: number;
+  provider: DynamicProvider;
+  revision: number;
+}
+/**
+ * POST `/providers/models/discover` body. Operational probe; no CAS bump.
+ */
+export interface DynamicProviderDiscoverRequest {
+  authKind: DynamicProviderAuthKind;
+  endpointUrl: string;
+  key?: string | null;
+  upstreamProtocol: AccountUpstreamProtocol;
+}
+/**
+ * Discovery result. Never includes the submitted Key.
+ */
+export interface DynamicProviderDiscoverResponse {
+  models: string[];
+  processGeneration: number;
+  revision: number;
+  truncated: boolean;
+}
+/**
+ * POST `/providers/test` body. Operational probe; no CAS bump.
+ */
+export interface DynamicProviderTestRequest {
+  authKind: DynamicProviderAuthKind;
+  endpointUrl: string;
+  key?: string | null;
+  publicModel: string;
+  upstreamModel: string;
+  upstreamProtocol: AccountUpstreamProtocol;
+}
+/**
+ * Model-test result. Never includes the submitted Key.
+ */
+export interface DynamicProviderTestResponse {
+  error: string | null;
+  ok: boolean;
+  processGeneration: number;
+  revision: number;
 }

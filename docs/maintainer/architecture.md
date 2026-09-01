@@ -4,10 +4,11 @@
 
 ## Four-layer crates
 
-Provider extension is **static and sealed**. There is no plugin slot, JSON
-DSL, or user-defined adapter implementation. Custom API is
-`ProviderAdapterKind::ConfigurableHttp`, not a base class other adapters
-inherit from.
+The **Adapter Registry** is **static and sealed**. Typed Provider definitions
+may be persisted at runtime and always bind Configurable HTTP. There is no
+plugin slot, JSON DSL, or user-defined adapter implementation. Custom API is
+`ProviderAdapterKind::ConfigurableHttp` used as an account-owned path, not a
+base class other adapters inherit from.
 
 ```text
 ocg-gateway -> ocg-domain
@@ -18,7 +19,7 @@ src-tauri   -> ocg-core
 
 ```text
   ocg-domain                      ocg-infra
-  IDs, BUILTIN_PLANS,             crypto, proxy HTTP,
+  IDs, BUILTIN_PROVIDERS,             crypto, proxy HTTP,
   MODEL_PROTOCOLS, Zen            inference HTTP, log SQL
        ^                               ^
        |                               |
@@ -48,7 +49,7 @@ src-tauri   -> ocg-core
 
 | Crate | Owns | Must not own |
 | --- | --- | --- |
-| `ocg-domain` | IDs, `BUILTIN_PLANS`, `ProviderAdapterKind`, protocol tables, Zen ID normalize, account/setup enums | DB, `CoreState`, reqwest, rusqlite, tokio, axum, filesystem, clocks |
+| `ocg-domain` | IDs, `BUILTIN_PROVIDERS`, `ProviderAdapterKind`, protocol tables, Zen ID normalize, account/setup enums | DB, `CoreState`, reqwest, rusqlite, tokio, axum, filesystem, clocks |
 | `ocg-gateway` | Alias registry, `AttemptSpec`, classify policy, secret-free selector, whole-document JSON convert | DB, `CoreState`, raw reqwest, rusqlite, axum, plaintext credentials |
 | `ocg-infra` | Key obfuscation, catalog-stripped proxy clients, inference HTTP helpers, one-statement log SQL | Product catalogs, `AppConfig`, Dashboard DTOs |
 | `ocg-core` | SQLite, `CoreState`, Dashboard V3, provider adapters, `GatewayExecutor`, `forward_once`, usage sync, host composition | Plugin registries; adapters still must not own DB/`CoreState`/raw clients |
@@ -229,7 +230,7 @@ streamGenerate. Eligible Custom IDs overlay resolution and `/v1/models`
 but do not steal published Go/Zen aliases. The published kebab
 `deepseek-v4-flash` can contain Go, Zen, and Command Code mappings; raw
 `deepseek/deepseek-v4-flash` pins to Command Code. Forward logs persist `requested_model`,
-`resolved_alias`, `upstream_model`, `provider_id`, and `offering_id`;
+`resolved_alias`, `upstream_model`, and `provider_id`;
 there is no `requested_alias` field.
 
 JSON conversion lives in `ocg-gateway::protocol`; the host
@@ -360,7 +361,7 @@ concurrent settings changes affect only later requests.
 
 ## Plan catalog
 
-`BUILTIN_PLANS` and `ProviderAdapterKind` live in `ocg-domain::provider`
+`BUILTIN_PROVIDERS` and `ProviderAdapterKind` live in `ocg-domain::provider`
 (facade `ocg_core::provider`). Six families:
 
 | Family | IDs | Routable | Notes |
@@ -424,7 +425,7 @@ is no Tauri `invoke` path.
   account_control / gateway_keys / settings / ...
            |
            v
-  SQLite schema v34
+  SQLite schema v35
            ^
            |
   ocg-manager-cli  same services, no argv CAS
@@ -435,13 +436,13 @@ mutation. CAS details: [Dashboard API](dashboard-api.md).
 
 ## Persistence map
 
-Authoritative schema is v34. `sub_gateway_keys` exists only in pre-v27
+Authoritative schema is v35. `sub_gateway_keys` exists only in pre-v27
 databases and is dropped by the migration. GUI data dir is
 `%USERPROFILE%\.ocg-mgr` on Windows and `~/.ocg-mgr` elsewhere; CLI
 defaults to `~/.ocg-mgr-cli`.
 
 ```text
-  data.sqlite                         CURRENT_SCHEMA_VERSION = 34
+  data.sqlite                         CURRENT_SCHEMA_VERSION = 35
     access_keys                       Primary id PRIMARY_KEY_ID
                                       cannot disable/delete Primary
                                       64 active sub-key cap

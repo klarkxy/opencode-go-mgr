@@ -8,7 +8,7 @@ use rusqlite::{Connection, params};
 
 const INSERT_FORWARD_LOG_SQL: &str = "INSERT INTO forward_logs
              (timestamp, model, account_id, account_name, client_key_id, client_key_name,
-              route_account_id, provider_id, offering_id, credential_account_id,
+              route_account_id, provider_id, credential_account_id,
               status, http_status, route,
               prompt_tokens, completion_tokens, cached_tokens, cache_creation_tokens, cost,
               raw_cost_usd, quota_debit, effective_paid_cost_usd,
@@ -19,7 +19,7 @@ const INSERT_FORWARD_LOG_SQL: &str = "INSERT INTO forward_logs
               native_cost_value, native_cost_unit, native_cost_currency)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
                      ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30,
-                     ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39)";
+                     ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38)";
 
 const UPDATE_FORWARD_LOG_SQL: &str = "UPDATE forward_logs
              SET status = ?2,
@@ -61,8 +61,8 @@ const INSERT_GATEWAY_LOG_SQL: &str = "INSERT INTO gateway_logs
               error_source, error_stage, duration_ms, diagnostic_json)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)";
 
-/// Borrowed v26 `forward_logs` insert payload. Field order matches the
-/// 39-column statement binding order.
+/// Borrowed `forward_logs` insert payload. Field order matches the
+/// 38-column statement binding order.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ForwardLogInsertRow<'a> {
     pub timestamp: &'a str,
@@ -73,7 +73,6 @@ pub struct ForwardLogInsertRow<'a> {
     pub client_key_name: Option<&'a str>,
     pub route_account_id: Option<&'a str>,
     pub provider_id: Option<&'a str>,
-    pub offering_id: Option<&'a str>,
     pub credential_account_id: Option<&'a str>,
     pub status: &'a str,
     pub http_status: Option<i32>,
@@ -179,7 +178,6 @@ pub fn insert_forward_log(
             row.client_key_name,
             row.route_account_id,
             row.provider_id,
-            row.offering_id,
             row.credential_account_id,
             row.status,
             row.http_status,

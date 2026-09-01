@@ -8,7 +8,7 @@ use ocg_core::dashboard_v3::{
 };
 use ocg_core::db::AccountUsageCalibrationSnapshot;
 use ocg_core::go_usage::{GoUsageError, GoUsageSnapshot, GoUsageWindowStatus};
-use ocg_core::provider::{COMMAND_CODE_PROVIDER_ID, GOAT_OFFERING_ID, ZEN_FREE_ACCOUNT_ID};
+use ocg_core::provider::{COMMAND_CODE_PROVIDER_ID, ZEN_FREE_ACCOUNT_ID};
 use reqwest::{Method, StatusCode};
 use serde_json::{Map, Value, json};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -215,7 +215,6 @@ async fn create_goat(harness: &V3Harness) -> String {
                 "name": "GOAT",
                 "key": "goat-key",
                 "providerId": COMMAND_CODE_PROVIDER_ID,
-                "offeringId": GOAT_OFFERING_ID,
                 "purchaseDate": "2026-01-31"
             }),
         ),

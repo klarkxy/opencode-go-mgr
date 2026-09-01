@@ -13,14 +13,12 @@ fn wire_fields_are_camel_case() {
         json!({
             "revision": 7,
             "processGeneration": 9,
-            "pricingRevision": "seed",
-        })
+            "pricingRevision": "seed" })
     );
 
     let parsed: MutationExpectation = serde_json::from_value(json!({
         "expectedRevision": 3,
-        "processGeneration": 9,
-    }))
+        "processGeneration": 9 }))
     .unwrap();
     assert_eq!(parsed.expected_revision, 3);
     assert_eq!(parsed.process_generation, 9);
@@ -352,7 +350,7 @@ fn account_response_emits_nulls_and_never_carries_secrets() {
     let account = Account {
         id: "acct-1".into(),
         provider_id: "opencode".into(),
-        offering_id: "go".into(),
+
         credential_kind: AccountCredentialKind::ApiKey,
         quota_scope: AccountQuotaScope::Key,
         name: "main".into(),
@@ -645,8 +643,7 @@ fn browser_dtos_are_distinct_secret_free_and_emit_required_nulls() {
     let parsed: BrowserOpenRequest = serde_json::from_value(json!({
         "expectedRevision": 3,
         "processGeneration": 9,
-        "target": "google_signup",
-    }))
+        "target": "google_signup" }))
     .unwrap();
     assert_eq!(parsed.expectation.expected_revision, 3);
     assert_eq!(parsed.target, BrowserTarget::GoogleSignup);
@@ -801,7 +798,7 @@ fn chat_evidence() -> EffectiveProtocolEvidence {
 fn sample_catalog_entry() -> ProviderCatalogEntry {
     ProviderCatalogEntry {
         provider_id: "opencode".into(),
-        offering_id: "go".into(),
+
         display_name: "OpenCode Go".into(),
         display_family: "OpenCode".into(),
         credential_kind: AccountCredentialKind::ApiKey,
@@ -861,16 +858,11 @@ fn sample_contracts() -> ProviderContracts {
         scope_id: "command-code".into(),
         provider_id: "command-code".into(),
         static_protocol_snapshot_date: None,
-        offerings: vec![ProviderOfferingChoice {
-            offering_id: "goat".into(),
-            display_name: "Command Code GOAT".into(),
-            routable: false,
-            accounts: vec![ProviderAccountChoice {
-                id: "goat-1".into(),
-                name: "draft".into(),
-                enabled: false,
-                verification_status: AccountVerificationStatus::Pending,
-            }],
+        accounts: vec![ProviderAccountChoice {
+            id: "goat-1".into(),
+            name: "draft".into(),
+            enabled: false,
+            verification_status: AccountVerificationStatus::Pending,
         }],
         catalog: EffectiveCatalog {
             source: "static".into(),
@@ -980,7 +972,6 @@ fn catalog_type_names_keep_accounts_prefix_and_register_provider_dtos() {
         "ProviderContracts",
         "ProviderContractGroup",
         "CustomEndpointContract",
-        "ProviderOfferingChoice",
         "ProviderAccountChoice",
         "EffectiveCatalog",
         "EffectiveModelContract",
@@ -1019,7 +1010,6 @@ fn catalog_type_names_keep_accounts_prefix_and_register_provider_dtos() {
         json!([
             "id",
             "providerId",
-            "offeringId",
             "credentialKind",
             "quotaScope",
             "name",
@@ -1143,7 +1133,7 @@ fn zen_and_contract_responses_keep_cas_distinct_from_display_revisions() {
         "custom_endpoint"
     );
     assert_eq!(
-        contracts_value["providers"][0]["offerings"]
+        contracts_value["providers"][0]["accounts"]
             .as_array()
             .unwrap()
             .len(),
@@ -1165,7 +1155,7 @@ fn zen_and_contract_responses_keep_cas_distinct_from_display_revisions() {
             .is_none()
     );
     assert_eq!(
-        contracts_value["providers"][0]["offerings"][0]["accounts"][0]["verificationStatus"],
+        contracts_value["providers"][0]["accounts"][0]["verificationStatus"],
         "pending"
     );
     assert_eq!(
@@ -1458,8 +1448,7 @@ fn updater_dtos_use_camel_case_nulls_and_install_requires_cas() {
             "releaseUrl": "https://github.com/klarkxy/opencode-go-mgr/releases/latest",
             "installSupported": false,
             "revision": 11,
-            "processGeneration": 9,
-        })
+            "processGeneration": 9 })
     );
     assert!(check_value.get("current_version").is_none());
     assert!(check_value.get("release_url").is_none());
@@ -1486,8 +1475,7 @@ fn updater_dtos_use_camel_case_nulls_and_install_requires_cas() {
             "currentVersion": "1.0.0",
             "installSupported": true,
             "revision": 11,
-            "processGeneration": 9,
-        })
+            "processGeneration": 9 })
     );
     assert!(idle_value.get("current_version").is_none());
     assert!(idle_value.get("install_supported").is_none());
@@ -1624,7 +1612,6 @@ const PROVIDER_CATALOG_TYPES: &[&str] = &[
     "ProviderContracts",
     "ProviderContractGroup",
     "CustomEndpointContract",
-    "ProviderOfferingChoice",
     "ProviderAccountChoice",
     "EffectiveCatalog",
     "EffectiveModelContract",
@@ -1793,6 +1780,18 @@ const CPA_CATALOG_TYPES: &[&str] = &[
     "CpaOAuthStatus",
     "CpaOAuthSessionDelete",
 ];
+const DYNAMIC_PROVIDER_CATALOG_TYPES: &[&str] = &[
+    "DynamicProviderAuthKind",
+    "DynamicProviderModel",
+    "DynamicProvider",
+    "DynamicProviderCreate",
+    "DynamicProviderUpdate",
+    "DynamicProviderMutation",
+    "DynamicProviderDiscoverRequest",
+    "DynamicProviderDiscoverResponse",
+    "DynamicProviderTestRequest",
+    "DynamicProviderTestResponse",
+];
 
 #[test]
 fn catalog_type_names_append_pricing_dtos_after_the_provider_prefix() {
@@ -1883,7 +1882,12 @@ fn catalog_type_names_append_pricing_dtos_after_the_provider_prefix() {
         &CATALOG_TYPE_NAMES[application_connector_end..cpa_end],
         CPA_CATALOG_TYPES
     );
-    assert_eq!(CATALOG_TYPE_NAMES.len(), cpa_end);
+    let dynamic_end = cpa_end + DYNAMIC_PROVIDER_CATALOG_TYPES.len();
+    assert_eq!(
+        &CATALOG_TYPE_NAMES[cpa_end..dynamic_end],
+        DYNAMIC_PROVIDER_CATALOG_TYPES
+    );
+    assert_eq!(CATALOG_TYPE_NAMES.len(), dynamic_end);
 }
 
 #[test]
@@ -1987,7 +1991,7 @@ fn pricing_refresh_and_provider_pricing_emit_nullable_fields() {
 
     let provider = ProviderPricing {
         provider_id: "opencode".into(),
-        offering_id: "go".into(),
+
         availability: PricingAvailability::Available,
         snapshot: None,
         provider_snapshot: None,
@@ -2152,7 +2156,7 @@ fn sample_forward_log() -> ForwardLog {
         account_name: "go".into(),
         route_account_id: Some("acct-1".into()),
         provider_id: Some("opencode".into()),
-        offering_id: Some("go".into()),
+
         credential_account_id: Some("acct-1".into()),
         client_key_id: Some("key-1".into()),
         client_key_name: Some("Laptop".into()),
@@ -2498,7 +2502,7 @@ fn usage_responses_emit_camel_case_nulls_and_reject_unknown_request_fields() {
     let provider = ProviderUsage {
         account_id: "acct-1".into(),
         provider_id: "opencode".into(),
-        offering_id: "go".into(),
+
         availability: UsageAvailability::Available,
         experimental: false,
         free_cooldown_until: None,
@@ -2606,8 +2610,7 @@ fn auth_status_is_camel_case_and_secret_free() {
             "initialized": true,
             "authenticated": true,
             "revision": 11,
-            "processGeneration": 9,
-        })
+            "processGeneration": 9 })
     );
     let object = value.as_object().unwrap();
     for forbidden in [
@@ -2782,8 +2785,7 @@ fn claude_desktop_models_are_camel_case_cas_and_secret_free() {
             "opus": "grok-4.5",
             "haiku": "mimo-v2.5",
             "revision": 11,
-            "processGeneration": 9,
-        })
+            "processGeneration": 9 })
     );
     let object = value.as_object().unwrap();
     for forbidden in [

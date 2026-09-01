@@ -120,7 +120,6 @@ function forwardLogQuery(value: ForwardLogQuery): V3ForwardLogQuery {
     requestId: value.request_id,
     keyId: value.key_id,
     providerId: value.provider_id,
-    offeringId: value.offering_id,
     routeAccountId: value.route_account_id,
     credentialAccountId: value.credential_account_id,
     startTime: value.start_time,
@@ -301,7 +300,7 @@ export const dashboardApi = {
   } satisfies ProxyTestRequest)),
 
   getPricing: async () => {
-    const result = await dashboardV3.getProviderPricing("opencode", "go");
+    const result = await dashboardV3.getProviderPricing("opencode");
     if (!result.snapshot) throw new Error("OpenCode Go pricing is not available");
     return presentPricing(result.snapshot);
   },

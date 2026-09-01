@@ -11,7 +11,7 @@ use serde::Deserialize;
 use crate::cpa::{self, CpaClient};
 use crate::models::{Account as ModelAccount, AccountSetupStep, AccountType};
 use crate::provider::{
-    CPA_ACCOUNT_ID, CPA_ACCOUNT_NAME, CPA_OFFERING_ID, CPA_PROVIDER_ID, CredentialKind, QuotaScope,
+    CPA_ACCOUNT_ID, CPA_ACCOUNT_NAME, CPA_PROVIDER_ID, CredentialKind, QuotaScope,
 };
 use crate::state::CoreState;
 
@@ -110,7 +110,7 @@ pub(super) async fn put_integration(
     let account = ModelAccount {
         id: CPA_ACCOUNT_ID.to_string(),
         provider_id: CPA_PROVIDER_ID.to_string(),
-        offering_id: CPA_OFFERING_ID.to_string(),
+
         credential_kind: CredentialKind::ApiKey,
         quota_scope: QuotaScope::Key,
         name: CPA_ACCOUNT_NAME.to_string(),

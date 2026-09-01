@@ -33,9 +33,8 @@ use crate::kernel::zen::{ZenFreeModelCatalog, model_views};
 use crate::models::{Account as ModelAccount, AppConfig, ForwardLog, UpstreamChannel};
 use crate::protocol_probe::{self, ProtocolProbeContext, ProtocolProbeRunError};
 use crate::provider::{
-    BUILTIN_PLANS, BuiltinPlan, COMMAND_CODE_PROVIDER_ID, CUSTOM_PROVIDER_ID,
-    ConnectionVerificationStatus, GO_OFFERING_ID, GOAT_OFFERING_ID, KIMI_CN_BASE_URL,
-    KIMI_CN_OFFERING_ID, KIMI_PROVIDER_ID, MINIMAX_CN_BASE_URL, MINIMAX_CN_OFFERING_ID,
+    BUILTIN_PROVIDERS, BuiltinProvider, COMMAND_CODE_PROVIDER_ID, CUSTOM_PROVIDER_ID,
+    ConnectionVerificationStatus, KIMI_CN_BASE_URL, KIMI_PROVIDER_ID, MINIMAX_CN_BASE_URL,
     MINIMAX_PROVIDER_ID, OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID, ProviderAdapterKind,
     ProviderRegistry, ZEN_FREE_ACCOUNT_ID, default_verification_status,
 };
@@ -57,7 +56,7 @@ use super::types::{
     ProtocolProbeRequest, ProtocolProbeResponse, ProtocolProbeResult, ProviderAccountChoice,
     ProviderCatalog, ProviderCatalogEntry, ProviderCatalogFormField, ProviderContractGroup,
     ProviderContracts, ProviderModelCapability, ProviderModels, ProviderModelsRefreshUpdate,
-    ProviderOfferingChoice, ZenFreeModel, ZenFreeModels, ZenFreeSettings, ZenFreeSettingsUpdate,
+    ZenFreeModel, ZenFreeModels, ZenFreeSettings, ZenFreeSettingsUpdate,
 };
 use super::{V3ApiError, check_expectation, parse_mutation_json};
 
@@ -243,9 +242,7 @@ pub(super) async fn refresh_provider_models(
                 ));
             }
             let account = load_model_account(&state, account_id)?;
-            if (account.provider_id.as_str(), account.offering_id.as_str())
-                != (OPENCODE_PROVIDER_ID, GO_OFFERING_ID)
-            {
+            if account.provider_id != OPENCODE_PROVIDER_ID {
                 return Err(V3ApiError::invalid_request_at(
                     &state,
                     "the selected account is not an OpenCode Go account",
@@ -495,12 +492,6 @@ pub(super) async fn refresh_contract_catalog(
                 .into_iter()
                 .find(|account| {
                     account.provider_id == scope_id
-                        && account.offering_id
-                            == if scope_id == MINIMAX_PROVIDER_ID {
-                                MINIMAX_CN_OFFERING_ID
-                            } else {
-                                KIMI_CN_OFFERING_ID
-                            }
                         && account_is_available_for_at(account, UpstreamChannel::Go, &[], now)
                 })
                 .ok_or_else(|| {
@@ -588,7 +579,6 @@ pub(super) async fn refresh_contract_catalog(
             .into_iter()
             .find(|account| {
                 account.provider_id == OPENCODE_PROVIDER_ID
-                    && account.offering_id == GO_OFFERING_ID
                     && account_is_available_for_at(account, UpstreamChannel::Go, &[], now)
             })
             .ok_or_else(|| {
@@ -976,13 +966,11 @@ fn log_protocol_probe_requests(
                 "attempt": attempt_number,
                 "duration_ms": attempt.duration_ms,
                 "provider_id": prepared.provider_id,
-                "offering_id": account.offering_id,
                 "account_id": account.id,
                 "model_id": prepared.model_id,
                 "client_format": protocol,
                 "upstream_format": protocol,
-                "upstream_error": attempt.error,
-            });
+                "upstream_error": attempt.error });
             let log = ForwardLog {
                 id: 0,
                 timestamp: prepared.now,
@@ -991,7 +979,7 @@ fn log_protocol_probe_requests(
                 account_name: account.name.clone(),
                 route_account_id: Some(account.id.clone()),
                 provider_id: Some(prepared.provider_id.clone()),
-                offering_id: Some(account.offering_id.clone()),
+
                 credential_account_id: (prepared.adapter != ProviderAdapterKind::ZenFree)
                     .then(|| account.id.clone()),
                 client_key_id: None,
@@ -1134,13 +1122,8 @@ fn prepare_protocol_probe(
         .filter(|account| {
             account.provider_id == provider_id
                 && match adapter {
-                    ProviderAdapterKind::OpenCodeGo => account.offering_id == GO_OFFERING_ID,
-                    ProviderAdapterKind::ZenFree => account.id == ZEN_FREE_ACCOUNT_ID,
-                    ProviderAdapterKind::CommandCodeGoat => account.offering_id == GOAT_OFFERING_ID,
-                    ProviderAdapterKind::MiniMaxCn => account.offering_id == MINIMAX_CN_OFFERING_ID,
-                    ProviderAdapterKind::KimiCn => account.offering_id == KIMI_CN_OFFERING_ID,
-                    ProviderAdapterKind::Cpa => false,
                     ProviderAdapterKind::ConfigurableHttp => false,
+                    _ => true,
                 }
                 && account_is_available_for_at(account, channel, &[], now)
         })
@@ -1227,10 +1210,9 @@ fn validate_custom_endpoint_scope(
         ));
     };
     let account = load_model_account(state, account_id)?;
-    let plan = crate::provider::builtin_plan(&account.provider_id, &account.offering_id)
-        .ok_or_else(|| {
-            V3ApiError::not_found_at(state, "custom endpoint contract scope not found")
-        })?;
+    let plan = crate::provider::builtin_provider(&account.provider_id).ok_or_else(|| {
+        V3ApiError::not_found_at(state, "custom endpoint contract scope not found")
+    })?;
     if crate::provider::plan_requires_custom_config(plan) {
         Ok(())
     } else {
@@ -1260,41 +1242,109 @@ fn provider_catalog_from_state(state: &CoreState) -> ProviderCatalog {
         .get(KIMI_PROVIDER_ID)
         .map(|scope| scope.catalog.models.as_slice())
         .unwrap_or_default();
+    let mut entries: Vec<ProviderCatalogEntry> = BUILTIN_PROVIDERS
+        .iter()
+        .filter(|plan| !plan.product_surface.is_external_integration())
+        .map(|plan| {
+            catalog_entry(
+                plan,
+                &zen_catalog.models,
+                goat_models,
+                minimax_models,
+                kimi_models,
+            )
+        })
+        .collect();
+    for runtime in state.dynamic_providers().iter() {
+        entries.push(dynamic_catalog_entry(runtime));
+    }
     ProviderCatalog {
-        entries: BUILTIN_PLANS
-            .iter()
-            .filter(|plan| !plan.product_surface.is_external_integration())
-            .map(|plan| {
-                catalog_entry(
-                    plan,
-                    &zen_catalog.models,
-                    goat_models,
-                    minimax_models,
-                    kimi_models,
-                )
-            })
-            .collect(),
+        entries,
         revision: revision.revision,
         process_generation: revision.process_generation,
         pricing_revision: revision.pricing_revision,
     }
 }
 
+fn dynamic_catalog_entry(runtime: &crate::dynamic::DynamicProviderRuntime) -> ProviderCatalogEntry {
+    let auth_schemes = match runtime.auth_kind.upstream_auth() {
+        Some(scheme) => vec![AccountAuthScheme::from(scheme)],
+        None => Vec::new(),
+    };
+    ProviderCatalogEntry {
+        provider_id: runtime.id.clone(),
+        display_name: runtime.name.clone(),
+        display_family: runtime.name.clone(),
+        credential_kind: runtime.auth_kind.credential_kind().into(),
+        quota_scope: AccountQuotaScope::from(runtime.auth_kind.quota_scope()),
+        singleton: runtime.auth_kind.is_singleton(),
+        creation_availability: if runtime.auth_kind.is_singleton() {
+            "unavailable".into()
+        } else {
+            "available".into()
+        },
+        creation_unavailable_reason: runtime
+            .auth_kind
+            .is_singleton()
+            .then(|| "no-auth providers own a singleton account".to_string()),
+        verification_policy: "not_required".into(),
+        verification_runtime_availability: "not_applicable".into(),
+        routable: true,
+        managed_registration: false,
+        pricing_availability: "unpriced".into(),
+        usage_availability: "unavailable".into(),
+        manual_usage_calibration: false,
+        quota_unit: "none".into(),
+        model_source: "dynamic_provider".into(),
+        key_prefix: None,
+        auth_schemes,
+        upstream_protocols: vec![AccountUpstreamProtocol::from(runtime.upstream_protocol)],
+        form_fields: {
+            let mut fields = vec![ProviderCatalogFormField {
+                id: "name".into(),
+                kind: "text".into(),
+                required: true,
+                immutable_after_create: false,
+            }];
+            if runtime.auth_kind.requires_key() {
+                fields.push(ProviderCatalogFormField {
+                    id: "key".into(),
+                    kind: "secret".into(),
+                    required: true,
+                    immutable_after_create: false,
+                });
+            }
+            fields.push(ProviderCatalogFormField {
+                id: "notes".into(),
+                kind: "text".into(),
+                required: false,
+                immutable_after_create: false,
+            });
+            fields
+        },
+        model_aliases: runtime
+            .mappings
+            .iter()
+            .map(|mapping| mapping.public_model.clone())
+            .collect(),
+    }
+}
+
 fn catalog_entry(
-    plan: &BuiltinPlan,
+    plan: &BuiltinProvider,
     zen_models: &[String],
     goat_models: &[String],
     minimax_models: &[String],
     kimi_models: &[String],
 ) -> ProviderCatalogEntry {
     ProviderCatalogEntry {
-        provider_id: plan.offering.provider_id.to_string(),
-        offering_id: plan.offering.offering_id.to_string(),
+        provider_id: plan.provider_id.to_string(),
+
         display_name: plan.display_name.to_string(),
         display_family: plan.display_family.to_string(),
-        credential_kind: plan.offering.credential_kind.into(),
-        quota_scope: AccountQuotaScope::from(plan.offering.quota_scope),
-        singleton: plan.offering.singleton_account_id.is_some(),
+        credential_kind: plan.credential_kind.into(),
+        quota_scope: AccountQuotaScope::from(plan.quota_scope),
+        singleton: plan.singleton_account_id.is_some(),
         creation_availability: plan.creation_availability.as_str().to_string(),
         creation_unavailable_reason: plan.creation_unavailable_reason.map(str::to_string),
         verification_policy: plan.verification_policy.as_str().to_string(),
@@ -1330,8 +1380,7 @@ fn catalog_entry(
             })
             .collect(),
         model_aliases: alias::routeable_aliases_for_with_extended_catalogs(
-            plan.offering.provider_id,
-            plan.offering.offering_id,
+            plan.provider_id,
             zen_models,
             goat_models,
             minimax_models,
@@ -1346,7 +1395,7 @@ fn model_capabilities() -> Vec<ProviderModelCapability> {
             Some(ProviderModelCapability {
                 model_id: model_id.to_string(),
                 provider_id: OPENCODE_PROVIDER_ID.to_string(),
-                offering_id: GO_OFFERING_ID.to_string(),
+
                 preferred_protocol: upstream_protocol(preferred)?,
                 supported_protocols: supported
                     .iter()
@@ -1505,21 +1554,13 @@ fn provider_contracts_from_state(
         };
         let descriptor = provider_contracts::provider_scope_descriptor(scope_id)
             .expect("provider contract scope has an exact descriptor");
-        let plan = crate::provider::builtin_plan(descriptor.provider_id, descriptor.offering_id)
+        let plan = crate::provider::builtin_provider(descriptor.provider_id)
             .expect("provider contract descriptor has a catalog plan");
-        let offerings = vec![ProviderOfferingChoice {
-            offering_id: plan.offering.offering_id.to_string(),
-            display_name: plan.display_name.to_string(),
-            routable: plan.routable,
-            accounts: accounts
-                .iter()
-                .filter(|account| {
-                    account.provider_id == plan.offering.provider_id
-                        && account.offering_id == plan.offering.offering_id
-                })
-                .map(|account| account_choice(account, statuses))
-                .collect(),
-        }];
+        let group_accounts = accounts
+            .iter()
+            .filter(|account| account.provider_id == plan.provider_id)
+            .map(|account| account_choice(account, statuses))
+            .collect();
         let mut catalog = catalog_from_domain(&contract.catalog);
         let mut models: Vec<EffectiveModelContract> = contract
             .models
@@ -1542,7 +1583,7 @@ fn provider_contracts_from_state(
                 scope_id,
             )
             .map(str::to_string),
-            offerings,
+            accounts: group_accounts,
             catalog,
             models,
             pricing: CapabilitySummary {
@@ -1563,8 +1604,7 @@ fn provider_contracts_from_state(
         .values()
         .map(|contract| {
             let descriptor =
-                ProviderRegistry::get(CUSTOM_PROVIDER_ID, crate::provider::CUSTOM_API_OFFERING_ID)
-                    .expect("custom offering is registered");
+                ProviderRegistry::get(CUSTOM_PROVIDER_ID).expect("custom offering is registered");
             let account = accounts
                 .iter()
                 .find(|account| account.id == contract.scope.id())
@@ -1617,8 +1657,7 @@ fn account_choice(
         .get(&account.id)
         .copied()
         .or_else(|| {
-            crate::provider::builtin_plan(&account.provider_id, &account.offering_id)
-                .map(default_verification_status)
+            crate::provider::builtin_provider(&account.provider_id).map(default_verification_status)
         })
         .unwrap_or(ConnectionVerificationStatus::NotRequired);
     ProviderAccountChoice {

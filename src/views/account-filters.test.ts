@@ -18,7 +18,6 @@ function account(overrides: Partial<Account>): Account {
     account_type: "key",
     setup_step: "ready",
     provider_id: "opencode",
-    offering_id: "go",
     credential_kind: "api_key",
     quota_scope: "key",
     purchase_date: "2026-08-01",
@@ -82,7 +81,7 @@ test("Custom API ignores legacy lifecycle dates", () => {
     id: "custom",
     name: "Custom",
     provider_id: "custom",
-    offering_id: "api",
+
     purchase_date: "2026-07-01",
     expires_on: "2026-08-01",
   });
@@ -94,7 +93,7 @@ test("zen free cooling is reported through the shared free lane", () => {
     id: "zen",
     name: "Zen",
     provider_id: "opencode-zen-free",
-    offering_id: "anonymous-free",
+
     credential_kind: "none",
     quota_scope: "egress-ip",
     expires_on: "2026-08-01",
@@ -114,7 +113,6 @@ test("status buckets mirror the card status labels", () => {
     accountStatusKey(account({
       enabled: false,
       provider_id: "custom",
-      offering_id: "api",
       plan_routable: true,
       verification_status: "pending",
     }), NOW),
@@ -124,7 +122,6 @@ test("status buckets mirror the card status labels", () => {
     accountStatusKey(account({
       enabled: false,
       provider_id: "custom",
-      offering_id: "api",
       plan_routable: false,
       verification_status: "failed",
     }), NOW),
@@ -134,7 +131,6 @@ test("status buckets mirror the card status labels", () => {
     accountStatusKey(account({
       enabled: false,
       provider_id: "custom",
-      offering_id: "api",
       plan_routable: true,
       verification_status: "failed",
     }), NOW),
@@ -144,7 +140,6 @@ test("status buckets mirror the card status labels", () => {
     accountStatusKey(account({
       enabled: false,
       provider_id: "custom",
-      offering_id: "api",
       plan_routable: false,
       verification_status: "pending",
     }), NOW),
@@ -157,7 +152,6 @@ test("status buckets mirror the card status labels", () => {
   assert.equal(
     accountStatusKey(account({
       provider_id: "opencode-zen-free",
-      offering_id: "anonymous-free",
       cooldown_free_until: "2026-08-21T13:00:00Z",
     }), NOW),
     "cooling",
@@ -171,7 +165,6 @@ test("plan and status filters keep the existing priority order", () => {
       id: "b",
       name: "B",
       provider_id: "opencode-zen-free",
-      offering_id: "anonymous-free",
     }),
     account({ id: "c", name: "C", auth_error: "401" }),
   ];
@@ -179,16 +172,27 @@ test("plan and status filters keep the existing priority order", () => {
   assert.deepEqual(filterAccounts(accounts, "zen-free", "all", NOW).map((a) => a.id), ["b"]);
   assert.deepEqual(filterAccounts(accounts, "all", "auth-error", NOW).map((a) => a.id), ["c"]);
   assert.deepEqual(filterAccounts(accounts, "opencode-go", "available", NOW).map((a) => a.id), ["a"]);
-  // Unknown pairs fall back to the raw provider/offering key.
+  // Unknown providers fall back to the raw provider id.
   assert.equal(
-    accountPlanKey(account({ provider_id: "else", offering_id: "where" })),
-    "else/where",
+    accountPlanKey(account({ provider_id: "else" })),
+    "else",
+  );
+  const dynamicId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  assert.equal(accountPlanKey(account({ provider_id: dynamicId })), dynamicId);
+  assert.deepEqual(
+    filterAccounts(
+      [account({ id: "dyn", provider_id: dynamicId }), account({ id: "go" })],
+      dynamicId,
+      "all",
+      NOW,
+    ).map((row) => row.id),
+    ["dyn"],
   );
 });
 
 test("plansInUse follows registry order, not account order", () => {
   const accounts = [
-    account({ id: "b", name: "B", provider_id: "opencode-zen-free", offering_id: "anonymous-free" }),
+    account({ id: "b", name: "B", provider_id: "opencode-zen-free" }),
     account({ id: "a", name: "A" }),
   ];
   assert.deepEqual(

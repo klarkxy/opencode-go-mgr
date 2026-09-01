@@ -95,7 +95,11 @@ pub(crate) fn diagnostic_forced_upstream(
 }
 
 fn mapping_adapter_kind(mapping: &ProviderMapping) -> Option<ProviderAdapterKind> {
-    ProviderAdapterKind::from_offering(mapping.provider_id, mapping.offering_id)
+    crate::dynamic::adapter_kind_for(&mapping.provider_id, &[]).or_else(|| {
+        uuid::Uuid::parse_str(&mapping.provider_id)
+            .ok()
+            .map(|_| ProviderAdapterKind::ConfigurableHttp)
+    })
 }
 
 fn mapping_is_configurable_http(mapping: &ProviderMapping) -> bool {
@@ -130,7 +134,6 @@ pub(crate) fn registry_alias_for_mapping(mapping: &ProviderMapping) -> Option<St
             }) => {
                 if mappings.iter().any(|candidate| {
                     candidate.provider_id == mapping.provider_id
-                        && candidate.offering_id == mapping.offering_id
                         && candidate.upstream_model == mapping.upstream_model
                 }) {
                     return Some(alias.to_string());
@@ -207,6 +210,7 @@ pub(crate) fn materialize_account_routes(
     goat_runtimes: &std::collections::HashMap<String, GoatAccountRuntime>,
     cpa_base_url: Option<&str>,
     contracts: &EffectiveContractSet,
+    dynamics: &[crate::dynamic::DynamicProviderRuntime],
 ) -> Result<MaterializedRouteSet, ProtocolError> {
     match resolved {
         ResolvedModel::PinnedRaw { mapping, .. } => {
@@ -239,6 +243,7 @@ pub(crate) fn materialize_account_routes(
                 custom_runtimes,
                 goat_runtimes,
                 contracts,
+                dynamics,
             )
         }
         ResolvedModel::Alias {
@@ -277,7 +282,7 @@ pub(crate) fn materialize_account_routes(
                     Err(error) => {
                         rejected.push(format!(
                             "{}/{} mapping `{}`: {error}",
-                            mapping.provider_id, mapping.offering_id, mapping.upstream_model
+                            mapping.provider_id, mapping.provider_id, mapping.upstream_model
                         ));
                         first_materialization_error.get_or_insert(error);
                     }
@@ -306,6 +311,7 @@ pub(crate) fn materialize_account_routes(
                 custom_runtimes,
                 goat_runtimes,
                 contracts,
+                dynamics,
             )
         }
     }
@@ -483,6 +489,58 @@ fn materialize_custom_account_plan(
     )
 }
 
+fn materialize_dynamic_account_plan(
+    account: &Account,
+    runtime: Option<&crate::dynamic::DynamicProviderRuntime>,
+    config: &AppConfig,
+    parsed: &ParsedClientRequest,
+    client_model: &str,
+    routing_model: &str,
+    resolved_alias: Option<String>,
+    mapping: &ProviderMapping,
+) -> Result<RequestPlan, ProtocolError> {
+    let runtime = runtime.ok_or_else(|| {
+        ProtocolError::new(format!(
+            "dynamic provider `{}` is not in the request snapshot",
+            account.provider_id
+        ))
+    })?;
+    if runtime.auth_kind.requires_key() && account.key_cipher.trim().is_empty() {
+        return Err(ProtocolError::new(format!(
+            "account `{}` has no stored Key",
+            account.name
+        )));
+    }
+    let selected = runtime
+        .mapping_for_public(routing_model)
+        .or_else(|| runtime.mapping_for_upstream(&mapping.upstream_model))
+        .or_else(|| runtime.mapping_for_upstream(routing_model))
+        .ok_or_else(|| {
+            ProtocolError::new(format!(
+                "dynamic provider `{}` has no mapping for `{routing_model}`",
+                runtime.name
+            ))
+        })?;
+    materialize_channel_plan(
+        config,
+        parsed,
+        client_model,
+        &selected.upstream_model,
+        resolved_alias.or_else(|| Some(selected.public_model.clone())),
+        UpstreamChannel::Go,
+        None,
+        false,
+        Some(match runtime.upstream_protocol {
+            crate::provider::UpstreamProtocolKind::ChatCompletions => ApiFormat::ChatCompletions,
+            crate::provider::UpstreamProtocolKind::Responses => ApiFormat::Responses,
+            crate::provider::UpstreamProtocolKind::Messages => ApiFormat::Messages,
+        }),
+        Some(CustomRouteSpec {
+            endpoint_url: runtime.endpoint_url.clone(),
+        }),
+    )
+}
+
 fn mapping_is_command_code_goat(mapping: &ProviderMapping) -> bool {
     mapping_adapter_kind(mapping) == Some(ProviderAdapterKind::CommandCodeGoat)
 }
@@ -501,12 +559,13 @@ fn collect_mapping_plans(
     custom_runtimes: &std::collections::HashMap<String, CustomAccountRuntime>,
     goat_runtimes: &std::collections::HashMap<String, GoatAccountRuntime>,
     contracts: &EffectiveContractSet,
+    dynamics: &[crate::dynamic::DynamicProviderRuntime],
 ) -> Result<MaterializedRouteSet, ProtocolError> {
     let mut routes = Vec::new();
     for account in accounts {
         for candidate in &plans {
             if account.provider_id != candidate.mapping.provider_id
-                || account.offering_id != candidate.mapping.offering_id
+                || account.provider_id != candidate.mapping.provider_id
             {
                 continue;
             }
@@ -523,7 +582,7 @@ fn collect_mapping_plans(
                         rejected.push(format!(
                             "{}/{} account `{}`: Command Code GOAT catalog does not include model `{}`",
                             account.provider_id,
-                            account.offering_id,
+                            account.provider_id,
                             account.name,
                             candidate.plan.model
                         ));
@@ -532,13 +591,15 @@ fn collect_mapping_plans(
                     None => {
                         rejected.push(format!(
                             "{}/{} account `{}`: Command Code GOAT production inference endpoint, auth, protocol, and model catalog are not verified; route is disabled",
-                            account.provider_id, account.offering_id, account.name
+                            account.provider_id, account.provider_id, account.name
                         ));
                         continue;
                     }
                 }
             }
-            let plan = if mapping_is_configurable_http(&candidate.mapping) {
+            let plan = if mapping_is_configurable_http(&candidate.mapping)
+                && crate::provider::is_custom_api(&account.provider_id)
+            {
                 match materialize_custom_account_plan(
                     account,
                     custom_runtimes.get(&account.id),
@@ -553,7 +614,27 @@ fn collect_mapping_plans(
                     Err(error) => {
                         rejected.push(format!(
                             "{}/{} account `{}`: {error}",
-                            account.provider_id, account.offering_id, account.name
+                            account.provider_id, account.provider_id, account.name
+                        ));
+                        continue;
+                    }
+                }
+            } else if mapping_is_configurable_http(&candidate.mapping) {
+                match materialize_dynamic_account_plan(
+                    account,
+                    crate::dynamic::find_runtime(dynamics, &account.provider_id),
+                    config,
+                    parsed,
+                    client_model,
+                    routing_model,
+                    resolved_alias.clone(),
+                    &candidate.mapping,
+                ) {
+                    Ok(plan) => plan,
+                    Err(error) => {
+                        rejected.push(format!(
+                            "{}/{} account `{}`: {error}",
+                            account.provider_id, account.provider_id, account.name
                         ));
                         continue;
                     }
@@ -561,7 +642,9 @@ fn collect_mapping_plans(
             } else {
                 candidate.plan.clone()
             };
-            match provider_adapter::supports_production_plan(account, config, &plan, contracts) {
+            match provider_adapter::supports_production_plan(
+                account, config, &plan, contracts, dynamics,
+            ) {
                 Ok(()) => {
                     routes.push(MaterializedCandidate {
                         routing: RoutingCandidate {
@@ -575,7 +658,7 @@ fn collect_mapping_plans(
                 }
                 Err(error) => rejected.push(format!(
                     "{}/{} account `{}`: {error}",
-                    account.provider_id, account.offering_id, account.name
+                    account.provider_id, account.provider_id, account.name
                 )),
             }
         }

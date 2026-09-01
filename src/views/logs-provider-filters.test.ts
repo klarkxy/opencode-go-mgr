@@ -26,14 +26,12 @@ test("forward log API sends the provider attribution filters as exact query para
     limit: 20,
     offset: 40,
     provider_id: "opencode",
-    offering_id: "go",
     route_account_id: "route 1",
     credential_account_id: "cred 2",
   });
 
   const query = new URL(requests[0]!.url, "http://localhost").searchParams;
   assert.equal(query.get("providerId"), "opencode");
-  assert.equal(query.get("offeringId"), "go");
   assert.equal(query.get("routeAccountId"), "route 1");
   assert.equal(query.get("credentialAccountId"), "cred 2");
   assert.equal(query.get("limit"), "20");
@@ -44,7 +42,6 @@ test("forward log DTO declares nullable provider attribution and cost fields", (
   for (const field of [
     "route_account_id",
     "provider_id",
-    "offering_id",
     "credential_account_id",
     "raw_cost_usd",
     "quota_debit",
@@ -65,13 +62,11 @@ test("Alias column and detail titles distinguish effective Alias from the reques
 
 test("forward filters are remote query params, reset paging, and are never local-page filtering", () => {
   assert.match(logs, /provider_id: providerFilter\.value/);
-  assert.match(logs, /offering_id: offeringFilter\.value/);
   assert.match(logs, /route_account_id: routeAccountFilter\.value/);
   assert.match(logs, /credential_account_id: credentialAccountFilter\.value/);
   // The four selects join the remote-reload watcher that resets to page 1.
   const watcher = logs.slice(logs.indexOf("watch(\n  ["));
   assert.match(watcher, /providerFilter/);
-  assert.match(watcher, /offeringFilter/);
   assert.match(watcher, /routeAccountFilter/);
   assert.match(watcher, /credentialAccountFilter/);
   assert.match(watcher, /forwardPage\.value = 1/);
@@ -82,7 +77,7 @@ test("forward filters are remote query params, reset paging, and are never local
 });
 
 test("provider filters keep accessible labels and participate in clear/has-filters state", () => {
-  for (const label of ["服务商", "服务方案", "路由账号", "凭证账号"]) {
+  for (const label of ["服务商", "路由账号", "凭证账号"]) {
     assert.ok(logs.includes(`<span class="filter-label">{{ t("${label}") }}</span>`), label);
   }
   assert.match(logs, /providerFilter\.value = ""/);
@@ -97,7 +92,6 @@ test("provider filter selects keep an accessible name after selection", () => {
   // static aria-label using the same translated label, independent of value.
   for (const [filter, label] of [
     ["providerFilter", "服务商"],
-    ["offeringFilter", "服务方案"],
     ["routeAccountFilter", "路由账号"],
     ["credentialAccountFilter", "凭证账号"],
   ] as const) {

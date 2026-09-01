@@ -145,8 +145,8 @@ impl From<TransportFailureKind> for TransportClassifyInput {
 /// Public only as the cross-crate bridge; the host crate's `gateway::classify`
 /// facade keeps this function crate-private.
 #[doc(hidden)]
-pub fn provider_error_policy(provider_id: &str, offering_id: &str) -> ProviderErrorPolicy {
-    match ProviderAdapterKind::from_offering(provider_id, offering_id) {
+pub fn provider_error_policy(provider_id: &str) -> ProviderErrorPolicy {
+    match ProviderAdapterKind::from_provider_id(provider_id) {
         Some(kind) => policy_for_kind(kind),
         None => ProviderErrorPolicy {
             // Stage 0 matched OpenCode/Zen 401 on provider_id only.
@@ -235,7 +235,6 @@ pub fn classify_stream(input: StreamClassifyInput) -> ProviderErrorClass {
 pub fn classify_http(
     status: u16,
     provider_id: &str,
-    offering_id: &str,
     free_channel: bool,
     anonymous: bool,
 ) -> ProviderErrorClass {
@@ -243,7 +242,7 @@ pub fn classify_http(
         return ProviderErrorClass::ServerError;
     }
     if status == 429 {
-        let policy = provider_error_policy(provider_id, offering_id);
+        let policy = provider_error_policy(provider_id);
         let rate = match policy.rate_limit_429 {
             RateLimit429Policy::GenericFiveMinute => RateLimitPolicy::GenericFiveMinute,
             RateLimit429Policy::GoWindow if free_channel => RateLimitPolicy::ZenFreeShared,
@@ -255,7 +254,7 @@ pub fn classify_http(
         return ProviderErrorClass::HttpRequestTimeout;
     }
     if status == 401 {
-        return match provider_error_policy(provider_id, offering_id).inference_401 {
+        return match provider_error_policy(provider_id).inference_401 {
             Auth401Policy::Passthrough => ProviderErrorClass::UnauthorizedPassthrough,
             Auth401Policy::RotatePersistAuthError => ProviderErrorClass::UnauthorizedRotate,
         };
@@ -283,14 +282,13 @@ pub fn classify_http(
 pub fn classify_http_response(
     status: u16,
     provider_id: &str,
-    offering_id: &str,
     free_channel: bool,
     anonymous: bool,
     response_body: &str,
 ) -> ProviderErrorClass {
-    let base = classify_http(status, provider_id, offering_id, free_channel, anonymous);
+    let base = classify_http(status, provider_id, free_channel, anonymous);
     if status == 401
-        && ProviderAdapterKind::from_offering(provider_id, offering_id)
+        && ProviderAdapterKind::from_provider_id(provider_id)
             == Some(ProviderAdapterKind::OpenCodeGo)
         && response_has_error_type(response_body, "CreditsError")
     {

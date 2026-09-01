@@ -33,7 +33,7 @@ GUI 或 CLI 启动时会原地执行 SQLite 迁移。打开新版二进制前：
 
 ## Schema v27 与 pre-v3 快照
 
-`CURRENT_SCHEMA_VERSION = 34`（`crates/ocg-core/src/db.rs`）。打开历史库会先规范迁移到 v26，再由 v27 重写把主 Key 与全部 `sub_gateway_keys` 行复制进一张 `access_keys` 表（主 Key 固定 id `00000000-0000-0000-0000-000000000001`），删除 `sub_gateway_keys`，并删除 `accounts` 上遗留的五列 `usage_sync_*`（用量同步元数据在 `provider_usage_sync_state`）。v33 新增 Custom 精确上游模型身份；v34 新增 CPA 单例配置表，但不会导入或导出 CPA 状态。账号 `key_cipher` / `password_cipher` 用 Host cipher 就地校验，**不会重新加密**。
+`CURRENT_SCHEMA_VERSION = 35`（`crates/ocg-core/src/db.rs`）。打开历史库会先规范迁移到 v26，再由 v27 重写把主 Key 与全部 `sub_gateway_keys` 行复制进一张 `access_keys` 表（主 Key 固定 id `00000000-0000-0000-0000-000000000001`），删除 `sub_gateway_keys`，并删除 `accounts` 上遗留的五列 `usage_sync_*`（用量同步元数据在 `provider_usage_sync_state`）。v33 新增 Custom 精确上游模型身份；v34 新增 CPA 单例配置表，但不会导入或导出 CPA 状态。v35 把 Provider/Plan 身份收成只有 `provider_id`：先预检每一个已知的 v34 provider/offering 对，未知对与会丢数据的复合键冲突在写入前失败，再重建受影响的表，使 offering 列不存在。账号 `key_cipher` / `password_cipher` 用 Host cipher 就地校验，**不会重新加密**。
 
 ## Schema v31 — 按模型/按协议覆盖
 
@@ -42,6 +42,24 @@ v31 创建 `provider_contract_model_protocol_overrides` 表。每行对应一个
 ## Schema v32 — Custom 单协议完整 Endpoint
 
 v32 用 `endpoint_url` 与单值 `upstream_protocol` 替换 `account_custom_configs.base_url`、JSON `upstream_protocols` 和 `auth_scheme`。历史行按 Chat Completions → Responses → Messages 选择协议，拼接对应标准推理后缀，并在同一事务中设为 disabled/pending、删除非所选协议的能力/证据/覆盖。管理员检查后必须显式重新启用迁移的 Custom 账号。
+
+## Schema v35 — Provider 单一身份
+
+v35 去掉 offering 维度。Provider 与 Plan 是同一产品身份，只按 `provider_id` 识别。已知 v34 对映射为 `opencode/go`、`opencode-zen-free/anonymous-free`、`command-code/goat`、`minimax/cn`、`kimi/cn`、`custom/api` 与 `cpa/local`。未知对与复合键冲突在任何写入前 fail closed。重建保留账号、密文字节、日志、定价/目录行、合约、Custom 配置/能力、设置与 access keys。同一 schema 版本还把类型化用户定义供应商存在 `dynamic_providers` 与 `dynamic_provider_models`。节点备份导出只含 `providerId` 的 payload V4。
+
+在非空 v34 库做破坏性 v35 重建之前，进程会写入一份唯一、不覆盖的同目录快照：
+
+```text
+data.sqlite.pre-v35.<timestamp>.bak
+data.sqlite.pre-v35.<timestamp>.bak.sha256
+```
+
+快照是独立的 v34 SQLite 文件（`VACUUM INTO`，两侧都做 `quick_check`）；sidecar 第一个字段是 `.bak` 的小写 SHA-256。全新空目录直接创建到当前 schema，不写这份副本。恢复前在数据目录内校验 sidecar：
+
+```bash
+sha256sum -c data.sqlite.pre-v35.<timestamp>.bak.sha256      # Linux
+shasum -a 256 -c data.sqlite.pre-v35.<timestamp>.bak.sha256  # macOS
+```
 
 ## Schema v33 — Custom 上游模型身份
 

@@ -6,10 +6,26 @@
 
 | 目标 | 路径 | 是否修改仓库 |
 | --- | --- | --- |
-| 给自己的节点接入 OpenAI 或 Anthropic 兼容端点 | 新增 **Custom API** 账号 | 否 |
+| 给本节点增加可跨账号复用的具名供应商 | **供应商** → **新建供应商**（用户定义） | 否 |
+| 给一张账号接入 OpenAI 或 Anthropic 兼容端点 | 新增 **Custom API** 账号 | 否 |
 | 让所有 OCG Manager 用户获得一个具名 Provider/Plan | 新增密封的内置供应商 | 是，需要经过审查的代码与测试 |
 
-OCG Manager 不提供运行时 Provider 插件 API。内置 Provider Registry 是静态密封注册表，未知的 `provider_id` + `offering_id` 组合会 fail closed。Custom API 是面向用户的可配置 HTTP 接入路径，不是内置供应商的基类。
+**适配器注册表**保持静态密封。用户定义供应商是类型化的持久定义；每一条都绑定代码持有的 Configurable HTTP 适配器。OCG 从不加载用户脚本、插件或二进制。未知 `provider_id` 除非匹配已保存的定义，否则 fail closed。Custom API 仍是独立的账号所有路径：Endpoint、协议和模型映射留在账号卡上。
+
+## 创建用户定义供应商
+
+1. 打开 **供应商**，选择 **新建供应商**。
+2. 填写名称、一个 API Endpoint、一个上游协议（Chat Completions、Responses 或 Messages），以及一种鉴权方式（Bearer、`x-api-key` 或无鉴权）。
+3. 至少添加一条对外模型名 → 精确上游 ID 映射。**获取模型** 可选，且不会保存。
+4. 若鉴权需要 Key，填写第一个账号名称和只写 Key。无鉴权供应商会创建一张不带 Key 的单例账号。
+5. **测试模型** 可选。先确认警告：真实测试会消耗上游额度或产生费用。
+6. 保存。写入是一次原子 `POST /providers`，不要求探测成功。
+
+编辑通过 `PATCH /providers/{id}` 整份替换供应商配置。供应商 id 不可变。从无鉴权改为需要 Key 时必须显式填写替换 Key。只有先删除全部引用账号后才能删除供应商；不会级联删除。
+
+供应商所有字段留在 **供应商** 页。账号 **Key**、启停、顺序、备注、冷却和测试留在 **账号** 页。用户定义供应商始终未定价：没有官方用量、额度估算或价格行。请求日志仍会归因供应商、账号和模型。
+
+备份使用只含 `providerId` 的 payload V4。Schema v35 保存 `dynamic_providers` 与 `dynamic_provider_models`。
 
 ## 立即接入兼容上游
 
@@ -64,7 +80,7 @@ OCG 根据协议派生鉴权。它不会同时发送两类鉴权头，不会在 
 
 只有当供应商需要产品持有的身份、目录、账号生命周期、路由、价格/用量或 Custom API 无法表达的其他语义时，才适合新增内置集成。以当前代码为准，不要从旧需求文档推断实现。
 
-1. 在 `crates/ocg-domain/src/ids.rs` 与 `provider.rs` 定义稳定的 Provider/Offering 身份、Plan 行、凭据/额度语义，并穷尽扩展 `ProviderAdapterKind` 映射。
+1. 在 `crates/ocg-domain/src/ids.rs` 与 `provider.rs` 定义稳定的 Provider 身份、Plan 行、凭据/额度语义，并穷尽扩展 `ProviderAdapterKind` 映射。
 2. 只把已经验证的协议事实加入 `crates/ocg-domain/src/protocol.rs`。请求路由绝不能通过可计费端点猜测协议。
 3. 在 `crates/ocg-gateway/src/alias.rs` 添加由代码持有的客户端 Alias 映射。保留准确上游 ID，拒绝有歧义的 raw ID；发现的新目录行不能擅自创造公开 Alias。
 4. 在 `ocg-core` 实现宿主路由 resolver。适配器只返回 `AttemptSpec`；数据库访问、Key 解密、代理选择和出站 HTTP 继续由宿主持有。

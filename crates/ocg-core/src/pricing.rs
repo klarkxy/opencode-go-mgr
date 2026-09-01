@@ -10,8 +10,7 @@ use std::time::Duration;
 
 use crate::db::Database;
 use crate::kernel::ids::{
-    ANONYMOUS_FREE_OFFERING_ID, COMMAND_CODE_PROVIDER_ID, GO_OFFERING_ID, GOAT_OFFERING_ID,
-    OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID, is_free_model,
+    COMMAND_CODE_PROVIDER_ID, OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID, is_free_model,
 };
 
 pub use crate::kernel::ids::normalize_model_name;
@@ -35,7 +34,7 @@ const ADJUSTMENT_POLICY_VERSION: &str = "local-v4";
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct ProviderScopedPricingSnapshot {
     provider_id: String,
-    offering_id: String,
+
     revision: String,
     activated_at: String,
     document_updated_at: Option<String>,
@@ -48,7 +47,7 @@ pub struct ProviderScopedPricingSnapshot {
 #[derive(Debug, Clone, Deserialize)]
 struct ProviderScopedPricingSnapshotWire {
     provider_id: String,
-    offering_id: String,
+
     revision: String,
     activated_at: String,
     document_updated_at: Option<String>,
@@ -62,7 +61,7 @@ impl ProviderScopedPricingSnapshot {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         provider_id: impl Into<String>,
-        offering_id: impl Into<String>,
+
         revision: impl Into<String>,
         activated_at: impl Into<String>,
         document_updated_at: Option<String>,
@@ -72,14 +71,12 @@ impl ProviderScopedPricingSnapshot {
         values: Vec<ProviderPricingValue>,
     ) -> Result<Self> {
         let provider_id = provider_id.into();
-        let offering_id = offering_id.into();
         let revision = revision.into();
         let activated_at = activated_at.into();
         let source_url = source_url.into();
         let content_hash = content_hash.into();
         if [
             provider_id.as_str(),
-            offering_id.as_str(),
             revision.as_str(),
             activated_at.as_str(),
         ]
@@ -109,7 +106,6 @@ impl ProviderScopedPricingSnapshot {
         }
         Ok(Self {
             provider_id,
-            offering_id,
             revision,
             activated_at,
             document_updated_at,
@@ -144,7 +140,6 @@ impl ProviderScopedPricingSnapshot {
             .collect::<Result<Vec<_>>>()?;
         Self::new(
             OPENCODE_PROVIDER_ID,
-            GO_OFFERING_ID,
             snapshot.revision.clone(),
             snapshot.activated_at.clone(),
             Some(snapshot.document_updated_at.clone()),
@@ -157,10 +152,6 @@ impl ProviderScopedPricingSnapshot {
 
     pub fn provider_id(&self) -> &str {
         &self.provider_id
-    }
-
-    pub fn offering_id(&self) -> &str {
-        &self.offering_id
     }
 
     pub fn revision(&self) -> &str {
@@ -253,7 +244,7 @@ impl ProviderScopedPricingSnapshot {
     pub fn to_storage_record(&self) -> Result<ProviderPricingSnapshot> {
         Ok(ProviderPricingSnapshot {
             provider_id: self.provider_id.clone(),
-            offering_id: self.offering_id.clone(),
+
             revision: self.revision.clone(),
             activated_at: self.activated_at.clone(),
             document_updated_at: self.document_updated_at.clone(),
@@ -274,7 +265,6 @@ impl ProviderScopedPricingSnapshot {
                 .collect::<Result<Vec<_>>>()?;
             let snapshot = Self::new(
                 wire.provider_id,
-                wire.offering_id,
                 wire.revision,
                 wire.activated_at,
                 wire.document_updated_at,
@@ -289,7 +279,7 @@ impl ProviderScopedPricingSnapshot {
 
         // v22 migrates old OpenCode Go snapshot JSON into the provider table.
         // Continue accepting that exact legacy value shape indefinitely.
-        if record.provider_id == OPENCODE_PROVIDER_ID && record.offering_id == GO_OFFERING_ID {
+        if record.provider_id == OPENCODE_PROVIDER_ID {
             let legacy: PricingSnapshot = serde_json::from_str(&record.snapshot_json)
                 .context("invalid provider pricing snapshot JSON")?;
             let snapshot = Self::from_opencode_go(&legacy)?;
@@ -297,16 +287,14 @@ impl ProviderScopedPricingSnapshot {
             return Ok(snapshot);
         }
         bail!(
-            "provider pricing snapshot `{}/{}/{}` has an unsupported value schema",
+            "provider pricing snapshot `{}/{}` has an unsupported value schema",
             record.provider_id,
-            record.offering_id,
             record.revision
         )
     }
 
     fn ensure_matches_record(&self, record: &ProviderPricingSnapshot) -> Result<()> {
         if self.provider_id != record.provider_id
-            || self.offering_id != record.offering_id
             || self.revision != record.revision
             || self.activated_at != record.activated_at
             || self.document_updated_at != record.document_updated_at
@@ -321,7 +309,7 @@ impl ProviderScopedPricingSnapshot {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProviderPricingRefreshError {
-    UnknownOffering,
+    UnknownProvider,
     NotApplicable,
     FetchFailed,
 }
@@ -329,7 +317,7 @@ pub enum ProviderPricingRefreshError {
 impl fmt::Display for ProviderPricingRefreshError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::UnknownOffering => f.write_str("unknown provider pricing offering"),
+            Self::UnknownProvider => f.write_str("unknown provider pricing offering"),
             Self::NotApplicable => {
                 f.write_str("this provider offering has no paid pricing snapshot")
             }
@@ -345,23 +333,20 @@ impl std::error::Error for ProviderPricingRefreshError {}
 pub async fn fetch_provider_pricing_manual(
     config: &crate::models::AppConfig,
     provider_id: &str,
-    offering_id: &str,
 ) -> std::result::Result<ProviderScopedPricingSnapshot, ProviderPricingRefreshError> {
-    match (provider_id, offering_id) {
-        (OPENCODE_PROVIDER_ID, GO_OFFERING_ID) => {
+    match provider_id {
+        OPENCODE_PROVIDER_ID => {
             let snapshot = fetch_official_snapshot(config)
                 .await
                 .map_err(|_| ProviderPricingRefreshError::FetchFailed)?;
             ProviderScopedPricingSnapshot::from_opencode_go(&snapshot)
                 .map_err(|_| ProviderPricingRefreshError::FetchFailed)
         }
-        (COMMAND_CODE_PROVIDER_ID, GOAT_OFFERING_ID) => fetch_goat_pricing_snapshot(config)
+        COMMAND_CODE_PROVIDER_ID => fetch_goat_pricing_snapshot(config)
             .await
             .map_err(|_| ProviderPricingRefreshError::FetchFailed),
-        (OPENCODE_ZEN_FREE_PROVIDER_ID, ANONYMOUS_FREE_OFFERING_ID) => {
-            Err(ProviderPricingRefreshError::NotApplicable)
-        }
-        _ => Err(ProviderPricingRefreshError::UnknownOffering),
+        OPENCODE_ZEN_FREE_PROVIDER_ID => Err(ProviderPricingRefreshError::NotApplicable),
+        _ => Err(ProviderPricingRefreshError::UnknownProvider),
     }
 }
 
@@ -562,7 +547,6 @@ pub fn parse_goat_html(html: &str) -> Result<ProviderScopedPricingSnapshot> {
     let revision = format!("goat-{}", content_hash.chars().take(16).collect::<String>());
     ProviderScopedPricingSnapshot::new(
         COMMAND_CODE_PROVIDER_ID,
-        GOAT_OFFERING_ID,
         revision,
         Utc::now().to_rfc3339(),
         None,
@@ -686,9 +670,8 @@ pub fn store_provider_pricing_snapshot(
 pub fn latest_provider_pricing_snapshot(
     db: &Database,
     provider_id: &str,
-    offering_id: &str,
 ) -> Result<Option<ProviderScopedPricingSnapshot>> {
-    db.latest_provider_pricing_snapshot(provider_id, offering_id)?
+    db.latest_provider_pricing_snapshot(provider_id)?
         .as_ref()
         .map(ProviderScopedPricingSnapshot::from_storage_record)
         .transpose()
@@ -821,7 +804,6 @@ pub(crate) fn provider_pricing_semantically_equal(
     right: &ProviderScopedPricingSnapshot,
 ) -> bool {
     left.provider_id == right.provider_id
-        && left.offering_id == right.offering_id
         && left.document_updated_at == right.document_updated_at
         && left.source_url == right.source_url
         && left.content_hash == right.content_hash

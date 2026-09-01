@@ -187,13 +187,11 @@ async fn refresh_go_pricing(
 
 pub(super) async fn put_pricing_multipliers(
     State(state): State<CoreState>,
-    Path((provider_id, offering_id)): Path<(String, String)>,
+    Path(provider_id): Path<String>,
     body: Bytes,
 ) -> Result<Response, V3ApiError> {
-    let is_go = provider_id == crate::provider::OPENCODE_PROVIDER_ID
-        && offering_id == crate::provider::GO_OFFERING_ID;
-    let is_goat = provider_id == crate::provider::COMMAND_CODE_PROVIDER_ID
-        && offering_id == crate::provider::GOAT_OFFERING_ID;
+    let is_go = provider_id == crate::provider::OPENCODE_PROVIDER_ID;
+    let is_goat = provider_id == crate::provider::COMMAND_CODE_PROVIDER_ID;
     if !is_go && !is_goat {
         return Err(V3ApiError::invalid_request_at(
             &state,
@@ -219,14 +217,14 @@ pub(super) async fn put_pricing_multipliers(
     }
 
     check_expectation(&state, &update.expectation)?;
-    let current_revision = current_provider_pricing_revision(&state, &provider_id, &offering_id)?;
+    let current_revision = current_provider_pricing_revision(&state, &provider_id)?;
     if update.expected_pricing_revision != current_revision {
         return Err(V3ApiError::conflict_at(
             &state,
             "provider pricing revision changed",
         ));
     }
-    let active = latest_provider_pricing_snapshot(&state.db.lock(), &provider_id, &offering_id)
+    let active = latest_provider_pricing_snapshot(&state.db.lock(), &provider_id)
         .map_err(V3ApiError::internal)?
         .ok_or_else(|| V3ApiError::invalid_request_at(&state, "provider pricing is not loaded"))?;
     let writes = update
@@ -245,9 +243,8 @@ pub(super) async fn put_pricing_multipliers(
                 &state,
                 "info",
                 &format!(
-                    "updated provider pricing multipliers in {}/{}/{}",
+                    "updated provider pricing multipliers in {}/{}",
                     provider_id,
-                    offering_id,
                     snapshot.revision()
                 ),
             );
@@ -257,7 +254,6 @@ pub(super) async fn put_pricing_multipliers(
     Ok(Json(provider_pricing_from_snapshot(
         &state,
         provider_id,
-        offering_id,
         PricingAvailability::Available,
         state.pricing_snapshot().as_ref(),
         Some(&active),
@@ -267,20 +263,28 @@ pub(super) async fn put_pricing_multipliers(
 
 pub(super) async fn get_provider_pricing(
     State(state): State<CoreState>,
-    Path((provider_id, offering_id)): Path<(String, String)>,
+    Path(provider_id): Path<String>,
 ) -> Result<Json<ProviderPricing>, V3ApiError> {
     let _settings_update = state.settings_update.lock();
-    let descriptor = ProviderRegistry::get(&provider_id, &offering_id)
+    if crate::dynamic::find_runtime(&state.dynamic_providers(), &provider_id).is_some() {
+        return Ok(Json(provider_pricing_from_snapshot(
+            &state,
+            provider_id,
+            PricingAvailability::Unpriced,
+            state.pricing_snapshot().as_ref(),
+            None,
+        )));
+    }
+    let descriptor = ProviderRegistry::get(&provider_id)
         .ok_or_else(|| V3ApiError::not_found_at(&state, "provider offering not found"))?;
     let availability =
         map_availability(descriptor.pricing.availability).map_err(V3ApiError::internal)?;
     let pricing = state.pricing_snapshot();
-    let scoped = latest_provider_pricing_snapshot(&state.db.lock(), &provider_id, &offering_id)
+    let scoped = latest_provider_pricing_snapshot(&state.db.lock(), &provider_id)
         .map_err(V3ApiError::internal)?;
     Ok(Json(provider_pricing_from_snapshot(
         &state,
         provider_id,
-        offering_id,
         availability,
         pricing.as_ref(),
         scoped.as_ref(),
@@ -332,7 +336,6 @@ fn synthetic_goat_snapshot_for_tests(
     )?;
     crate::pricing::ProviderScopedPricingSnapshot::new(
         crate::provider::COMMAND_CODE_PROVIDER_ID,
-        crate::provider::GOAT_OFFERING_ID,
         format!("test-goat-{}", go.content_hash),
         Utc::now().to_rfc3339(),
         None,
@@ -358,7 +361,6 @@ async fn refresh_goat_pricing(
         check_provider_pricing_expectation(
             state,
             crate::provider::COMMAND_CODE_PROVIDER_ID,
-            crate::provider::GOAT_OFFERING_ID,
             &update,
         )?;
     }
@@ -366,21 +368,12 @@ async fn refresh_goat_pricing(
     let fetched = fetch_configured_goat_snapshot(state).await;
 
     let _settings_update = state.settings_update.lock();
-    check_provider_pricing_expectation(
-        state,
-        crate::provider::COMMAND_CODE_PROVIDER_ID,
-        crate::provider::GOAT_OFFERING_ID,
-        &update,
-    )?;
-    let current_revision = current_provider_pricing_revision(
-        state,
-        crate::provider::COMMAND_CODE_PROVIDER_ID,
-        crate::provider::GOAT_OFFERING_ID,
-    )?;
+    check_provider_pricing_expectation(state, crate::provider::COMMAND_CODE_PROVIDER_ID, &update)?;
+    let current_revision =
+        current_provider_pricing_revision(state, crate::provider::COMMAND_CODE_PROVIDER_ID)?;
     let active = latest_provider_pricing_snapshot(
         &state.db.lock(),
         crate::provider::COMMAND_CODE_PROVIDER_ID,
-        crate::provider::GOAT_OFFERING_ID,
     )
     .map_err(V3ApiError::internal)?;
     match fetched {
@@ -394,7 +387,6 @@ async fn refresh_goat_pricing(
             Ok(provider_refresh_result(
                 state,
                 crate::provider::COMMAND_CODE_PROVIDER_ID,
-                vec![crate::provider::GOAT_OFFERING_ID.to_string()],
                 PricingRefreshStatus::FailedNoChange,
                 Vec::new(),
                 None,
@@ -417,7 +409,6 @@ async fn refresh_goat_pricing(
                 return Ok(provider_refresh_result(
                     state,
                     crate::provider::COMMAND_CODE_PROVIDER_ID,
-                    vec![crate::provider::GOAT_OFFERING_ID.to_string()],
                     PricingRefreshStatus::NeedsConfirmation,
                     map_changes(multiplier_changes),
                     Some(official_content_hash),
@@ -437,7 +428,6 @@ async fn refresh_goat_pricing(
                 return Ok(provider_refresh_result(
                     state,
                     crate::provider::COMMAND_CODE_PROVIDER_ID,
-                    vec![crate::provider::GOAT_OFFERING_ID.to_string()],
                     PricingRefreshStatus::Unchanged,
                     map_changes(multiplier_changes),
                     None,
@@ -459,7 +449,6 @@ async fn refresh_goat_pricing(
             Ok(provider_refresh_result(
                 state,
                 crate::provider::COMMAND_CODE_PROVIDER_ID,
-                vec![crate::provider::GOAT_OFFERING_ID.to_string()],
                 PricingRefreshStatus::Success,
                 map_changes(multiplier_changes),
                 None,
@@ -473,11 +462,11 @@ async fn refresh_goat_pricing(
 fn check_provider_pricing_expectation(
     state: &CoreState,
     provider_id: &str,
-    offering_id: &str,
+
     update: &ProviderPricingRefreshUpdate,
 ) -> Result<(), V3ApiError> {
     check_expectation(state, &update.expectation)?;
-    let current = current_provider_pricing_revision(state, provider_id, offering_id)?;
+    let current = current_provider_pricing_revision(state, provider_id)?;
     if update.expected_provider_pricing_revision != current {
         Err(V3ApiError::conflict_at(
             state,
@@ -491,15 +480,12 @@ fn check_provider_pricing_expectation(
 fn current_provider_pricing_revision(
     state: &CoreState,
     provider_id: &str,
-    offering_id: &str,
 ) -> Result<String, V3ApiError> {
-    if provider_id == crate::provider::OPENCODE_PROVIDER_ID
-        && offering_id == crate::provider::GO_OFFERING_ID
-    {
+    if provider_id == crate::provider::OPENCODE_PROVIDER_ID {
         return Ok(state.pricing_snapshot().revision.clone());
     }
     Ok(
-        latest_provider_pricing_snapshot(&state.db.lock(), provider_id, offering_id)
+        latest_provider_pricing_snapshot(&state.db.lock(), provider_id)
             .map_err(V3ApiError::internal)?
             .map(|snapshot| snapshot.revision().to_string())
             .unwrap_or_else(|| UNINITIALIZED_PROVIDER_PRICING_REVISION.to_string()),
@@ -512,7 +498,6 @@ fn provider_refresh_from_go(refreshed: PricingRefresh) -> ProviderPricingRefresh
     let process_generation = refreshed.snapshot.process_generation;
     ProviderPricingRefresh {
         provider_id: crate::provider::OPENCODE_PROVIDER_ID.to_string(),
-        offering_ids: vec![crate::provider::GO_OFFERING_ID.to_string()],
         refresh_status: refreshed.refresh_status,
         multiplier_changes: refreshed.multiplier_changes,
         official_content_hash: refreshed.official_content_hash,
@@ -529,7 +514,6 @@ fn provider_refresh_from_go(refreshed: PricingRefresh) -> ProviderPricingRefresh
 fn provider_refresh_result(
     state: &CoreState,
     provider_id: &str,
-    offering_ids: Vec<String>,
     refresh_status: PricingRefreshStatus,
     multiplier_changes: Vec<PricingMultiplierChange>,
     official_content_hash: Option<String>,
@@ -538,7 +522,6 @@ fn provider_refresh_result(
 ) -> ProviderPricingRefresh {
     ProviderPricingRefresh {
         provider_id: provider_id.to_string(),
-        offering_ids,
         refresh_status,
         multiplier_changes,
         official_content_hash,
@@ -554,7 +537,7 @@ fn provider_refresh_result(
 fn provider_pricing_from_snapshot(
     state: &CoreState,
     provider_id: String,
-    offering_id: String,
+
     availability: PricingAvailability,
     pricing: &kernel_pricing::PricingSnapshot,
     scoped: Option<&crate::pricing::ProviderScopedPricingSnapshot>,
@@ -569,7 +552,6 @@ fn provider_pricing_from_snapshot(
     };
     ProviderPricing {
         provider_id,
-        offering_id,
         availability,
         snapshot: (availability == PricingAvailability::Available && is_go)
             .then(|| map_kernel_snapshot(state, pricing)),
@@ -820,9 +802,7 @@ mod tests {
     use super::*;
     use crate::crypto::{KeyCipher, StaticKeyCipher};
     use crate::db::Database;
-    use crate::provider::{
-        COMMAND_CODE_PROVIDER_ID, GO_OFFERING_ID, GOAT_OFFERING_ID, OPENCODE_PROVIDER_ID,
-    };
+    use crate::provider::{COMMAND_CODE_PROVIDER_ID, OPENCODE_PROVIDER_ID};
     use crate::state::CoreStateInner;
     use std::sync::Arc;
 
@@ -849,7 +829,6 @@ mod tests {
         let go = provider_pricing_from_snapshot(
             &state,
             OPENCODE_PROVIDER_ID.into(),
-            GO_OFFERING_ID.into(),
             PricingAvailability::Available,
             captured.as_ref(),
             None,
@@ -864,7 +843,6 @@ mod tests {
         let goat = provider_pricing_from_snapshot(
             &state,
             COMMAND_CODE_PROVIDER_ID.into(),
-            GOAT_OFFERING_ID.into(),
             PricingAvailability::Unavailable,
             captured.as_ref(),
             None,

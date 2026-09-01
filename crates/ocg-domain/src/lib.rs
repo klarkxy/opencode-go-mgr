@@ -3,6 +3,7 @@
 
 pub mod account;
 pub mod catalog;
+pub mod dynamic;
 pub mod ids;
 pub mod protocol;
 pub mod provider;

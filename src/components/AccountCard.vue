@@ -423,9 +423,7 @@ const emit = defineEmits<{
 
 const isZen = computed(() => isZenFreeAccount(props.account));
 const isCpa = computed(() => isCpaIntegrationAccount(props.account));
-const isGo = computed(() => (
-  props.account.provider_id === "opencode" && props.account.offering_id === "go"
-));
+const isGo = computed(() => props.account.provider_id === "opencode");
 const isCustom = computed(() => isCustomApiAccount(props.account));
 const isOfficialCn = computed(() => isOfficialCnPlanAccount(props.account));
 const hasValidityPeriod = computed(() => (
@@ -446,7 +444,6 @@ const canSavePurchaseDate = computed(() => (
 ));
 const plan = computed(() => props.catalog?.find((entry) => (
   entry.provider_id === props.account.provider_id
-  && entry.offering_id === props.account.offering_id
 )));
 // Manual calibration display is catalog-driven: no hardcoded per-plan meters.
 const manualUsageCalibration = computed(() => (

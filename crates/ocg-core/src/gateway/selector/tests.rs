@@ -22,7 +22,7 @@ fn account(id: &str, enabled: bool, cooldown: Option<chrono::DateTime<Utc>>) -> 
     Account {
         id: id.into(),
         provider_id: crate::provider::default_provider_id(),
-        offering_id: crate::provider::default_offering_id(),
+
         credential_kind: crate::provider::default_credential_kind(),
         quota_scope: crate::provider::default_quota_scope(),
         name: id.into(),
@@ -148,7 +148,7 @@ fn local_usage_does_not_exclude_only_account() {
         account_name: "estimated-full".into(),
         route_account_id: None,
         provider_id: None,
-        offering_id: None,
+
         credential_account_id: None,
         client_key_id: None,
         client_key_name: None,
@@ -198,7 +198,6 @@ fn local_usage_does_not_exclude_only_account() {
 fn one_free_cooldown_exhausts_the_whole_free_channel() {
     let mut cooled = account(crate::provider::ZEN_FREE_ACCOUNT_ID, false, None);
     cooled.provider_id = crate::provider::OPENCODE_ZEN_FREE_PROVIDER_ID.to_string();
-    cooled.offering_id = crate::provider::ANONYMOUS_FREE_OFFERING_ID.to_string();
     cooled.credential_kind = crate::provider::CredentialKind::None;
     cooled.quota_scope = crate::provider::QuotaScope::EgressIp;
     cooled.key_cipher.clear();
@@ -253,7 +252,6 @@ fn free_channel_exhaustion_uses_injected_wall() {
     let wall = frozen_wall();
     let mut cooled = account(crate::provider::ZEN_FREE_ACCOUNT_ID, false, None);
     cooled.provider_id = crate::provider::OPENCODE_ZEN_FREE_PROVIDER_ID.to_string();
-    cooled.offering_id = crate::provider::ANONYMOUS_FREE_OFFERING_ID.to_string();
     cooled.credential_kind = crate::provider::CredentialKind::None;
     cooled.quota_scope = crate::provider::QuotaScope::EgressIp;
     cooled.key_cipher.clear();
@@ -297,7 +295,6 @@ fn disabled_zen_free_exhaustion_expires_at_exact_deadline() {
     let wall = frozen_wall();
     let mut cooled = account(crate::provider::ZEN_FREE_ACCOUNT_ID, false, None);
     cooled.provider_id = crate::provider::OPENCODE_ZEN_FREE_PROVIDER_ID.to_string();
-    cooled.offering_id = crate::provider::ANONYMOUS_FREE_OFFERING_ID.to_string();
     cooled.credential_kind = crate::provider::CredentialKind::None;
     cooled.quota_scope = crate::provider::QuotaScope::EgressIp;
     cooled.key_cipher.clear();

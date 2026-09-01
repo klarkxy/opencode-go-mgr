@@ -32,11 +32,8 @@ pub(crate) const GOAT_ACCOUNT_KEY: &str = "v2-secret-KEY-9f3a2c1b-goat";
 pub(crate) const CUSTOM_ACCOUNT_KEY: &str = "v2-secret-KEY-9f3a2c1b-custom";
 
 pub(crate) const OPENCODE_PROVIDER_ID: &str = "opencode";
-pub(crate) const GO_OFFERING_ID: &str = "go";
 pub(crate) const COMMAND_CODE_PROVIDER_ID: &str = "command-code";
-pub(crate) const GOAT_OFFERING_ID: &str = "goat";
 pub(crate) const CUSTOM_PROVIDER_ID: &str = "custom";
-pub(crate) const CUSTOM_OFFERING_ID: &str = "api";
 pub(crate) const CUSTOM_UNROUTABLE_MODEL_ID: &str = "custom-unroutable-model";
 
 pub(crate) const GO_ALIAS: &str = "deepseek-v4-flash";
@@ -250,7 +247,6 @@ impl V2Harness {
         let (status, body) = self
             .create_account(json!({
                 "provider_id": OPENCODE_PROVIDER_ID,
-                "offering_id": GO_OFFERING_ID,
                 "name": name,
                 "key": key,
                 "expected_revision": revision
@@ -413,15 +409,11 @@ pub(crate) async fn start_v2_with_disconnect_upstream() -> V2Harness {
     }
 }
 
-pub(crate) fn catalog_entry<'a>(
-    catalog: &'a Value,
-    provider_id: &str,
-    offering_id: &str,
-) -> Option<&'a Value> {
+pub(crate) fn catalog_entry<'a>(catalog: &'a Value, provider_id: &str) -> Option<&'a Value> {
     catalog
         .as_array()?
         .iter()
-        .find(|entry| entry["provider_id"] == provider_id && entry["offering_id"] == offering_id)
+        .find(|entry| entry["provider_id"] == provider_id || entry["providerId"] == provider_id)
 }
 
 pub(crate) fn catalog_aliases(entry: &Value) -> Vec<Value> {
@@ -465,7 +457,6 @@ pub(crate) fn custom_create_payload(
     let endpoint_url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
     json!({
         "provider_id": CUSTOM_PROVIDER_ID,
-        "offering_id": CUSTOM_OFFERING_ID,
         "name": name,
         "key": key,
         "expected_revision": revision,
@@ -480,14 +471,13 @@ pub(crate) fn custom_create_payload(
     })
 }
 
-pub(crate) fn overlapping_raw_ids(catalog: &Value) -> Vec<(String, Vec<(String, String)>)> {
-    let mut by_raw: HashMap<String, Vec<(String, String)>> = HashMap::new();
+pub(crate) fn overlapping_raw_ids(catalog: &Value) -> Vec<(String, Vec<String>)> {
+    let mut by_raw: HashMap<String, Vec<String>> = HashMap::new();
     let Some(entries) = catalog.as_array() else {
         return Vec::new();
     };
     for entry in entries {
         let provider = entry["provider_id"].as_str().unwrap_or_default();
-        let offering = entry["offering_id"].as_str().unwrap_or_default();
         for alias in catalog_aliases(entry) {
             let raw = alias["upstream_model"]
                 .as_str()
@@ -496,7 +486,7 @@ pub(crate) fn overlapping_raw_ids(catalog: &Value) -> Vec<(String, Vec<(String, 
                 by_raw
                     .entry(raw.to_string())
                     .or_default()
-                    .push((provider.to_string(), offering.to_string()));
+                    .push(provider.to_string());
             }
         }
     }

@@ -24,9 +24,9 @@ Session-protected (non-exhaustive; see `dashboard_v3/mod.rs`):
 `/contract`, `/connection`, `/settings`, `/settings/test-proxy`,
 `/claude-desktop/models`, `/settings/check-update`,
 `/settings/update-status`, `/settings/install-update`,
-`/providers/{provider_id}/{offering_id}/pricing`,
+`/providers/{provider_id}/pricing`,
 `/providers/{provider_id}/pricing/refresh`,
-`/providers/opencode/go/pricing/multipliers`, `/keys`,
+`/providers/{provider_id}/pricing/multipliers`, `/keys`,
 `/keys/primary/regenerate`, `/keys/{id}`, `/keys/{id}/regenerate`,
 `/accounts`, `/accounts/managed`, `/accounts/order`, `/accounts/{id}`,
 `/accounts/{id}/toggle`, `/accounts/{id}/browser`,
@@ -35,7 +35,8 @@ Session-protected (non-exhaustive; see `dashboard_v3/mod.rs`):
 `/accounts/{id}/custom-config`, `/accounts/{id}/model-capabilities`,
 `/accounts/{id}/acknowledgements`, `/accounts/{id}/usage`,
 `/accounts/{id}/usage/refresh`, `/accounts/{id}/provider-usage`,
-`/accounts/{id}/verify`, `/providers`, `/providers/model-capabilities`,
+`/accounts/{id}/verify`, `/providers`, `/providers/{provider_id}`,
+`/providers/models/discover`, `/providers/test`, `/providers/model-capabilities`,
 `/providers/zen-free`, `/providers/zen-free/models`,
 `/providers/zen-free/models/refresh`,
 `/providers/{provider_id}/models/refresh`, `/provider-contracts`,
@@ -52,7 +53,10 @@ Go/Zen protocol probes are `POST /providers/{provider_id}/protocol-probes`.
 Custom is rejected there (`protocol probes for Custom API are account-owned`).
 The historical V2 `POST /accounts/{id}/protocol-probes` is 410. Custom
 connection verify is `POST /accounts/{id}/verify`; model discovery is the
-operational `POST /custom/models/discover`.
+operational `POST /custom/models/discover`. User-defined Providers use
+`POST /providers`, `GET|PATCH|DELETE /providers/{provider_id}`,
+`POST /providers/models/discover`, and `POST /providers/test`. Discovery and
+test never gate save; a real test may consume upstream quota.
 
 ## Static dashboard
 

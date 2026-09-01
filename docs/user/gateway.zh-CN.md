@@ -53,7 +53,7 @@ Gateway API 必须携带 **Key**，支持 `Authorization: Bearer <key>`、`x-api
 - `resolved_alias` — 存在时解析出的公开 Alias
 - `upstream_model` — 实际发送到该账号上游的精确模型 ID
 
-以及 `provider_id` 与 `offering_id`。原生成本字段可选。
+以及 `provider_id`。原生成本字段可选。
 
 Claude Desktop 仍是独立的三角色别名层（`claude-sonnet-4-6`、`claude-opus-4-6`、`claude-haiku-4-5-20251001`），先改写为 **应用** 视图保存的映射，再进入 Alias 解析。`GET /claude-desktop/v1/models` 仍然只公布这三个角色别名，而不是 Plan 模型并集。
 

@@ -2,7 +2,7 @@
 
 # Architecture Diagrams
 
-These are text maps of a single local node, current as of HEAD. Live routes: OpenCode Go, Zen Free, Command Code GOAT, MiniMax CN Token Plan, Kimi Code CN, and Custom API. Each diagram points to the chapter that owns the details; when a picture and a chapter disagree, trust the chapter and the code.
+These are text maps of a single local node, current as of HEAD. Live routes: OpenCode Go, Zen Free, Command Code GOAT, MiniMax CN Token Plan, Kimi Code CN, Custom API, and any user-defined Providers created on **Providers**. Each diagram points to the chapter that owns the details; when a picture and a chapter disagree, trust the chapter and the code.
 
 ## Contents
 
@@ -39,7 +39,7 @@ Desktop, CLI, and Docker are just three ways to host the same `ocg-core` process
                    \                      /
                     \                    /
              +----------------+------------------+
-             |         SQLite schema v34         |
+             |         SQLite schema v35         |
              |  GUI  ~/.ocg-mgr                  |
              |  CLI  ~/.ocg-mgr-cli              |
              +-----------------------------------+
@@ -84,7 +84,7 @@ Auth, aliases, selection, and breakers: [Gateway](gateway.md),
 
 ## Plans
 
-Every account card is one Plan (`provider_id` + `offering_id`). All six families are live and routable.
+Every account card is one Plan (`provider_id` only). Built-in families and any user-defined Providers you create are live and routable.
 
 ```text
   LIVE (routable)
@@ -104,6 +104,10 @@ Every account card is one Plan (`provider_id` + `offering_id`). All six families
   Custom API
     one trusted-admin HTTP/HTTPS API URL: root, /v1 base, or compatible complete Endpoint
     one upstream protocol; auth is derived automatically
+  User-defined Provider
+    typed definition on Providers; binds Configurable HTTP
+    Endpoint/protocol/auth/mappings are Provider-owned
+    account Key/enablement/order stay on Accounts; unpriced/unknown usage
 
 
   Custom API lifecycle
@@ -147,7 +151,7 @@ The sidebar has seven views. `browser` is a hosted-session overlay, not a hidden
 
     AI client --Key--> this node --account credential--> Plan
 
-    Key            access_keys (current schema v34)
+    Key            access_keys (current schema v35)
                    Primary + optional sub keys (64 active cap)
     Account cred   Go key, Custom key, or Zen Free (none)
 ```

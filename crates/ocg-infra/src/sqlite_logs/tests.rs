@@ -1,7 +1,7 @@
 use super::*;
 use rusqlite::types::Value;
 
-const FORWARD_INSERT_COLUMNS: [&str; 39] = [
+const FORWARD_INSERT_COLUMNS: [&str; 38] = [
     "timestamp",
     "model",
     "account_id",
@@ -10,7 +10,6 @@ const FORWARD_INSERT_COLUMNS: [&str; 39] = [
     "client_key_name",
     "route_account_id",
     "provider_id",
-    "offering_id",
     "credential_account_id",
     "status",
     "http_status",
@@ -54,7 +53,6 @@ const V26_LOG_DDL: &str = "
             client_key_name TEXT,
             route_account_id TEXT,
             provider_id TEXT,
-            offering_id TEXT,
             credential_account_id TEXT,
             status TEXT NOT NULL,
             http_status INTEGER,
@@ -118,7 +116,6 @@ fn sentinel_insert_row() -> ForwardLogInsertRow<'static> {
         client_key_name: Some("keyname-6"),
         route_account_id: Some("route-acct-7"),
         provider_id: Some("prov-8"),
-        offering_id: Some("off-9"),
         credential_account_id: Some("cred-10"),
         status: "status-11",
         http_status: Some(12),
@@ -152,7 +149,7 @@ fn sentinel_insert_row() -> ForwardLogInsertRow<'static> {
     }
 }
 
-fn expected_insert_values() -> [Value; 39] {
+fn expected_insert_values() -> [Value; 38] {
     [
         text("ts-1"),
         text("model-2"),
@@ -162,7 +159,6 @@ fn expected_insert_values() -> [Value; 39] {
         text("keyname-6"),
         text("route-acct-7"),
         text("prov-8"),
-        text("off-9"),
         text("cred-10"),
         text("status-11"),
         Value::Integer(12),
@@ -269,7 +265,7 @@ fn insert_forward_log_round_trips_every_column_in_binding_order() {
     let lists = parenthesized_lists(INSERT_FORWARD_LOG_SQL);
     assert_eq!(lists.len(), 2, "{lists:?}");
     assert_eq!(lists[0], FORWARD_INSERT_COLUMNS);
-    let expected_placeholders: Vec<String> = (1..=39).map(|index| format!("?{index}")).collect();
+    let expected_placeholders: Vec<String> = (1..=38).map(|index| format!("?{index}")).collect();
     assert_eq!(lists[1], expected_placeholders);
 
     let conn = v26_conn();
@@ -441,10 +437,10 @@ fn update_and_patch_missing_rows_return_zero() {
     };
     assert_eq!(update_forward_log(&conn, &coalesced).unwrap(), 1);
     let after = select_forward_columns(&conn, id);
-    assert_eq!(after[11], Value::Integer(12), "http_status COALESCE");
-    assert_eq!(after[26], text("err-27"), "error_message COALESCE");
-    assert_eq!(after[29], text("src-30"), "error_source COALESCE");
-    assert_eq!(after[10], text("streaming"));
+    assert_eq!(after[10], Value::Integer(12), "http_status COALESCE");
+    assert_eq!(after[25], text("err-27"), "error_message COALESCE");
+    assert_eq!(after[28], text("src-30"), "error_source COALESCE");
+    assert_eq!(after[9], text("streaming"));
     assert_eq!(
         patch_forward_log_identity(
             &conn,
@@ -462,12 +458,12 @@ fn update_and_patch_missing_rows_return_zero() {
         1
     );
     let patched = select_forward_columns(&conn, id);
-    assert_eq!(patched[33], text("patched-model"));
-    assert_eq!(patched[34], text("patched-alias"));
-    assert_eq!(patched[35], text("patched-up"));
-    assert_eq!(patched[36], Value::Real(9.25));
-    assert_eq!(patched[37], text("usd"));
-    assert_eq!(patched[38], text("USD"));
+    assert_eq!(patched[32], text("patched-model"));
+    assert_eq!(patched[33], text("patched-alias"));
+    assert_eq!(patched[34], text("patched-up"));
+    assert_eq!(patched[35], Value::Real(9.25));
+    assert_eq!(patched[36], text("usd"));
+    assert_eq!(patched[37], text("USD"));
 }
 
 #[test]

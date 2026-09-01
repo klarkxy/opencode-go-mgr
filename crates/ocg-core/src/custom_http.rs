@@ -410,7 +410,36 @@ impl CustomHttpClient {
         body: Option<Vec<u8>>,
         request_timeout: Option<Duration>,
     ) -> Result<reqwest::Response, CustomHttpError> {
-        if header_map_contains_forbidden_client_credentials(&extra_headers, scheme) {
+        self.send_isolated_optional(
+            method,
+            url,
+            Some((scheme, api_key)),
+            extra_headers,
+            body,
+            request_timeout,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn send_isolated_optional(
+        &self,
+        method: reqwest::Method,
+        url: reqwest::Url,
+        auth: Option<(UpstreamAuthScheme, &str)>,
+        extra_headers: HeaderMap,
+        body: Option<Vec<u8>>,
+        request_timeout: Option<Duration>,
+    ) -> Result<reqwest::Response, CustomHttpError> {
+        let forbidden = match auth {
+            Some((scheme, _)) => {
+                header_map_contains_forbidden_client_credentials(&extra_headers, scheme)
+            }
+            None => extra_headers
+                .keys()
+                .any(|name| FORBIDDEN_CLIENT_HEADERS.contains(&name.as_str())),
+        };
+        if forbidden {
             return Err(CustomHttpError::InvalidUrl(
                 "Custom upstream request must not forward dashboard or client credentials"
                     .to_string(),
@@ -420,7 +449,7 @@ impl CustomHttpClient {
             .send(InferenceHttpRequest {
                 method,
                 url,
-                auth: Some((scheme, api_key)),
+                auth,
                 extra_headers,
                 body,
                 request_timeout,

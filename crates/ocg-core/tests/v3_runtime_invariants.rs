@@ -13,9 +13,8 @@ use ocg_core::db::Database;
 use ocg_core::gateway;
 use ocg_core::models::{Account, ProxyMode, RoutingMode, UsageWindowKind};
 use ocg_core::provider::{
-    COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM, COMMAND_CODE_PROVIDER_ID, CUSTOM_API_OFFERING_ID,
-    CUSTOM_PROVIDER_ID, GOAT_OFFERING_ID, OPENCODE_PROVIDER_ID, UpstreamProtocolKind,
-    ZEN_FREE_ACCOUNT_ID,
+    COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM, COMMAND_CODE_PROVIDER_ID, CUSTOM_PROVIDER_ID,
+    OPENCODE_PROVIDER_ID, UpstreamProtocolKind, ZEN_FREE_ACCOUNT_ID,
 };
 use ocg_core::provider_contracts::{ContractScope, ProtocolOverrideState};
 use ocg_core::state::CoreStateInner;
@@ -118,7 +117,7 @@ fn go_state_with_keys_and_clock(
         let account = Account {
             id: format!("acct-{}", idx + 1),
             provider_id: ocg_core::provider::default_provider_id(),
-            offering_id: ocg_core::provider::default_offering_id(),
+
             credential_kind: ocg_core::provider::default_credential_kind(),
             quota_scope: ocg_core::provider::default_quota_scope(),
             name: format!("acct-{}", idx + 1),
@@ -792,7 +791,6 @@ async fn create_verified_custom(
             "expectedRevision": state.settings_revision(),
             "processGeneration": state.process_generation(),
             "providerId": CUSTOM_PROVIDER_ID,
-            "offeringId": CUSTOM_API_OFFERING_ID,
             "name": name,
             "key": key,
             "customConfig": {
@@ -845,7 +843,7 @@ fn insert_disabled_offering(
     source_id: &str,
     account_id: &str,
     provider_id: &str,
-    offering_id: &str,
+
     key: &str,
 ) {
     let mut account = state
@@ -856,7 +854,6 @@ fn insert_disabled_offering(
         .expect("source account");
     account.id = account_id.to_string();
     account.provider_id = provider_id.to_string();
-    account.offering_id = offering_id.to_string();
     account.name = account_id.to_string();
     account.key_cipher = state.encrypt_key(key).unwrap();
     account.enabled = false;
@@ -1067,7 +1064,6 @@ async fn disabled_goat_is_skipped_and_unavailable_raw_has_no_route() {
         "acct-1",
         "goat-disabled",
         COMMAND_CODE_PROVIDER_ID,
-        GOAT_OFFERING_ID,
         "goat-key",
     );
     state

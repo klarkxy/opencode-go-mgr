@@ -38,8 +38,8 @@ OCG Manager 文档按读者拆分：打开与你角色匹配的那本指南即�
 | 模型推荐/已验证协议表 | `crates/ocg-domain/src/protocol.rs`（`MODEL_PROTOCOLS`）；转换内核 `crates/ocg-gateway/src/protocol.rs`；宿主 parse/stream `crates/ocg-core/src/gateway/protocol.rs`；[`user/protocol-conversion.md`](user/protocol-conversion.md) / [`user/protocol-conversion.zh-CN.md`](user/protocol-conversion.zh-CN.md) 镜像该表 |
 | 模型上下文/输入/推理能力表 | `src/views/application-guides.ts`（`APPLICATION_MODEL_METADATA`）；[`user/applications.md`](user/applications.md) / [`user/applications.zh-CN.md`](user/applications.zh-CN.md) 镜像该表 |
 | 面板 HTTP API | `crates/ocg-core/src/dashboard_v3/` 挂载于 `/dashboard/api/v3`；冻结契约 `schema/dashboard-api-v3.schema.json`；SPA 客户端 `src/api/dashboard-v3.ts` + 投影 `src/api/dashboard.ts` / `src/api/providers.ts` + 契约类型 `src/api/generated/dashboard-v3.ts`。组成根 `crates/ocg-core/src/host_router.rs`。受保护未版本化 `/dashboard/api` REST 返回结构化 `410`；auth/session、browser WebSocket 与推理入口语义独立。 |
-| 接入凭证 | SQLite `access_keys`（当前 schema v34，v27 引入），经 `crates/ocg-core/src/gateway_keys.rs` 与 `dashboard_v3/keys.rs`。主 Key id 为 `PRIMARY_KEY_ID`。历史 `sub_gateway_keys` 不是现行权威 |
-| SQLite 库版本 | `crates/ocg-core/src/db.rs`（`CURRENT_SCHEMA_VERSION = 34`）；升级/备份/回滚约定：[maintainer/storage-migration.zh-CN.md](maintainer/storage-migration.zh-CN.md) |
+| 接入凭证 | SQLite `access_keys`（当前 schema v35，v27 引入），经 `crates/ocg-core/src/gateway_keys.rs` 与 `dashboard_v3/keys.rs`。主 Key id 为 `PRIMARY_KEY_ID`。历史 `sub_gateway_keys` 不是现行权威 |
+| SQLite 库版本 | `crates/ocg-core/src/db.rs`（`CURRENT_SCHEMA_VERSION = 35`）；升级/备份/回滚约定：[maintainer/storage-migration.zh-CN.md](maintainer/storage-migration.zh-CN.md) |
 | 发布产物、CI、签名 | [`maintainer/release-artifacts.md`](maintainer/release-artifacts.md) / [`maintainer/release-artifacts.zh-CN.md`](maintainer/release-artifacts.zh-CN.md)、[`maintainer/ci.md`](maintainer/ci.md) / [`maintainer/ci.zh-CN.md`](maintainer/ci.zh-CN.md)、[`maintainer/releasing.md`](maintainer/releasing.md) / [`maintainer/releasing.zh-CN.md`](maintainer/releasing.zh-CN.md) |
 | 当前版本钉 | `package.json` / workspace `Cargo.toml` / `src-tauri/tauri.conf.json` / `compose.example.yaml` |
 | 接入凭证文案 | 面板显示 **Key**（`DESIGN.md`、`src/theme.ts`），不使用 “Gateway Key” |
@@ -53,7 +53,7 @@ Docker 示例里的版本钉应与当前发版线一致（现为 **v2.0.0**）�
 1. **新用户** — README 快速开始 → 用户指南 `overview` → `architecture` → `install` → `first-client` → `accounts`（导入 Key / 托管 Beta）→ `providers`（目录、按模型覆盖、探测、范围内价格）→ `gateway` → `routing` → `applications` → `troubleshooting`。
 2. **Docker / CLI 运维** — 用户指南 `overview` → `architecture` → `docker` 与 `cli` → `accounts` → `providers` → `routing` → `logs-settings`；托管注册需要时启用 browser profile。
 3. **集成作者** — 上游先读用户指南 [`add-provider`](user/add-provider.zh-CN.md)，下游客户端先读 [`add-application`](user/add-application.zh-CN.md)，再读维护者指南 `extending` 了解仓库施工细节。
-4. **贡献者** — 维护者指南 `layout` → `development` → `architecture` → `state-and-lifecycle` → `http-routes` → `conventions`；编码时以 `AGENTS.md` 为准（V3 crate 拆分、`/dashboard/api/v3`、当前 schema v34、`access_keys`、托管向导、刷新额度、协议表、Key 命名）。未版本化 `/dashboard/api` REST 与 Tauri `invoke` 均不是当前面板路径。
+4. **贡献者** — 维护者指南 `layout` → `development` → `architecture` → `state-and-lifecycle` → `http-routes` → `conventions`；编码时以 `AGENTS.md` 为准（V3 crate 拆分、`/dashboard/api/v3`、当前 schema v35、`access_keys`、托管向导、刷新额度、协议表、Key 命名）。未版本化 `/dashboard/api` REST 与 Tauri `invoke` 均不是当前面板路径。
 5. **发版负责人** — 维护者指南 `release-artifacts` → `ci` → `releasing` → `known-debt`；发版前检查清单含托管回退与刷新额度路径。
 6. **UI / 主题** — 先读 `DESIGN.md`，再改 `src/theme.ts` 与对应 Vue 页面。
 

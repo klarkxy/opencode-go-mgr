@@ -10,8 +10,8 @@ use ocg_core::dashboard_v3::{
     ERROR_UNAUTHORIZED,
 };
 use ocg_core::provider::{
-    COMMAND_CODE_PROVIDER_ID, CUSTOM_API_OFFERING_ID, CUSTOM_PROVIDER_ID, GOAT_OFFERING_ID,
-    OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID, ZEN_FREE_ACCOUNT_ID,
+    COMMAND_CODE_PROVIDER_ID, CUSTOM_PROVIDER_ID, OPENCODE_PROVIDER_ID,
+    OPENCODE_ZEN_FREE_PROVIDER_ID, ZEN_FREE_ACCOUNT_ID,
 };
 use reqwest::{Method, StatusCode};
 use serde_json::{Map, Value, json};
@@ -610,7 +610,7 @@ async fn dashboard_v3_create_gates_for_go_custom_goat_and_zen() {
     let go = mutation_account(&go);
     assert!(go.enabled);
     assert_eq!(go.provider_id, OPENCODE_PROVIDER_ID);
-    assert_eq!(go.offering_id, "go");
+    assert_eq!(go.provider_id, OPENCODE_PROVIDER_ID);
     assert_eq!(
         go.verification_status,
         AccountVerificationStatus::NotRequired
@@ -628,7 +628,6 @@ async fn dashboard_v3_create_gates_for_go_custom_goat_and_zen() {
                 "name": "GOAT",
                 "key": "goat-key",
                 "providerId": COMMAND_CODE_PROVIDER_ID,
-                "offeringId": GOAT_OFFERING_ID
             }),
         ),
     )
@@ -652,7 +651,6 @@ async fn dashboard_v3_create_gates_for_go_custom_goat_and_zen() {
                 "name": "Custom",
                 "key": "custom-key",
                 "providerId": CUSTOM_PROVIDER_ID,
-                "offeringId": CUSTOM_API_OFFERING_ID
             }),
         ),
     )
@@ -669,7 +667,6 @@ async fn dashboard_v3_create_gates_for_go_custom_goat_and_zen() {
                 "name": "Custom",
                 "key": "custom-key",
                 "providerId": CUSTOM_PROVIDER_ID,
-                "offeringId": CUSTOM_API_OFFERING_ID,
                 "customConfig": custom_write(),
                 "modelCapabilities": [custom_capability()]
             }),
@@ -701,7 +698,6 @@ async fn dashboard_v3_create_gates_for_go_custom_goat_and_zen() {
                 "name": "Zen",
                 "key": "unused",
                 "providerId": OPENCODE_ZEN_FREE_PROVIDER_ID,
-                "offeringId": "anonymous-free"
             }),
         ),
     )
@@ -895,7 +891,6 @@ async fn dashboard_v3_custom_invalidation_ack_and_enable_gates() {
                 "name": "Custom",
                 "key": "custom-key",
                 "providerId": CUSTOM_PROVIDER_ID,
-                "offeringId": CUSTOM_API_OFFERING_ID,
                 "customConfig": custom_write(),
                 "modelCapabilities": [custom_capability()]
             }),
@@ -1066,7 +1061,6 @@ async fn dashboard_v3_custom_invalidation_ack_and_enable_gates() {
                 "name": "GOAT",
                 "key": "goat-key",
                 "providerId": COMMAND_CODE_PROVIDER_ID,
-                "offeringId": GOAT_OFFERING_ID
             }),
         ),
     )
@@ -1106,7 +1100,6 @@ async fn dashboard_v3_custom_config_and_capabilities_roll_back_together() {
                 "name": "Custom post-read",
                 "key": "custom-key",
                 "providerId": CUSTOM_PROVIDER_ID,
-                "offeringId": CUSTOM_API_OFFERING_ID,
                 "customConfig": custom_write(),
                 "modelCapabilities": [custom_capability()]
             }),
@@ -1180,7 +1173,6 @@ async fn dashboard_v3_capabilities_commit_advances_revision_before_post_read_fai
                 "name": "Capabilities post-read",
                 "key": "custom-key",
                 "providerId": CUSTOM_PROVIDER_ID,
-                "offeringId": CUSTOM_API_OFFERING_ID,
                 "customConfig": custom_write(),
                 "modelCapabilities": [custom_capability()]
             }),

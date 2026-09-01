@@ -2,7 +2,7 @@
 
 # Accounts
 
-Accounts is the tenant list. Every card binds one **Plan** (provider + offering)
+Accounts is the tenant list. Every card binds one **Plan** (`provider_id` only)
 and, when the Plan demands it, one credential. Quota authority is Plan-specific:
 OpenCode Go counts usage by account **Key**, Zen Free shares free cooldown by
 egress IP, and Custom API keeps no provider-side quota — one of the three has
@@ -14,8 +14,12 @@ pool.
 **Accounts** owns identity, the account **Key**, verification, enabled state,
 card order, managed registration, and available usage / cooldown state.
 Cards intentionally omit provider contracts and protocol details. Catalogs,
-protocol probes, per-model protocol overrides, and scoped pricing live on
-**Providers**, not here. Command Code exposes no machine-readable account-usage
+protocol probes, per-model protocol overrides, user-defined Provider
+Endpoint/protocol/mappings, and scoped pricing live on **Providers**, not here.
+A user-defined Provider account only stores Key (when auth requires it), notes,
+enablement, and runtime state. Custom API is the exception: that account still
+owns Endpoint, protocol, and model mappings. No-auth user-defined Providers
+expose one singleton account and reject a second. Command Code exposes no machine-readable account-usage
 endpoint, so GOAT cards show a clearly labelled local estimate: priced OCG
 request logs accumulate against the public `$14 / $35 / $70` windows. Traffic
 outside OCG and unpriced rows are not included; manual calibration can correct
@@ -42,8 +46,9 @@ characters and transfer it separately from the file; OCG Manager cannot recover
 it. The operation remains available only from the node's loopback dashboard;
 forwarded scheme headers do not grant access to a remote dashboard.
 
-The current V3 payload moves usable ordinary accounts and their stable IDs,
+The current V4 payload moves usable ordinary accounts and their stable IDs,
 ready account Keys, Custom Endpoint/public-model → upstream-ID mappings and verification state,
+user-defined Providers (`providerId` only),
 the primary and active sub Access Keys, portable routing/proxy settings, Zen
 Free enablement/catalog, and Provider catalogs, evidence, and protocol
 overrides. Matching stable IDs are merged with package-owned portable fields;
@@ -64,7 +69,7 @@ import-compatible. The outer encrypted envelope remains version 1 while the
 portable payload version evolves.
 
 Every persistent mutation path rejects `enabled=true` for a catalogued
-`routable=false` offering before it mutates the row, revision, or timestamps.
+`routable=false` Provider before it mutates the row, revision, or timestamps.
 Command Code GOAT does not use directory fetch as Key verification; an enabled,
 ready account with a non-empty Key can route models enabled in the Provider
 matrix. A newly created, routable Custom API account defaults to enabled.

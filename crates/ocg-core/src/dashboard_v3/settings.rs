@@ -316,17 +316,11 @@ fn proxy_supported_models(state: &CoreState) -> Vec<ProxySupportedModel> {
         }
     }
     let contracts = state.provider_contracts();
-    for (provider_id, offering_id) in [
-        (
-            crate::kernel::ids::MINIMAX_PROVIDER_ID,
-            crate::kernel::ids::MINIMAX_CN_OFFERING_ID,
-        ),
-        (
-            crate::kernel::ids::KIMI_PROVIDER_ID,
-            crate::kernel::ids::KIMI_CN_OFFERING_ID,
-        ),
+    for provider_id in [
+        crate::kernel::ids::MINIMAX_PROVIDER_ID,
+        crate::kernel::ids::KIMI_PROVIDER_ID,
     ] {
-        let Some(contract) = contracts.provider_offering(provider_id, offering_id) else {
+        let Some(contract) = contracts.provider_offering(provider_id) else {
             continue;
         };
         for id in &contract.catalog.models {

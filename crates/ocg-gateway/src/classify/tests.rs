@@ -1,17 +1,16 @@
 use super::*;
 use ocg_domain::ids::{
-    ANONYMOUS_FREE_OFFERING_ID, COMMAND_CODE_PROVIDER_ID, CUSTOM_API_OFFERING_ID,
-    CUSTOM_PROVIDER_ID, GO_OFFERING_ID, GOAT_OFFERING_ID,
+    COMMAND_CODE_PROVIDER_ID, CUSTOM_PROVIDER_ID, OPENCODE_PROVIDER_ID,
+    OPENCODE_ZEN_FREE_PROVIDER_ID,
 };
 
 fn classify(
     status: u16,
     provider_id: &str,
-    offering_id: &str,
     free_channel: bool,
     anonymous: bool,
 ) -> ProviderErrorClass {
-    classify_http(status, provider_id, offering_id, free_channel, anonymous)
+    classify_http(status, provider_id, free_channel, anonymous)
 }
 
 #[test]
@@ -42,43 +41,19 @@ fn provider_error_policy_covers_every_adapter_kind() {
 #[test]
 fn opencode_and_zen_401_passthrough_without_rotation() {
     assert_eq!(
-        classify(401, OPENCODE_PROVIDER_ID, GO_OFFERING_ID, false, false),
+        classify(401, OPENCODE_PROVIDER_ID, false, false),
         ProviderErrorClass::UnauthorizedPassthrough
     );
     assert_eq!(
-        classify(
-            401,
-            OPENCODE_ZEN_FREE_PROVIDER_ID,
-            ANONYMOUS_FREE_OFFERING_ID,
-            true,
-            true
-        ),
-        ProviderErrorClass::UnauthorizedPassthrough
-    );
-    assert_eq!(
-        classify(
-            401,
-            OPENCODE_PROVIDER_ID,
-            "not-a-catalog-offering",
-            false,
-            false
-        ),
+        classify(401, OPENCODE_ZEN_FREE_PROVIDER_ID, true, true),
         ProviderErrorClass::UnauthorizedPassthrough
     );
 }
 
 #[test]
 fn opencode_go_credits_401_rotates_but_model_and_unknown_401_passthrough() {
-    let classify_body = |body| {
-        classify_http_response(
-            401,
-            OPENCODE_PROVIDER_ID,
-            GO_OFFERING_ID,
-            false,
-            false,
-            body,
-        )
-    };
+    let classify_body =
+        |body| classify_http_response(401, OPENCODE_PROVIDER_ID, false, false, body);
     assert_eq!(
         classify_body(
             r#"{"type":"error","error":{"type":"CreditsError","message":"No active subscription"}}"#
@@ -113,40 +88,26 @@ fn opencode_go_credits_401_rotates_but_model_and_unknown_401_passthrough() {
 fn credits_error_refinement_is_go_only() {
     let body = r#"{"error":{"type":"CreditsError"}}"#;
     assert_eq!(
-        classify_http_response(
-            401,
-            OPENCODE_ZEN_FREE_PROVIDER_ID,
-            ANONYMOUS_FREE_OFFERING_ID,
-            true,
-            true,
-            body,
-        ),
+        classify_http_response(401, OPENCODE_ZEN_FREE_PROVIDER_ID, true, true, body),
         ProviderErrorClass::UnauthorizedPassthrough
     );
     assert_eq!(
-        classify_http_response(
-            401,
-            CUSTOM_PROVIDER_ID,
-            CUSTOM_API_OFFERING_ID,
-            false,
-            false,
-            body,
-        ),
+        classify_http_response(401, CUSTOM_PROVIDER_ID, false, false, body),
         ProviderErrorClass::UnauthorizedRotate
     );
 }
 
 #[test]
 fn ordinary_401_rotates_and_persists_auth_error() {
-    for (provider_id, offering_id) in [
-        (CUSTOM_PROVIDER_ID, CUSTOM_API_OFFERING_ID),
-        (COMMAND_CODE_PROVIDER_ID, GOAT_OFFERING_ID),
-        ("unknown-provider", "unknown-offering"),
+    for provider_id in [
+        CUSTOM_PROVIDER_ID,
+        COMMAND_CODE_PROVIDER_ID,
+        "unknown-provider",
     ] {
         assert_eq!(
-            classify(401, provider_id, offering_id, false, false),
+            classify(401, provider_id, false, false),
             ProviderErrorClass::UnauthorizedRotate,
-            "{provider_id}/{offering_id}"
+            "{provider_id}"
         );
     }
 }
@@ -154,43 +115,25 @@ fn ordinary_401_rotates_and_persists_auth_error() {
 #[test]
 fn go_zen_free_and_generic_429_policies() {
     assert_eq!(
-        classify(429, OPENCODE_PROVIDER_ID, GO_OFFERING_ID, false, false),
+        classify(429, OPENCODE_PROVIDER_ID, false, false),
         ProviderErrorClass::RateLimited {
             policy: RateLimitPolicy::GoWindow
         }
     );
     assert_eq!(
-        classify(
-            429,
-            OPENCODE_ZEN_FREE_PROVIDER_ID,
-            ANONYMOUS_FREE_OFFERING_ID,
-            true,
-            true
-        ),
+        classify(429, OPENCODE_ZEN_FREE_PROVIDER_ID, true, true),
         ProviderErrorClass::RateLimited {
             policy: RateLimitPolicy::ZenFreeShared
         }
     );
     assert_eq!(
-        classify(
-            429,
-            CUSTOM_PROVIDER_ID,
-            CUSTOM_API_OFFERING_ID,
-            false,
-            false
-        ),
+        classify(429, CUSTOM_PROVIDER_ID, false, false),
         ProviderErrorClass::RateLimited {
             policy: RateLimitPolicy::GenericFiveMinute
         }
     );
     assert_eq!(
-        classify(
-            429,
-            COMMAND_CODE_PROVIDER_ID,
-            GOAT_OFFERING_ID,
-            false,
-            false
-        ),
+        classify(429, COMMAND_CODE_PROVIDER_ID, false, false),
         ProviderErrorClass::RateLimited {
             policy: RateLimitPolicy::GenericFiveMinute
         }
@@ -209,19 +152,13 @@ fn go_zen_free_and_generic_429_policies() {
 #[test]
 fn generic_429_wins_over_free_channel_and_zen_go_channel_parses_windows() {
     assert_eq!(
-        classify(429, CUSTOM_PROVIDER_ID, CUSTOM_API_OFFERING_ID, true, false),
+        classify(429, CUSTOM_PROVIDER_ID, true, false),
         ProviderErrorClass::RateLimited {
             policy: RateLimitPolicy::GenericFiveMinute
         }
     );
     assert_eq!(
-        classify(
-            429,
-            OPENCODE_ZEN_FREE_PROVIDER_ID,
-            ANONYMOUS_FREE_OFFERING_ID,
-            false,
-            true
-        ),
+        classify(429, OPENCODE_ZEN_FREE_PROVIDER_ID, false, true),
         ProviderErrorClass::RateLimited {
             policy: RateLimitPolicy::GoWindow
         }
@@ -231,27 +168,15 @@ fn generic_429_wins_over_free_channel_and_zen_go_channel_parses_windows() {
 #[test]
 fn credentialed_403_rotates_anonymous_403_stops() {
     assert_eq!(
-        classify(403, OPENCODE_PROVIDER_ID, GO_OFFERING_ID, false, false),
+        classify(403, OPENCODE_PROVIDER_ID, false, false),
         ProviderErrorClass::ForbiddenRotate
     );
     assert_eq!(
-        classify(
-            403,
-            OPENCODE_ZEN_FREE_PROVIDER_ID,
-            ANONYMOUS_FREE_OFFERING_ID,
-            true,
-            true
-        ),
+        classify(403, OPENCODE_ZEN_FREE_PROVIDER_ID, true, true),
         ProviderErrorClass::ForbiddenStop
     );
     assert_eq!(
-        classify(
-            403,
-            CUSTOM_PROVIDER_ID,
-            CUSTOM_API_OFFERING_ID,
-            false,
-            false
-        ),
+        classify(403, CUSTOM_PROVIDER_ID, false, false),
         ProviderErrorClass::ForbiddenRotate
     );
 }
@@ -259,25 +184,19 @@ fn credentialed_403_rotates_anonymous_403_stops() {
 #[test]
 fn http_408_is_outcome_unknown_and_5xx_passthrough() {
     assert_eq!(
-        classify(408, OPENCODE_PROVIDER_ID, GO_OFFERING_ID, false, false),
+        classify(408, OPENCODE_PROVIDER_ID, false, false),
         ProviderErrorClass::HttpRequestTimeout
     );
     for status in [500, 502, 503, 599] {
         assert_eq!(
-            classify(status, OPENCODE_PROVIDER_ID, GO_OFFERING_ID, false, false),
+            classify(status, OPENCODE_PROVIDER_ID, false, false),
             ProviderErrorClass::ServerError,
             "{status}"
         );
     }
     for status in [400, 404, 413] {
         assert_eq!(
-            classify(
-                status,
-                CUSTOM_PROVIDER_ID,
-                CUSTOM_API_OFFERING_ID,
-                false,
-                false
-            ),
+            classify(status, CUSTOM_PROVIDER_ID, false, false),
             ProviderErrorClass::ClientError,
             "{status}"
         );

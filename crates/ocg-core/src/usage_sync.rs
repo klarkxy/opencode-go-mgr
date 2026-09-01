@@ -420,12 +420,12 @@ pub fn account_is_auto_sync_candidate(enabled: bool, setup_ready: bool, key_pres
 
 pub fn provider_account_is_auto_sync_candidate(
     provider_id: &str,
-    offering_id: &str,
+
     enabled: bool,
     setup_ready: bool,
     key_present: bool,
 ) -> bool {
-    supports_authoritative_auto_sync(provider_id, offering_id)
+    supports_authoritative_auto_sync(provider_id)
         && account_is_auto_sync_candidate(enabled, setup_ready, key_present)
 }
 
@@ -547,7 +547,7 @@ pub fn schedule_after_inference_429(state: &impl UsageSyncHost, account_id: &str
     let scheduled = state.with_sync_store(|store| {
         let supported = match store.get_account(account_id) {
             Ok(Some(account)) => {
-                supports_authoritative_auto_sync(&account.provider_id, &account.offering_id)
+                supports_authoritative_auto_sync(&account.provider_id)
             }
             Ok(None) => false,
             Err(error) => {
@@ -690,7 +690,6 @@ fn list_auto_candidates_on(
     for account in accounts {
         if !provider_account_is_auto_sync_candidate(
             &account.provider_id,
-            &account.offering_id,
             account.enabled,
             account.setup_step.is_ready(),
             !account.key_cipher.is_empty(),
@@ -992,7 +991,7 @@ async fn execute_official_usage_refresh(
             }
         }
     };
-    if !supports_authoritative_auto_sync(&account.provider_id, &account.offering_id) {
+    if !supports_authoritative_auto_sync(&account.provider_id) {
         return Err(OfficialUsageRefreshError::NotEligible(
             "verified official usage refresh is unavailable for this provider offering",
         ));

@@ -1,5 +1,6 @@
 use crate::crypto::KeyCipher;
 use crate::custom::validate_custom_endpoint_url;
+use crate::dynamic::DynamicProviderRuntime;
 use crate::kernel::ids::{PRIMARY_KEY_ID, PRIMARY_KEY_NAME};
 use crate::kernel::pricing::{
     PricingLimits, PricingSnapshot, ProviderPricingSnapshot, SEED_LIMITS,
@@ -13,6 +14,7 @@ use crate::provider_contracts::{
 };
 use anyhow::{Context, Result};
 use chrono::{DateTime, Duration, Local, NaiveDate, TimeZone, Utc};
+use ocg_domain::dynamic::{DynamicAuthKind, DynamicModelMapping};
 use ocg_infra::sqlite_logs::{
     ForwardLogIdentityPatch, ForwardLogInsertRow, ForwardLogUpdateRow, GatewayLogInsertRow,
 };
@@ -102,8 +104,30 @@ pub const PRE_V23_BACKUP_FILE_PREFIX: &str = "data.sqlite.pre-v23.";
 /// Fresh unique SQLite snapshot taken after a database has reached canonical
 /// v26 and before any v27 write. Not created for a brand-new empty database.
 pub const PRE_V3_BACKUP_FILE_PREFIX: &str = "data.sqlite.pre-v3.";
+/// Unique never-overwritten SQLite snapshot taken before a non-empty v34
+/// database is rewritten to provider-only identity in v35.
+pub const PRE_V35_BACKUP_FILE_PREFIX: &str = "data.sqlite.pre-v35.";
 /// Highest schema this binary can open or migrate. Newer databases fail closed.
-pub const CURRENT_SCHEMA_VERSION: i32 = 34;
+pub const CURRENT_SCHEMA_VERSION: i32 = 35;
+/// Canonical source schema for the v35 provider-identity rewrite.
+pub const V34_SCHEMA_VERSION: i32 = 34;
+/// Historical v34 offering IDs. Used only by v1–v34 SQL and the v35 preflight
+/// pair map; they are not re-exported from the domain catalog.
+const V34_OFFERING_GO: &str = "go";
+const V34_OFFERING_ANONYMOUS_FREE: &str = "anonymous-free";
+const V34_OFFERING_GOAT: &str = "goat";
+const V34_OFFERING_CN: &str = "cn";
+const V34_OFFERING_API: &str = "api";
+const V34_OFFERING_LOCAL: &str = "local";
+const V34_KNOWN_PROVIDER_OFFERING_PAIRS: &[(&str, &str)] = &[
+    (OPENCODE_PROVIDER_ID, V34_OFFERING_GO),
+    (OPENCODE_ZEN_FREE_PROVIDER_ID, V34_OFFERING_ANONYMOUS_FREE),
+    (COMMAND_CODE_PROVIDER_ID, V34_OFFERING_GOAT),
+    (MINIMAX_PROVIDER_ID, V34_OFFERING_CN),
+    (KIMI_PROVIDER_ID, V34_OFFERING_CN),
+    (CUSTOM_PROVIDER_ID, V34_OFFERING_API),
+    (CPA_PROVIDER_ID, V34_OFFERING_LOCAL),
+];
 pub const V27_SCHEMA_VERSION: i32 = 27;
 /// Schema the v27 rewrite expects as its committed source. Historical databases
 /// always migrate through this version first.
@@ -163,7 +187,6 @@ pub struct ForwardLogQueryOptions<'a> {
     pub status: Option<&'a str>,
     pub account_id: Option<&'a str>,
     pub provider_id: Option<&'a str>,
-    pub offering_id: Option<&'a str>,
     pub route_account_id: Option<&'a str>,
     pub credential_account_id: Option<&'a str>,
     pub model: Option<&'a str>,
@@ -218,7 +241,6 @@ pub struct ManagedKeyVerificationCas {
     pub key_cipher: String,
     pub updated_at: DateTime<Utc>,
     pub provider_id: String,
-    pub offering_id: String,
     pub account_type: AccountType,
     pub setup_step: AccountSetupStep,
 }
@@ -229,7 +251,6 @@ impl ManagedKeyVerificationCas {
             key_cipher: account.key_cipher.clone(),
             updated_at: account.updated_at,
             provider_id: account.provider_id.clone(),
-            offering_id: account.offering_id.clone(),
             account_type: account.account_type,
             setup_step: account.setup_step,
         }
@@ -1741,6 +1762,468 @@ fn migrate_to_v34(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+fn v34_pair_is_known(provider_id: &str, offering_id: &str) -> bool {
+    V34_KNOWN_PROVIDER_OFFERING_PAIRS
+        .iter()
+        .any(|(provider, offering)| *provider == provider_id && *offering == offering_id)
+}
+
+fn preflight_v35_pairs(conn: &Connection, table: &str, provider_nullable: bool) -> Result<()> {
+    if !table_exists(conn, table)? || !table_has_column(conn, table, "offering_id")? {
+        return Ok(());
+    }
+    let mut stmt = conn.prepare(&format!(
+        "SELECT DISTINCT provider_id, offering_id FROM {table}"
+    ))?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, Option<String>>(0)?,
+                row.get::<_, Option<String>>(1)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    for (provider_id, offering_id) in rows {
+        match (provider_id.as_deref(), offering_id.as_deref()) {
+            (None, None) if provider_nullable => continue,
+            (Some(provider), Some(offering)) if v34_pair_is_known(provider, offering) => continue,
+            (provider, offering) => anyhow::bail!(
+                "v35 preflight found unknown provider/offering pair in {table}: `{}`/`{}`",
+                provider.unwrap_or("<null>"),
+                offering.unwrap_or("<null>")
+            ),
+        }
+    }
+    Ok(())
+}
+
+fn preflight_v35_catalog_collisions(conn: &Connection) -> Result<()> {
+    if !table_exists(conn, "provider_model_catalogs")?
+        || !table_has_column(conn, "provider_model_catalogs", "offering_id")?
+    {
+        return Ok(());
+    }
+    let mut stmt = conn.prepare(
+        "SELECT provider_id, COUNT(*) FROM provider_model_catalogs
+         GROUP BY provider_id HAVING COUNT(*) > 1",
+    )?;
+    let collisions = stmt
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    anyhow::ensure!(
+        collisions.is_empty(),
+        "v35 preflight found provider_model_catalogs collisions collapsing onto provider_id: {collisions:?}"
+    );
+    Ok(())
+}
+
+fn preflight_v35_pricing_collisions(conn: &Connection) -> Result<()> {
+    if !table_exists(conn, "provider_pricing_snapshots")?
+        || !table_has_column(conn, "provider_pricing_snapshots", "offering_id")?
+    {
+        return Ok(());
+    }
+    let mut stmt = conn.prepare(
+        "SELECT provider_id, revision, COUNT(*) FROM provider_pricing_snapshots
+         GROUP BY provider_id, revision HAVING COUNT(*) > 1",
+    )?;
+    let collisions = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    anyhow::ensure!(
+        collisions.is_empty(),
+        "v35 preflight found provider_pricing_snapshots collisions collapsing onto (provider_id, revision): {collisions:?}"
+    );
+    Ok(())
+}
+
+fn preflight_v35_identity(conn: &Connection) -> Result<()> {
+    sqlite_quick_check(conn)?;
+    preflight_v35_pairs(conn, "accounts", false)?;
+    preflight_v35_pairs(conn, "forward_logs", true)?;
+    preflight_v35_pairs(conn, "provider_pricing_snapshots", false)?;
+    preflight_v35_pairs(conn, "provider_model_catalogs", false)?;
+    preflight_v35_catalog_collisions(conn)?;
+    preflight_v35_pricing_collisions(conn)?;
+    Ok(())
+}
+
+fn verify_pre_v35_backup(path: &Path) -> Result<()> {
+    sqlite_quick_check(&Connection::open_with_flags(
+        path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )?)?;
+    verify_schema_backup(path, PRE_V35_BACKUP_FILE_PREFIX, V34_SCHEMA_VERSION)?;
+    Ok(())
+}
+
+fn create_pre_v35_backup(conn: &Connection, db_path: &Path) -> Result<PathBuf> {
+    for _ in 0..8 {
+        let timestamp = Utc::now().format("%Y%m%dT%H%M%S%9fZ");
+        let backup_path =
+            db_path.with_file_name(format!("{PRE_V35_BACKUP_FILE_PREFIX}{timestamp}.bak"));
+        if backup_path.exists() {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+            continue;
+        }
+        let backup_value = backup_path.to_string_lossy().into_owned();
+        conn.execute("VACUUM main INTO ?1", [&backup_value])
+            .with_context(|| {
+                format!(
+                    "failed to create pre-v35 database backup {}",
+                    backup_path.display()
+                )
+            })?;
+        verify_pre_v35_backup(&backup_path)?;
+        write_backup_sha256_evidence(&backup_path)?;
+        return Ok(backup_path);
+    }
+    anyhow::bail!("failed to allocate a unique pre-v35 backup filename")
+}
+
+fn migrate_v35_body(tx: &Transaction<'_>) -> Result<()> {
+    if table_exists(tx, "forward_logs")? {
+        tx.execute_batch("DROP INDEX IF EXISTS idx_forward_logs_provider_offering;")?;
+    }
+
+    if table_exists(tx, "accounts")? && table_has_column(tx, "accounts", "offering_id")? {
+        tx.execute_batch("ALTER TABLE accounts DROP COLUMN offering_id;")?;
+    }
+
+    if table_exists(tx, "forward_logs")? && table_has_column(tx, "forward_logs", "offering_id")? {
+        tx.execute_batch("ALTER TABLE forward_logs DROP COLUMN offering_id;")?;
+        tx.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_forward_logs_provider ON forward_logs(provider_id);",
+        )?;
+    }
+
+    if table_exists(tx, "provider_model_catalogs")?
+        && table_has_column(tx, "provider_model_catalogs", "offering_id")?
+    {
+        tx.execute_batch(
+            "CREATE TABLE provider_model_catalogs_v35 (
+                provider_id TEXT PRIMARY KEY,
+                models_json TEXT NOT NULL,
+                refreshed_at TEXT,
+                source_url TEXT NOT NULL
+            );",
+        )?;
+        tx.execute(
+            "INSERT INTO provider_model_catalogs_v35
+             (provider_id, models_json, refreshed_at, source_url)
+             SELECT provider_id, models_json, refreshed_at, source_url
+             FROM provider_model_catalogs",
+            [],
+        )?;
+        tx.execute_batch(
+            "DROP TABLE provider_model_catalogs;
+             ALTER TABLE provider_model_catalogs_v35 RENAME TO provider_model_catalogs;",
+        )?;
+    }
+
+    if table_exists(tx, "provider_pricing_snapshots")?
+        && table_has_column(tx, "provider_pricing_snapshots", "offering_id")?
+    {
+        tx.execute_batch("DROP INDEX IF EXISTS idx_provider_pricing_active;")?;
+        tx.execute_batch(
+            "CREATE TABLE provider_pricing_snapshots_v35 (
+                provider_id TEXT NOT NULL,
+                revision TEXT NOT NULL,
+                activated_at TEXT NOT NULL,
+                document_updated_at TEXT,
+                source_url TEXT NOT NULL,
+                content_hash TEXT NOT NULL,
+                snapshot_json TEXT NOT NULL,
+                PRIMARY KEY (provider_id, revision)
+            );",
+        )?;
+        tx.execute(
+            "INSERT INTO provider_pricing_snapshots_v35
+             (provider_id, revision, activated_at, document_updated_at,
+              source_url, content_hash, snapshot_json)
+             SELECT provider_id, revision, activated_at, document_updated_at,
+                    source_url, content_hash, snapshot_json
+             FROM provider_pricing_snapshots",
+            [],
+        )?;
+        tx.execute_batch(
+            "DROP TABLE provider_pricing_snapshots;
+             ALTER TABLE provider_pricing_snapshots_v35 RENAME TO provider_pricing_snapshots;
+             CREATE INDEX IF NOT EXISTS idx_provider_pricing_active
+                 ON provider_pricing_snapshots(provider_id, activated_at DESC);",
+        )?;
+    }
+
+    ensure_dynamic_provider_tables(tx)?;
+    sqlite_quick_check(tx)?;
+    sqlite_foreign_key_check(tx)?;
+    Ok(())
+}
+
+fn dynamic_tx_fault(point: &'static str) -> Result<()> {
+    #[cfg(test)]
+    {
+        return dynamic_provider_fault::inject(point);
+    }
+    #[cfg(not(test))]
+    {
+        let _ = point;
+        Ok(())
+    }
+}
+
+fn list_dynamic_providers_on(conn: &Connection) -> Result<Vec<DynamicProviderRuntime>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, name, endpoint_url, upstream_protocol, auth_kind, created_at, updated_at
+         FROM dynamic_providers
+         ORDER BY created_at ASC, id ASC",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
+            row.get::<_, String>(4)?,
+            row.get::<_, String>(5)?,
+            row.get::<_, String>(6)?,
+        ))
+    })?;
+    let mut providers = Vec::new();
+    for row in rows {
+        let (id, name, endpoint_url, protocol, auth_kind, created_at, updated_at) = row?;
+        providers.push(load_dynamic_provider_runtime(
+            conn,
+            id,
+            name,
+            endpoint_url,
+            protocol,
+            auth_kind,
+            created_at,
+            updated_at,
+        )?);
+    }
+    Ok(providers)
+}
+
+fn get_dynamic_provider_on(
+    conn: &Connection,
+    provider_id: &str,
+) -> Result<Option<DynamicProviderRuntime>> {
+    let row = conn
+        .query_row(
+            "SELECT id, name, endpoint_url, upstream_protocol, auth_kind, created_at, updated_at
+             FROM dynamic_providers
+             WHERE lower(id) = lower(?1)",
+            [provider_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, String>(6)?,
+                ))
+            },
+        )
+        .optional()?;
+    let Some((id, name, endpoint_url, protocol, auth_kind, created_at, updated_at)) = row else {
+        return Ok(None);
+    };
+    Ok(Some(load_dynamic_provider_runtime(
+        conn,
+        id,
+        name,
+        endpoint_url,
+        protocol,
+        auth_kind,
+        created_at,
+        updated_at,
+    )?))
+}
+
+fn load_dynamic_provider_runtime(
+    conn: &Connection,
+    id: String,
+    name: String,
+    endpoint_url: String,
+    protocol: String,
+    auth_kind: String,
+    created_at: String,
+    updated_at: String,
+) -> Result<DynamicProviderRuntime> {
+    let upstream_protocol = ocg_domain::catalog::UpstreamProtocolKind::try_from(protocol.as_str())
+        .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+    let auth_kind = DynamicAuthKind::try_from(auth_kind.as_str())
+        .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+    let mut stmt = conn.prepare(
+        "SELECT public_model, upstream_model
+         FROM dynamic_provider_models
+         WHERE provider_id = ?1
+         ORDER BY public_model_key ASC",
+    )?;
+    let rows = stmt.query_map([&id], |row| {
+        Ok(DynamicModelMapping {
+            public_model: row.get(0)?,
+            upstream_model: row.get(1)?,
+        })
+    })?;
+    let mut mappings = Vec::new();
+    for row in rows {
+        mappings.push(row?);
+    }
+    Ok(DynamicProviderRuntime {
+        id,
+        name,
+        endpoint_url,
+        upstream_protocol,
+        auth_kind,
+        mappings,
+        created_at: DateTime::parse_from_rfc3339(&created_at)
+            .map(|value| value.with_timezone(&Utc))
+            .unwrap_or_else(|_| Utc::now()),
+        updated_at: DateTime::parse_from_rfc3339(&updated_at)
+            .map(|value| value.with_timezone(&Utc))
+            .unwrap_or_else(|_| Utc::now()),
+    })
+}
+
+fn insert_dynamic_provider_on(conn: &Connection, runtime: &DynamicProviderRuntime) -> Result<()> {
+    conn.execute(
+        "INSERT INTO dynamic_providers
+         (id, name, endpoint_url, upstream_protocol, auth_kind, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            runtime.id,
+            runtime.name,
+            runtime.endpoint_url,
+            runtime.upstream_protocol.as_str(),
+            runtime.auth_kind.as_str(),
+            runtime.created_at.to_rfc3339(),
+            runtime.updated_at.to_rfc3339(),
+        ],
+    )?;
+    insert_dynamic_provider_models_on(conn, &runtime.id, &runtime.mappings)
+}
+
+fn insert_dynamic_provider_models_on(
+    conn: &Connection,
+    provider_id: &str,
+    mappings: &[DynamicModelMapping],
+) -> Result<()> {
+    let mut stmt = conn.prepare(
+        "INSERT INTO dynamic_provider_models
+         (provider_id, public_model, public_model_key, upstream_model)
+         VALUES (?1, ?2, ?3, ?4)",
+    )?;
+    for mapping in mappings {
+        stmt.execute(params![
+            provider_id,
+            mapping.public_model,
+            mapping.public_model.to_ascii_lowercase(),
+            mapping.upstream_model,
+        ])?;
+    }
+    Ok(())
+}
+
+fn ensure_dynamic_provider_tables(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS dynamic_providers (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            endpoint_url TEXT NOT NULL,
+            upstream_protocol TEXT NOT NULL,
+            auth_kind TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+         );
+         CREATE TABLE IF NOT EXISTS dynamic_provider_models (
+            provider_id TEXT NOT NULL,
+            public_model TEXT NOT NULL,
+            public_model_key TEXT NOT NULL,
+            upstream_model TEXT NOT NULL,
+            PRIMARY KEY (provider_id, public_model_key),
+            FOREIGN KEY (provider_id) REFERENCES dynamic_providers(id)
+         );
+         CREATE INDEX IF NOT EXISTS idx_dynamic_provider_models_provider
+            ON dynamic_provider_models(provider_id);",
+    )?;
+    Ok(())
+}
+
+/// v35: collapse provider/offering identity onto provider_id. Historical
+/// v1–v34 migrations keep the offering_id column name; this rewrite is the
+/// first schema that omits it.
+fn migrate_to_v35(conn: &Connection, db_path: &Path, is_fresh: bool) -> Result<()> {
+    let version = schema_version_on(conn)?;
+    if version >= CURRENT_SCHEMA_VERSION {
+        return Ok(());
+    }
+    anyhow::ensure!(
+        version == V34_SCHEMA_VERSION,
+        "v35 requires a canonical schema v34 source, found {version}"
+    );
+    if !is_fresh {
+        create_pre_v35_backup(conn, db_path)?;
+    }
+    preflight_v35_identity(conn)?;
+    with_foreign_keys_off(conn, || {
+        let tx = Transaction::new_unchecked(conn, TransactionBehavior::Immediate)?;
+        let version_locked = schema_version_on(&tx)?;
+        if version_locked >= CURRENT_SCHEMA_VERSION {
+            tx.rollback()?;
+            return Ok(());
+        }
+        anyhow::ensure!(
+            version_locked == V34_SCHEMA_VERSION,
+            "v35 writer lock observed schema {version_locked}, expected {V34_SCHEMA_VERSION}"
+        );
+        preflight_v35_identity(&tx)?;
+        migrate_v35_body(&tx)?;
+        tx.execute_batch(&format!(
+            "INSERT OR REPLACE INTO schema_version (version) VALUES ({CURRENT_SCHEMA_VERSION});"
+        ))?;
+        tx.commit()?;
+        Ok(())
+    })
+}
+
+#[cfg(test)]
+pub(crate) mod dynamic_provider_fault {
+    use std::cell::Cell;
+
+    thread_local! {
+        static FAULT: Cell<Option<&'static str>> = const { Cell::new(None) };
+    }
+
+    pub(crate) fn install(point: &'static str) {
+        FAULT.set(Some(point));
+    }
+
+    pub(crate) fn clear() {
+        FAULT.set(None);
+    }
+
+    pub(crate) fn inject(point: &'static str) -> anyhow::Result<()> {
+        if FAULT.get() == Some(point) {
+            FAULT.set(None);
+            anyhow::bail!("injected dynamic provider fault at {point}");
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod v27_test_hooks {
     use super::V27MigrationFault;
@@ -1828,8 +2311,8 @@ fn insert_account_row(
     verification_status: ConnectionVerificationStatus,
 ) -> Result<()> {
     conn.execute(
-        "INSERT INTO accounts (id, name, username, password_cipher, key_cipher, enabled, referral_code, recharge_date, sort_order, cooldown_until, cooldown_generic_until, cooldown_5h_until, cooldown_week_until, cooldown_month_until, cooldown_free_until, last_error, auth_error, account_type, setup_step, notes, created_at, updated_at, provider_id, offering_id, credential_kind, quota_scope, verification_status, connection_verified_at, verification_error)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, (SELECT COALESCE(MAX(sort_order), -1) + 1 FROM accounts), ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, NULL, NULL)",
+        "INSERT INTO accounts (id, name, username, password_cipher, key_cipher, enabled, referral_code, recharge_date, sort_order, cooldown_until, cooldown_generic_until, cooldown_5h_until, cooldown_week_until, cooldown_month_until, cooldown_free_until, last_error, auth_error, account_type, setup_step, notes, created_at, updated_at, provider_id, credential_kind, quota_scope, verification_status, connection_verified_at, verification_error)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, (SELECT COALESCE(MAX(sort_order), -1) + 1 FROM accounts), ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, NULL, NULL)",
         params![
             account.id,
             account.name,
@@ -1853,7 +2336,6 @@ fn insert_account_row(
             account.created_at.to_rfc3339(),
             account.updated_at.to_rfc3339(),
             account.provider_id,
-            account.offering_id,
             account.credential_kind.as_str(),
             account.quota_scope.as_str(),
             verification_status.as_str(),
@@ -1876,15 +2358,11 @@ fn insert_import_account_on(conn: &Connection, record: &AccountImportRecord) -> 
         "Zen Free is database-owned and cannot be imported"
     );
     account.validate_provider_binding()?;
-    ensure_enabled_offering_is_routable(
-        &account.provider_id,
-        &account.offering_id,
-        account.enabled,
-    )?;
-    let plan = builtin_plan(&account.provider_id, &account.offering_id)
+    ensure_enabled_provider_is_routable(&account.provider_id, account.enabled)?;
+    let plan = builtin_provider(&account.provider_id)
         .ok_or_else(|| anyhow::anyhow!("unknown provider offering"))?;
     let verification_gates_enablement = plan.verification_policy == VerificationPolicy::Required
-        && ProviderRegistry::get(&account.provider_id, &account.offering_id)
+        && ProviderRegistry::get(&account.provider_id)
             .is_some_and(|descriptor| descriptor.card_actions.enable_requires_verification);
     anyhow::ensure!(
         !account.enabled
@@ -1957,15 +2435,11 @@ fn merge_import_account_on(conn: &Connection, record: &AccountImportRecord) -> R
     }
     let account = &record.account;
     account.validate_provider_binding()?;
-    ensure_enabled_offering_is_routable(
-        &account.provider_id,
-        &account.offering_id,
-        account.enabled,
-    )?;
-    let plan = builtin_plan(&account.provider_id, &account.offering_id)
+    ensure_enabled_provider_is_routable(&account.provider_id, account.enabled)?;
+    let plan = builtin_provider(&account.provider_id)
         .ok_or_else(|| anyhow::anyhow!("unknown provider offering"))?;
     let verification_gates_enablement = plan.verification_policy == VerificationPolicy::Required
-        && ProviderRegistry::get(&account.provider_id, &account.offering_id)
+        && ProviderRegistry::get(&account.provider_id)
             .is_some_and(|descriptor| descriptor.card_actions.enable_requires_verification);
     anyhow::ensure!(
         !account.enabled
@@ -2001,10 +2475,10 @@ fn merge_import_account_on(conn: &Connection, record: &AccountImportRecord) -> R
         "UPDATE accounts SET
              name = ?2, username = ?3, key_cipher = ?4, enabled = ?5,
              recharge_date = ?6, account_type = ?7, setup_step = ?8, notes = ?9,
-             provider_id = ?10, offering_id = ?11, credential_kind = ?12,
-             quota_scope = ?13, verification_status = ?14,
-             connection_verified_at = ?15, verification_error = NULL,
-             auth_error = NULL, last_error = NULL, updated_at = ?16
+             provider_id = ?10, credential_kind = ?11,
+             quota_scope = ?12, verification_status = ?13,
+             connection_verified_at = ?14, verification_error = NULL,
+             auth_error = NULL, last_error = NULL, updated_at = ?15
          WHERE id = ?1",
         params![
             account.id,
@@ -2017,7 +2491,6 @@ fn merge_import_account_on(conn: &Connection, record: &AccountImportRecord) -> R
             account.setup_step.as_str(),
             account.notes,
             account.provider_id,
-            account.offering_id,
             account.credential_kind.as_str(),
             account.quota_scope.as_str(),
             record.verification_status.as_str(),
@@ -2170,17 +2643,13 @@ fn refresh_goat_provider_catalog_on(conn: &Connection) -> Result<()> {
         "SELECT c.model_id
          FROM account_model_capabilities c
          INNER JOIN accounts a ON a.id = c.account_id
-         WHERE a.provider_id = ?1 AND a.offering_id = ?2
-           AND c.source = ?3
+         WHERE a.provider_id = ?1
+           AND c.source = ?2
            AND a.verification_status = 'verified'
          ORDER BY a.sort_order ASC, a.created_at ASC, a.id ASC, c.rowid ASC",
     )?;
     let rows = stmt.query_map(
-        params![
-            COMMAND_CODE_PROVIDER_ID,
-            GOAT_OFFERING_ID,
-            COMMAND_CODE_GOAT_MODELS_SOURCE
-        ],
+        params![COMMAND_CODE_PROVIDER_ID, COMMAND_CODE_GOAT_MODELS_SOURCE],
         |row| row.get::<_, String>(0),
     )?;
     let mut models = Vec::new();
@@ -2195,15 +2664,14 @@ fn refresh_goat_provider_catalog_on(conn: &Connection) -> Result<()> {
     let now = Utc::now();
     conn.execute(
         "INSERT INTO provider_model_catalogs
-         (provider_id, offering_id, models_json, refreshed_at, source_url)
-         VALUES (?1, ?2, ?3, ?4, ?5)
-         ON CONFLICT(provider_id, offering_id) DO UPDATE SET
+         (provider_id, models_json, refreshed_at, source_url)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(provider_id) DO UPDATE SET
              models_json = excluded.models_json,
              refreshed_at = excluded.refreshed_at,
              source_url = excluded.source_url",
         params![
             COMMAND_CODE_PROVIDER_ID,
-            GOAT_OFFERING_ID,
             serde_json::to_string(&models)?,
             now.to_rfc3339(),
             COMMAND_CODE_GOAT_BASE_URL,
@@ -2416,21 +2884,45 @@ fn migrate_legacy_usage_baselines(
 }
 
 /// Idempotent open/startup backstop: leftover `enabled=1` rows for every
-/// catalog plan with `routable=false` are forced off. Pairs come from
-/// [`BUILTIN_PLANS`]; Go, Zen, and unknown provider/offering rows are skipped.
+/// catalog plan with `routable=false` are forced off. Providers come from
+/// [`BUILTIN_PROVIDERS`]; Go, Zen, and unknown provider rows are skipped.
 fn disable_unroutable_catalog_accounts(tx: &Transaction<'_>) -> Result<()> {
     if !(table_has_column(tx, "accounts", "provider_id")?
-        && table_has_column(tx, "accounts", "offering_id")?
         && table_has_column(tx, "accounts", "enabled")?)
     {
         return Ok(());
     }
-    for plan in BUILTIN_PLANS.iter().filter(|plan| !plan.routable) {
+    for plan in BUILTIN_PROVIDERS.iter().filter(|plan| !plan.routable) {
         tx.execute(
             "UPDATE accounts SET enabled = 0
-             WHERE provider_id = ?1 AND offering_id = ?2 AND enabled <> 0",
-            params![plan.offering.provider_id, plan.offering.offering_id],
+             WHERE provider_id = ?1 AND enabled <> 0",
+            params![plan.provider_id],
         )?;
+    }
+    Ok(())
+}
+
+fn ensure_account_provider_binding(db: &Database, account: &Account) -> Result<()> {
+    if builtin_provider(&account.provider_id).is_some() {
+        account.validate_provider_binding()?;
+        ensure_enabled_provider_is_routable(&account.provider_id, account.enabled)?;
+        return Ok(());
+    }
+    let Some(runtime) = db.get_dynamic_provider(&account.provider_id)? else {
+        anyhow::bail!("unknown provider `{}`", account.provider_id);
+    };
+    anyhow::ensure!(
+        account.credential_kind == runtime.auth_kind.credential_kind()
+            && account.quota_scope == runtime.auth_kind.quota_scope(),
+        "provider binding does not match `{}`",
+        account.provider_id
+    );
+    if runtime.auth_kind.is_singleton() {
+        let count = db.count_accounts_for_provider(&runtime.id)?;
+        anyhow::ensure!(
+            count == 0,
+            "no-auth provider already has a singleton account"
+        );
     }
     Ok(())
 }
@@ -2482,6 +2974,8 @@ impl Database {
         migrate_to_v32(&db.conn)?;
         migrate_to_v33(&db.conn)?;
         migrate_to_v34(&db.conn)?;
+        migrate_to_v35(&db.conn, &db_path, is_fresh)?;
+        ensure_dynamic_provider_tables(&db.conn)?;
         Ok(db)
     }
 
@@ -3243,7 +3737,7 @@ impl Database {
                 if let Some((provider, offering, credential, scope)) = reserved_binding {
                     anyhow::ensure!(
                         provider == OPENCODE_ZEN_FREE_PROVIDER_ID
-                            && offering == ANONYMOUS_FREE_OFFERING_ID
+                            && offering == V34_OFFERING_ANONYMOUS_FREE
                             && credential == CredentialKind::None.as_str()
                             && scope == QuotaScope::EgressIp.as_str(),
                         "reserved Zen Free account id {ZEN_FREE_ACCOUNT_ID} is already used by a different account"
@@ -3292,7 +3786,7 @@ impl Database {
                     params![
                         ZEN_FREE_ACCOUNT_ID,
                         OPENCODE_ZEN_FREE_PROVIDER_ID,
-                        ANONYMOUS_FREE_OFFERING_ID,
+                        V34_OFFERING_ANONYMOUS_FREE,
                         CredentialKind::None.as_str(),
                         QuotaScope::EgressIp.as_str(),
                         0,
@@ -3316,7 +3810,7 @@ impl Database {
                     params![
                         ZEN_FREE_ACCOUNT_ID,
                         OPENCODE_ZEN_FREE_PROVIDER_ID,
-                        ANONYMOUS_FREE_OFFERING_ID,
+                        V34_OFFERING_ANONYMOUS_FREE,
                         CredentialKind::None.as_str(),
                         QuotaScope::EgressIp.as_str(),
                         0,
@@ -3368,8 +3862,8 @@ impl Database {
                         ZEN_FREE_ACCOUNT_ID,
                         OPENCODE_ZEN_FREE_PROVIDER_ID,
                         OPENCODE_PROVIDER_ID,
-                        ANONYMOUS_FREE_OFFERING_ID,
-                        GO_OFFERING_ID,
+                        V34_OFFERING_ANONYMOUS_FREE,
+                        V34_OFFERING_GO,
                     ],
                 )?;
             }
@@ -3382,7 +3876,7 @@ impl Database {
                  ) SELECT ?1, ?2, revision, activated_at, document_updated_at,
                           source_url, content_hash, snapshot_json
                    FROM pricing_snapshots",
-                    params![OPENCODE_PROVIDER_ID, GO_OFFERING_ID],
+                    params![OPENCODE_PROVIDER_ID, V34_OFFERING_GO],
                 )?;
             }
             tx.execute(
@@ -3548,20 +4042,20 @@ impl Database {
                         "UPDATE accounts SET verification_status = 'pending', verification_error = NULL,
                                 enabled = 0
                          WHERE provider_id = ?1 AND offering_id = ?2",
-                        params![COMMAND_CODE_PROVIDER_ID, GOAT_OFFERING_ID],
+                        params![COMMAND_CODE_PROVIDER_ID, V34_OFFERING_GOAT],
                     )?;
                 } else {
                     tx.execute(
                         "UPDATE accounts SET verification_status = 'pending', verification_error = NULL
                          WHERE provider_id = ?1 AND offering_id = ?2",
-                        params![COMMAND_CODE_PROVIDER_ID, GOAT_OFFERING_ID],
+                        params![COMMAND_CODE_PROVIDER_ID, V34_OFFERING_GOAT],
                     )?;
                 }
                 tx.execute(
                     "UPDATE accounts SET verification_status = 'not_required', verification_error = NULL
                      WHERE NOT (provider_id = ?1 AND offering_id = ?2)
                        AND (verification_status IS NULL OR verification_status = 'not_required')",
-                    params![COMMAND_CODE_PROVIDER_ID, GOAT_OFFERING_ID],
+                    params![COMMAND_CODE_PROVIDER_ID, V34_OFFERING_GOAT],
                 )?;
             }
 
@@ -3700,7 +4194,6 @@ impl Database {
         // Normalize historical GOAT verification states to the single current
         // account semantic; inference remains the actual Key-auth boundary.
         if table_has_column(&tx, "accounts", "provider_id")?
-            && table_has_column(&tx, "accounts", "offering_id")?
             && table_has_column(&tx, "accounts", "verification_status")?
         {
             tx.execute(
@@ -3708,8 +4201,8 @@ impl Database {
                  SET verification_status = 'not_required',
                      connection_verified_at = NULL,
                      verification_error = NULL
-                 WHERE provider_id = ?1 AND offering_id = ?2",
-                params![COMMAND_CODE_PROVIDER_ID, GOAT_OFFERING_ID],
+                 WHERE provider_id = ?1",
+                params![COMMAND_CODE_PROVIDER_ID],
             )?;
         }
 
@@ -3778,12 +4271,11 @@ impl Database {
         )?;
         tx.execute(
             "INSERT OR IGNORE INTO provider_pricing_snapshots
-             (provider_id, offering_id, revision, activated_at, document_updated_at,
+             (provider_id, revision, activated_at, document_updated_at,
               source_url, content_hash, snapshot_json)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![
                 OPENCODE_PROVIDER_ID,
-                GO_OFFERING_ID,
                 snapshot.revision,
                 snapshot.activated_at,
                 snapshot.document_updated_at,
@@ -3803,8 +4295,8 @@ impl Database {
             .query_row(
                 "SELECT models_json, refreshed_at, source_url
                  FROM provider_model_catalogs
-                 WHERE provider_id = ?1 AND offering_id = ?2",
-                params![OPENCODE_ZEN_FREE_PROVIDER_ID, ANONYMOUS_FREE_OFFERING_ID],
+                 WHERE provider_id = ?1",
+                params![OPENCODE_ZEN_FREE_PROVIDER_ID],
                 |row| {
                     let models_json: String = row.get(0)?;
                     let refreshed_at: Option<String> = row.get(1)?;
@@ -3853,15 +4345,14 @@ impl Database {
         let tx = self.conn.unchecked_transaction()?;
         tx.execute(
             "INSERT INTO provider_model_catalogs
-             (provider_id, offering_id, models_json, refreshed_at, source_url)
-             VALUES (?1, ?2, ?3, ?4, ?5)
-             ON CONFLICT(provider_id, offering_id) DO UPDATE SET
+             (provider_id, models_json, refreshed_at, source_url)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(provider_id) DO UPDATE SET
                  models_json = excluded.models_json,
                  refreshed_at = excluded.refreshed_at,
                  source_url = excluded.source_url",
             params![
                 OPENCODE_ZEN_FREE_PROVIDER_ID,
-                ANONYMOUS_FREE_OFFERING_ID,
                 models_json,
                 refreshed_at,
                 catalog.source_url,
@@ -4215,19 +4706,17 @@ impl Database {
         snapshot: &ProviderPricingSnapshot,
     ) -> Result<()> {
         anyhow::ensure!(
-            builtin_offering(&snapshot.provider_id, &snapshot.offering_id).is_some(),
-            "unknown provider offering `{}/{}`",
-            snapshot.provider_id,
-            snapshot.offering_id
+            builtin_provider(&snapshot.provider_id).is_some(),
+            "unknown provider `{}`",
+            snapshot.provider_id
         );
         self.conn.execute(
             "INSERT OR IGNORE INTO provider_pricing_snapshots
-             (provider_id, offering_id, revision, activated_at, document_updated_at,
+             (provider_id, revision, activated_at, document_updated_at,
               source_url, content_hash, snapshot_json)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![
                 snapshot.provider_id,
-                snapshot.offering_id,
                 snapshot.revision,
                 snapshot.activated_at,
                 snapshot.document_updated_at,
@@ -4242,26 +4731,24 @@ impl Database {
     pub fn latest_provider_pricing_snapshot(
         &self,
         provider_id: &str,
-        offering_id: &str,
     ) -> Result<Option<ProviderPricingSnapshot>> {
         self.conn
             .query_row(
-                "SELECT provider_id, offering_id, revision, activated_at,
+                "SELECT provider_id, revision, activated_at,
                         document_updated_at, source_url, content_hash, snapshot_json
                  FROM provider_pricing_snapshots
-                 WHERE provider_id = ?1 AND offering_id = ?2
+                 WHERE provider_id = ?1
                  ORDER BY activated_at DESC, rowid DESC LIMIT 1",
-                params![provider_id, offering_id],
+                params![provider_id],
                 |row| {
                     Ok(ProviderPricingSnapshot {
                         provider_id: row.get(0)?,
-                        offering_id: row.get(1)?,
-                        revision: row.get(2)?,
-                        activated_at: row.get(3)?,
-                        document_updated_at: row.get(4)?,
-                        source_url: row.get(5)?,
-                        content_hash: row.get(6)?,
-                        snapshot_json: row.get(7)?,
+                        revision: row.get(1)?,
+                        activated_at: row.get(2)?,
+                        document_updated_at: row.get(3)?,
+                        source_url: row.get(4)?,
+                        content_hash: row.get(5)?,
+                        snapshot_json: row.get(6)?,
                     })
                 },
             )
@@ -4275,18 +4762,13 @@ impl Database {
             account.id != ZEN_FREE_ACCOUNT_ID,
             "Zen Free is database-owned and cannot be created through the generic account API"
         );
-        account.validate_provider_binding()?;
-        ensure_enabled_offering_is_routable(
-            &account.provider_id,
-            &account.offering_id,
-            account.enabled,
-        )?;
+        ensure_account_provider_binding(self, account)?;
         let purchase_date = if account.purchase_date.trim().is_empty() {
             local_today()
         } else {
             normalize_purchase_date(&account.purchase_date)?
         };
-        let verification_status = builtin_plan(&account.provider_id, &account.offering_id)
+        let verification_status = builtin_provider(&account.provider_id)
             .map(default_verification_status)
             .unwrap_or(ConnectionVerificationStatus::NotRequired);
         let tx = self.conn.unchecked_transaction()?;
@@ -4308,13 +4790,8 @@ impl Database {
             account.id != ZEN_FREE_ACCOUNT_ID,
             "Zen Free is database-owned and cannot be created through the generic account API"
         );
-        account.validate_provider_binding()?;
-        ensure_enabled_offering_is_routable(
-            &account.provider_id,
-            &account.offering_id,
-            account.enabled,
-        )?;
-        let plan = builtin_plan(&account.provider_id, &account.offering_id)
+        ensure_account_provider_binding(self, account)?;
+        let plan = builtin_provider(&account.provider_id)
             .ok_or_else(|| anyhow::anyhow!("unknown provider offering"))?;
         if plan_requires_custom_config(plan) {
             anyhow::ensure!(
@@ -4349,6 +4826,160 @@ impl Database {
         if !capabilities.is_empty() {
             persist_account_model_capabilities_on(&tx, &account.id, capabilities)?;
         }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn list_dynamic_providers(&self) -> Result<Vec<DynamicProviderRuntime>> {
+        list_dynamic_providers_on(&self.conn)
+    }
+
+    pub fn get_dynamic_provider(
+        &self,
+        provider_id: &str,
+    ) -> Result<Option<DynamicProviderRuntime>> {
+        get_dynamic_provider_on(&self.conn, provider_id)
+    }
+
+    pub fn count_accounts_for_provider(&self, provider_id: &str) -> Result<i64> {
+        self.conn
+            .query_row(
+                "SELECT COUNT(*) FROM accounts WHERE lower(provider_id) = lower(?1)",
+                [provider_id],
+                |row| row.get(0),
+            )
+            .map_err(Into::into)
+    }
+
+    pub fn create_dynamic_provider(
+        &self,
+        runtime: &DynamicProviderRuntime,
+        first_account: &Account,
+    ) -> Result<()> {
+        let tx = self.conn.unchecked_transaction()?;
+        insert_dynamic_provider_on(&tx, runtime)?;
+        dynamic_tx_fault("after_provider_insert")?;
+        let purchase_date = if first_account.purchase_date.trim().is_empty() {
+            local_today()
+        } else {
+            normalize_purchase_date(&first_account.purchase_date)?
+        };
+        insert_account_row(
+            &tx,
+            first_account,
+            &purchase_date,
+            ConnectionVerificationStatus::NotRequired,
+        )?;
+        dynamic_tx_fault("after_account_insert")?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn replace_dynamic_provider(
+        &self,
+        runtime: &DynamicProviderRuntime,
+        clear_runtime_state: bool,
+        clear_keys: bool,
+        replacement_key_cipher: Option<&str>,
+    ) -> Result<()> {
+        let tx = self.conn.unchecked_transaction()?;
+        let existing = get_dynamic_provider_on(&tx, &runtime.id)?
+            .ok_or_else(|| anyhow::anyhow!("unknown provider `{}`", runtime.id))?;
+        tx.execute(
+            "UPDATE dynamic_providers
+             SET name = ?1, endpoint_url = ?2, upstream_protocol = ?3, auth_kind = ?4, updated_at = ?5
+             WHERE id = ?6",
+            params![
+                runtime.name,
+                runtime.endpoint_url,
+                runtime.upstream_protocol.as_str(),
+                runtime.auth_kind.as_str(),
+                runtime.updated_at.to_rfc3339(),
+                existing.id,
+            ],
+        )?;
+        tx.execute(
+            "DELETE FROM dynamic_provider_models WHERE provider_id = ?1",
+            [&existing.id],
+        )?;
+        insert_dynamic_provider_models_on(&tx, &existing.id, &runtime.mappings)?;
+        dynamic_tx_fault("after_mapping_replace")?;
+        if clear_runtime_state {
+            tx.execute(
+                "UPDATE accounts SET
+                    auth_error = NULL,
+                    last_error = NULL,
+                    cooldown_until = NULL,
+                    cooldown_generic_until = NULL,
+                    cooldown_5h_until = NULL,
+                    cooldown_week_until = NULL,
+                    cooldown_month_until = NULL,
+                    cooldown_free_until = NULL,
+                    updated_at = ?1
+                 WHERE lower(provider_id) = lower(?2)",
+                params![runtime.updated_at.to_rfc3339(), existing.id],
+            )?;
+        }
+        if clear_keys {
+            tx.execute(
+                "UPDATE accounts SET key_cipher = '', credential_kind = ?1, quota_scope = ?2, updated_at = ?3
+                 WHERE lower(provider_id) = lower(?4)",
+                params![
+                    runtime.auth_kind.credential_kind().as_str(),
+                    runtime.auth_kind.quota_scope().as_str(),
+                    runtime.updated_at.to_rfc3339(),
+                    existing.id,
+                ],
+            )?;
+        } else if let Some(key_cipher) = replacement_key_cipher {
+            tx.execute(
+                "UPDATE accounts SET key_cipher = ?1, credential_kind = ?2, quota_scope = ?3, updated_at = ?4
+                 WHERE lower(provider_id) = lower(?5)",
+                params![
+                    key_cipher,
+                    runtime.auth_kind.credential_kind().as_str(),
+                    runtime.auth_kind.quota_scope().as_str(),
+                    runtime.updated_at.to_rfc3339(),
+                    existing.id,
+                ],
+            )?;
+        } else {
+            tx.execute(
+                "UPDATE accounts SET credential_kind = ?1, quota_scope = ?2, updated_at = ?3
+                 WHERE lower(provider_id) = lower(?4)",
+                params![
+                    runtime.auth_kind.credential_kind().as_str(),
+                    runtime.auth_kind.quota_scope().as_str(),
+                    runtime.updated_at.to_rfc3339(),
+                    existing.id,
+                ],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn delete_dynamic_provider(&self, provider_id: &str) -> Result<()> {
+        let tx = self.conn.unchecked_transaction()?;
+        let existing = get_dynamic_provider_on(&tx, provider_id)?
+            .ok_or_else(|| anyhow::anyhow!("unknown provider `{provider_id}`"))?;
+        let count: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM accounts WHERE lower(provider_id) = lower(?1)",
+            [&existing.id],
+            |row| row.get(0),
+        )?;
+        anyhow::ensure!(
+            count == 0,
+            "dynamic provider still has {count} referencing account(s)"
+        );
+        tx.execute(
+            "DELETE FROM dynamic_provider_models WHERE provider_id = ?1",
+            [&existing.id],
+        )?;
+        tx.execute(
+            "DELETE FROM dynamic_providers WHERE id = ?1",
+            [&existing.id],
+        )?;
         tx.commit()?;
         Ok(())
     }
@@ -4433,13 +5064,12 @@ impl Database {
 
         let zen_changed = tx.execute(
             "UPDATE accounts SET enabled = ?2, free_alias_enabled = 0, updated_at = ?3
-             WHERE id = ?1 AND provider_id = ?4 AND offering_id = ?5",
+             WHERE id = ?1 AND provider_id = ?4 ",
             params![
                 ZEN_FREE_ACCOUNT_ID,
                 record.zen_free_enabled as i32,
                 Utc::now().to_rfc3339(),
                 OPENCODE_ZEN_FREE_PROVIDER_ID,
-                ANONYMOUS_FREE_OFFERING_ID,
             ],
         )?;
         anyhow::ensure!(zen_changed == 1, "Zen Free singleton is missing");
@@ -4470,15 +5100,14 @@ impl Database {
         let zen_models_json = serde_json::to_string(&record.zen_catalog.models)?;
         tx.execute(
             "INSERT INTO provider_model_catalogs
-             (provider_id, offering_id, models_json, refreshed_at, source_url)
-             VALUES (?1, ?2, ?3, ?4, ?5)
-             ON CONFLICT(provider_id, offering_id) DO UPDATE SET
+             (provider_id, models_json, refreshed_at, source_url)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(provider_id) DO UPDATE SET
                  models_json = excluded.models_json,
                  refreshed_at = excluded.refreshed_at,
                  source_url = excluded.source_url",
             params![
                 OPENCODE_ZEN_FREE_PROVIDER_ID,
-                ANONYMOUS_FREE_OFFERING_ID,
                 zen_models_json,
                 record
                     .zen_catalog
@@ -4591,13 +5220,13 @@ impl Database {
             None => existing.password_cipher.clone(),
         };
         let key_replaced = key_cipher.is_some();
-        let requires_verification = builtin_plan(&existing.provider_id, &existing.offering_id)
+        let requires_verification = builtin_provider(&existing.provider_id)
             .is_some_and(|plan| plan.verification_policy == VerificationPolicy::Required);
         // Key replacement invalidates verification for every Required plan.
         // Only a descriptor that explicitly gates enablement on verification
         // would also force the account off; current built-ins do not do so.
         let verification_gates_enablement = requires_verification
-            && ProviderRegistry::get(&existing.provider_id, &existing.offering_id)
+            && ProviderRegistry::get(&existing.provider_id)
                 .is_some_and(|descriptor| descriptor.card_actions.enable_requires_verification);
         // Gate the value that will actually persist. Verification-gated key
         // replacement still forces enabled=0 in SQL; that write is not an
@@ -4607,7 +5236,15 @@ impl Database {
         } else {
             requested_enabled
         };
-        ensure_enabled_offering_is_routable(&existing.provider_id, &existing.offering_id, enabled)?;
+        if builtin_provider(&existing.provider_id).is_some() {
+            ensure_enabled_provider_is_routable(&existing.provider_id, enabled)?;
+        } else {
+            anyhow::ensure!(
+                self.get_dynamic_provider(&existing.provider_id)?.is_some(),
+                "unknown provider `{}`",
+                existing.provider_id
+            );
+        }
 
         let tx = self.conn.unchecked_transaction()?;
         tx.execute(
@@ -4636,10 +5273,7 @@ impl Database {
                 verification_gates_enablement,
             ],
         )?;
-        if key_replaced
-            && requires_verification
-            && is_command_code_goat(&existing.provider_id, &existing.offering_id)
-        {
+        if key_replaced && requires_verification && is_command_code_goat(&existing.provider_id) {
             tx.execute(
                 "DELETE FROM account_model_capabilities
                  WHERE account_id = ?1 AND source = ?2",
@@ -4699,15 +5333,14 @@ impl Database {
             "invalid CPA singleton account id"
         );
         anyhow::ensure!(
-            account.provider_id == CPA_PROVIDER_ID && account.offering_id == CPA_OFFERING_ID,
+            account.provider_id == CPA_PROVIDER_ID,
             "invalid CPA singleton binding"
         );
-        let plan = builtin_plan(CPA_PROVIDER_ID, CPA_OFFERING_ID)
+        let plan = builtin_provider(CPA_PROVIDER_ID)
             .ok_or_else(|| anyhow::anyhow!("CPA provider offering is not registered"))?;
         validate_account_binding(
             &account.id,
             &account.provider_id,
-            &account.offering_id,
             account.credential_kind,
             account.quota_scope,
         )?;
@@ -4727,8 +5360,8 @@ impl Database {
                         auth_error = CASE WHEN key_cipher <> ?3 THEN NULL ELSE auth_error END,
                         key_cipher = ?3, enabled = ?4,
                         account_type = ?5, setup_step = ?6, updated_at = ?7,
-                        provider_id = ?8, offering_id = ?9,
-                        credential_kind = ?10, quota_scope = ?11,
+                        provider_id = ?8,
+                        credential_kind = ?9, quota_scope = ?10,
                         verification_status = 'not_required',
                         connection_verified_at = NULL, verification_error = NULL
                   WHERE id = ?1",
@@ -4741,7 +5374,6 @@ impl Database {
                     account.setup_step.as_str(),
                     account.updated_at.to_rfc3339(),
                     account.provider_id,
-                    account.offering_id,
                     account.credential_kind.as_str(),
                     account.quota_scope.as_str(),
                 ],
@@ -4780,8 +5412,8 @@ impl Database {
         let tx = self.conn.unchecked_transaction()?;
         tx.execute("DELETE FROM cpa_integration WHERE id = 'cpa'", [])?;
         tx.execute(
-            "DELETE FROM provider_model_catalogs WHERE provider_id = ?1 AND offering_id = ?2",
-            params![CPA_PROVIDER_ID, CPA_OFFERING_ID],
+            "DELETE FROM provider_model_catalogs WHERE provider_id = ?1",
+            params![CPA_PROVIDER_ID],
         )?;
         tx.execute(
             "DELETE FROM provider_contract_model_protocol_overrides
@@ -4808,8 +5440,8 @@ impl Database {
             .query_row(
                 "SELECT models_json, refreshed_at, source_url
                    FROM provider_model_catalogs
-                  WHERE provider_id = ?1 AND offering_id = ?2",
-                params![CPA_PROVIDER_ID, CPA_OFFERING_ID],
+                  WHERE provider_id = ?1",
+                params![CPA_PROVIDER_ID],
                 |row| {
                     let models_json: String = row.get(0)?;
                     let refreshed_at: Option<String> = row.get(1)?;
@@ -4850,15 +5482,14 @@ impl Database {
         let models_json = serde_json::to_string(models)?;
         self.conn.execute(
             "INSERT INTO provider_model_catalogs
-                 (provider_id, offering_id, models_json, refreshed_at, source_url)
-             VALUES (?1, ?2, ?3, ?4, ?5)
-             ON CONFLICT(provider_id, offering_id) DO UPDATE SET
+                 (provider_id, models_json, refreshed_at, source_url)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(provider_id) DO UPDATE SET
                  models_json = excluded.models_json,
                  refreshed_at = excluded.refreshed_at,
                  source_url = excluded.source_url",
             params![
                 CPA_PROVIDER_ID,
-                CPA_OFFERING_ID,
                 models_json,
                 refreshed_at.to_rfc3339(),
                 source_url,
@@ -4901,20 +5532,15 @@ impl Database {
     /// The retired `free_alias_enabled` column is forced to zero for rollback
     /// compatibility but no longer participates in runtime behavior.
     pub fn set_zen_free_enabled(&self, enabled: bool) -> Result<()> {
-        ensure_enabled_offering_is_routable(
-            OPENCODE_ZEN_FREE_PROVIDER_ID,
-            ANONYMOUS_FREE_OFFERING_ID,
-            enabled,
-        )?;
+        ensure_enabled_provider_is_routable(OPENCODE_ZEN_FREE_PROVIDER_ID, enabled)?;
         let changed = self.conn.execute(
             "UPDATE accounts SET enabled = ?2, free_alias_enabled = 0, updated_at = ?3
-             WHERE id = ?1 AND provider_id = ?4 AND offering_id = ?5",
+             WHERE id = ?1 AND provider_id = ?4",
             params![
                 ZEN_FREE_ACCOUNT_ID,
                 enabled as i32,
                 Utc::now().to_rfc3339(),
                 OPENCODE_ZEN_FREE_PROVIDER_ID,
-                ANONYMOUS_FREE_OFFERING_ID,
             ],
         )?;
         anyhow::ensure!(changed == 1, "Zen Free singleton is missing");
@@ -5201,10 +5827,10 @@ impl Database {
                     c.created_at, c.updated_at
              FROM accounts a
              INNER JOIN account_custom_configs c ON c.account_id = a.id
-             WHERE a.provider_id = ?1 AND a.offering_id = ?2
+             WHERE a.provider_id = ?1
              ORDER BY a.sort_order ASC, a.created_at ASC, a.id ASC",
         )?;
-        let rows = stmt.query_map(params![CUSTOM_PROVIDER_ID, CUSTOM_API_OFFERING_ID], |row| {
+        let rows = stmt.query_map(params![CUSTOM_PROVIDER_ID], |row| {
             let account_id: String = row.get(0)?;
             let enabled = row.get::<_, i32>(1)? != 0;
             let status_value = row.get::<_, String>(2)?;
@@ -5263,10 +5889,10 @@ impl Database {
         let mut stmt = self.conn.prepare(
             "SELECT id, enabled, verification_status, setup_step, key_cipher
              FROM accounts
-             WHERE provider_id = ?1 AND offering_id = ?2
+             WHERE provider_id = ?1
              ORDER BY sort_order ASC, created_at ASC, id ASC",
         )?;
-        let rows = stmt.query_map(params![COMMAND_CODE_PROVIDER_ID, GOAT_OFFERING_ID], |row| {
+        let rows = stmt.query_map(params![COMMAND_CODE_PROVIDER_ID], |row| {
             let account_id: String = row.get(0)?;
             let enabled = row.get::<_, i32>(1)? != 0;
             let status_value = row.get::<_, String>(2)?;
@@ -5390,14 +6016,12 @@ impl Database {
             "SELECT COUNT(*) FROM accounts
              WHERE id = ?1
                AND provider_id = ?2
-               AND offering_id = ?3
                AND verification_status = 'verified'
-               AND updated_at = ?4
-               AND key_cipher = ?5",
+               AND updated_at = ?3
+               AND key_cipher = ?4",
             params![
                 contract.account_id,
                 COMMAND_CODE_PROVIDER_ID,
-                GOAT_OFFERING_ID,
                 contract.account_updated_at,
                 contract.key_cipher,
             ],
@@ -5815,7 +6439,7 @@ impl Database {
 
     pub fn get_account(&self, id: &str) -> Result<Option<Account>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, username, password_cipher, key_cipher, enabled, referral_code, recharge_date, cooldown_until, cooldown_generic_until, cooldown_5h_until, cooldown_week_until, cooldown_month_until, cooldown_free_until, last_error, created_at, updated_at, auth_error, account_type, setup_step, notes, provider_id, offering_id, credential_kind, quota_scope FROM accounts WHERE id = ?1"
+            "SELECT id, name, username, password_cipher, key_cipher, enabled, referral_code, recharge_date, cooldown_until, cooldown_generic_until, cooldown_5h_until, cooldown_week_until, cooldown_month_until, cooldown_free_until, last_error, created_at, updated_at, auth_error, account_type, setup_step, notes, provider_id, credential_kind, quota_scope FROM accounts WHERE id = ?1"
         )?;
         let account = stmt.query_row([id], account_from_row).optional()?;
         Ok(account)
@@ -5823,7 +6447,7 @@ impl Database {
 
     pub fn list_accounts(&self) -> Result<Vec<Account>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, username, password_cipher, key_cipher, enabled, referral_code, recharge_date, cooldown_until, cooldown_generic_until, cooldown_5h_until, cooldown_week_until, cooldown_month_until, cooldown_free_until, last_error, created_at, updated_at, auth_error, account_type, setup_step, notes, provider_id, offering_id, credential_kind, quota_scope FROM accounts ORDER BY sort_order ASC, created_at ASC, id ASC"
+            "SELECT id, name, username, password_cipher, key_cipher, enabled, referral_code, recharge_date, cooldown_until, cooldown_generic_until, cooldown_5h_until, cooldown_week_until, cooldown_month_until, cooldown_free_until, last_error, created_at, updated_at, auth_error, account_type, setup_step, notes, provider_id, credential_kind, quota_scope FROM accounts ORDER BY sort_order ASC, created_at ASC, id ASC"
         )?;
         let rows = stmt.query_map([], account_from_row)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.into())
@@ -5883,11 +6507,7 @@ impl Database {
         write: &ManagedKeyVerificationWrite,
     ) -> Result<ManagedKeyVerificationCommit> {
         if matches!(write, ManagedKeyVerificationWrite::Verified { .. }) {
-            ensure_enabled_offering_is_routable(
-                &expected.provider_id,
-                &expected.offering_id,
-                true,
-            )?;
+            ensure_enabled_provider_is_routable(&expected.provider_id, true)?;
         }
 
         let now = Utc::now();
@@ -5898,8 +6518,8 @@ impl Database {
              SET key_cipher = ?1, enabled = 0, auth_error = NULL, last_error = NULL,
                  updated_at = ?2
              WHERE id = ?3 AND key_cipher = ?4 AND updated_at = ?5
-               AND provider_id = ?6 AND offering_id = ?7
-               AND account_type = ?8 AND setup_step = ?9",
+               AND provider_id = ?6
+               AND account_type = ?7 AND setup_step = ?8",
             params![
                 candidate_key_cipher,
                 now_rfc,
@@ -5907,7 +6527,6 @@ impl Database {
                 expected.key_cipher,
                 expected.updated_at.to_rfc3339(),
                 expected.provider_id,
-                expected.offering_id,
                 expected.account_type.as_str(),
                 expected.setup_step.as_str(),
             ],
@@ -6022,7 +6641,7 @@ impl Database {
         let Some(account) = self.get_account(id)? else {
             return Ok(false);
         };
-        ensure_enabled_offering_is_routable(&account.provider_id, &account.offering_id, true)?;
+        ensure_enabled_provider_is_routable(&account.provider_id, true)?;
         let changed = self.conn.execute(
             "UPDATE accounts
              SET setup_step = 'ready', enabled = 1, auth_error = NULL, updated_at = ?1
@@ -6171,12 +6790,12 @@ impl Database {
             tx.execute(
                 "INSERT INTO forward_logs
                  (timestamp, model, account_id, account_name, client_key_id, client_key_name,
-                  route_account_id, provider_id, offering_id, credential_account_id,
+                  route_account_id, provider_id, credential_account_id,
                   status, http_status, prompt_tokens, completion_tokens, cached_tokens,
                   cache_creation_tokens, cost, cost_state, raw_cost_usd, quota_debit,
                   effective_paid_cost_usd)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
-                         0, 0, 0, 0, 0, 'legacy_estimate', ?13, ?14, ?15)",
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
+                         0, 0, 0, 0, 0, 'legacy_estimate', ?12, ?13, ?14)",
                 params![
                     log.timestamp.to_rfc3339(),
                     log.model,
@@ -6186,7 +6805,6 @@ impl Database {
                     log.client_key_name,
                     log.route_account_id,
                     log.provider_id,
-                    log.offering_id,
                     log.credential_account_id,
                     log.status,
                     log.http_status,
@@ -6220,7 +6838,7 @@ impl Database {
                 client_key_name: log.client_key_name.as_deref(),
                 route_account_id: log.route_account_id.as_deref(),
                 provider_id: log.provider_id.as_deref(),
-                offering_id: log.offering_id.as_deref(),
+
                 credential_account_id: log.credential_account_id.as_deref(),
                 status: &log.status,
                 http_status: log.http_status,
@@ -6270,22 +6888,13 @@ impl Database {
         let binding = self
             .conn
             .query_row(
-                "SELECT provider_id, offering_id FROM forward_logs WHERE id = ?1",
+                "SELECT provider_id FROM forward_logs WHERE id = ?1",
                 [id],
-                |row| {
-                    Ok((
-                        row.get::<_, Option<String>>(0)?,
-                        row.get::<_, Option<String>>(1)?,
-                    ))
-                },
+                |row| row.get::<_, Option<String>>(0),
             )
             .optional()?;
-        if let Some((provider_id, offering_id)) = binding.as_ref() {
-            metrics.scope_to_provider(
-                provider_id.as_deref(),
-                offering_id.as_deref(),
-                status.starts_with("success"),
-            );
+        if let Some(provider_id) = binding.as_ref() {
+            metrics.scope_to_provider(provider_id.as_deref(), status.starts_with("success"));
         }
         let cost_state = match (metrics.cost_state, status) {
             ("not_applicable", "outcome_unknown") => "outcome_unknown",
@@ -6426,7 +7035,7 @@ impl Database {
                     service_tier, cost_state, error_message, request_id, attempt,
                     error_source, error_stage, duration_ms, diagnostic_json,
                     client_key_id, client_key_name, route_account_id, provider_id,
-                    offering_id, credential_account_id, raw_cost_usd, quota_debit,
+                    credential_account_id, raw_cost_usd, quota_debit,
                     effective_paid_cost_usd
              FROM forward_logs ORDER BY id DESC LIMIT ?1",
         )?;
@@ -6471,7 +7080,7 @@ impl Database {
                     service_tier, cost_state, error_message, request_id, attempt,
                     error_source, error_stage, duration_ms, diagnostic_json,
                     client_key_id, client_key_name, route_account_id, provider_id,
-                    offering_id, credential_account_id, raw_cost_usd, quota_debit,
+                    credential_account_id, raw_cost_usd, quota_debit,
                     effective_paid_cost_usd
              FROM forward_logs{filter}
              {order_clause}
@@ -7765,7 +8374,6 @@ fn forward_log_filter(options: &ForwardLogQueryOptions<'_>) -> (String, Vec<Valu
         ("status = ?", options.status),
         ("account_id = ?", options.account_id),
         ("provider_id = ?", options.provider_id),
-        ("offering_id = ?", options.offering_id),
         ("route_account_id = ?", options.route_account_id),
         ("credential_account_id = ?", options.credential_account_id),
     ]
@@ -7854,8 +8462,7 @@ fn forward_log_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ForwardLog>
         client_key_name: row.get(26)?,
         route_account_id: row.get(27)?,
         provider_id: row.get(28)?,
-        offering_id: row.get(29)?,
-        credential_account_id: row.get(30)?,
+        credential_account_id: row.get(29)?,
         status: row.get(5)?,
         http_status: row.get(6)?,
         route: row.get(7)?,
@@ -7864,9 +8471,9 @@ fn forward_log_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ForwardLog>
         cached_tokens: row.get(10)?,
         cache_creation_tokens: row.get(11)?,
         cost,
-        raw_cost_usd: row.get(31)?,
-        quota_debit: row.get(32)?,
-        effective_paid_cost_usd: row.get(33)?,
+        raw_cost_usd: row.get(30)?,
+        quota_debit: row.get(31)?,
+        effective_paid_cost_usd: row.get(32)?,
         pricing_revision_id: row.get(13)?,
         quota_multiplier: row.get(14)?,
         local_adjustment_multiplier: row.get(15)?,
@@ -8043,18 +8650,18 @@ fn account_from_row(row: &Row<'_>) -> rusqlite::Result<Account> {
             Box::new(std::io::Error::other(error)),
         )
     })?;
-    let credential_value = row.get::<_, String>(23)?;
+    let credential_value = row.get::<_, String>(22)?;
     let credential_kind = CredentialKind::try_from(credential_value.as_str()).map_err(|error| {
         rusqlite::Error::FromSqlConversionFailure(
-            23,
+            22,
             Type::Text,
             Box::new(std::io::Error::other(error)),
         )
     })?;
-    let quota_scope_value = row.get::<_, String>(24)?;
+    let quota_scope_value = row.get::<_, String>(23)?;
     let quota_scope = QuotaScope::try_from(quota_scope_value.as_str()).map_err(|error| {
         rusqlite::Error::FromSqlConversionFailure(
-            24,
+            23,
             Type::Text,
             Box::new(std::io::Error::other(error)),
         )
@@ -8062,7 +8669,7 @@ fn account_from_row(row: &Row<'_>) -> rusqlite::Result<Account> {
     Ok(Account {
         id: row.get(0)?,
         provider_id: row.get(21)?,
-        offering_id: row.get(22)?,
+
         credential_kind,
         quota_scope,
         name: row.get(1)?,

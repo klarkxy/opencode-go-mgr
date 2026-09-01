@@ -3,11 +3,9 @@ use crate::crypto::{KeyCipher, StaticKeyCipher};
 use crate::gateway::protocol::CustomRouteSpec;
 use crate::models::{Account, AccountSetupStep, AccountType, AppConfig};
 use crate::provider::{
-    ANONYMOUS_FREE_OFFERING_ID, COMMAND_CODE_GOAT_BASE_URL,
-    COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM, COMMAND_CODE_PROVIDER_ID, CUSTOM_API_OFFERING_ID,
-    CUSTOM_PROVIDER_ID, GO_OFFERING_ID, GOAT_OFFERING_ID, KIMI_CN_BASE_URL,
-    KIMI_CN_CHAT_COMPLETIONS_PATH, KIMI_CN_OFFERING_ID, KIMI_PROVIDER_ID, MINIMAX_CN_OFFERING_ID,
-    MINIMAX_PROVIDER_ID, OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID,
+    COMMAND_CODE_GOAT_BASE_URL, COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM,
+    COMMAND_CODE_PROVIDER_ID, CUSTOM_PROVIDER_ID, KIMI_CN_BASE_URL, KIMI_CN_CHAT_COMPLETIONS_PATH,
+    KIMI_PROVIDER_ID, MINIMAX_PROVIDER_ID, OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID,
     ZEN_FREE_ACCOUNT_NAME,
 };
 use bytes::Bytes;
@@ -18,7 +16,7 @@ use std::sync::Arc;
 fn account(
     id: &str,
     provider_id: &str,
-    offering_id: &str,
+
     credential_kind: CredentialKind,
     quota_scope: QuotaScope,
 ) -> Account {
@@ -26,7 +24,7 @@ fn account(
     Account {
         id: id.into(),
         provider_id: provider_id.into(),
-        offering_id: offering_id.into(),
+
         credential_kind,
         quota_scope,
         name: id.into(),
@@ -115,8 +113,7 @@ fn official_transport_is_fixed_bearer_chat_without_redirects_or_zdr() {
         "http://127.0.0.1:9/provider/v1/chat/completions"
     );
     assert!(crate::provider::is_command_code_goat(
-        COMMAND_CODE_PROVIDER_ID,
-        GOAT_OFFERING_ID
+        COMMAND_CODE_PROVIDER_ID
     ));
     assert_eq!(
         crate::provider::COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_ALIAS,
@@ -134,7 +131,6 @@ fn adapter_kind_dispatch_preserves_route_auth_and_model_decisions() {
     let go = account(
         "go-1",
         OPENCODE_PROVIDER_ID,
-        GO_OFFERING_ID,
         CredentialKind::ApiKey,
         QuotaScope::Key,
     );
@@ -181,7 +177,6 @@ fn adapter_kind_dispatch_preserves_route_auth_and_model_decisions() {
     let mut zen = account(
         ZEN_FREE_ACCOUNT_ID,
         OPENCODE_ZEN_FREE_PROVIDER_ID,
-        ANONYMOUS_FREE_OFFERING_ID,
         CredentialKind::None,
         QuotaScope::EgressIp,
     );
@@ -209,7 +204,6 @@ fn adapter_kind_dispatch_preserves_route_auth_and_model_decisions() {
     let goat = account(
         "goat-1",
         COMMAND_CODE_PROVIDER_ID,
-        GOAT_OFFERING_ID,
         CredentialKind::ApiKey,
         QuotaScope::Key,
     );
@@ -270,7 +264,6 @@ fn adapter_kind_dispatch_preserves_route_auth_and_model_decisions() {
     let custom = account(
         "custom-1",
         CUSTOM_PROVIDER_ID,
-        CUSTOM_API_OFFERING_ID,
         CredentialKind::ApiKey,
         QuotaScope::Key,
     );
@@ -337,7 +330,6 @@ fn adapter_kind_dispatch_preserves_route_auth_and_model_decisions() {
     let unknown = account(
         "unknown-1",
         "unknown",
-        "unknown",
         CredentialKind::ApiKey,
         QuotaScope::Key,
     );
@@ -359,11 +351,10 @@ fn adapter_kind_dispatch_preserves_route_auth_and_model_decisions() {
 
 #[test]
 fn resolve_uses_the_same_sealed_descriptors() {
-    let go = ProviderRegistry::get(OPENCODE_PROVIDER_ID, GO_OFFERING_ID).unwrap();
-    let zen =
-        ProviderRegistry::get(OPENCODE_ZEN_FREE_PROVIDER_ID, ANONYMOUS_FREE_OFFERING_ID).unwrap();
-    let goat = ProviderRegistry::get(COMMAND_CODE_PROVIDER_ID, GOAT_OFFERING_ID).unwrap();
-    let custom = ProviderRegistry::get(CUSTOM_PROVIDER_ID, CUSTOM_API_OFFERING_ID).unwrap();
+    let go = ProviderRegistry::get(OPENCODE_PROVIDER_ID).unwrap();
+    let zen = ProviderRegistry::get(OPENCODE_ZEN_FREE_PROVIDER_ID).unwrap();
+    let goat = ProviderRegistry::get(COMMAND_CODE_PROVIDER_ID).unwrap();
+    let custom = ProviderRegistry::get(CUSTOM_PROVIDER_ID).unwrap();
     assert!(go.inference.production_inference);
     assert_eq!(
         zen.inference.channel,
@@ -435,7 +426,6 @@ fn probe_route_allows_ceiling_without_static_support_production_requires_contrac
     let go = account(
         "go-1",
         OPENCODE_PROVIDER_ID,
-        GO_OFFERING_ID,
         CredentialKind::ApiKey,
         QuotaScope::Key,
     );
@@ -467,7 +457,7 @@ fn probe_route_allows_ceiling_without_static_support_production_requires_contrac
         crate::provider_contracts::PersistedContracts::default(),
     );
     assert!(
-        supports_production_plan(&go, &config, &chat_grok, &static_contracts).is_err(),
+        supports_production_plan(&go, &config, &chat_grok, &static_contracts, &[]).is_err(),
         "static grok-4.5 Chat must stay unverified until a probe succeeds"
     );
     assert!(
@@ -475,7 +465,8 @@ fn probe_route_allows_ceiling_without_static_support_production_requires_contrac
             &go,
             &config,
             &chat_plan("grok-4.5", UpstreamChannel::Go, ApiFormat::Responses, None),
-            &static_contracts
+            &static_contracts,
+            &[],
         )
         .is_ok()
     );
@@ -502,12 +493,11 @@ fn probe_route_allows_ceiling_without_static_support_production_requires_contrac
         &[],
         persisted,
     );
-    assert!(supports_production_plan(&go, &config, &chat_grok, &probed).is_ok());
+    assert!(supports_production_plan(&go, &config, &chat_grok, &probed, &[]).is_ok());
 
     let goat = account(
         "goat-1",
         COMMAND_CODE_PROVIDER_ID,
-        GOAT_OFFERING_ID,
         CredentialKind::ApiKey,
         QuotaScope::Key,
     );
@@ -529,17 +519,15 @@ fn probe_route_allows_ceiling_without_static_support_production_requires_contrac
 #[test]
 fn fixed_chat_plans_expose_the_same_sealed_chat_route_to_tests_and_provider_probes() {
     let config = AppConfig::default();
-    for (provider_id, offering_id, base_url, path, model_id) in [
+    for (provider_id, base_url, path, model_id) in [
         (
             MINIMAX_PROVIDER_ID,
-            MINIMAX_CN_OFFERING_ID,
             MINIMAX_CN_BASE_URL,
             MINIMAX_CN_CHAT_COMPLETIONS_PATH,
             "MiniMax-M3",
         ),
         (
             KIMI_PROVIDER_ID,
-            KIMI_CN_OFFERING_ID,
             KIMI_CN_BASE_URL,
             KIMI_CN_CHAT_COMPLETIONS_PATH,
             "kimi-for-coding",
@@ -548,7 +536,6 @@ fn fixed_chat_plans_expose_the_same_sealed_chat_route_to_tests_and_provider_prob
         let account = account(
             &format!("{provider_id}-test"),
             provider_id,
-            offering_id,
             CredentialKind::ApiKey,
             QuotaScope::Key,
         );

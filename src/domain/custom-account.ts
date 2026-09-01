@@ -14,13 +14,11 @@ import type {
  * malformed input, non-http(s) schemes, and URL-embedded credentials.
  */
 export const CUSTOM_PROVIDER_ID = "custom";
-export const CUSTOM_OFFERING_ID = "api";
 
 export function isCustomApiAccount(
-  account: Pick<Account, "provider_id" | "offering_id">,
+  account: Pick<Account, "provider_id">,
 ): boolean {
-  return account.provider_id === CUSTOM_PROVIDER_ID
-    && account.offering_id === CUSTOM_OFFERING_ID;
+  return account.provider_id === CUSTOM_PROVIDER_ID;
 }
 
 export type CustomEndpointUrlIssue = "empty" | "malformed" | "not_http" | "with_credentials";
@@ -272,7 +270,7 @@ export async function executeCustomAccountEdit(
 }
 
 export function customAccountNeedsVerification(
-  account: Pick<Account, "provider_id" | "offering_id" | "verification_status">,
+  account: Pick<Account, "provider_id" | "verification_status">,
 ): boolean {
   return isCustomApiAccount(account)
     && (account.verification_status === "pending" || account.verification_status === "failed");

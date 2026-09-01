@@ -8,8 +8,7 @@ use crate::http_client;
 use crate::models::AppConfig;
 use crate::provider::{
     COMMAND_CODE_GOAT_BASE_URL, COMMAND_CODE_GOAT_MODELS_PATH, COMMAND_CODE_PROVIDER_ID,
-    ConnectionVerificationStatus, GOAT_OFFERING_ID, is_command_code_goat,
-    parse_provider_models_catalog,
+    ConnectionVerificationStatus, is_command_code_goat, parse_provider_models_catalog,
 };
 use std::collections::HashMap;
 use std::fmt;
@@ -115,7 +114,7 @@ impl GoatAccountRuntime {
         self.enabled
             && self.setup_ready
             && self.has_key
-            && is_command_code_goat(COMMAND_CODE_PROVIDER_ID, GOAT_OFFERING_ID)
+            && is_command_code_goat(COMMAND_CODE_PROVIDER_ID)
     }
 
     pub fn serves(&self, _requested: &str) -> bool {

@@ -1,12 +1,11 @@
 {
-  "comment": "Black-box Plan catalog contract for OCG Manager v2.0. GET /dashboard/api/providers/catalog is the only Plan source. Internal identity stays provider_id + offering_id. Catalog JSON uses display_name/display_family, creation_availability, verification_policy, verification_runtime_availability, routable, form_fields, risk_notice, model_aliases, pricing_availability, usage_availability, and manual_usage_calibration. risk_notice is omitted when a Plan has none.",
+  "comment": "Black-box Plan catalog contract for OCG Manager v2.0. GET /dashboard/api/providers/catalog is the only Plan source. Internal identity is provider_id. Catalog JSON uses display_name/display_family, creation_availability, verification_policy, verification_runtime_availability, routable, form_fields, risk_notice, model_aliases, pricing_availability, usage_availability, and manual_usage_calibration. risk_notice is omitted when a Plan has none.",
   "catalog_paths": [
     "/dashboard/api/providers/catalog",
     "/dashboard/api/providers"
   ],
   "required_entry_fields": [
     "provider_id",
-    "offering_id",
     "display_name",
     "display_family",
     "creation_availability",
@@ -27,7 +26,6 @@
   "plans": [
     {
       "provider_id": "opencode",
-      "offering_id": "go",
       "verification_policy": "not_required",
       "verification_runtime_availability": "optional",
       "creation_availability": "available",
@@ -36,7 +34,6 @@
     },
     {
       "provider_id": "opencode-zen-free",
-      "offering_id": "anonymous-free",
       "verification_policy": "not_required",
       "verification_runtime_availability": "not_applicable",
       "creation_availability": "unavailable",
@@ -46,7 +43,6 @@
     },
     {
       "provider_id": "command-code",
-      "offering_id": "goat",
       "verification_policy": "not_required",
       "verification_runtime_availability": "not_applicable",
       "creation_availability": "available",
@@ -54,7 +50,6 @@
     },
     {
       "provider_id": "custom",
-      "offering_id": "api",
       "verification_policy": "required",
       "verification_runtime_availability": "available",
       "creation_availability": "available",

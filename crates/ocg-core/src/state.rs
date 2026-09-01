@@ -101,6 +101,7 @@ pub struct CoreStateInner {
     /// Network calls may hold this async gate but never the SQLite mutex.
     pub cpa_operations: tokio::sync::Mutex<()>,
     provider_contracts: RwLock<Arc<crate::provider_contracts::EffectiveContractSet>>,
+    dynamic_providers: RwLock<Arc<Vec<crate::dynamic::DynamicProviderRuntime>>>,
     pub routing: RoutingRuntime,
     pub browser: crate::browser::BrowserRuntime,
     /// Official Go usage sync gates (concurrency, dedupe, clock/jitter seams).
@@ -129,17 +130,11 @@ fn sealed_proxy_model_ids(
     cpa_models: &[String],
 ) -> Vec<String> {
     [
-        (
-            crate::kernel::ids::MINIMAX_PROVIDER_ID,
-            crate::kernel::ids::MINIMAX_CN_OFFERING_ID,
-        ),
-        (
-            crate::kernel::ids::KIMI_PROVIDER_ID,
-            crate::kernel::ids::KIMI_CN_OFFERING_ID,
-        ),
+        crate::kernel::ids::MINIMAX_PROVIDER_ID,
+        crate::kernel::ids::KIMI_PROVIDER_ID,
     ]
     .into_iter()
-    .filter_map(|(provider_id, offering_id)| contracts.provider_offering(provider_id, offering_id))
+    .filter_map(|provider_id| contracts.provider_offering(provider_id))
     .flat_map(|contract| contract.catalog.models.iter().cloned())
     .chain(cpa_models.iter().cloned())
     .collect()
@@ -319,6 +314,7 @@ impl CoreStateInner {
             .map(|catalog| catalog.models)
             .unwrap_or_default();
         let custom_runtimes = db.list_custom_account_runtimes()?;
+        let dynamic_providers = db.list_dynamic_providers()?;
         let provider_contracts = crate::provider_contracts::build_effective_contracts(
             &zen_free_models,
             &custom_runtimes,
@@ -363,6 +359,7 @@ impl CoreStateInner {
             provider_usage_refresh: tokio::sync::Mutex::new(()),
             cpa_operations: tokio::sync::Mutex::new(()),
             provider_contracts: RwLock::new(Arc::new(provider_contracts)),
+            dynamic_providers: RwLock::new(Arc::new(dynamic_providers)),
             routing: RoutingRuntime::new(),
             browser: crate::browser::BrowserRuntime::new(),
             usage_sync: crate::usage_sync::UsageSyncRuntime::new(),
@@ -540,6 +537,21 @@ impl CoreStateInner {
             *http_client = Arc::new(route_set);
         }
         self.routing.reset();
+        Ok(())
+    }
+
+    pub fn dynamic_providers(&self) -> Arc<Vec<crate::dynamic::DynamicProviderRuntime>> {
+        self.dynamic_providers.read().clone()
+    }
+
+    pub fn reload_dynamic_providers(&self) -> crate::Result<()> {
+        let db = self.db.lock();
+        self.reload_dynamic_providers_locked(&db)
+    }
+
+    pub fn reload_dynamic_providers_locked(&self, db: &Database) -> crate::Result<()> {
+        let loaded = db.list_dynamic_providers()?;
+        *self.dynamic_providers.write() = Arc::new(loaded);
         Ok(())
     }
 

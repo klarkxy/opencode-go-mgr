@@ -7,9 +7,9 @@
 use crate::alias::ProviderMapping;
 use crate::custom::CustomAccountRuntime;
 use crate::kernel::ids::{
-    COMMAND_CODE_PROVIDER_ID, CUSTOM_API_OFFERING_ID, CUSTOM_PROVIDER_ID, KIMI_PROVIDER_ID,
-    MINIMAX_PROVIDER_ID, OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID,
-    custom_model_id_matches, normalize_model_name,
+    COMMAND_CODE_PROVIDER_ID, CUSTOM_PROVIDER_ID, KIMI_PROVIDER_ID, MINIMAX_PROVIDER_ID,
+    OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID, custom_model_id_matches,
+    normalize_model_name,
 };
 use crate::kernel::protocol::{ApiFormat, is_known_model, supported_model_protocol_profiles};
 use crate::kernel::zen::ZenFreeModelCatalog;
@@ -134,23 +134,15 @@ impl ContractScope {
     }
 
     pub fn from_account(account: &crate::models::Account) -> Option<Self> {
-        Self::from_offering(
-            &account.provider_id,
-            &account.offering_id,
-            Some(&account.id),
-        )
+        Self::from_provider_id(&account.provider_id, Some(&account.id))
     }
 
     pub fn from_mapping(mapping: &ProviderMapping) -> Option<Self> {
-        Self::from_offering(mapping.provider_id, mapping.offering_id, None)
+        Self::from_provider_id(&mapping.provider_id, None)
     }
 
-    pub fn from_offering(
-        provider_id: &str,
-        offering_id: &str,
-        account_id: Option<&str>,
-    ) -> Option<Self> {
-        let descriptor = ProviderRegistry::get(provider_id, offering_id)?;
+    pub fn from_provider_id(provider_id: &str, account_id: Option<&str>) -> Option<Self> {
+        let descriptor = ProviderRegistry::get(provider_id)?;
         match descriptor.kind {
             ProviderAdapterKind::ConfigurableHttp => account_id
                 .map(str::trim)
@@ -393,7 +385,7 @@ impl EffectiveModelContract {
 pub struct EffectiveScopeContract {
     pub scope: ContractScope,
     pub provider_id: String,
-    pub offering_id: String,
+
     pub adapter_kind: ProviderAdapterKind,
     pub catalog_routable: bool,
     pub production_inference: bool,
@@ -437,12 +429,8 @@ impl EffectiveContractSet {
         }
     }
 
-    pub fn provider_offering(
-        &self,
-        provider_id: &str,
-        offering_id: &str,
-    ) -> Option<&EffectiveScopeContract> {
-        let scope = ContractScope::from_offering(provider_id, offering_id, None)?;
+    pub fn provider_offering(&self, provider_id: &str) -> Option<&EffectiveScopeContract> {
+        let scope = ContractScope::from_provider_id(provider_id, None)?;
         self.scope(&scope)
     }
 
@@ -478,7 +466,7 @@ impl EffectiveContractSet {
         let scope = ContractScope::from_mapping(mapping).ok_or_else(|| {
             ProtocolSelectError::new(format!(
                 "no contract scope for `{}/{}`",
-                mapping.provider_id, mapping.offering_id
+                mapping.provider_id, mapping.provider_id
             ))
         })?;
         self.select_upstream(&scope, client, model_id)
@@ -975,7 +963,7 @@ fn merge_provider_scope(
     EffectiveScopeContract {
         scope: ContractScope::provider(scope_id),
         provider_id: descriptor.provider_id.to_string(),
-        offering_id: descriptor.offering_id.to_string(),
+
         adapter_kind: adapter,
         catalog_routable: descriptor.inference.catalog_routable,
         production_inference: descriptor.inference.production_inference,
@@ -993,8 +981,8 @@ fn merge_custom_scope(
     evidence: &[PersistedModelProtocol],
     overrides: &[PersistedModelProtocolOverride],
 ) -> EffectiveScopeContract {
-    let descriptor = ProviderRegistry::get(CUSTOM_PROVIDER_ID, CUSTOM_API_OFFERING_ID)
-        .expect("custom offering is registered");
+    let descriptor =
+        ProviderRegistry::get(CUSTOM_PROVIDER_ID).expect("custom offering is registered");
     let revision = persisted.map(|row| row.revision).unwrap_or(1);
     let declared: Vec<(String, UpstreamProtocolKind)> = runtime
         .capabilities
@@ -1049,7 +1037,7 @@ fn merge_custom_scope(
     EffectiveScopeContract {
         scope: ContractScope::custom_endpoint(&runtime.account_id),
         provider_id: CUSTOM_PROVIDER_ID.to_string(),
-        offering_id: CUSTOM_API_OFFERING_ID.to_string(),
+
         adapter_kind: ProviderAdapterKind::ConfigurableHttp,
         catalog_routable: descriptor.inference.catalog_routable,
         production_inference: descriptor.inference.production_inference,

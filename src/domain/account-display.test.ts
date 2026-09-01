@@ -19,7 +19,6 @@ function draftAccount(overrides: Partial<Account> = {}): Account {
     account_type: "key",
     setup_step: "ready",
     provider_id: "custom",
-    offering_id: "api",
     credential_kind: "api_key",
     quota_scope: "key",
     purchase_date: "2026-08-21",

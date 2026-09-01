@@ -4,7 +4,7 @@
 
 ## 四层 crate
 
-供应商扩展是 **静态且封闭** 的。没有插件槽、JSON DSL 或用户自定义适配器。 Custom API 是 `ProviderAdapterKind::ConfigurableHttp`，不是其他适配器继承的基类。
+**适配器注册表**是 **静态且封闭** 的。类型化 Provider 定义可在运行时持久化，并始终绑定 Configurable HTTP。没有插件槽、JSON DSL 或用户自定义适配器实现。Custom API 是作为账号所有路径使用的 `ProviderAdapterKind::ConfigurableHttp`，不是其他适配器继承的基类。
 
 ```text
 ocg-gateway -> ocg-domain
@@ -15,7 +15,7 @@ src-tauri   -> ocg-core
 
 ```text
   ocg-domain                      ocg-infra
-  IDs, BUILTIN_PLANS,             crypto, proxy HTTP,
+  IDs, BUILTIN_PROVIDERS,             crypto, proxy HTTP,
   MODEL_PROTOCOLS, Zen            inference HTTP, log SQL
        ^                               ^
        |                               |
@@ -44,7 +44,7 @@ src-tauri   -> ocg-core
 
 | Crate | 负责 | 不持有 |
 | --- | --- | --- |
-| `ocg-domain` | ID、`BUILTIN_PLANS`、`ProviderAdapterKind`、协议表、Zen ID 规范化、账号/步骤枚举 | DB、`CoreState`、reqwest、rusqlite、tokio、axum、文件系统、时钟 |
+| `ocg-domain` | ID、`BUILTIN_PROVIDERS`、`ProviderAdapterKind`、协议表、Zen ID 规范化、账号/步骤枚举 | DB、`CoreState`、reqwest、rusqlite、tokio、axum、文件系统、时钟 |
 | `ocg-gateway` | Alias 注册表、`AttemptSpec`、classify 策略、无密钥 selector、整文档 JSON 转换 | DB、`CoreState`、原始 reqwest、rusqlite、axum、明文凭据 |
 | `ocg-infra` | Key 混淆、与目录剥离的代理客户端、推理 HTTP 辅助、单语句日志 SQL | 产品目录、`AppConfig`、Dashboard DTO |
 | `ocg-core` | SQLite、`CoreState`、Dashboard V3、供应商适配器、`GatewayExecutor`、`forward_once`、用量同步、宿主组合 | 插件注册表；适配器同样不持有 DB/`CoreState`/原始客户端 |
@@ -150,7 +150,7 @@ src-tauri   -> ocg-core
 
 标准入口为 `/v1/chat/completions`、`/v1/responses`、`/v1/messages`、`/v1/models`。Claude Desktop 使用 `/claude-desktop/v1/messages` 与 `/claude-desktop/v1/models`。Gemini 接受 `/v1beta/models/{model}:*` 与 `/v1/models/{model}:*`；`generateContent` 与 `streamGenerateContent` 进入转换链，`countTokens` 与 `embedContent` 返回 `501`，未知 action 返回 `404`。带鉴权的 `GET /v1/models` 仅本地读取代码持有且当前可路由的 Alias，再追加合格 Custom 声明 ID。最早 OpenCode Go 表授权 Go 名称，精确密封 MiniMax CN、Kimi CN 与选定 GOAT 长名称映射表授权供应商专属名称但不新增 Go 路由；保存的 Zen 目录只能加入 Go Alias，Command 目录可以加入任一代码持有的 Alias，CN 目录只激活密封映射，无法匹配的内置目录 ID 保留为精确 raw pin。受保护的 `GET /dashboard/api/v3/application-models` 是另一份本地列表：Go 可路由别名 ∩ 当前 Go 价格快照（highspeed 变体继承基价行），不含 Custom ID。Claude Desktop `/claude-desktop/v1/models` 只公布三个角色别名。
 
-Alias 注册表在 `ocg-gateway::alias`（门面 `ocg_core::alias`）。首选别名是小写 kebab-case，由最早 OpenCode Go 静态表或密封 CN/GOAT 映射表授权。Command 会去掉 Provider 命名空间；已知套餐后缀只有在短 Alias 已获代码授权时才去掉；`nvidia/nemotron-3-ultra-550b-a55b` 映射为 `nemotron-3-ultra`。Alias 拼写大小写折叠；内置 raw ID 则严格区分大小写，含 `/`、`_` 或空白的名称同样不会折叠成 kebab 别名。原始 ID 在注册表中恰好对应一个 mapping 时钉在该 mapping，之后再检查可路由性；不可路由的 mapping 会被识别，但不能产出生产路由。重叠的精确原始 ID 返回 `400` `ambiguous_model_id`，不调用上游。未知名称在 Chat Completions、Responses、Messages 以及 Gemini generate / streamGenerate 上返回 `400`。合格 Custom ID 继续按其既有匹配规则 overlay 进解析与 `/v1/models`，但不替换已公布的内置 Alias。已公布 kebab 别名 `deepseek-v4-flash` 可以同时含 Go、Zen 与 Command Code mapping；原始 ID `deepseek/deepseek-v4-flash` 精确钉在 Command Code。转发日志持久化 `requested_model`、`resolved_alias`、`upstream_model`、`provider_id` 与 `offering_id`；没有 `requested_alias` 字段。
+Alias 注册表在 `ocg-gateway::alias`（门面 `ocg_core::alias`）。首选别名是小写 kebab-case，由最早 OpenCode Go 静态表或密封 CN/GOAT 映射表授权。Command 会去掉 Provider 命名空间；已知套餐后缀只有在短 Alias 已获代码授权时才去掉；`nvidia/nemotron-3-ultra-550b-a55b` 映射为 `nemotron-3-ultra`。Alias 拼写大小写折叠；内置 raw ID 则严格区分大小写，含 `/`、`_` 或空白的名称同样不会折叠成 kebab 别名。原始 ID 在注册表中恰好对应一个 mapping 时钉在该 mapping，之后再检查可路由性；不可路由的 mapping 会被识别，但不能产出生产路由。重叠的精确原始 ID 返回 `400` `ambiguous_model_id`，不调用上游。未知名称在 Chat Completions、Responses、Messages 以及 Gemini generate / streamGenerate 上返回 `400`。合格 Custom ID 继续按其既有匹配规则 overlay 进解析与 `/v1/models`，但不替换已公布的内置 Alias。已公布 kebab 别名 `deepseek-v4-flash` 可以同时含 Go、Zen 与 Command Code mapping；原始 ID `deepseek/deepseek-v4-flash` 精确钉在 Command Code。转发日志持久化 `requested_model`、`resolved_alias`、`upstream_model` 与 `provider_id`；没有 `requested_alias` 字段。
 
 JSON 转换在 `ocg-gateway::protocol`；宿主 `gateway/protocol.rs` 保留解析、usage、流式与路由身份类型。Gemini 只是客户端格式。已知模型使用 `ocg-domain` 中硬编码的 `MODEL_PROTOCOLS`：客户端协议在 `supported` 内则透传，否则转到 `preferred`。未知模型在所有受支持的客户端格式上返回 `400`；请求路径不试探协议。非空 `safetySettings` 返回 `400`；空数组可以接受。`topK` 与 `thinkingConfig` 只是兼容提示，不保证与 Gemini 等价。
 
@@ -208,7 +208,7 @@ Command Code GOAT 的请求计费只读取其最新、已验证的 Provider 范�
 
 ## Plan 目录
 
-`BUILTIN_PLANS` 与 `ProviderAdapterKind` 在 `ocg-domain::provider`（门面 `ocg_core::provider`）。六个家族：
+`BUILTIN_PROVIDERS` 与 `ProviderAdapterKind` 在 `ocg-domain::provider`（门面 `ocg_core::provider`）。六个家族：
 
 | 家族 | ID | 可路由 | 说明 |
 | --- | --- | --- | --- |
@@ -250,7 +250,7 @@ Vue SPA 是当前唯一的面板客户端，走 HTTP Dashboard V3。CLI 调用�
   account_control / gateway_keys / settings / ...
            |
            v
-  SQLite schema v34
+  SQLite schema v35
            ^
            |
   ocg-manager-cli  同一组服务，无 argv CAS
@@ -260,10 +260,10 @@ Vue SPA 是当前唯一的面板客户端，走 HTTP Dashboard V3。CLI 调用�
 
 ## 持久化地图
 
-权威 schema 是 v34。`sub_gateway_keys` 只出现在迁到 v27 之前的历史库，迁完即丢弃。GUI 数据目录在 Windows 为 `%USERPROFILE%\.ocg-mgr`，在 macOS/Linux 为 `~/.ocg-mgr`；CLI 默认 `~/.ocg-mgr-cli`。
+权威 schema 是 v35。`sub_gateway_keys` 只出现在迁到 v27 之前的历史库，迁完即丢弃。GUI 数据目录在 Windows 为 `%USERPROFILE%\.ocg-mgr`，在 macOS/Linux 为 `~/.ocg-mgr`；CLI 默认 `~/.ocg-mgr-cli`。
 
 ```text
-  data.sqlite                         CURRENT_SCHEMA_VERSION = 34
+  data.sqlite                         CURRENT_SCHEMA_VERSION = 35
     access_keys                       主 Key id PRIMARY_KEY_ID
                                       主 Key 不可禁用/删除
                                       子 Key 活跃上限 64

@@ -12,7 +12,7 @@ use std::time::Instant;
 
 use crate::models::Account as ModelAccount;
 use crate::provider::{
-    ProviderAdapterKind, UpstreamProtocolKind, builtin_plan, plan_requires_custom_config,
+    ProviderAdapterKind, UpstreamProtocolKind, builtin_provider, plan_requires_custom_config,
 };
 use crate::provider_contracts::ContractScope;
 use crate::state::CoreState;
@@ -80,9 +80,9 @@ fn prepare_account_model_test(
     if model_id.is_empty() {
         return Err(V3ApiError::invalid_request_at(state, "modelId is required"));
     }
-    let plan = builtin_plan(&account.provider_id, &account.offering_id)
+    let plan = builtin_provider(&account.provider_id)
         .ok_or_else(|| V3ApiError::invalid_request_at(state, "unknown provider offering"))?;
-    let adapter = ProviderAdapterKind::from_offering(&account.provider_id, &account.offering_id)
+    let adapter = ProviderAdapterKind::from_provider_id(&account.provider_id)
         .ok_or_else(|| V3ApiError::invalid_request_at(state, "unknown provider offering"))?;
 
     let (protocol, custom_endpoint_url, upstream_model) = if plan_requires_custom_config(plan) {

@@ -81,7 +81,6 @@ pub const CATALOG_TYPE_NAMES: &[&str] = &[
     "ProviderContracts",
     "ProviderContractGroup",
     "CustomEndpointContract",
-    "ProviderOfferingChoice",
     "ProviderAccountChoice",
     "EffectiveCatalog",
     "EffectiveModelContract",
@@ -194,6 +193,16 @@ pub const CATALOG_TYPE_NAMES: &[&str] = &[
     "CpaOAuthStart",
     "CpaOAuthStatus",
     "CpaOAuthSessionDelete",
+    "DynamicProviderAuthKind",
+    "DynamicProviderModel",
+    "DynamicProvider",
+    "DynamicProviderCreate",
+    "DynamicProviderUpdate",
+    "DynamicProviderMutation",
+    "DynamicProviderDiscoverRequest",
+    "DynamicProviderDiscoverResponse",
+    "DynamicProviderTestRequest",
+    "DynamicProviderTestResponse",
 ];
 
 pub const ERROR_UNAUTHORIZED: &str = "unauthorized";
@@ -725,7 +734,7 @@ pub enum RoutingMode {
 pub struct Account {
     pub id: String,
     pub provider_id: String,
-    pub offering_id: String,
+
     pub credential_kind: AccountCredentialKind,
     pub quota_scope: AccountQuotaScope,
     pub name: String,
@@ -834,7 +843,7 @@ pub struct AccountImportPreviewItem {
     pub index: u64,
     pub name: String,
     pub provider_id: String,
-    pub offering_id: String,
+
     pub account_type: AccountType,
     pub disposition: AccountImportDisposition,
     pub reason: Option<String>,
@@ -910,8 +919,6 @@ pub struct AccountCreate {
     pub expectation: MutationExpectation,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub offering_id: Option<String>,
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub username: Option<String>,
@@ -1290,14 +1297,14 @@ pub struct ProviderCatalog {
     pub pricing_revision: String,
 }
 
-/// One Provider Registry offering as a wire catalog row. Identity strings are
+/// One Provider Registry entry as a wire catalog row. Identity strings are
 /// data copied from the static registry; this DTO does not define them.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 #[schemars(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProviderCatalogEntry {
     pub provider_id: String,
-    pub offering_id: String,
+
     pub display_name: String,
     pub display_family: String,
     pub credential_kind: AccountCredentialKind,
@@ -1321,7 +1328,7 @@ pub struct ProviderCatalogEntry {
     pub model_aliases: Vec<String>,
 }
 
-/// One create-form field advertised by a catalog offering.
+/// One create-form field advertised by a catalog provider.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 #[schemars(rename_all = "camelCase", deny_unknown_fields)]
@@ -1352,7 +1359,7 @@ pub struct ProviderCatalogRiskNotice {
 pub struct ProviderModelCapability {
     pub model_id: String,
     pub provider_id: String,
-    pub offering_id: String,
+
     pub preferred_protocol: AccountUpstreamProtocol,
     pub supported_protocols: Vec<AccountUpstreamProtocol>,
 }
@@ -1418,7 +1425,7 @@ pub struct ProviderContracts {
     pub pricing_revision: String,
 }
 
-/// One built-in Provider/Offering contract scope.
+/// One built-in Provider contract scope.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 #[schemars(rename_all = "camelCase", deny_unknown_fields)]
@@ -1430,7 +1437,7 @@ pub struct ProviderContractGroup {
     /// `null` when the scope has no restorable snapshot and is distinct from
     /// catalog `refreshed_at`.
     pub static_protocol_snapshot_date: Option<String>,
-    pub offerings: Vec<ProviderOfferingChoice>,
+    pub accounts: Vec<ProviderAccountChoice>,
     pub catalog: EffectiveCatalog,
     pub models: Vec<EffectiveModelContract>,
     pub pricing: CapabilitySummary,
@@ -1462,17 +1469,6 @@ pub struct CustomEndpointContract {
     pub disabled_reasons: Vec<String>,
     /// Display revision for this endpoint, distinct from the top-level CAS token.
     pub revision: u64,
-}
-
-/// One offering under a provider scope, with current account cards.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-#[schemars(rename_all = "camelCase", deny_unknown_fields)]
-pub struct ProviderOfferingChoice {
-    pub offering_id: String,
-    pub display_name: String,
-    pub routable: bool,
-    pub accounts: Vec<ProviderAccountChoice>,
 }
 
 /// Secret-free account identity on a contract card.
@@ -1934,7 +1930,7 @@ pub enum PricingRefreshPolicy {
 }
 
 /// PUT provider pricing-multipliers body. CAS tokens,
-/// `expectedPricingRevision` (the selected offering's active revision), and
+/// `expectedPricingRevision` (the selected provider's active revision), and
 /// `multipliers` are required.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -1962,7 +1958,7 @@ pub struct PricingMultiplierWrite {
 #[schemars(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProviderPricing {
     pub provider_id: String,
-    pub offering_id: String,
+
     pub availability: PricingAvailability,
     pub snapshot: Option<PricingSnapshot>,
     pub provider_snapshot: Option<ProviderPricingSnapshot>,
@@ -1972,7 +1968,7 @@ pub struct ProviderPricing {
     pub provider_pricing_revision: String,
 }
 
-/// Result of refreshing every priced offering owned by one Provider. Provider
+/// Result of refreshing the priced snapshot owned by one Provider. Provider
 /// failures are isolated: this response never represents a cross-Provider
 /// transaction.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -1980,7 +1976,6 @@ pub struct ProviderPricing {
 #[schemars(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProviderPricingRefresh {
     pub provider_id: String,
-    pub offering_ids: Vec<String>,
     pub refresh_status: PricingRefreshStatus,
     pub multiplier_changes: Vec<PricingMultiplierChange>,
     pub official_content_hash: Option<String>,
@@ -2277,7 +2272,7 @@ pub struct ForwardLog {
     pub account_name: String,
     pub route_account_id: Option<String>,
     pub provider_id: Option<String>,
-    pub offering_id: Option<String>,
+
     pub credential_account_id: Option<String>,
     pub client_key_id: Option<String>,
     pub client_key_name: Option<String>,
@@ -2396,8 +2391,6 @@ pub struct ForwardLogQuery {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub offering_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub route_account_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub credential_account_id: Option<String>,
@@ -2482,7 +2475,7 @@ pub struct AccountUsageUpdate {
 pub struct ProviderUsage {
     pub account_id: String,
     pub provider_id: String,
-    pub offering_id: String,
+
     pub availability: UsageAvailability,
     pub experimental: bool,
     pub free_cooldown_until: Option<String>,
@@ -2842,6 +2835,157 @@ pub struct CpaOAuthSessionDelete {
     pub state: String,
 }
 
+/// Auth kind owned by a dynamic Provider. Independent of protocol.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[schemars(rename_all = "snake_case")]
+pub enum DynamicProviderAuthKind {
+    Bearer,
+    #[serde(rename = "x-api-key")]
+    XApiKey,
+    None,
+}
+
+impl From<ocg_domain::dynamic::DynamicAuthKind> for DynamicProviderAuthKind {
+    fn from(value: ocg_domain::dynamic::DynamicAuthKind) -> Self {
+        match value {
+            ocg_domain::dynamic::DynamicAuthKind::Bearer => Self::Bearer,
+            ocg_domain::dynamic::DynamicAuthKind::XApiKey => Self::XApiKey,
+            ocg_domain::dynamic::DynamicAuthKind::None => Self::None,
+        }
+    }
+}
+
+impl From<DynamicProviderAuthKind> for ocg_domain::dynamic::DynamicAuthKind {
+    fn from(value: DynamicProviderAuthKind) -> Self {
+        match value {
+            DynamicProviderAuthKind::Bearer => Self::Bearer,
+            DynamicProviderAuthKind::XApiKey => Self::XApiKey,
+            DynamicProviderAuthKind::None => Self::None,
+        }
+    }
+}
+
+/// One public-to-upstream mapping owned by a dynamic Provider.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[schemars(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DynamicProviderModel {
+    pub public_model: String,
+    pub upstream_model: String,
+}
+
+/// Secret-free dynamic Provider definition.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DynamicProvider {
+    pub id: String,
+    pub name: String,
+    pub endpoint_url: String,
+    pub upstream_protocol: AccountUpstreamProtocol,
+    pub auth_kind: DynamicProviderAuthKind,
+    pub models: Vec<DynamicProviderModel>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub revision: u64,
+    pub process_generation: u64,
+}
+
+/// POST `/providers` body. Creates the definition, mappings, and first account.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[schemars(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DynamicProviderCreate {
+    #[serde(flatten)]
+    pub expectation: MutationExpectation,
+    pub name: String,
+    pub endpoint_url: String,
+    pub upstream_protocol: AccountUpstreamProtocol,
+    pub auth_kind: DynamicProviderAuthKind,
+    pub models: Vec<DynamicProviderModel>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
+}
+
+/// PATCH `/providers/{providerId}` body. Full replacement of mutable config.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[schemars(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DynamicProviderUpdate {
+    #[serde(flatten)]
+    pub expectation: MutationExpectation,
+    pub name: String,
+    pub endpoint_url: String,
+    pub upstream_protocol: AccountUpstreamProtocol,
+    pub auth_kind: DynamicProviderAuthKind,
+    pub models: Vec<DynamicProviderModel>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+}
+
+/// Mutation result for a dynamic Provider write.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DynamicProviderMutation {
+    pub provider: DynamicProvider,
+    pub revision: u64,
+    pub process_generation: u64,
+}
+
+/// POST `/providers/models/discover` body. Operational probe; no CAS bump.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[schemars(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DynamicProviderDiscoverRequest {
+    pub endpoint_url: String,
+    pub upstream_protocol: AccountUpstreamProtocol,
+    pub auth_kind: DynamicProviderAuthKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+}
+
+/// Discovery result. Never includes the submitted Key.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DynamicProviderDiscoverResponse {
+    pub models: Vec<String>,
+    pub truncated: bool,
+    pub revision: u64,
+    pub process_generation: u64,
+}
+
+/// POST `/providers/test` body. Operational probe; no CAS bump.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[schemars(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DynamicProviderTestRequest {
+    pub endpoint_url: String,
+    pub upstream_protocol: AccountUpstreamProtocol,
+    pub auth_kind: DynamicProviderAuthKind,
+    pub public_model: String,
+    pub upstream_model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+}
+
+/// Model-test result. Never includes the submitted Key.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DynamicProviderTestResponse {
+    pub ok: bool,
+    pub error: Option<String>,
+    pub revision: u64,
+    pub process_generation: u64,
+}
+
 /// Deterministic JSON Schema catalog for the checked-in V3 contract.
 ///
 /// Response types are generated with the serialize contract so `Option` fields
@@ -2881,7 +3025,6 @@ pub fn contract_schema() -> Value {
     include_type::<ProviderContracts>(&mut serialize);
     include_type::<ProviderContractGroup>(&mut serialize);
     include_type::<CustomEndpointContract>(&mut serialize);
-    include_type::<ProviderOfferingChoice>(&mut serialize);
     include_type::<ProviderAccountChoice>(&mut serialize);
     include_type::<EffectiveCatalog>(&mut serialize);
     include_type::<EffectiveModelContract>(&mut serialize);
@@ -2951,6 +3094,12 @@ pub fn contract_schema() -> Value {
     include_type::<CpaOAuthProvider>(&mut serialize);
     include_type::<CpaOAuthStart>(&mut serialize);
     include_type::<CpaOAuthStatus>(&mut serialize);
+    include_type::<DynamicProviderAuthKind>(&mut serialize);
+    include_type::<DynamicProviderModel>(&mut serialize);
+    include_type::<DynamicProvider>(&mut serialize);
+    include_type::<DynamicProviderMutation>(&mut serialize);
+    include_type::<DynamicProviderDiscoverResponse>(&mut serialize);
+    include_type::<DynamicProviderTestResponse>(&mut serialize);
     let mut defs = serialize.take_definitions(true);
 
     let mut deserialize = SchemaSettings::draft2020_12().into_generator();
@@ -3005,6 +3154,10 @@ pub fn contract_schema() -> Value {
     include_type::<CpaQuotaReset>(&mut deserialize);
     include_type::<CpaOAuthStartRequest>(&mut deserialize);
     include_type::<CpaOAuthSessionDelete>(&mut deserialize);
+    include_type::<DynamicProviderCreate>(&mut deserialize);
+    include_type::<DynamicProviderUpdate>(&mut deserialize);
+    include_type::<DynamicProviderDiscoverRequest>(&mut deserialize);
+    include_type::<DynamicProviderTestRequest>(&mut deserialize);
     for (name, schema) in deserialize.take_definitions(true) {
         defs.entry(name).or_insert(schema);
     }
@@ -3020,8 +3173,7 @@ pub fn contract_schema() -> Value {
         "title": "DashboardApiV3",
         "$comment": "Extensible Dashboard V3 contract catalog. Add new $defs for later DTOs; do not rename or reshape existing definitions. ConnectionInfo is the only plaintext Key DTO.",
         "anyOf": catalog_refs(&defs),
-        "$defs": defs,
-    })
+        "$defs": defs })
 }
 
 /// Pretty-printed catalog JSON with a trailing newline.

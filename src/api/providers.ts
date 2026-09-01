@@ -3,6 +3,10 @@ import { useControlPlaneStore } from "../stores/controlPlane.ts";
 import type {
   AccountCredentialKind,
   AccountQuotaScope,
+  DynamicProvider as V3DynamicProvider,
+  DynamicProviderDiscoverResponse as V3DynamicProviderDiscoverResponse,
+  DynamicProviderMutation as V3DynamicProviderMutation,
+  DynamicProviderTestResponse as V3DynamicProviderTestResponse,
   ModelProtocolOverridesUpdate,
   ProviderCatalogEntry as V3ProviderCatalogEntry,
   ProviderContracts as V3ProviderContracts,
@@ -36,7 +40,6 @@ export interface ProviderCatalogFormField {
 
 export interface ProviderCatalogEntry {
   provider_id: string;
-  offering_id: string;
   display_name: string;
   display_family: string;
   credential_kind: AccountCredentialKind;
@@ -60,12 +63,31 @@ export interface ProviderCatalogEntry {
   model_aliases: string[];
 }
 
+export type DynamicProviderAuthKind = "bearer" | "x-api-key" | "none";
+
+export interface DynamicProviderModelView {
+  public_model: string;
+  upstream_model: string;
+}
+
+export interface DynamicProviderView {
+  id: string;
+  name: string;
+  endpoint_url: string;
+  upstream_protocol: "chat_completions" | "responses" | "messages";
+  auth_kind: DynamicProviderAuthKind;
+  models: DynamicProviderModelView[];
+  created_at: string;
+  updated_at: string;
+  revision: number;
+  process_generation: number;
+}
+
 export type ProviderProtocol = AccountProtocol;
 
 export interface ProviderModelCapability {
   model_id: string;
   provider_id: string;
-  offering_id: string;
   preferred_protocol: ProviderProtocol;
   supported_protocols: ProviderProtocol[];
 }
@@ -96,7 +118,6 @@ export interface ProviderNeutralPricingSnapshot {
 
 export type StoredProviderPricingSnapshot = PricingSnapshot | ProviderNeutralPricingSnapshot | {
   provider_id: string;
-  offering_id: string;
   revision: string;
   activated_at: string;
   document_updated_at: string | null;
@@ -107,7 +128,6 @@ export type StoredProviderPricingSnapshot = PricingSnapshot | ProviderNeutralPri
 
 export interface ProviderPricingResponse {
   provider_id: string;
-  offering_id: string;
   availability: "available" | "unavailable" | "not_applicable" | "unpriced";
   snapshot?: StoredProviderPricingSnapshot;
   revision: number;
@@ -151,7 +171,6 @@ export interface ProviderUsageSyncState {
 export interface ProviderUsageResponse {
   account_id: string;
   provider_id: string;
-  offering_id: string;
   availability: string;
   quota_windows: ProviderQuotaWindow[];
   credit_balances: ProviderCreditBalance[];
@@ -224,13 +243,6 @@ export interface ProviderAccountChoice {
   verification_status: ConnectionVerificationStatus;
 }
 
-export interface ProviderOfferingChoice {
-  offering_id: string;
-  display_name: string;
-  routable: boolean;
-  accounts: ProviderAccountChoice[];
-}
-
 export interface CapabilitySummary {
   availability: string;
 }
@@ -247,7 +259,7 @@ export interface ProviderContractGroup {
   scope_id: string;
   provider_id: string;
   static_protocol_snapshot_date: string | null;
-  offerings: ProviderOfferingChoice[];
+  accounts: ProviderAccountChoice[];
   catalog: EffectiveCatalog;
   models: EffectiveModelContract[];
   pricing: CapabilitySummary;
@@ -353,10 +365,34 @@ function formFieldKind(value: string): ProviderCatalogFormField["kind"] {
   return "text";
 }
 
+export function presentDynamicProvider(value: V3DynamicProvider): DynamicProviderView {
+  return {
+    id: value.id,
+    name: value.name,
+    endpoint_url: value.endpointUrl,
+    upstream_protocol: value.upstreamProtocol,
+    auth_kind: value.authKind,
+    models: value.models.map((model) => ({
+      public_model: model.publicModel,
+      upstream_model: model.upstreamModel,
+    })),
+    created_at: value.createdAt,
+    updated_at: value.updatedAt,
+    revision: value.revision,
+    process_generation: value.processGeneration,
+  };
+}
+
+function assertNoSecret(value: object): void {
+  const record = value as Record<string, unknown>;
+  if ("key" in record || "apiKey" in record) {
+    throw new Error("dynamic Provider response must not include a Key");
+  }
+}
+
 export function presentCatalogEntry(value: V3ProviderCatalogEntry): ProviderCatalogEntry {
   return {
     provider_id: value.providerId,
-    offering_id: value.offeringId,
     display_name: value.displayName,
     display_family: value.displayFamily,
     credential_kind: value.credentialKind,
@@ -439,7 +475,7 @@ function presentCatalog(value: V3ProviderContracts["providers"][number]["catalog
   };
 }
 
-function presentAccountChoice(value: V3ProviderContracts["providers"][number]["offerings"][number]["accounts"][number]): ProviderAccountChoice {
+function presentAccountChoice(value: V3ProviderContracts["providers"][number]["accounts"][number]): ProviderAccountChoice {
   return {
     id: value.id,
     name: value.name,
@@ -456,12 +492,7 @@ export function presentContracts(value: V3ProviderContracts): ProviderContractsR
       scope_id: scope.scopeId,
       provider_id: scope.providerId,
       static_protocol_snapshot_date: scope.staticProtocolSnapshotDate,
-      offerings: scope.offerings.map((offering) => ({
-        offering_id: offering.offeringId,
-        display_name: offering.displayName,
-        routable: offering.routable,
-        accounts: offering.accounts.map(presentAccountChoice),
-      })),
+      accounts: scope.accounts.map(presentAccountChoice),
       catalog: presentCatalog(scope.catalog),
       models: scope.models.map(presentModel),
       pricing: { availability: scope.pricing.availability },
@@ -497,7 +528,6 @@ export function presentContracts(value: V3ProviderContracts): ProviderContractsR
 function presentProviderPricing(value: V3ProviderPricing): ProviderPricingResponse {
   return {
     provider_id: value.providerId,
-    offering_id: value.offeringId,
     availability: value.availability,
     snapshot: value.providerSnapshot === null
       ? (value.snapshot === null ? undefined : presentPricing(value.snapshot))
@@ -537,7 +567,6 @@ function presentProviderUsage(value: V3ProviderUsage): ProviderUsageResponse {
   return {
     account_id: value.accountId,
     provider_id: value.providerId,
-    offering_id: value.offeringId,
     availability: value.availability,
     quota_windows: value.quotaWindows.map((window) => ({
       account_id: window.accountId,
@@ -599,22 +628,20 @@ export const providerApi = {
     (await dashboardV3.getProviderModelCapabilities()).map((model) => ({
       model_id: model.modelId,
       provider_id: model.providerId,
-      offering_id: model.offeringId,
       preferred_protocol: model.preferredProtocol,
       supported_protocols: [...model.supportedProtocols],
     })),
-  getProviderPricing: async (providerId: string, offeringId: string) =>
-    presentProviderPricing(await dashboardV3.getProviderPricing(providerId, offeringId)),
+  getProviderPricing: async (providerId: string) =>
+    presentProviderPricing(await dashboardV3.getProviderPricing(providerId)),
   updateProviderPricingMultipliers: async (
     providerId: string,
-    offeringId: string,
     expectedPricingRevision: string,
     multipliers: Array<{ model_id: string; multiplier: number }>,
   ) => {
     const control = useControlPlaneStore();
     if (!control.hasTokens()) await control.refresh();
     return presentProviderPricing(await control.runMutation((expectation) => (
-      dashboardV3.putProviderPricingMultipliers(providerId, offeringId, {
+      dashboardV3.putProviderPricingMultipliers(providerId, {
         expectedPricingRevision,
         multipliers: multipliers.map((multiplier) => ({
           modelId: multiplier.model_id,
@@ -624,7 +651,7 @@ export const providerApi = {
     )));
   },
   getGoPricing: async (): Promise<PricingSnapshot> => {
-    const result = await dashboardV3.getProviderPricing("opencode", "go");
+    const result = await dashboardV3.getProviderPricing("opencode");
     if (!result.snapshot) throw new Error("OpenCode Go pricing is not available");
     return presentPricing(result.snapshot);
   },
@@ -760,5 +787,91 @@ export const providerApi = {
         modelId: input.model_id,
         protocols: input.protocols,
       }, expectation)));
+  },
+  getDynamicProvider: async (providerId: string) => {
+    const value = await dashboardV3.getDynamicProvider(providerId);
+    assertNoSecret(value);
+    return presentDynamicProvider(value);
+  },
+  createDynamicProvider: async (
+    input: WithoutExpectation<import("./generated/dashboard-v3.ts").DynamicProviderCreate>,
+  ) => {
+    const control = useControlPlaneStore();
+    if (!control.hasTokens()) await control.refresh();
+    try {
+      const value: V3DynamicProviderMutation = await control.runMutation((expectation) =>
+        dashboardV3.createDynamicProvider(input, expectation));
+      assertNoSecret(value);
+      assertNoSecret(value.provider);
+      return presentDynamicProvider(value.provider);
+    } catch (cause) {
+      if (isRevisionConflict(cause)) await dashboardV3.getProviders();
+      throw cause;
+    }
+  },
+  updateDynamicProvider: async (
+    providerId: string,
+    input: WithoutExpectation<import("./generated/dashboard-v3.ts").DynamicProviderUpdate>,
+  ) => {
+    const control = useControlPlaneStore();
+    if (!control.hasTokens()) await control.refresh();
+    try {
+      const value: V3DynamicProviderMutation = await control.runMutation((expectation) =>
+        dashboardV3.updateDynamicProvider(providerId, input, expectation));
+      assertNoSecret(value);
+      assertNoSecret(value.provider);
+      return presentDynamicProvider(value.provider);
+    } catch (cause) {
+      if (isRevisionConflict(cause)) {
+        await dashboardV3.getProviders();
+        await dashboardV3.getDynamicProvider(providerId).catch(() => undefined);
+      }
+      throw cause;
+    }
+  },
+  deleteDynamicProvider: async (providerId: string) => {
+    const control = useControlPlaneStore();
+    if (!control.hasTokens()) await control.refresh();
+    try {
+      return await control.runMutation((expectation) =>
+        dashboardV3.deleteDynamicProvider(providerId, expectation));
+    } catch (cause) {
+      if (isRevisionConflict(cause)) await dashboardV3.getProviders();
+      throw cause;
+    }
+  },
+  discoverDynamicProviderModels: async (input: {
+    endpoint_url: string;
+    upstream_protocol: "chat_completions" | "responses" | "messages";
+    auth_kind: DynamicProviderAuthKind;
+    key?: string;
+  }) => {
+    const value: V3DynamicProviderDiscoverResponse = await dashboardV3.discoverDynamicProviderModels({
+      endpointUrl: input.endpoint_url,
+      upstreamProtocol: input.upstream_protocol,
+      authKind: input.auth_kind,
+      key: input.key,
+    });
+    assertNoSecret(value);
+    return { models: value.models, truncated: value.truncated };
+  },
+  testDynamicProvider: async (input: {
+    endpoint_url: string;
+    upstream_protocol: "chat_completions" | "responses" | "messages";
+    auth_kind: DynamicProviderAuthKind;
+    public_model: string;
+    upstream_model: string;
+    key?: string;
+  }) => {
+    const value: V3DynamicProviderTestResponse = await dashboardV3.testDynamicProvider({
+      endpointUrl: input.endpoint_url,
+      upstreamProtocol: input.upstream_protocol,
+      authKind: input.auth_kind,
+      publicModel: input.public_model,
+      upstreamModel: input.upstream_model,
+      key: input.key,
+    });
+    assertNoSecret(value);
+    return { ok: value.ok, error: value.error };
   },
 };

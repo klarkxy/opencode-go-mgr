@@ -366,8 +366,7 @@ async fn ping_one(
         "model": model,
         "messages": [{"role": "user", "content": message}],
         "max_tokens": max_tokens,
-        "stream": false,
-    });
+        "stream": false });
     let started = std::time::Instant::now();
     let resp = client
         .post(&url)
@@ -423,7 +422,6 @@ async fn ping_keys(
                     reject_zen_key_operation(&a)?;
                     if a.credential_kind == CredentialKind::ApiKey
                         && a.provider_id == ocg_core::provider::OPENCODE_PROVIDER_ID
-                        && a.offering_id == ocg_core::provider::GO_OFFERING_ID
                         && a.setup_step.is_ready()
                         && !a.key_cipher.is_empty()
                     {
@@ -440,7 +438,6 @@ async fn ping_keys(
                 .filter(|a| {
                     a.credential_kind == CredentialKind::ApiKey
                         && a.provider_id == ocg_core::provider::OPENCODE_PROVIDER_ID
-                        && a.offering_id == ocg_core::provider::GO_OFFERING_ID
                         && a.enabled
                         && a.setup_step.is_ready()
                         && !a.key_cipher.is_empty()

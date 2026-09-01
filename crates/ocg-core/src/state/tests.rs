@@ -216,7 +216,7 @@ fn startup_finishes_reset_profile_journal_without_restoring_cookies() {
     let account = Account {
         id: "existing-account".into(),
         provider_id: crate::provider::default_provider_id(),
-        offering_id: crate::provider::default_offering_id(),
+
         credential_kind: crate::provider::default_credential_kind(),
         quota_scope: crate::provider::default_quota_scope(),
         name: "existing-account".into(),
@@ -318,7 +318,7 @@ fn routing_runtime_resets_when_routing_fields_or_gateway_key_change() {
         Account {
             id: id.into(),
             provider_id: crate::provider::default_provider_id(),
-            offering_id: crate::provider::default_offering_id(),
+
             credential_kind: crate::provider::default_credential_kind(),
             quota_scope: crate::provider::default_quota_scope(),
             name: id.into(),
@@ -506,8 +506,7 @@ fn desktop_update_state_machine_is_serializable_atomic_and_retriable() {
             "total": null,
             "error": null,
             "current_version": env!("CARGO_PKG_VERSION"),
-            "install_supported": false,
-        })
+            "install_supported": false })
     );
     assert!(!state.set_desktop_update_progress(1, Some(2)));
     assert!(!state.set_desktop_update_installing());
@@ -636,8 +635,7 @@ fn legacy_config_with_embedded_key_list_drops_it_and_keeps_the_scalar() {
                 "created_at": "2026-08-16T00:00:00Z"
             }
         ],
-        "upstream_base_url": "https://opencode.ai/zen/go",
-    });
+        "upstream_base_url": "https://opencode.ai/zen/go" });
     db.set_setting("config", &legacy.to_string())
         .expect("legacy config should persist");
     let cipher: Arc<dyn KeyCipher + Send + Sync> = Arc::new(StaticKeyCipher::new("state-test"));
@@ -734,7 +732,7 @@ fn routing_resets_only_when_routing_fields_or_primary_key_change() {
         Account {
             id: id.into(),
             provider_id: crate::provider::default_provider_id(),
-            offering_id: crate::provider::default_offering_id(),
+
             credential_kind: crate::provider::default_credential_kind(),
             quota_scope: crate::provider::default_quota_scope(),
             name: id.into(),

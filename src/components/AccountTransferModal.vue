@@ -68,7 +68,7 @@
           <div v-for="item in preview.items" :key="item.index" class="transfer-preview-row">
             <span class="transfer-disposition">{{ dispositionLabel(item.disposition) }}</span>
             <span>{{ item.name }}</span>
-            <span class="mono">{{ item.providerId }}/{{ item.offeringId }}</span>
+            <span class="mono">{{ item.providerId }}</span>
             <span v-if="item.reason" class="transfer-reason">{{ dispositionReason(item.disposition) }}</span>
           </div>
         </div>

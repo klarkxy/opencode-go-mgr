@@ -29,8 +29,7 @@ pub fn v2_removed_response() -> Response {
         StatusCode::GONE,
         Json(json!({
             "code": DASHBOARD_V2_REMOVED_CODE,
-            "message": DASHBOARD_V2_REMOVED_MESSAGE,
-        })),
+            "message": DASHBOARD_V2_REMOVED_MESSAGE })),
     )
         .into_response()
 }

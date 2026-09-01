@@ -800,8 +800,7 @@ async fn http_v3_port_change_rebinds_running_listener_or_keeps_old_on_failure() 
         .json(&json!({
             "expectedRevision": state.settings_revision(),
             "processGeneration": state.process_generation(),
-            "gatewayPort": new_port,
-        }))
+            "gatewayPort": new_port }))
         .send()
         .await
         .unwrap();
@@ -822,8 +821,7 @@ async fn http_v3_port_change_rebinds_running_listener_or_keeps_old_on_failure() 
         .json(&json!({
             "expectedRevision": state.settings_revision(),
             "processGeneration": state.process_generation(),
-            "gatewayPort": occupied_port,
-        }))
+            "gatewayPort": occupied_port }))
         .send()
         .await
         .unwrap();
@@ -954,8 +952,7 @@ async fn failed_http_rebind_releases_sync_gate_and_preserves_later_key_and_claud
             .json(&json!({
                 "expectedRevision": settings_state.settings_revision(),
                 "processGeneration": settings_state.process_generation(),
-                "gatewayPort": failed_port,
-            }))
+                "gatewayPort": failed_port }))
             .send()
             .await
             .expect("failed-port settings request should receive a response")
@@ -985,8 +982,7 @@ async fn failed_http_rebind_releases_sync_gate_and_preserves_later_key_and_claud
                 "processGeneration": state.process_generation(),
                 "sonnet": "glm-5.2",
                 "opus": "",
-                "haiku": "",
-            }))
+                "haiku": "" }))
             .send(),
     )
     .await
@@ -1003,8 +999,7 @@ async fn failed_http_rebind_releases_sync_gate_and_preserves_later_key_and_claud
             ))
             .json(&json!({
                 "expectedRevision": state.settings_revision(),
-                "processGeneration": state.process_generation(),
-            }))
+                "processGeneration": state.process_generation() }))
             .send(),
     )
     .await
@@ -1161,8 +1156,7 @@ async fn http_v2_and_v3_concurrent_port_changes_agree_on_configured_and_active_p
             .json(&json!({
                 "expectedRevision": a_state.settings_revision(),
                 "processGeneration": a_state.process_generation(),
-                "gatewayPort": first_port,
-            }))
+                "gatewayPort": first_port }))
             .send()
             .await
             .unwrap()
@@ -1181,8 +1175,7 @@ async fn http_v2_and_v3_concurrent_port_changes_agree_on_configured_and_active_p
             .json(&json!({
                 "expectedRevision": b_state.settings_revision(),
                 "processGeneration": b_state.process_generation(),
-                "gatewayPort": second_port,
-            }))
+                "gatewayPort": second_port }))
             .send()
             .await
             .unwrap()

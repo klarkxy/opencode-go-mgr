@@ -479,8 +479,7 @@ async fn dashboard_v3_update_status_is_idle_camelcase_nulls_and_does_not_bump() 
             "currentVersion": env!("CARGO_PKG_VERSION"),
             "installSupported": false,
             "revision": before.0,
-            "processGeneration": before.1,
-        })
+            "processGeneration": before.1 })
     );
     assert_eq!(parsed.revision, before.0);
     assert_eq!(parsed.process_generation, before.1);

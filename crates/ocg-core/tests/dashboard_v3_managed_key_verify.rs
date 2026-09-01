@@ -16,8 +16,7 @@ use ocg_core::models::{
     Account as ModelAccount, AccountSetupStep as ModelSetupStep, AccountType as ModelAccountType,
 };
 use ocg_core::provider::{
-    COMMAND_CODE_PROVIDER_ID, ConnectionVerificationStatus, GO_OFFERING_ID, GOAT_OFFERING_ID,
-    OPENCODE_PROVIDER_ID,
+    COMMAND_CODE_PROVIDER_ID, ConnectionVerificationStatus, OPENCODE_PROVIDER_ID,
 };
 use reqwest::{Method, StatusCode};
 use serde_json::{Map, Value, json};
@@ -180,7 +179,7 @@ fn managed_waiting(id: &str) -> ModelAccount {
     ModelAccount {
         id: id.into(),
         provider_id: OPENCODE_PROVIDER_ID.into(),
-        offering_id: GO_OFFERING_ID.into(),
+
         credential_kind: ocg_core::provider::default_credential_kind(),
         quota_scope: ocg_core::provider::default_quota_scope(),
         name: id.into(),
@@ -646,7 +645,6 @@ async fn dashboard_v3_managed_key_verify_rejects_unknown_wrong_step_and_unroutab
     harness.state.db.lock().create_account(&key_acct).unwrap();
     let mut goat = managed_waiting("goat-1");
     goat.provider_id = COMMAND_CODE_PROVIDER_ID.into();
-    goat.offering_id = GOAT_OFFERING_ID.into();
     harness.state.db.lock().create_account(&goat).unwrap();
     let before = harness.state.settings_revision();
 
@@ -1360,7 +1358,6 @@ async fn dashboard_v3_invalid_stale_and_wrong_step_never_call_upstream() {
     harness.state.db.lock().create_account(&draft).unwrap();
     let mut goat = managed_waiting("goat-1");
     goat.provider_id = COMMAND_CODE_PROVIDER_ID.into();
-    goat.offering_id = GOAT_OFFERING_ID.into();
     harness.state.db.lock().create_account(&goat).unwrap();
     let before = harness.state.settings_revision();
     let generation = harness.state.process_generation();

@@ -186,7 +186,7 @@ fn prepare_verify(
 ) -> Result<PreparedVerify, V3ApiError> {
     check_expectation(state, expectation)?;
     let account = load_model_account(state, id)?;
-    let plan = crate::provider::builtin_plan(&account.provider_id, &account.offering_id)
+    let plan = crate::provider::builtin_provider(&account.provider_id)
         .ok_or_else(|| V3ApiError::invalid_request_at(state, "unknown provider offering"))?;
     if plan.verification_policy == VerificationPolicy::NotRequired {
         return Ok(PreparedVerify::Ready(Box::new(mutation_from_state(
@@ -214,7 +214,7 @@ fn prepare_verify(
             "connection verification runtime is not available for this Plan in this slice",
         ));
     }
-    if is_custom_api(&account.provider_id, &account.offering_id) {
+    if is_custom_api(&account.provider_id) {
         let verification = state
             .db
             .lock()
@@ -229,7 +229,7 @@ fn prepare_verify(
         let job = capture_custom_verification_job(state, account, expectation.clone())?;
         return Ok(PreparedVerify::Custom(Box::new(job)));
     }
-    if is_command_code_goat(&account.provider_id, &account.offering_id) {
+    if is_command_code_goat(&account.provider_id) {
         let verification = state
             .db
             .lock()

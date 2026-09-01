@@ -32,10 +32,11 @@ export function accountStatusKey(account: Account, now: number = Date.now()): Ac
   return isCooling(account, now) ? "cooling" : "available";
 }
 
-/** The plan family id an account belongs to, or the raw pair for unknown plans. */
-export function accountPlanKey(account: Pick<Account, "provider_id" | "offering_id">): string {
+/** The plan family id an account belongs to, or the raw provider id for unknown plans. */
+export function accountPlanKey(account: Pick<Account, "provider_id">): string {
   const plan: PlanDefinition | null = planForAccount(account);
-  return plan ? plan.id : `${account.provider_id}/${account.offering_id}`;
+  if (plan?.id === "dynamic-http") return account.provider_id;
+  return plan ? plan.id : account.provider_id;
 }
 
 export function filterAccounts(
@@ -55,7 +56,10 @@ export function filterAccounts(
 export function plansInUse(
   accounts: readonly Account[],
   registry: readonly PlanDefinition[],
+  extras: readonly PlanDefinition[] = [],
 ): PlanDefinition[] {
   const used = new Set(accounts.map((account) => accountPlanKey(account)));
-  return registry.filter((plan) => used.has(plan.id));
+  const builtin = registry.filter((plan) => used.has(plan.id));
+  const extra = extras.filter((plan) => used.has(plan.provider_id) || used.has(plan.id));
+  return [...builtin, ...extra];
 }

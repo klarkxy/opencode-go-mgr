@@ -6,7 +6,7 @@ This guide is for people running OCG Manager as a desktop app, a headless gatewa
 
 ## Add integrations
 
-- [Add a Provider](user/add-provider.md) — Connect a compatible upstream through Custom API, or contribute a sealed built-in Provider with its complete HTTP and routing contract.
+- [Add a Provider](user/add-provider.md) — Create a user-defined Provider, connect Custom API, or contribute a sealed built-in Provider with its complete HTTP and routing contract.
 - [Add an Application](user/add-application.md) — Connect an unlisted client to the Gateway, contribute an Applications guide, or add an optional local Desktop connector.
 
 ## Chapters

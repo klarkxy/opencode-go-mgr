@@ -240,7 +240,7 @@ fn catalog_type_names_append_claude_desktop_after_custom_discovery() {
         ]
     );
     assert_eq!(
-        &CATALOG_TYPE_NAMES[application_connector_start + 9..],
+        &CATALOG_TYPE_NAMES[application_connector_start + 9..application_connector_start + 24],
         [
             "CpaIntegration",
             "CpaIntegrationUpdate",
@@ -259,7 +259,22 @@ fn catalog_type_names_append_claude_desktop_after_custom_discovery() {
             "CpaOAuthSessionDelete",
         ]
     );
-    assert_eq!(CATALOG_TYPE_NAMES.len(), application_connector_start + 24);
+    assert_eq!(
+        &CATALOG_TYPE_NAMES[application_connector_start + 24..],
+        [
+            "DynamicProviderAuthKind",
+            "DynamicProviderModel",
+            "DynamicProvider",
+            "DynamicProviderCreate",
+            "DynamicProviderUpdate",
+            "DynamicProviderMutation",
+            "DynamicProviderDiscoverRequest",
+            "DynamicProviderDiscoverResponse",
+            "DynamicProviderTestRequest",
+            "DynamicProviderTestResponse",
+        ]
+    );
+    assert_eq!(CATALOG_TYPE_NAMES.len(), application_connector_start + 34);
 
     let schema = contract_schema();
     let defs = schema["$defs"].as_object().expect("$defs");

@@ -6,7 +6,7 @@ import { applyCustomAccountEditPlan, planCustomAccountEdit } from "../domain/cus
 function customAccount(): Account {
   return {
     id: "custom-1", name: "Custom", username: "", password: "", key: "", enabled: false,
-    account_type: "key", setup_step: "ready", provider_id: "custom", offering_id: "api",
+    account_type: "key", setup_step: "ready", provider_id: "custom",
     credential_kind: "api_key", quota_scope: "key", purchase_date: "", expires_on: "",
     cooldown_until: null, cooldown_generic_until: null, cooldown_5h_until: null,
     cooldown_week_until: null, cooldown_month_until: null, cooldown_free_until: null,

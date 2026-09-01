@@ -25,15 +25,15 @@
       >
         {{ t("目标端点由管理员自行选择并负责：使用 http:// 时 Key 将明文传输；测试连接会发送最小真实请求，可能产生服务商费用。") }}
       </n-alert>
+      <n-alert
+        v-if="isDynamicPlan"
+        type="default"
+        :show-icon="false"
+        class="form-error"
+      >
+        {{ t("账号不拥有 Endpoint、协议或模型映射。") }}
+      </n-alert>
       <div class="modal-grid">
-        <n-form-item v-if="!isEdit && offeringOptions.length > 1" path="offeringId" :label="t('服务套餐')">
-          <n-select
-            v-model:value="form.offeringId"
-            :options="offeringOptions"
-            :placeholder="t('选择服务套餐')"
-          />
-        </n-form-item>
-
         <n-form-item path="name" :label="t('名称')">
           <n-input
             :value="form.name"
@@ -265,7 +265,7 @@ import type { ProviderCatalogEntry, ProviderCatalogFormField } from "../api/prov
 import { t } from "../i18n/index.ts";
 import { useLocalizedModalCloseLabel } from "../utils/modal-close-label.ts";
 import { localDateString } from "../domain/account-lifecycle.ts";
-import { findCatalogEntry, findPlanDefinition, planFamilyLabel } from "../domain/plans.ts";
+import { findCatalogEntry, planFamilyLabel, planForAccount } from "../domain/plans.ts";
 import type { PlanDefinition } from "../domain/plans.ts";
 import { resolveAccountFormFields } from "../domain/account-form-fields.ts";
 import {
@@ -289,7 +289,6 @@ export type AccountFormPayload = {
   username: string;
   key?: string;
   provider_id?: string;
-  offering_id?: string;
   purchase_date?: string;
   notes: string;
   /** Custom API edit only; persisted via the dedicated custom-config route. */
@@ -310,7 +309,6 @@ type FormModel = {
   key: string;
   purchaseDate: number | null;
   notes: string;
-  offeringId: string;
   endpointUrl: string;
   upstreamProtocol: AccountProtocol | null;
   modelCapabilities: EditableModelCapability[];
@@ -375,31 +373,18 @@ const title = computed(() => {
 const effectivePlan = computed<PlanDefinition | null>(() => {
   if (isEdit.value) {
     const account = props.account!;
-    return findPlanDefinition(account.provider_id, account.offering_id) ?? null;
+    return planForAccount(account, props.catalog);
   }
   return props.plan;
 });
 
 const isCustomPlan = computed(() => effectivePlan.value?.id === "custom-endpoint");
-
-const offeringOptions = computed(() => {
-  const plan = effectivePlan.value;
-  if (!plan) return [];
-  return plan.offering_ids
-    .map((offeringId) => findCatalogEntry(props.catalog, plan.provider_id, offeringId))
-    .filter((entry): entry is ProviderCatalogEntry => !!entry)
-    .map((entry) => ({ value: entry.offering_id, label: entry.display_name }));
-});
-
-const selectedOfferingId = computed(() => {
-  if (form.value.offeringId) return form.value.offeringId;
-  return offeringOptions.value[0]?.value ?? effectivePlan.value?.offering_ids[0] ?? "";
-});
+const isDynamicPlan = computed(() => effectivePlan.value?.id === "dynamic-http");
 
 const catalogEntry = computed<ProviderCatalogEntry | undefined>(() => {
   const plan = effectivePlan.value;
   if (!plan) return undefined;
-  return findCatalogEntry(props.catalog, plan.provider_id, selectedOfferingId.value);
+  return findCatalogEntry(props.catalog, plan.provider_id);
 });
 
 const formFields = computed<ProviderCatalogFormField[]>(() => {
@@ -565,12 +550,6 @@ watch(
   { flush: "sync" },
 );
 
-watch(() => props.plan, (plan) => {
-  if (!isEdit.value && plan && !form.value.offeringId) {
-    form.value.offeringId = plan.offering_ids[0] ?? "";
-  }
-}, { immediate: true });
-
 function timestampFromLocalDate(value: string): number | null {
   const parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
   if (!parts) return null;
@@ -584,14 +563,12 @@ function timestampFromLocalDate(value: string): number | null {
 }
 
 function blankForm(): FormModel {
-  const plan = props.plan;
   return {
     name: "",
     username: "",
     key: "",
     purchaseDate: timestampFromLocalDate(localDateString()) ?? Date.now(),
     notes: "",
-    offeringId: plan?.offering_ids[0] ?? "",
     endpointUrl: "",
     upstreamProtocol: "chat_completions",
     modelCapabilities: [],
@@ -612,7 +589,6 @@ function formFromAccount(account: Account): FormModel {
     key: "",
     purchaseDate: timestampFromLocalDate(account.purchase_date),
     notes: account.notes ?? "",
-    offeringId: account.offering_id,
     endpointUrl: account.custom_config?.endpoint_url ?? "",
     upstreamProtocol: account.custom_config?.upstream_protocol ?? "chat_completions",
     modelCapabilities,
@@ -761,7 +737,7 @@ async function handleSave() {
   }
 
   try {
-    const payload = buildCreateAccountPayload(plan, form.value.offeringId, values);
+    const payload = buildCreateAccountPayload(plan, values);
     emit("save", payload);
   } catch (error) {
     // Never submit a degraded payload: the backend rejects incomplete Custom

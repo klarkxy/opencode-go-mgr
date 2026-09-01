@@ -65,8 +65,7 @@ async fn assert_v2_removed(response: reqwest::Response) {
         body,
         json!({
             "code": DASHBOARD_V2_REMOVED_CODE,
-            "message": DASHBOARD_V2_REMOVED_MESSAGE,
-        })
+            "message": DASHBOARD_V2_REMOVED_MESSAGE })
     );
 }
 

@@ -18,6 +18,18 @@ export function resolveAccountFormFields(
   catalogEntry: ProviderCatalogEntry | undefined,
 ): ProviderCatalogFormField[] {
   if (!plan) return [];
+  if (plan.id === "dynamic-http") {
+    const fields = [...(catalogEntry?.form_fields ?? [])];
+    if (fields.length > 0) return fields;
+    const fallback: ProviderCatalogFormField[] = [
+      { id: "name", kind: "text", required: true, immutable_after_create: false },
+      { id: "notes", kind: "text", required: false, immutable_after_create: false },
+    ];
+    if (plan.credential_kind !== "none") {
+      fallback.splice(1, 0, { id: "key", kind: "secret", required: true, immutable_after_create: false });
+    }
+    return fallback;
+  }
   if (plan.id !== "opencode-go") return [...(catalogEntry?.form_fields ?? [])];
 
   const fields = [...(catalogEntry?.form_fields ?? [])];

@@ -18,7 +18,7 @@ export interface AccountTestModel {
 
 /** Resolve only the current account's routable models from the loaded contract snapshot. */
 export function accountTestModels(
-  account: Pick<Account, "id" | "provider_id" | "offering_id">,
+  account: Pick<Account, "id" | "provider_id">,
   response: ProviderContractsResponse | null | undefined,
   catalog: readonly ProviderCatalogEntry[] | null | undefined = null,
 ): AccountTestModel[] {

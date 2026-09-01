@@ -9,10 +9,7 @@
 use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
 
-use super::ids::{
-    ANONYMOUS_FREE_OFFERING_ID, COMMAND_CODE_PROVIDER_ID, GO_OFFERING_ID, GOAT_OFFERING_ID,
-    OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID,
-};
+use super::ids::{COMMAND_CODE_PROVIDER_ID, OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID};
 
 pub const SOURCE_URL: &str = "https://opencode.ai/docs/go/";
 
@@ -31,44 +28,36 @@ pub enum ProviderPricingEvidence {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProviderPricingCapability {
     pub provider_id: &'static str,
-    pub offering_id: &'static str,
+
     pub evidence: ProviderPricingEvidence,
     pub experimental: bool,
     pub source_url: Option<&'static str>,
     pub manual_refresh_available: bool,
 }
 
-pub fn provider_pricing_capability(
-    provider_id: &str,
-    offering_id: &str,
-) -> Option<ProviderPricingCapability> {
-    match (provider_id, offering_id) {
-        (OPENCODE_PROVIDER_ID, GO_OFFERING_ID) => Some(ProviderPricingCapability {
+pub fn provider_pricing_capability(provider_id: &str) -> Option<ProviderPricingCapability> {
+    match provider_id {
+        OPENCODE_PROVIDER_ID => Some(ProviderPricingCapability {
             provider_id: OPENCODE_PROVIDER_ID,
-            offering_id: GO_OFFERING_ID,
             evidence: ProviderPricingEvidence::Verified,
             experimental: false,
             source_url: Some(SOURCE_URL),
             manual_refresh_available: true,
         }),
-        (COMMAND_CODE_PROVIDER_ID, GOAT_OFFERING_ID) => Some(ProviderPricingCapability {
+        COMMAND_CODE_PROVIDER_ID => Some(ProviderPricingCapability {
             provider_id: COMMAND_CODE_PROVIDER_ID,
-            offering_id: GOAT_OFFERING_ID,
             evidence: ProviderPricingEvidence::Verified,
             experimental: false,
             source_url: Some("https://commandcode.ai/docs/plans/goat"),
             manual_refresh_available: true,
         }),
-        (OPENCODE_ZEN_FREE_PROVIDER_ID, ANONYMOUS_FREE_OFFERING_ID) => {
-            Some(ProviderPricingCapability {
-                provider_id: OPENCODE_ZEN_FREE_PROVIDER_ID,
-                offering_id: ANONYMOUS_FREE_OFFERING_ID,
-                evidence: ProviderPricingEvidence::Unavailable,
-                experimental: false,
-                source_url: None,
-                manual_refresh_available: false,
-            })
-        }
+        OPENCODE_ZEN_FREE_PROVIDER_ID => Some(ProviderPricingCapability {
+            provider_id: OPENCODE_ZEN_FREE_PROVIDER_ID,
+            evidence: ProviderPricingEvidence::Unavailable,
+            experimental: false,
+            source_url: None,
+            manual_refresh_available: false,
+        }),
         _ => None,
     }
 }
@@ -433,7 +422,7 @@ pub struct PricingSnapshot {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProviderPricingSnapshot {
     pub provider_id: String,
-    pub offering_id: String,
+
     pub revision: String,
     pub activated_at: String,
     pub document_updated_at: Option<String>,

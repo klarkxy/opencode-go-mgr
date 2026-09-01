@@ -61,7 +61,6 @@ export interface Account {
   account_type: AccountType;
   setup_step: AccountSetupStep;
   provider_id: string;
-  offering_id: string;
   credential_kind: AccountCredentialKind;
   quota_scope: AccountQuotaScope;
   revision?: number;
@@ -110,7 +109,6 @@ export interface AccountInput {
   password?: string;
   key: string;
   provider_id?: string;
-  offering_id?: string;
   purchase_date?: string;
   notes?: string;
   custom_config?: AccountCustomConfigInput;
@@ -277,7 +275,6 @@ export interface ForwardLog {
   client_key_name: string | null;
   route_account_id: string | null;
   provider_id: string | null;
-  offering_id: string | null;
   credential_account_id: string | null;
   raw_cost_usd: number | null;
   quota_debit: number | null;
@@ -329,7 +326,6 @@ export interface ForwardLogQuery {
   request_id?: string | null;
   key_id?: string | null;
   provider_id?: string | null;
-  offering_id?: string | null;
   route_account_id?: string | null;
   credential_account_id?: string | null;
   start_time?: string | null;
@@ -407,7 +403,6 @@ export interface PricingMultiplierChange {
 
 export interface ProviderPricingRefreshResult {
   provider_id: string;
-  offering_ids: string[];
   refresh_status: "success" | "unchanged" | "needs_confirmation" | "failed_no_change";
   multiplier_changes: PricingMultiplierChange[];
   official_content_hash: string | null;
@@ -461,7 +456,6 @@ export function presentAccount(value: V3Account): Account {
     account_type: value.accountType,
     setup_step: value.setupStep,
     provider_id: value.providerId,
-    offering_id: value.offeringId,
     credential_kind: value.credentialKind,
     quota_scope: value.quotaScope,
     revision: value.revision,
@@ -508,7 +502,6 @@ export function accountCreateInput(value: AccountInput): Omit<V3AccountCreate, "
     username: value.username,
     password: value.password,
     providerId: value.provider_id,
-    offeringId: value.offering_id,
     purchaseDate: value.purchase_date,
     notes: value.notes,
     customConfig: value.custom_config ? {
@@ -659,7 +652,6 @@ export function presentProviderPricingRefresh(
 ): ProviderPricingRefreshResult {
   return {
     provider_id: value.providerId,
-    offering_ids: [...value.offeringIds],
     refresh_status: value.refreshStatus,
     multiplier_changes: value.multiplierChanges.map((change) => ({
       model_id: change.modelId,
@@ -720,7 +712,6 @@ export function presentForwardLog(value: V3ForwardLog): ForwardLog {
     client_key_name: value.clientKeyName,
     route_account_id: value.routeAccountId,
     provider_id: value.providerId,
-    offering_id: value.offeringId,
     credential_account_id: value.credentialAccountId,
     raw_cost_usd: value.rawCostUsd,
     quota_debit: value.quotaDebit,

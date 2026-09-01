@@ -10,7 +10,7 @@ fn account(id: &str, enabled: bool) -> Account {
     Account {
         id: id.into(),
         provider_id: crate::provider::default_provider_id(),
-        offering_id: crate::provider::default_offering_id(),
+
         credential_kind: crate::provider::default_credential_kind(),
         quota_scope: crate::provider::default_quota_scope(),
         name: id.into(),
@@ -64,7 +64,6 @@ fn cooling_at(id: &str, until: DateTime<Utc>) -> Account {
 fn zen_account(enabled: bool) -> Account {
     let mut item = account(ZEN_FREE_ACCOUNT_ID, enabled);
     item.provider_id = OPENCODE_ZEN_FREE_PROVIDER_ID.into();
-    item.offering_id = ANONYMOUS_FREE_OFFERING_ID.into();
     item.credential_kind = CredentialKind::None;
     item.quota_scope = QuotaScope::EgressIp;
     item.key_cipher.clear();

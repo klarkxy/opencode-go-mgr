@@ -47,7 +47,6 @@ const PROVIDER_CATALOG_TYPES: &[&str] = &[
     "ProviderContracts",
     "ProviderContractGroup",
     "CustomEndpointContract",
-    "ProviderOfferingChoice",
     "ProviderAccountChoice",
     "EffectiveCatalog",
     "EffectiveModelContract",
@@ -274,7 +273,7 @@ fn protocol_tokens_stay_snake_case_and_nested_revision_is_not_cas() {
 
     let catalog_entry = properties(defs, "ProviderCatalogEntry");
     assert!(catalog_entry.contains_key("providerId"));
-    assert!(catalog_entry.contains_key("offeringId"));
+    assert!(!catalog_entry.contains_key("offeringId"));
     assert!(!catalog_entry.contains_key("provider_id"));
 
     let override_update = properties(defs, "ModelProtocolOverridesUpdate");

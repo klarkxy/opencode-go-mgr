@@ -30,8 +30,8 @@ use crate::models::{
     normalize_account_notes, normalize_purchase_date,
 };
 use crate::provider::{
-    ConnectionVerificationStatus, CreationAvailability, UpstreamProtocolKind, builtin_plan,
-    offering_allows_enablement,
+    ConnectionVerificationStatus, CreationAvailability, UpstreamProtocolKind, builtin_provider,
+    provider_allows_enablement,
 };
 use crate::provider_contracts::{
     ContractEvidenceSource, ContractScope, ContractScopeKind, PersistedContracts,
@@ -51,7 +51,7 @@ const ENVELOPE_FORMAT: &str = "ocg-manager-account-backup";
 const ENVELOPE_VERSION: u32 = 1;
 const LEGACY_PAYLOAD_VERSION: u32 = 1;
 const NODE_PAYLOAD_VERSION: u32 = 2;
-const PAYLOAD_VERSION: u32 = 3;
+const PAYLOAD_VERSION: u32 = 4;
 const AAD: &[u8] = b"ocg-manager-account-backup:v1:argon2id-m65536-t3-p1:aes-256-gcm";
 const ARGON_MEMORY_KIB: u32 = 64 * 1024;
 const ARGON_ITERATIONS: u32 = 3;
@@ -102,7 +102,7 @@ struct PortableAccount {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     id: Option<String>,
     provider_id: String,
-    offering_id: String,
+
     name: String,
     username: Option<String>,
     key: String,
@@ -221,7 +221,6 @@ impl Zeroize for PortablePayload {
 impl Zeroize for PortableAccount {
     fn zeroize(&mut self) {
         self.provider_id.zeroize();
-        self.offering_id.zeroize();
         self.name.zeroize();
         self.username.zeroize();
         self.id.zeroize();
@@ -328,7 +327,7 @@ struct ValidatedAccount {
     portable_index: usize,
     id: Option<String>,
     provider_id: String,
-    offering_id: String,
+
     name: String,
     username: Option<String>,
     key: Zeroizing<String>,
@@ -500,7 +499,7 @@ async fn import_accounts_inner(
     let mut items = Vec::with_capacity(validated.accounts.len());
     let mut duplicate_accounts = 0_u64;
     for account in validated.accounts {
-        let logical = logical_key(&account.provider_id, &account.offering_id, &account.name);
+        let logical = logical_key(&account.provider_id, &account.name);
         if !is_node_migration && existing.contains(&logical) {
             duplicate_accounts += 1;
             items.push(preview_item(
@@ -526,14 +525,12 @@ async fn import_accounts_inner(
         let model = ModelAccount {
             id,
             provider_id: account.provider_id.clone(),
-            offering_id: account.offering_id.clone(),
-            credential_kind: builtin_plan(&account.provider_id, &account.offering_id)
+
+            credential_kind: builtin_provider(&account.provider_id)
                 .expect("validated Plan must remain sealed")
-                .offering
                 .credential_kind,
-            quota_scope: builtin_plan(&account.provider_id, &account.offering_id)
+            quota_scope: builtin_provider(&account.provider_id)
                 .expect("validated Plan must remain sealed")
-                .offering
                 .quota_scope,
             name: account.name.clone(),
             username: account.username.clone(),
@@ -714,8 +711,7 @@ fn export_payload(state: &CoreState) -> Result<(PortablePayload, u64, u64), Tran
         if portable_key_required && key.trim().is_empty() {
             return Err(TransferError::Internal);
         }
-        let plan = builtin_plan(&account.provider_id, &account.offering_id)
-            .ok_or(TransferError::Internal)?;
+        let plan = builtin_provider(&account.provider_id).ok_or(TransferError::Internal)?;
         let (custom_config, model_capabilities) =
             if crate::provider::plan_requires_custom_config(plan) {
                 (
@@ -744,7 +740,7 @@ fn export_payload(state: &CoreState) -> Result<(PortablePayload, u64, u64), Tran
         accounts.push(PortableAccount {
             id: Some(account.id),
             provider_id: account.provider_id,
-            offering_id: account.offering_id,
+
             name: account.name,
             username: account.username,
             key: std::mem::take(&mut *key),
@@ -950,16 +946,16 @@ fn derive_key(password: &str, salt: &[u8]) -> Result<Zeroizing<[u8; 32]>, Transf
 
 fn validate_payload(payload: PortablePayload) -> Result<ValidatedMigration, TransferError> {
     let mut payload = Zeroizing::new(payload);
-    if !matches!(
-        payload.version,
-        LEGACY_PAYLOAD_VERSION | NODE_PAYLOAD_VERSION | PAYLOAD_VERSION
-    ) || payload.accounts.len() > MAX_ACCOUNTS
-        || (payload.version >= NODE_PAYLOAD_VERSION && payload.node.is_none())
-        || (payload.version == LEGACY_PAYLOAD_VERSION && payload.node.is_some())
+    if payload.version == LEGACY_PAYLOAD_VERSION
+        || payload.version == NODE_PAYLOAD_VERSION
+        || payload.version == 3
+        || payload.version != PAYLOAD_VERSION
+        || payload.accounts.len() > MAX_ACCOUNTS
+        || payload.node.is_none()
     {
         return Err(TransferError::InvalidBundle);
     }
-    let is_node_migration = payload.version >= NODE_PAYLOAD_VERSION;
+    let is_node_migration = true;
     if payload.exported_at.chars().count() > 64
         || DateTime::parse_from_rfc3339(&payload.exported_at).is_err()
     {
@@ -991,7 +987,6 @@ fn validate_payload(payload: PortablePayload) -> Result<ValidatedMigration, Tran
             None => None,
         };
         account.provider_id = account.provider_id.trim().to_string();
-        account.offering_id = account.offering_id.trim().to_string();
         account.name = account.name.trim().to_string();
         account.key = account.key.trim().to_string();
         if account.key.chars().count() > MAX_KEY_CHARS {
@@ -1016,9 +1011,9 @@ fn validate_payload(payload: PortablePayload) -> Result<ValidatedMigration, Tran
                 prefix()
             )));
         }
-        let plan = builtin_plan(&account.provider_id, &account.offering_id)
+        let plan = builtin_provider(&account.provider_id)
             .ok_or_else(|| TransferError::Invalid(format!("{} uses an unknown Plan", prefix())))?;
-        if plan.offering.singleton_account_id.is_some()
+        if plan.singleton_account_id.is_some()
             || plan.creation_availability == CreationAvailability::Unavailable
         {
             return Err(TransferError::Invalid(format!(
@@ -1047,8 +1042,7 @@ fn validate_payload(payload: PortablePayload) -> Result<ValidatedMigration, Tran
                 (
                     ModelSetupStep::Ready,
                     Zeroizing::new(std::mem::take(&mut account.key)),
-                    account.enabled
-                        && offering_allows_enablement(&account.provider_id, &account.offering_id),
+                    account.enabled && provider_allows_enablement(&account.provider_id),
                 )
             }
             ModelAccountType::Managed => {
@@ -1071,11 +1065,7 @@ fn validate_payload(payload: PortablePayload) -> Result<ValidatedMigration, Tran
                     (
                         ModelSetupStep::Ready,
                         Zeroizing::new(std::mem::take(&mut account.key)),
-                        account.enabled
-                            && offering_allows_enablement(
-                                &account.provider_id,
-                                &account.offering_id,
-                            ),
+                        account.enabled && provider_allows_enablement(&account.provider_id),
                     )
                 } else {
                     (
@@ -1127,7 +1117,7 @@ fn validate_payload(payload: PortablePayload) -> Result<ValidatedMigration, Tran
             .map(|value| value.with_timezone(&Utc));
         let verification_gates_enablement = plan.verification_policy
             == crate::provider::VerificationPolicy::Required
-            && crate::provider::ProviderRegistry::get(&account.provider_id, &account.offering_id)
+            && crate::provider::ProviderRegistry::get(&account.provider_id)
                 .is_some_and(|descriptor| descriptor.card_actions.enable_requires_verification);
         if is_node_migration
             && enabled
@@ -1239,7 +1229,7 @@ fn validate_payload(payload: PortablePayload) -> Result<ValidatedMigration, Tran
             }
             (None, Vec::new())
         };
-        let logical_key = logical_key(&account.provider_id, &account.offering_id, &account.name);
+        let logical_key = logical_key(&account.provider_id, &account.name);
         let duplicate = if is_node_migration {
             !account_ids.insert(id.clone().expect("V2 account id was validated"))
         } else {
@@ -1255,7 +1245,7 @@ fn validate_payload(payload: PortablePayload) -> Result<ValidatedMigration, Tran
             portable_index: index,
             id,
             provider_id: account.provider_id.clone(),
-            offering_id: account.offering_id.clone(),
+
             name: account.name.clone(),
             username: account.username.clone().and_then(trim_optional),
             key,
@@ -1511,11 +1501,7 @@ fn preview_against_current(
                     None,
                 );
             }
-            let duplicate = existing.contains(&logical_key(
-                &account.provider_id,
-                &account.offering_id,
-                &account.name,
-            ));
+            let duplicate = existing.contains(&logical_key(&account.provider_id, &account.name));
             if duplicate {
                 duplicates += 1;
                 preview_item(
@@ -1584,9 +1570,7 @@ fn current_account_ids(state: &CoreState) -> Result<HashSet<String>, V3ApiError>
         .collect())
 }
 
-fn current_logical_accounts(
-    state: &CoreState,
-) -> Result<HashSet<(String, String, String)>, V3ApiError> {
+fn current_logical_accounts(state: &CoreState) -> Result<HashSet<(String, String)>, V3ApiError> {
     Ok(state
         .db
         .lock()
@@ -1594,7 +1578,7 @@ fn current_logical_accounts(
         .map_err(|_| V3ApiError::internal("failed to inspect existing accounts"))?
         .into_iter()
         .filter(|account| !account.is_zen_free() && account.id != crate::provider::CPA_ACCOUNT_ID)
-        .map(|account| logical_key(&account.provider_id, &account.offering_id, &account.name))
+        .map(|account| logical_key(&account.provider_id, &account.name))
         .collect())
 }
 
@@ -1607,19 +1591,15 @@ fn preview_item(
         index: account.portable_index as u64,
         name: account.name.clone(),
         provider_id: account.provider_id.clone(),
-        offering_id: account.offering_id.clone(),
+
         account_type: account.account_type.into(),
         disposition,
         reason,
     }
 }
 
-fn logical_key(provider_id: &str, offering_id: &str, name: &str) -> (String, String, String) {
-    (
-        provider_id.trim().to_string(),
-        offering_id.trim().to_string(),
-        name.trim().to_string(),
-    )
+fn logical_key(provider_id: &str, name: &str) -> (String, String) {
+    (provider_id.trim().to_string(), name.trim().to_string())
 }
 
 fn trim_optional(value: String) -> Option<String> {
@@ -1708,7 +1688,7 @@ mod tests {
         PortableAccount {
             id: None,
             provider_id: "opencode".to_string(),
-            offering_id: "go".to_string(),
+
             name: name.into(),
             username: Some("user@example.com".to_string()),
             key: "sk-ocg-test-secret".to_string(),
@@ -1726,11 +1706,14 @@ mod tests {
     }
 
     fn sample_payload() -> PortablePayload {
+        let account_id = "00000000-0000-4000-8000-000000000041";
+        let mut account = sample_account("Primary");
+        account.id = Some(account_id.to_string());
         PortablePayload {
-            version: LEGACY_PAYLOAD_VERSION,
+            version: PAYLOAD_VERSION,
             exported_at: "2026-08-29T00:00:00Z".to_string(),
-            accounts: vec![sample_account("Primary")],
-            node: None,
+            accounts: vec![account],
+            node: Some(sample_node(account_id)),
         }
     }
 
@@ -1738,7 +1721,7 @@ mod tests {
         PortableAccount {
             id: None,
             provider_id: crate::kernel::ids::CUSTOM_PROVIDER_ID.to_string(),
-            offering_id: crate::kernel::ids::CUSTOM_API_OFFERING_ID.to_string(),
+
             name: "Mapped Custom".to_string(),
             username: None,
             key: "sk-custom-test-secret".to_string(),
@@ -1796,32 +1779,24 @@ mod tests {
     }
 
     #[test]
-    fn legacy_v1_and_v2_model_ids_import_as_both_custom_identities() {
-        for version in [LEGACY_PAYLOAD_VERSION, NODE_PAYLOAD_VERSION] {
+    fn payload_v1_v2_and_v3_are_rejected_without_a_legacy_offering_parser() {
+        for version in [LEGACY_PAYLOAD_VERSION, NODE_PAYLOAD_VERSION, 3] {
             let mut account = sample_custom_account();
-            account.model_capabilities = vec![PortableModelCapability::Legacy(
-                PortableModelCapabilityLegacy {
-                    model_id: "legacy/model:latest".to_string(),
-                    protocol: "chat_completions".to_string(),
-                },
-            )];
-            let node = if version == NODE_PAYLOAD_VERSION {
+            let node = if version >= NODE_PAYLOAD_VERSION {
                 let account_id = "00000000-0000-4000-8000-000000000042";
                 account.id = Some(account_id.to_string());
                 Some(sample_node(account_id))
             } else {
                 None
             };
-            let validated = validate_payload(PortablePayload {
+            let error = validate_payload(PortablePayload {
                 version,
                 exported_at: "2026-08-29T00:00:00Z".to_string(),
                 accounts: vec![account],
                 node,
             })
-            .unwrap();
-            let capability = &validated.accounts[0].capabilities[0];
-            assert_eq!(capability.public_model, "legacy/model:latest");
-            assert_eq!(capability.upstream_model, "legacy/model:latest");
+            .unwrap_err();
+            assert!(matches!(error, TransferError::InvalidBundle), "{error:?}");
         }
     }
 
@@ -1904,7 +1879,7 @@ mod tests {
         payload.accounts.push(PortableAccount {
             id: None,
             provider_id: "opencode".to_string(),
-            offering_id: "go".to_string(),
+
             name: "Primary".to_string(),
             username: None,
             key: "sk-ocg-another-secret".to_string(),
@@ -1956,10 +1931,16 @@ mod tests {
     #[test]
     fn account_count_and_decoded_ciphertext_limits_fail_closed() {
         let mut payload = sample_payload();
+        let node = payload
+            .node
+            .as_mut()
+            .expect("v4 payload includes node state");
         for index in 1..MAX_ACCOUNTS {
-            payload
-                .accounts
-                .push(sample_account(format!("Account {index}")));
+            let id = format!("00000000-0000-4000-8000-{:012x}", 0x41 + index);
+            let mut extra = sample_account(format!("Account {index}"));
+            extra.id = Some(id.clone());
+            payload.accounts.push(extra);
+            node.account_order.push(id);
         }
         assert_eq!(
             validate_payload(payload).unwrap().accounts.len(),
@@ -2006,7 +1987,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             format!("{:x}", Sha256::digest(bundle.as_bytes())),
-            "c67afea9b4f3fdd9b66d79882ccd36bc8bf3a23c73d7d2943c120cca3a036550"
+            "afa7b6590844628ec70a76f6ed213c02033141ee9488db4842dc8cdf90c4c2b8"
         );
     }
 }

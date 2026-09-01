@@ -239,7 +239,7 @@ pub(crate) fn log_request_failure(
         account_name: "Gateway".to_string(),
         route_account_id: None,
         provider_id: None,
-        offering_id: None,
+
         credential_account_id: None,
         client_key_id: trace.client_key_id.clone(),
         client_key_name: trace.client_key_name.clone(),
@@ -284,8 +284,7 @@ fn summarize_request(body: &[u8]) -> (Value, String) {
             json!({
                 "kind": "invalid_json",
                 "bytes": body.len(),
-                "sha256": fingerprint,
-            }),
+                "sha256": fingerprint }),
             fingerprint,
         );
     };
@@ -348,8 +347,7 @@ fn summarize_request(body: &[u8]) -> (Value, String) {
         "string_bytes": total_string_bytes,
         "content_parts": parts,
         "parameters": parameters,
-        "sha256": fingerprint,
-    });
+        "sha256": fingerprint });
     if summary.to_string().len() <= MAX_REQUEST_SUMMARY_BYTES {
         (summary, fingerprint)
     } else {
@@ -362,8 +360,7 @@ fn summarize_request(body: &[u8]) -> (Value, String) {
                 "strings": total_strings,
                 "string_bytes": total_string_bytes,
                 "sha256": fingerprint,
-                "truncated": true,
-            }),
+                "truncated": true }),
             fingerprint,
         )
     }
@@ -408,8 +405,7 @@ fn collect_shape(
                 parts.push(json!({
                     "kind": content_kind(&key),
                     "bytes": text.len(),
-                    "sha256": &sha256_hex(text.as_bytes())[..12],
-                }));
+                    "sha256": &sha256_hex(text.as_bytes())[..12] }));
             }
         }
         Value::Array(values) => {

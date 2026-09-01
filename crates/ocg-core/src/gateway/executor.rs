@@ -39,6 +39,7 @@ pub(crate) struct RequestSnapshots {
     contracts: Arc<EffectiveContractSet>,
     resolved: alias::ResolvedModel,
     cpa_base_url: Option<String>,
+    dynamics: Arc<Vec<crate::dynamic::DynamicProviderRuntime>>,
 }
 
 impl RequestSnapshots {
@@ -47,6 +48,7 @@ impl RequestSnapshots {
         config: AppConfig,
         contracts: Arc<EffectiveContractSet>,
         resolved: alias::ResolvedModel,
+        dynamics: Arc<Vec<crate::dynamic::DynamicProviderRuntime>>,
     ) -> Self {
         let cpa_base_url = match crate::cpa::env_base_url() {
             Ok(Some(base_url)) => Some(base_url),
@@ -66,6 +68,7 @@ impl RequestSnapshots {
             contracts,
             resolved,
             cpa_base_url,
+            dynamics,
         }
     }
 }
@@ -106,13 +109,14 @@ impl GatewayExecutor {
         config: AppConfig,
         client_key_id: Option<String>,
         contracts: Arc<EffectiveContractSet>,
+        dynamics: Arc<Vec<crate::dynamic::DynamicProviderRuntime>>,
     ) -> Response {
         // One logical client request, including safe retries and account fallback,
         // must use one immutable pricing revision from start to finish.
         // Routing snapshot captured once at entry: every attempt (including after
         // free fallback rewrites the model) resolves its leg from this snapshot,
         // and a concurrent settings switch only affects requests starting later.
-        let snapshots = RequestSnapshots::capture(&state, config, contracts, resolved);
+        let snapshots = RequestSnapshots::capture(&state, config, contracts, resolved, dynamics);
         let mut loop_state = LoopState::new();
         let conversation_key = if snapshots.config.conversation_sticky {
             resolve_conversation_key(client_format, &routing_model, &headers, &client_body)
@@ -259,6 +263,7 @@ impl GatewayExecutor {
                 &goat_runtimes,
                 snapshots.cpa_base_url.as_deref(),
                 &snapshots.contracts,
+                &snapshots.dynamics,
             ) {
                 Ok(route_set) => route_set,
                 Err(error) => {
@@ -432,6 +437,7 @@ impl GatewayExecutor {
                     headers.clone(),
                     snapshots.pricing.clone(),
                     client_key_id.as_deref(),
+                    &snapshots.dynamics,
                 )
                 .await
                 {
