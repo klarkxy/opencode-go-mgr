@@ -1,0 +1,53 @@
+{
+  "skill_name": "defensive-overdesign-audit",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "This Rust repository has 21 integration tests that each assert CURRENT_SCHEMA_VERSION == 34. It also has tests that open a v33 database, migrate it, reopen it, reject too-new schemas, and compare the generated public contract. Audit which defenses are overdesigned and what should be removed.",
+      "expected_output": "Classify the repeated number assertions as GREEN CUT, retain migration and public-contract behavior, identify the surviving owner, and avoid proposing a new centralized source scanner.",
+      "files": [],
+      "expectations": [
+        "The 21 copied constant assertions are GREEN CUT.",
+        "Migration, reopen, too-new-schema, and public-contract tests are retained.",
+        "The recommendation names a surviving behavior-level proof.",
+        "No AST, regex, policy registry, or automatic deletion system is proposed."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Our gateway fallback file has 79 tests with almost identical setup. The cases include ModelError 401, CreditsError 401, Zen 401 and 403, a 504 body timeout, truncated body, interrupted stream, 408, and empty-stream retries. Please remove the over-defensive parts.",
+      "expected_output": "Recommend a shared harness and delete only strict behavioral subsets; retain cases whose breaker, fallback, replay, client status, persistence, or accounting post-conditions differ.",
+      "files": [],
+      "expectations": [
+        "Repeated setup is consolidated into a harness rather than used as evidence to delete tests.",
+        "Tests with distinct breaker, fallback, replay, status, persistence, or accounting outcomes are RED KEEP.",
+        "A case is removable only if input, transition, output, side effects, and failure window are all duplicates.",
+        "The response does not infer duplication from a shared 401 status or outcome_unknown label."
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "The frontend suite has tests that read DESIGN.md and user docs to require exact headings and wording. Another set greps Vue files for keyboard handlers and aria labels, and there are no component mount or browser tests yet. Which defensive tests should go?",
+      "expected_output": "Remove documentation-shape mirrors, but hold the accessibility source-grep tests until behavior-level replacement coverage exists; do not weaken accessibility.",
+      "files": [],
+      "expectations": [
+        "Documentation heading and wording tests are GREEN CUT unless an external compliance consumer is shown.",
+        "The sole keyboard and ARIA regression net is YELLOW HOLD, not deleted immediately.",
+        "The next step is a mount, browser, or accessibility behavior test.",
+        "Accessibility remains a RED KEEP boundary."
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "A service has a regex test that checks the auth module calls an exact helper name, behavioral tests for unauthenticated 401 responses, session rotation, and CAS conflicts, plus a release job that runs a real signed-upgrade smoke test. There is also an old compatibility endpoint with no in-repository caller, but plugins may call it. Classify the over-defensive pieces.",
+      "expected_output": "Remove the helper-name source mirror when behavior owns the contract, retain auth, CAS, and real release-smoke behavior, and hold the compatibility endpoint until external consumers are resolved.",
+      "files": [],
+      "expectations": [
+        "The exact helper-name regex is GREEN CUT only because behavior-level auth coverage survives.",
+        "Authentication, session rotation, CAS conflict, and real signed-upgrade smoke tests are RED KEEP.",
+        "The compatibility endpoint is YELLOW HOLD while external plugin consumers remain unknown.",
+        "Lack of an in-repository caller is not treated as sufficient deletion evidence."
+      ]
+    }
+  ]
+}
