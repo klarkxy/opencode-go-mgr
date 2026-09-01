@@ -2,11 +2,11 @@
 
 # 管理面板
 
-管理面板是 Gateway 提供的单页 Vue 3 应用。左侧边栏（宽度低于 1024px 时改为顶部横向菜单）有七个固定核心页面：**仪表盘**、**接入 Key**、**账号**、**供应商**、**应用**、**日志**、**设置**。设置下方的分界线之后是可选的 **扩展** 分组，用于容纳非核心产品功能；CPA 是其中第一个仅本机使用的入口，并非供应商或套餐。顶栏右侧是主题切换、语言切换、退出登录。面板原生支持十种语言：简体中文、繁體中文、English、日本語、한국어、Español、 Français、Deutsch、Português (Brasil)、Русский，默认简体中文。语言选择持久化在 `localStorage` 的 `ocg-manager.locale`；浏览器拒绝持久化时，当前会话仍正常工作——隐私窗口不会把面板怎么样。
+管理面板是 Gateway 提供的单页 Vue 3 应用。左侧边栏（宽度低于 1024px 时改为顶部横向菜单）有八个固定核心页面：**仪表盘**、**接入 Key**、**账号**、**供应商**、**别名**、**应用**、**日志**、**设置**。当前不显示扩展入口：CPA 暂留给后续独立测试，路由也被强制关闭。顶栏右侧是主题切换、语言切换、退出登录。面板原生支持十种语言：简体中文、繁體中文、English、日本語、한국어、Español、 Français、Deutsch、Português (Brasil)、Русский，默认简体中文。语言选择持久化在 `localStorage` 的 `ocg-manager.locale`；浏览器拒绝持久化时，当前会话仍正常工作——隐私窗口不会把面板怎么样。
 
 ## 面板 V3
 
-当前 SPA **只** 访问 `/dashboard/api/v3`。接入中心、接入 Key、账号、供应商、应用、日志、设置，以及登录、注册、退出，全部走这条路径。写入携带 `expectedRevision` 与 `processGeneration` 做 CAS；若同一进程的另一个标签页先保存，服务端返回 HTTP 409，错误码 `revisionConflict`。SPA 会刷新控制 token 与受影响资源，但不会自动重放被拒绝的变更；确认当前值后再次提交即可。这些 token 只属于当前进程；多个进程共用一个数据目录时，并不构成统一的 CAS 域。OpenCode Go 价格快照使用独立的 `pricingRevision`，与设置 token 无关。
+当前 SPA **只** 访问 `/dashboard/api/v3`。接入中心、接入 Key、账号、供应商、别名、应用、日志、设置，以及登录、注册、退出，全部走这条路径。写入携带 `expectedRevision` 与 `processGeneration` 做 CAS；若同一进程的另一个标签页先保存，服务端返回 HTTP 409，错误码 `revisionConflict`。SPA 会刷新控制 token 与受影响资源，但不会自动重放被拒绝的变更；确认当前值后再次提交即可。这些 token 只属于当前进程；多个进程共用一个数据目录时，并不构成统一的 CAS 域。OpenCode Go 价格快照使用独立的 `pricingRevision`，与设置 token 无关。
 
 明文 Key 只出现在接入中心载荷（`GET /dashboard/api/v3/connection`）里。Settings 资源从不包含 Key 值。浏览器只把秘密留在内存；退出登录或 401 会话失效会立即清除。
 

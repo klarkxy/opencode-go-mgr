@@ -431,6 +431,7 @@ fn clone_account_row_as_enabled(
     source_id: &str,
     new_id: &str,
     provider_id: &str,
+    offering_id: &str,
 ) {
     let mut stmt = conn.prepare("PRAGMA table_info(accounts)").unwrap();
     let columns: Vec<String> = stmt
@@ -443,6 +444,7 @@ fn clone_account_row_as_enabled(
         .map(|column| match column.as_str() {
             "id" | "name" => "?1".to_string(),
             "provider_id" => "?2".to_string(),
+            "offering_id" => "?3".to_string(),
             "enabled" => "1".to_string(),
             other => other.to_string(),
         })
@@ -450,10 +452,10 @@ fn clone_account_row_as_enabled(
         .join(", ");
     conn.execute(
         &format!(
-            "INSERT INTO accounts ({cols}) SELECT {select_list} FROM accounts WHERE id = ?3",
+            "INSERT INTO accounts ({cols}) SELECT {select_list} FROM accounts WHERE id = ?4",
             cols = columns.join(", ")
         ),
-        params![new_id, provider_id, source_id],
+        params![new_id, provider_id, offering_id, source_id],
     )
     .unwrap();
 }
@@ -5976,7 +5978,7 @@ fn open_sanitizes_unroutable_catalog_leftovers_without_touching_go_zen_or_unknow
             .iter()
             .map(|plan| (plan.provider_id, plan.provider_id))
             .collect::<Vec<_>>(),
-        Vec::<(&str, &str)>::new()
+        vec![(CPA_PROVIDER_ID, CPA_PROVIDER_ID)]
     );
     assert!(builtin_provider(CUSTOM_PROVIDER_ID).is_some_and(|plan| plan.routable));
 
@@ -6160,6 +6162,7 @@ fn v22_open_sanitizes_enabled_unroutable_catalog_rows() {
             "v22-goat",
             &format!("v22-{}", plan.provider_id),
             plan.provider_id,
+            V34_OFFERING_LOCAL,
         );
     }
     drop(conn);
@@ -6644,7 +6647,7 @@ fn cpa_singleton_upsert_catalog_and_disconnect_are_idempotent_and_atomic() {
     assert_eq!(record.account_id, CPA_ACCOUNT_ID);
     assert_eq!(record.base_url, "http://127.0.0.1:9317");
     assert_eq!(record.management_key_cipher, management_cipher);
-    assert!(db.get_account(CPA_ACCOUNT_ID).unwrap().unwrap().enabled);
+    assert!(!db.get_account(CPA_ACCOUNT_ID).unwrap().unwrap().enabled);
 
     db.conn
         .execute(

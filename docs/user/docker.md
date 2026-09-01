@@ -80,7 +80,9 @@ does not read or copy those files. Back up `cpa-auth` separately from
 configuration and keys. `docker compose down` preserves all three named
 volumes, while `docker compose down -v` permanently deletes them.
 
-Open **Extensions → CPA** after the container is running. Save the
+The current staged build hides **Extensions → CPA** and forces CPA routing off;
+leave this profile disabled until the dedicated validation pass. When the gate
+is reopened, save the
 same CPA inference key from `cpa-config.yaml` and the Management password, run
 the application-level test, and perform OAuth inside CPA. The OCG container
 does not start, stop, upgrade, or health-check CPA on your behalf.

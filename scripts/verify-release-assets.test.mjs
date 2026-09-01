@@ -37,6 +37,7 @@ async function withReleaseFixture(callback) {
     `ocg-manager_${VERSION}_linux-x64.deb.sig`,
     `ocg-manager-cli_${VERSION}_linux-x64.tar.gz`,
     "compose.example.yaml",
+    "cpa-config.example.yaml",
   ];
   for (const [index, name] of names.entries()) {
     writeFileSync(join(directory, name), name.endsWith(".sig") ? `signature-${index}\n` : `payload-${index}`);
@@ -71,7 +72,7 @@ test("release verification accepts the exact manifest, checksum, and GitHub dige
       repository: REPOSITORY,
       assetMetadataPath: metadataPath,
     });
-    assert.deepEqual(result, { assetCount: 15, version: VERSION });
+    assert.deepEqual(result, { assetCount: 16, version: VERSION });
   });
 });
 

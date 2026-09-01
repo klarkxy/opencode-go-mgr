@@ -11,10 +11,10 @@ export type AppNavigationIcon =
   | "keys"
   | "accounts"
   | "providers"
+  | "aliases"
   | "apps"
   | "logs"
-  | "settings"
-  | "cpa";
+  | "settings";
 
 export interface AppNavigationItem {
   key: string;
@@ -30,22 +30,23 @@ export const APP_NAVIGATION = [
   { key: "keys", label: "接入 Key", icon: "keys", group: "core" },
   { key: "accounts", label: "账号", icon: "accounts", group: "core" },
   { key: "providers", label: "供应商", icon: "providers", group: "core" },
+  { key: "aliases", label: "别名", icon: "aliases", group: "core" },
   { key: "apps", label: "应用", icon: "apps", group: "core" },
   { key: "logs", label: "日志", icon: "logs", group: "core" },
   { key: "settings", label: "设置", icon: "settings", group: "core" },
-  { key: "cpa", label: "CPA", icon: "cpa", group: "extensions" },
 ] as const satisfies readonly AppNavigationItem[];
 
 export type AppNavigationViewKey = (typeof APP_NAVIGATION)[number]["key"];
-export type AppViewKey = AppNavigationViewKey | "browser";
+export type AppViewKey = AppNavigationViewKey | "browser" | "cpa";
 
 export const APP_VIEW_KEYS: readonly AppViewKey[] = [
   ...APP_NAVIGATION.map(({ key }) => key),
+  "cpa",
   "browser",
 ];
 
 export const CORE_APP_NAVIGATION = APP_NAVIGATION.filter(({ group }) => group === "core");
-export const EXTENSION_APP_NAVIGATION = APP_NAVIGATION.filter(({ group }) => group === "extensions");
+export const EXTENSION_APP_NAVIGATION: readonly AppNavigationItem[] = [];
 
 export const LEGACY_PRICING_VIEW = "pricing";
 export const PROVIDERS_VIEW: AppViewKey = "providers";
@@ -78,6 +79,11 @@ export function readProviderScopeQuery(search: string): {
   };
 }
 
+export function readAccountDeepLink(search: string): string | null {
+  const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
+  return params.get("account_id");
+}
+
 export function applyAppViewSearchParams(
   url: URL,
   view: AppViewKey,
@@ -100,5 +106,11 @@ export function applyAppViewSearchParams(
   else url.searchParams.delete("scope_kind");
   if (scope.scope_id) url.searchParams.set("scope_id", scope.scope_id);
   else url.searchParams.delete("scope_id");
+  return url;
+}
+
+export function applyAccountViewSearchParams(url: URL, accountId: string): URL {
+  applyAppViewSearchParams(url, "accounts");
+  url.searchParams.set("account_id", accountId);
   return url;
 }

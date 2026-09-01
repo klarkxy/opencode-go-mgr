@@ -2,7 +2,7 @@
 
 # 产品定位
 
-OCG Manager 是一台本地 Gateway：把供应商 API Key 保存在 SQLite 数据库里——包括受支持的供应商 Plan Key 与受信的 Custom API 目的地——并通过回环地址 `http://127.0.0.1:9042/v1` 暴露给客户端。每张账号卡对应一个 **Plan**（只有 `provider_id`）。客户端发送本地注册表里的 **别名**、用户定义供应商的对外模型名，或符合要求的 Custom 模型 ID；当前可路由的是 OpenCode Go、Zen Free、Command Code GOAT、MiniMax CN Token Plan、Kimi Code CN、Custom API，以及你在 **供应商** 页创建的用户定义供应商。Vue 3 管理面板在 `/dashboard/`，当前 SPA 通过 `/dashboard/api/v3` 读写 JSON。每个节点独立运行——没有远端同步，没有 Admin API，也没有遥测。
+OCG Manager 是一台本地 Gateway：把受支持的供应商 Plan Key 与受信的 Custom API 目的地保存在 SQLite 数据库里，并通过回环地址 `http://127.0.0.1:9042/v1` 暴露给客户端。每张账号卡对应一个 **Plan**（provider + offering）。客户端发送本地注册表里的 **别名** 或符合要求的 Custom 模型 ID；当前可路由的是 OpenCode Go、Zen Free、Command Code GOAT、MiniMax CN Token Plan、Kimi Code CN 与 Custom API。Vue 3 管理面板在 `/dashboard/`，当前 SPA 通过 `/dashboard/api/v3` 读写 JSON。每个节点独立运行——没有远端同步，没有 Admin API，也没有遥测。
 
 Gateway 只做四件事，顺序基本符合直觉：
 
@@ -30,7 +30,7 @@ Gateway 只做四件事，顺序基本符合直觉：
               SQLite schema v35（仅本地）
 ```
 
-请求路径、Plan、七个面板视图和协议转换的文字图见
+请求路径、Plan、八个面板视图和协议转换的文字图见
 [架构图](architecture.zh-CN.md)。
 
 ---

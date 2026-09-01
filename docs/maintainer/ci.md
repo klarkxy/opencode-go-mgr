@@ -82,23 +82,22 @@ test/type/lint suite is not repeated on all three native runners.
   env APPIMAGE_EXTRACT_AND_RUN=1 WEBKIT_DISABLE_COMPOSITING_MODE=1` and wait
   for the dashboard.
 
-`scripts/smoke-windows-release.ps1` uses the legacy V2 settings route exactly
-once while bootstrapping the currently published v1.8.2 binary, which predates
-Dashboard V3. After the overwrite restart, update status and every settings
-read/write use V3. Candidate auto-start writes obtain the live `revision` /
+`scripts/smoke-windows-release.ps1` uses Dashboard V3 for both the published
+baseline and the candidate. Auto-start writes obtain the live `revision` /
 `processGeneration` pair from `GET /dashboard/api/v3/settings` and send a
 CAS-aware V3 `PUT`.
 
 ## draft-release and verify-release
 
 On a `v*` tag push, `draft-release` downloads the three per-runner artifacts,
-assembles their payloads, signatures, and `compose.example.yaml` into
+assembles their payloads, signatures, `compose.example.yaml`, and
+`cpa-config.example.yaml` into
 `release/`, generates `latest.json` with immutable tag URLs and bundle-aware
 platform keys, regenerates `SHA256SUMS` over the manifest and all attachments,
 and creates or updates a **draft** GitHub Release.
 
 `verify-release` checks that GitHub asset names match the assembled `release/`
-set exactly. The local verifier pins the current 15-file contract, re-derives
+set exactly. The local verifier pins the current 16-file contract, re-derives
 `latest.json`, recomputes every checksum, verifies all four updater signatures,
 and compares each downloaded artifact with the digest reported by GitHub Release
 storage.
@@ -227,7 +226,7 @@ architecture image records an SPDX SBOM and BuildKit SLSA provenance.
 are monotonic moving channels. The browser image is a GHCR package, not a
 GitHub Release asset, so the native release keeps only the assembled GitHub
 attachments. The workflow compares that exact set, and the local verifier pins
-the current 15-file contract.
+the current 16-file contract.
 
 Package visibility is managed separately from the linked repository, so the
 workflow cannot use its repository token to make a package public. A new

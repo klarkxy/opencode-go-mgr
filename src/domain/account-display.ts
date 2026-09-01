@@ -192,10 +192,8 @@ export function usageRefreshTooltip(account: Account, now = Date.now()): string 
 
 export function accountMenuOptions(account: Account, now = Date.now()): AccountMenuOption[] {
   const options: AccountMenuOption[] = [];
-  // CPA is a static external-integration singleton. Account ordering and its
-  // enabled switch stay here; all other controls live on the CPA page.
+  // CPA is staged for dedicated testing and has no Accounts-page entry.
   if (isCpaIntegrationAccount(account)) {
-    options.push({ key: "open-cpa", label: t("前往 CPA"), accountId: account.id, accountName: account.name });
     return options;
   }
   // The built-in Zen Free singleton has no Key/profile/console actions.

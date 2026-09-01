@@ -21,17 +21,18 @@ like this:
   never editable from this page.
 
 The left rail lists built-in contract scopes and user-defined Providers. Built-in
-main panes keep three tabs: **Model catalog**, **Pricing**, and **Alias**.
+main panes keep two tabs: **Model catalog** and **Pricing**.
 User-defined panes show configuration, mappings, and edit/delete. User-defined
 Providers are unpriced.
 
-**Alias** is read-only. It aggregates the existing Provider contracts and
-account capabilities into public names, with
-their routeability and exact upstream identities. It does not create a new
-Alias API, store, cache, or editor. A Custom mapping links to the one editor on
-**Accounts** with `?view=accounts&account_id=<id>`; loading that link opens the
-matching account editor. Closing the editor removes `account_id`; an unknown
-account shows a notice and clears the stale parameter.
+**Aliases** is a separate core page because its read-only table spans every
+Provider contract, user-defined Provider mapping, and Custom account instead of
+the selected Provider. It aggregates existing contracts and account capabilities
+into public names with their routeability and exact upstream identities. It does
+not create a new Alias API, store, cache, or editor. A Custom mapping links to
+the one editor on **Accounts** with `?view=accounts&account_id=<id>`; loading
+that link opens the matching account editor. Closing the editor removes
+`account_id`; an unknown account shows a notice and clears the stale parameter.
 
 **Model catalog** is local. The matrix has one row per current catalog model and
 three columns — Chat Completions, Responses, and Messages. Each cell is a binary
@@ -48,18 +49,17 @@ reported and retained as evidence, but never pin the shared protocol
 `force_off`; only an explicit switch can do that.
 
 For the built-in **OpenCode Go**, **Zen Free**, **Command Code GOAT**,
-**MiniMax CN**, and **Kimi Code CN** scopes,
-the catalog header offers **Restore static
-protocol snapshot**. It makes no upstream request, keeps the current model
-catalog, clears manual switches and probe evidence, and restores the static
-protocol snapshot dated **2026-08-27**. Any current-catalog protocol pair absent
-from that static snapshot is left off, with two sealed-adapter exceptions.
-MiniMax CN and Kimi Code CN rows declare Chat Completions as their only
-supported upstream protocol. For GOAT, models added after the dated snapshot
-restore their sealed Provider-family preset (Messages for Anthropic IDs, Chat
-Completions otherwise); this is shown as preset evidence, not static or
-probe-confirmed evidence. Refreshing the catalog alone still leaves newly
-discovered GOAT rows off.
+**MiniMax CN**, and **Kimi Code CN** scopes, the catalog header offers
+**Restore official protocol baseline**. It makes no upstream request, keeps the
+current model catalog, clears manual switches and probe evidence, and restores
+the development-time official baseline reviewed on **2026-09-01**. OpenCode
+Go and known Zen rows default to the one upstream endpoint documented for each
+model. GOAT uses Messages for Anthropic model IDs and Chat Completions for the
+other Provider families, with newly discovered non-preset models still off by
+default. MiniMax CN and Kimi Code CN both default to Chat Completions and
+Messages; neither advertises Responses. Protocols absent from the official
+baseline remain off until an administrator explicitly enables a constructible
+path or a successful explicit probe records positive evidence.
 
 The compact source line, refresh action, and matrix share one content panel;
 there is no separate catalog-summary card and no refresh-account selector.
@@ -85,8 +85,8 @@ preset. After success, the saved official snapshot is authoritative and
 replaces that preset. Models newly added by a refresh are visible in the matrix.
 For OpenCode Go and Command Code, new protocol cells remain disabled until you
 turn one on or a successful Test confirms it. MiniMax CN and Kimi Code CN rows
-instead enable their sealed Chat Completions contract immediately; Responses
-and Messages stay unsupported. Existing overrides and probe results for
+enable their sealed Chat Completions and Messages contracts; Responses stays
+unsupported. Existing overrides and probe results for
 surviving models are preserved. A failed or empty refresh keeps the previous
 snapshot.
 
@@ -124,7 +124,7 @@ For each probeable protocol the provider automatically tries its eligible
 accounts in saved routing order and stops at the first success. OpenCode Go and
 Zen Free use their constructable protocol set. GOAT tests only its sealed native
 family path: Messages for Anthropic IDs and Chat Completions otherwise. MiniMax
-CN and Kimi Code CN test their sealed Chat Completions path. None of these
+CN and Kimi Code CN test their sealed Chat Completions and Messages paths. None of these
 Providers submits an unsupported Responses or alternate-family probe. Custom
 endpoint tests remain account-owned. Models must belong to the current provider
 catalog, including newly fetched models not yet in the static table. A

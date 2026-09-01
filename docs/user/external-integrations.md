@@ -2,10 +2,12 @@
 
 # External Integrations
 
+> **Current status:** CPA is staged for later dedicated testing. Its normal dashboard entry is hidden and its routing remains forced off; the implementation details below are retained as testing reference.
+
 External integrations are optional, locally supported services that extend OCG
 Manager without becoming a Provider, a Plan, or a plugin. The dashboard keeps
-its seven core views; supported surfaces appear in the general **Extensions**
-group below the Settings divider.
+its eight core views; extension entries appear only after their validation gate
+is reopened.
 
 ## CPA
 
@@ -28,11 +30,15 @@ CPA is intentionally not a remote integration. URLs with embedded credentials,
 queries, fragments, redirects, or non-loopback hosts are rejected. Do not
 reuse an OCG Manager Key as either CPA key.
 
-### Connect and operate
+### Validation-gated operation
+
+The following workflow describes the staged implementation and is not available
+from the normal dashboard while CPA remains hidden and forced off. Use it only
+after a release reopens the CPA validation gate.
 
 1. Install and start CPA locally, then create its distinct **Management Key**
    and **Inference Key**.
-2. Open **Extensions → CPA**, save the local address and both keys,
+2. Open **Extensions → CPA** after that entry is restored, save the local address and both keys,
    then run the connection test. It reports reachability, supported CPA version,
    Management authentication, and Inference authentication separately.
    OCG requires CPA 7.1.0 or newer; later major versions continue through the

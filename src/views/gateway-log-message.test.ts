@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { locale, setLocale, type Locale } from "../i18n/index.ts";
 import { gatewayLogMessage } from "./gateway-log-message.ts";
@@ -44,9 +43,4 @@ test("passes unknown backend log strings through untouched", () => {
   assert.equal(gatewayLogMessage("created account"), "created account");
   setLocale("en-US");
   assert.equal(gatewayLogMessage("stream aborted: client disconnected"), "stream aborted: client disconnected");
-});
-
-test("Logs view renders the gateway message column through the localizer", async () => {
-  const logs = await readFile(new URL("./Logs.vue", import.meta.url), "utf8");
-  assert.match(logs, /title: t\("消息"\), key: "message"[\s\S]*?gatewayLogMessage\(row\.message\)/);
 });

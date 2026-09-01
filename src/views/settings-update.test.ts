@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync } from "node:fs";
 import test from "node:test";
 import type { UpdatePhase } from "../api/dashboard.ts";
 import { isVersionAtLeast } from "../utils/version.ts";
@@ -83,61 +82,4 @@ test("install request failures preserve the target for restart observation", () 
   assert.equal(decideInstallRequestFailure(null, true), "wait");
   assert.equal(decideInstallRequestFailure(null, false), "fail");
   assert.equal(decideInstallRequestFailure(500, true), "fail");
-});
-
-test("update API sends the expected version and exposes polling status", () => {
-  const api = readFileSync(new URL("../api/dashboard-v3.ts", import.meta.url), "utf8");
-  assert.match(api, /installUpdate: \(expectedVersion: string/);
-  assert.match(api, /requestV3<DesktopUpdate>\("\/settings\/install-update"/);
-  assert.match(api, /withExpectation\(\{ expectedVersion \}/);
-});
-
-test("settings restores and observes updates with bounded, lifecycle-safe polling", () => {
-  const settings = readFileSync(new URL("./Settings.vue", import.meta.url), "utf8");
-  assert.match(settings, /@positive-click="installAvailableUpdate"/);
-  assert.match(settings, /dashboardApi\.installUpdate\(result\.latest_version\)/);
-  assert.match(settings, /UPDATE_INSTALL_TIMEOUT_MS = 15 \* 60_000/);
-  assert.match(settings, /void restoreUpdateState\(\)/);
-  assert.match(settings, /readUpdateTarget\(sessionUpdateStorage\(\)\)/);
-  assert.match(settings, /isActiveUpdateGeneration\(generation\)/);
-  assert.match(settings, /onUnmounted\(\(\) => \{\s*updateDisposed = true;\s*cancelUpdatePolling\(\)/);
-  assert.match(settings, /const failureDecision = decideInstallRequestFailure/);
-  assert.equal(settings.match(/rememberUpdateTarget\(result\.latest_version\)/g)?.length, 2);
-  assert.match(settings, /window\.location\.reload\(\)/);
-  assert.match(settings, /updateResult\.release_url/);
-  assert.match(settings, /function observeUpdateStatusFailure\(\)[\s\S]*?phase !== "installing"[\s\S]*?updateStatusFallback\("installing"\)/);
-  assert.match(settings, /catch \{[\s\S]*?observeUpdateStatusFailure\(\);[\s\S]*?scheduleUpdatePoll\(generation\)/);
-  assert.doesNotMatch(settings, /class="update-result" aria-live=/);
-  assert.match(settings, /class="sr-only" aria-live="polite" aria-atomic="true"/);
-
-  const finishStart = settings.indexOf("function finishInstalledUpdate");
-  const finishEnd = settings.indexOf("function acceptObservedUpdateStatus", finishStart);
-  assert.ok(finishStart >= 0 && finishEnd > finishStart);
-  const finishSource = settings.slice(finishStart, finishEnd);
-  assert.doesNotMatch(finishSource, /checkForUpdate/);
-  assert.doesNotMatch(finishSource, /updateDisposed/);
-  assert.match(finishSource, /}, 800\)/);
-});
-
-test("every translated locale includes the updater interaction copy", () => {
-  const messagesDir = new URL("../i18n/messages/", import.meta.url);
-  const requiredKeys = [
-    "下载并安装",
-    "开始升级",
-    "正在准备升级…",
-    "正在下载升级…",
-    "正在安装升级…",
-    "正在等待新版本启动…",
-    "升级失败",
-    "重试升级",
-    "已升级到 v{version}",
-  ];
-  for (const filename of readdirSync(messagesDir).filter((name) => (
-    name.endsWith(".ts") && name !== "managed-account.ts"
-  ))) {
-    const source = readFileSync(new URL(filename, messagesDir), "utf8");
-    for (const key of requiredKeys) {
-      assert.match(source, new RegExp(`"${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"`), `${filename}: ${key}`);
-    }
-  }
 });

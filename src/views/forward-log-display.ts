@@ -18,10 +18,17 @@ export function forwardLogAlias(
     || row.model;
 }
 
+/**
+ * Total tokens for a request-log row. `prompt_tokens` already includes the
+ * cached-read and cache-write portions (the Messages path adds them back
+ * explicitly; Chat/Responses rely on the upstream convention where
+ * `prompt_tokens` includes cached and cache-write is always 0), so adding
+ * them again would double count. The total is input + output only.
+ */
 export function forwardLogTotalTokens(
-  row: Pick<ForwardLog, "prompt_tokens" | "completion_tokens" | "cached_tokens" | "cache_creation_tokens">,
+  row: Pick<ForwardLog, "prompt_tokens" | "completion_tokens">,
 ): number {
-  return row.prompt_tokens + row.completion_tokens + row.cached_tokens + row.cache_creation_tokens;
+  return row.prompt_tokens + row.completion_tokens;
 }
 
 export function forwardLogLatencyMs(

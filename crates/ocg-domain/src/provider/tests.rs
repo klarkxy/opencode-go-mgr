@@ -168,7 +168,7 @@ fn catalog_hardcodes_providers_and_keeps_unverified_providers_unroutable() {
     assert!(!is_custom_api(OPENCODE_PROVIDER_ID));
 
     let cpa = builtin_provider(CPA_PROVIDER_ID).unwrap();
-    assert!(cpa.routable);
+    assert!(!cpa.routable);
     assert_eq!(
         cpa.product_surface,
         ProviderProductSurface::ExternalIntegration
@@ -356,7 +356,6 @@ fn provider_registry_is_exhaustive_for_plans_and_adapter_kinds() {
                     | ProviderAdapterKind::CommandCodeGoat
                     | ProviderAdapterKind::MiniMaxCn
                     | ProviderAdapterKind::KimiCn
-                    | ProviderAdapterKind::ConfigurableHttp
             )
         );
         assert_eq!(
@@ -376,7 +375,10 @@ fn provider_registry_is_exhaustive_for_plans_and_adapter_kinds() {
             | ProviderAdapterKind::ConfigurableHttp
             | ProviderAdapterKind::Cpa => {
                 assert!(descriptor.inference.production_inference);
-                assert!(descriptor.inference.catalog_routable);
+                assert_eq!(
+                    descriptor.inference.catalog_routable,
+                    kind != ProviderAdapterKind::Cpa
+                );
             }
         }
     }
@@ -480,16 +482,24 @@ fn adapter_descriptors_preserve_current_capability_decisions() {
     assert!(!goat.verification.uses_get_models);
     assert!(!goat.verification.never_auto_enable);
 
-    for fixed_chat in [
+    for fixed_provider in [
         ProviderRegistry::get(MINIMAX_PROVIDER_ID).unwrap(),
         ProviderRegistry::get(KIMI_PROVIDER_ID).unwrap(),
     ] {
-        assert!(fixed_chat.protocol_probe.explicit_probe);
+        assert!(fixed_provider.protocol_probe.explicit_probe);
         assert_eq!(
-            fixed_chat.protocol_probe.structural_ceiling,
-            StructuralProbeCeiling::FixedChatCompletions
+            fixed_provider.protocol_probe.structural_ceiling,
+            StructuralProbeCeiling::Fixed(&CHAT_MESSAGES_PROTOCOLS)
         );
-        assert!(fixed_chat.card_actions.protocol_probe);
+        assert_eq!(
+            fixed_provider.protocol_probe.matrix,
+            ProtocolMatrixKind::FixedProviderProtocols
+        );
+        assert_eq!(
+            fixed_provider.protocol_probe.fallback_priority,
+            &CHAT_MESSAGES_PROTOCOLS
+        );
+        assert!(fixed_provider.card_actions.protocol_probe);
     }
 
     let custom = ProviderRegistry::get(CUSTOM_PROVIDER_ID).unwrap();
@@ -514,12 +524,13 @@ fn adapter_descriptors_preserve_current_capability_decisions() {
     assert!(!custom.card_actions.protocol_and_auth_immutable_after_create);
     assert!(!custom.card_actions.enable_requires_verification);
     assert!(custom.card_actions.discover_models);
-    assert!(custom.card_actions.protocol_probe);
+    assert!(!custom.card_actions.protocol_probe);
     assert!(!custom.card_actions.catalog_refresh);
     assert_eq!(
         custom.protocol_probe.structural_ceiling,
-        StructuralProbeCeiling::AccountDeclared
+        StructuralProbeCeiling::Unavailable
     );
+    assert!(!custom.protocol_probe.explicit_probe);
     assert!(!custom.usage.egress_ip_shared_cooldown_window);
 
     assert_ne!(go.kind, ProviderAdapterKind::ConfigurableHttp);

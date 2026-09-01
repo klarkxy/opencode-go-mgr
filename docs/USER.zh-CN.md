@@ -6,7 +6,7 @@
 
 ## 新增集成
 
-- [新增供应商](user/add-provider.zh-CN.md) — 创建用户定义供应商、接入 Custom API，或贡献一个具备完整 HTTP 与路由契约的密封内置供应商。
+- [新增供应商](user/add-provider.zh-CN.md) — 通过 Custom API 接入兼容上游，或贡献一个具备完整 HTTP 与路由契约的密封内置供应商。
 - [新增应用](user/add-application.zh-CN.md) — 把未收录客户端接到 Gateway、贡献应用教程，或新增可选的本机 Desktop 连接器。
 
 ## 章节
@@ -16,10 +16,10 @@
 - [安装与首次启动](user/install.zh-CN.md) — Windows、macOS、Linux 安装包；附赠 SmartScreen 仪式。
 - [接入第一个客户端](user/first-client.zh-CN.md) — 复制 Key 与 API Base URL，用一个请求验证连通。
 - [升级、备份、恢复与卸载](user/upgrade-backup.zh-CN.md) — 升级通道、手动升级、备份、恢复与卸载。
-- [管理面板](user/dashboard.zh-CN.md) — 七个核心页面、扩展分组、国际化与接入中心。
+- [管理面板](user/dashboard.zh-CN.md) — 八个核心页面、扩展分组、国际化与接入中心。
 - [应用教程与模型能力](user/applications.zh-CN.md) — 客户端教程与模型能力表。
 - [账号](user/accounts.zh-CN.md) — Plan、凭据、排序、额度行为与托管注册。
-- [供应商](user/providers.zh-CN.md) — 目录、供应商合约、按模型协议覆盖与探测。
+- [供应商](user/providers.zh-CN.md) — 目录、供应商合约、按模型协议覆盖、探测与用户定义供应商。
 - [日志与设置](user/logs-settings.zh-CN.md) — 请求日志、设置、代理模式与主题。
 - [Gateway 行为](user/gateway.zh-CN.md) — 端点、鉴权、别名、Zen Free 与熔断。
 - [协议转换](user/protocol-conversion.zh-CN.md) — 推荐/已验证协议、透传与转换边界。

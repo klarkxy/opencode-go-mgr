@@ -132,7 +132,7 @@ Zen Free has only an enable switch; turn the card off if you do not want it. Cat
 
 ## Dashboard, Key, and account cards
 
-The sidebar has seven views. `browser` is a hosted-session overlay, not a hidden eighth. The SPA reads and writes `/dashboard/api/v3`. Loopback listeners skip dashboard login unless forwarding headers are present; clients still need the Key for `/v1`.
+The sidebar has eight core views, including **Aliases**. `browser` is a hosted-session overlay. The optional Extensions group is currently hidden while CPA routing is forced off. The SPA reads and writes `/dashboard/api/v3`. Loopback listeners skip dashboard login unless forwarding headers are present; clients still need the Key for `/v1`.
 
 ```text
   Dashboard -> Access Keys -> Accounts -> Providers

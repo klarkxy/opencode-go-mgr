@@ -199,6 +199,7 @@
               <Keys v-else-if="activeKey === 'keys'" />
               <Accounts v-else-if="activeKey === 'accounts'" />
               <Providers v-else-if="activeKey === 'providers'" />
+              <Aliases v-else-if="activeKey === 'aliases'" />
               <Applications v-else-if="activeKey === 'apps'" />
               <Logs v-else-if="activeKey === 'logs'" />
               <Settings
@@ -243,13 +244,13 @@ import {
 import type { DropdownMenuProps, DropdownOption, MenuOption } from "naive-ui";
 import {
   AppstoreOutlined,
-  ApiOutlined,
   BgColorsOutlined,
   CheckOutlined,
   DashboardOutlined,
   CloudServerOutlined,
   FileTextOutlined,
   KeyOutlined,
+  LinkOutlined,
   LogoutOutlined,
   SettingOutlined,
   TeamOutlined,
@@ -295,6 +296,7 @@ const Keys = defineAsyncComponent(() => import("./views/Keys.vue"));
 const Accounts = defineAsyncComponent(() => import("./views/Accounts.vue"));
 const Applications = defineAsyncComponent(() => import("./views/Applications.vue"));
 const Providers = defineAsyncComponent(() => import("./views/Providers.vue"));
+const Aliases = defineAsyncComponent(() => import("./views/Aliases.vue"));
 const Logs = defineAsyncComponent(() => import("./views/Logs.vue"));
 const Settings = defineAsyncComponent(() => import("./views/Settings.vue"));
 const Cpa = defineAsyncComponent(() => import("./views/Cpa.vue"));
@@ -346,10 +348,10 @@ const navigationIcons: Record<AppNavigationItem["icon"], Component> = {
   keys: KeyOutlined,
   accounts: TeamOutlined,
   providers: CloudServerOutlined,
+  aliases: LinkOutlined,
   apps: AppstoreOutlined,
   logs: FileTextOutlined,
   settings: SettingOutlined,
-  cpa: ApiOutlined,
 };
 
 function menuOption(item: AppNavigationItem): MenuOption {
@@ -370,26 +372,36 @@ function mobileMenuOption(item: AppNavigationItem): DropdownOption {
   };
 }
 
-const menuOptions = computed<MenuOption[]>(() => [
-  ...CORE_APP_NAVIGATION.map(menuOption),
-  { type: "divider", key: "extensions-divider" },
-  {
-    type: "group",
-    key: "extensions",
-    label: t(APP_NAVIGATION_GROUPS.extensions.label),
-    children: EXTENSION_APP_NAVIGATION.map(menuOption),
-  },
-]);
-const mobileMenuOptions = computed<DropdownOption[]>(() => [
-  ...CORE_APP_NAVIGATION.map(mobileMenuOption),
-  { type: "divider", key: "mobile-extensions-divider" },
-  {
-    label: t(APP_NAVIGATION_GROUPS.extensions.label),
-    key: "mobile-extensions-label",
-    disabled: true,
-  },
-  ...EXTENSION_APP_NAVIGATION.map(mobileMenuOption),
-]);
+const menuOptions = computed<MenuOption[]>(() => {
+  const options: MenuOption[] = CORE_APP_NAVIGATION.map(menuOption);
+  if (EXTENSION_APP_NAVIGATION.length > 0) {
+    options.push(
+      { type: "divider", key: "extensions-divider" },
+      {
+        type: "group",
+        key: "extensions",
+        label: t(APP_NAVIGATION_GROUPS.extensions.label),
+        children: EXTENSION_APP_NAVIGATION.map(menuOption),
+      },
+    );
+  }
+  return options;
+});
+const mobileMenuOptions = computed<DropdownOption[]>(() => {
+  const options: DropdownOption[] = CORE_APP_NAVIGATION.map(mobileMenuOption);
+  if (EXTENSION_APP_NAVIGATION.length > 0) {
+    options.push(
+      { type: "divider", key: "mobile-extensions-divider" },
+      {
+        label: t(APP_NAVIGATION_GROUPS.extensions.label),
+        key: "mobile-extensions-label",
+        disabled: true,
+      },
+      ...EXTENSION_APP_NAVIGATION.map(mobileMenuOption),
+    );
+  }
+  return options;
+});
 const currentTitle = computed(() => t(
   APP_NAVIGATION.find(({ key }) => key === activeKey.value)?.label ?? "远程浏览器",
 ));

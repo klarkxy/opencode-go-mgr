@@ -37,15 +37,18 @@ pub const COMMAND_CODE_GOAT_QUOTA_MONTH: f64 = 70.0;
 pub const MAX_COMMAND_CODE_MODELS_CATALOG: usize = 1_000;
 
 /// Official MiniMax CN Token Plan endpoints. The Plan Key is sent as Bearer
-/// auth to all three surfaces; redirects stay disabled in the host adapter.
+/// auth to catalog, Chat, and Messages surfaces; redirects stay disabled.
 pub const MINIMAX_CN_BASE_URL: &str = "https://api.minimaxi.com/v1";
 pub const MINIMAX_CN_CHAT_COMPLETIONS_PATH: &str = "/chat/completions";
+pub const MINIMAX_CN_ANTHROPIC_BASE_URL: &str = "https://api.minimaxi.com/anthropic";
+pub const MINIMAX_CN_MESSAGES_PATH: &str = "/v1/messages";
 pub const MINIMAX_CN_MODELS_PATH: &str = "/models";
 pub const MINIMAX_CN_USAGE_URL: &str = "https://api.minimaxi.com/v1/token_plan/remains";
 pub const MINIMAX_CN_MODEL_SOURCE: &str = "minimax_cn_get_models";
 pub const MAX_MINIMAX_CN_MODELS_CATALOG: usize = 1_000;
 pub const KIMI_CN_BASE_URL: &str = "https://api.kimi.com/coding/v1";
 pub const KIMI_CN_CHAT_COMPLETIONS_PATH: &str = "/chat/completions";
+pub const KIMI_CN_MESSAGES_PATH: &str = "/messages";
 pub const KIMI_CN_MODELS_PATH: &str = "/models";
 pub const KIMI_CN_USAGE_URL: &str = "https://api.kimi.com/coding/v1/usages";
 pub const KIMI_CN_MODEL_SOURCE: &str = "kimi_cn_get_models";
@@ -327,7 +330,10 @@ const GOAT_PROTOCOLS: [UpstreamProtocolKind; 2] = [
     UpstreamProtocolKind::ChatCompletions,
     UpstreamProtocolKind::Messages,
 ];
-const CHAT_PROTOCOLS: [UpstreamProtocolKind; 1] = [UpstreamProtocolKind::ChatCompletions];
+const CHAT_MESSAGES_PROTOCOLS: [UpstreamProtocolKind; 2] = [
+    UpstreamProtocolKind::ChatCompletions,
+    UpstreamProtocolKind::Messages,
+];
 const CUSTOM_PROTOCOLS: [UpstreamProtocolKind; 3] = [
     UpstreamProtocolKind::ChatCompletions,
     UpstreamProtocolKind::Responses,
@@ -434,7 +440,7 @@ pub const BUILTIN_PROVIDERS: [BuiltinProvider; 7] = [
         model_source: MINIMAX_CN_MODEL_SOURCE,
         key_prefix: Some("sk-cp"),
         auth_schemes: &BEARER_AUTH,
-        upstream_protocols: &CHAT_PROTOCOLS,
+        upstream_protocols: &CHAT_MESSAGES_PROTOCOLS,
         form_fields: &MINIMAX_CN_FORM_FIELDS,
     },
     BuiltinProvider {
@@ -459,7 +465,7 @@ pub const BUILTIN_PROVIDERS: [BuiltinProvider; 7] = [
         model_source: KIMI_CN_MODEL_SOURCE,
         key_prefix: Some("sk-ki"),
         auth_schemes: &BEARER_AUTH,
-        upstream_protocols: &CHAT_PROTOCOLS,
+        upstream_protocols: &CHAT_MESSAGES_PROTOCOLS,
         form_fields: &KIMI_CN_FORM_FIELDS,
     },
     BuiltinProvider {
@@ -502,7 +508,7 @@ pub const BUILTIN_PROVIDERS: [BuiltinProvider; 7] = [
         ),
         verification_policy: VerificationPolicy::Required,
         verification_runtime_availability: "external_integration",
-        routable: true,
+        routable: false,
         managed_registration: false,
         pricing_availability: "unpriced",
         usage_availability: "unavailable",
@@ -807,7 +813,7 @@ pub struct InferenceRoutingDescriptor {
 pub enum ProtocolMatrixKind {
     OpenCodeModelProtocols,
     CommandCodeNative,
-    FixedChatCompletions,
+    FixedProviderProtocols,
     AccountDeclaredProtocol,
     FixedStandardProtocols,
 }
@@ -823,16 +829,14 @@ pub enum StructuralProbeCeiling {
     /// Command Code GOAT has both route families, while each model's sealed
     /// family rule selects the one path worth probing.
     CommandCodeConstructable,
-    /// This sealed provider exposes only its fixed Chat Completions path.
-    FixedChatCompletions,
+    /// This sealed provider exposes exactly the listed documented paths.
+    Fixed(&'static [UpstreamProtocolKind]),
     /// Current-catalog OpenCode Go models: Chat Completions, Responses, and
     /// Messages all have constructable `/v1/...` paths and OpenCode auth.
     OpenCodeConstructable,
     /// Known Zen models share OpenCode constructable paths. Unknown `-free`
     /// IDs stay Chat-only. Anything else is empty.
     ZenFreeConstructable,
-    /// Configurable HTTP: only the account's immutable declared protocol.
-    AccountDeclared,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1146,11 +1150,11 @@ fn minimax_cn_capabilities(plan: BuiltinProvider) -> ProviderCapabilities {
         },
         protocol_probe: ProtocolProbeDescriptor {
             request_path_may_trial: false,
-            matrix: ProtocolMatrixKind::FixedChatCompletions,
+            matrix: ProtocolMatrixKind::FixedProviderProtocols,
             unknown_zen_free_defaults_to_chat: false,
-            fallback_priority: &CHAT_PROTOCOLS,
+            fallback_priority: &CHAT_MESSAGES_PROTOCOLS,
             explicit_probe: true,
-            structural_ceiling: StructuralProbeCeiling::FixedChatCompletions,
+            structural_ceiling: StructuralProbeCeiling::Fixed(&CHAT_MESSAGES_PROTOCOLS),
         },
         verification: VerificationDescriptor {
             policy: plan.verification_policy,
@@ -1211,11 +1215,11 @@ fn kimi_cn_capabilities(plan: BuiltinProvider) -> ProviderCapabilities {
         },
         protocol_probe: ProtocolProbeDescriptor {
             request_path_may_trial: false,
-            matrix: ProtocolMatrixKind::FixedChatCompletions,
+            matrix: ProtocolMatrixKind::FixedProviderProtocols,
             unknown_zen_free_defaults_to_chat: false,
-            fallback_priority: &CHAT_PROTOCOLS,
+            fallback_priority: &CHAT_MESSAGES_PROTOCOLS,
             explicit_probe: true,
-            structural_ceiling: StructuralProbeCeiling::FixedChatCompletions,
+            structural_ceiling: StructuralProbeCeiling::Fixed(&CHAT_MESSAGES_PROTOCOLS),
         },
         verification: VerificationDescriptor {
             policy: plan.verification_policy,
@@ -1279,8 +1283,8 @@ fn configurable_http_capabilities(plan: BuiltinProvider) -> ProviderCapabilities
             matrix: ProtocolMatrixKind::AccountDeclaredProtocol,
             unknown_zen_free_defaults_to_chat: false,
             fallback_priority: PROTOCOL_FALLBACK_CHAT_RESPONSES_MESSAGES,
-            explicit_probe: true,
-            structural_ceiling: StructuralProbeCeiling::AccountDeclared,
+            explicit_probe: false,
+            structural_ceiling: StructuralProbeCeiling::Unavailable,
         },
         verification: VerificationDescriptor {
             policy: plan.verification_policy,
@@ -1312,7 +1316,7 @@ fn configurable_http_capabilities(plan: BuiltinProvider) -> ProviderCapabilities
             manual_usage_calibration: plan.manual_usage_calibration,
             connection_verify: CardVerifyAction::Optional,
             protocol_and_auth_immutable_after_create: false,
-            protocol_probe: true,
+            protocol_probe: false,
             catalog_refresh: false,
         },
     }

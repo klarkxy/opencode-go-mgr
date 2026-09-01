@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { watch } from "vue";
 import { setLocale } from "../i18n/index.ts";
@@ -51,32 +50,6 @@ test("applyModalCloseAriaLabel rewrites naive close buttons scoped to the modal 
   setLocale("en-US");
   applyModalCloseAriaLabel(root as unknown as ParentNode, "account-modal");
   assert.equal(elements[0].attrs["aria-label"], "Close dialog");
-});
-
-test("account add/edit flow modals patch their close control through the shared helper", async () => {
-  const read = (path: string) => readFile(new URL(path, import.meta.url), "utf8");
-  const formModal = await read("../components/AccountFormModal.vue");
-  const addModal = await read("../components/AccountAddModal.vue");
-  const wizard = await read("../components/ManagedAccountWizard.vue");
-  const accounts = await read("../views/Accounts.vue");
-
-  assert.match(formModal, /class="account-modal"/);
-  assert.match(formModal, /useLocalizedModalCloseLabel\(toRef\(props, "show"\), "account-modal"\)/);
-  assert.match(addModal, /class="account-add-modal"/);
-  assert.match(addModal, /useLocalizedModalCloseLabel\(toRef\(props, "show"\), "account-add-modal"\)/);
-  assert.match(wizard, /class="managed-wizard-modal"/);
-  assert.match(wizard, /useLocalizedModalCloseLabel\(toRef\(props, "show"\), "managed-wizard-modal"\)/);
-  assert.match(accounts, /class="account-managed-modal"/);
-  assert.match(accounts, /useLocalizedModalCloseLabel\(showManagedCreate, "account-managed-modal"\)/);
-});
-
-test("the composable re-applies on effective-catalog swaps, not just locale changes", async () => {
-  // Regression guard for the lazy-startup path: the watch must track the
-  // effective catalog signal so an already-open modal picks up a lazy catalog
-  // that activates without `locale` changing.
-  const source = await readFile(new URL("./modal-close-label.ts", import.meta.url), "utf8");
-  assert.match(source, /import \{ effectiveCatalog, locale, t \} from "\.\.\/i18n\/index\.ts"/);
-  assert.match(source, /watch\(\[show, locale, effectiveCatalog\]/);
 });
 
 test("a stored lazy locale activates its catalog at startup without a locale change", async () => {

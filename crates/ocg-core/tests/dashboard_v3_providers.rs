@@ -1005,10 +1005,13 @@ async fn unified_zen_catalog_refresh_returns_the_shared_layout_with_new_models_o
         .find(|model| model["modelId"] == "unified-new-free")
         .expect("new Zen model stays visible");
     assert_eq!(model["routable"], false);
-    for protocol in ["chat_completions", "responses", "messages"] {
-        assert_eq!(model["protocols"][protocol]["override"], "force_off");
-        assert_eq!(model["protocols"][protocol]["enabled"], false);
-    }
+    assert_eq!(
+        model["protocols"]["chat_completions"]["override"],
+        "force_off"
+    );
+    assert_eq!(model["protocols"]["chat_completions"]["enabled"], false);
+    assert!(model["protocols"]["responses"].is_null());
+    assert!(model["protocols"]["messages"].is_null());
 
     harness.stop();
 }

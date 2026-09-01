@@ -37,21 +37,21 @@ Rust，Windows 也不必重做 dashboard 构建：
 - **macOS GUI**——挂载 DMG，`codesign --verify --deep --strict`， `lipo -archs` 校验 universal，`--startup` 启动后等 dashboard。
 - **Linux GUI**——`dpkg-deb --info` / `dpkg-deb --contents` 校验 deb，`file` 校验 AppImage；用 `dbus-run-session -- xvfb-run -a env APPIMAGE_EXTRACT_AND_RUN=1 WEBKIT_DISABLE_COMPOSITING_MODE=1` 启动后等 dashboard。
 
-`scripts/smoke-windows-release.ps1` 仅在引导当前已发布的 v1.8.2 时调用一次遗留
-V2 settings 路径，因为该版本早于 Dashboard V3。覆盖安装重启后，版本探测及所有
-settings 读写都使用 V3；候选版自启写入先从
+`scripts/smoke-windows-release.ps1` 对已发布基线和候选版均使用 Dashboard V3。
+自启写入先从
 `GET /dashboard/api/v3/settings` 取得实时 `revision` / `processGeneration`，再发送带
 CAS 的 V3 `PUT`。
 
 ## draft-release 与 verify-release
 
 `v*` tag 触发时，下游 `draft-release` job 下载三个 runner 的 Actions artifact，
-把平台 payload、签名与 `compose.example.yaml` 组装进 `release/`，生成使用不可变
+把平台 payload、签名、`compose.example.yaml` 与 `cpa-config.example.yaml` 组装进
+`release/`，生成使用不可变
 tag URL 和 bundle 感知平台键的 `latest.json`，再重写覆盖 manifest、签名和其余附
 件的 `SHA256SUMS`，最后创建或更新 **draft** GitHub Release。
 
 `verify-release` 要求 GitHub 附件名称与组装后的 `release/` 集合逐名一致。本地验
-证器还固定校验当前 15 个文件，再重新推导 `latest.json`、重算全部 checksum、验
+证器还固定校验当前 16 个文件，再重新推导 `latest.json`、重算全部 checksum、验
 证四份升级签名，并把每个下载文件与 GitHub Release 存储层报告的 digest 对比。
 
 draft job 会把数字 Release ID 传给下游；验证和公开 job 都重新校验该 ID、tag 与

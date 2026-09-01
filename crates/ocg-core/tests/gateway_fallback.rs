@@ -473,8 +473,8 @@ async fn routes_all_client_formats_to_each_models_native_protocol() {
         (
             "/v1/responses",
             "deepseek-v4-flash",
-            "/v1/responses",
-            RESPONSES_SUCCESS_BODY,
+            "/v1/chat/completions",
+            SUCCESS_BODY,
         ),
         ("/v1/responses", "hy3", "/v1/chat/completions", SUCCESS_BODY),
         (
@@ -492,8 +492,8 @@ async fn routes_all_client_formats_to_each_models_native_protocol() {
         (
             "/v1/messages",
             "deepseek-v4-flash",
-            "/v1/messages",
-            MESSAGES_SUCCESS_BODY,
+            "/v1/chat/completions",
+            SUCCESS_BODY,
         ),
         ("/v1/messages", "hy3", "/v1/chat/completions", SUCCESS_BODY),
         (
@@ -736,8 +736,8 @@ async fn inference_skips_accounts_with_unusable_stored_credentials() {
         (
             "/v1/responses",
             "deepseek-v4-flash",
-            "/v1/responses",
-            RESPONSES_SUCCESS_BODY,
+            "/v1/chat/completions",
+            SUCCESS_BODY,
         ),
         (
             "/v1/messages",
@@ -1885,7 +1885,6 @@ async fn zen_free_is_anonymous_across_all_client_formats_and_logs_route_identity
     assert!(logs.iter().all(|log| {
         log.route_account_id.as_deref() == Some(ZEN_FREE_ACCOUNT_ID)
             && log.provider_id.as_deref() == Some("opencode-zen-free")
-            && log.provider_id.as_deref() == Some("opencode-zen-free")
             && log.credential_account_id.is_none()
             && log.account_id == ZEN_FREE_ACCOUNT_ID
     }));
@@ -2090,7 +2089,6 @@ async fn goat_loopback_adapter_routes_all_client_formats_with_its_own_auth_contr
     assert!(logs.iter().all(|log| {
         log.route_account_id.as_deref() == Some(goat_id.as_str())
             && log.provider_id.as_deref() == Some(COMMAND_CODE_PROVIDER_ID)
-            && log.provider_id.as_deref() == Some(ocg_core::provider::COMMAND_CODE_PROVIDER_ID)
             && log.credential_account_id.as_deref() == Some(goat_id.as_str())
             && log.model == COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM
     }));

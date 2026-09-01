@@ -479,7 +479,7 @@ async fn opencode_static_protocol_reset_is_cas_protected_and_restores_current_ca
         .iter()
         .find(|provider| provider["providerId"] == OPENCODE_PROVIDER_ID)
         .unwrap();
-    assert_eq!(opencode["staticProtocolSnapshotDate"], "2026-08-27");
+    assert_eq!(opencode["staticProtocolSnapshotDate"], "2026-09-01");
     assert_eq!(opencode["catalog"]["models"], json!(models));
     let grok = opencode["models"]
         .as_array()
@@ -524,11 +524,10 @@ async fn opencode_static_protocol_reset_is_cas_protected_and_restores_current_ca
 }
 
 #[tokio::test]
-async fn zen_static_protocol_reset_restores_exact_snapshot_pairs_and_defaults_other_catalog_pairs_off()
- {
+async fn zen_static_protocol_reset_restores_official_pairs_and_defaults_other_catalog_pairs_off() {
     let harness = start_loopback("zen-static-protocol-reset").await;
     let scope = ContractScope::provider(OPENCODE_ZEN_FREE_PROVIDER_ID);
-    let models = vec!["hy3-free".to_string(), "future-free".to_string()];
+    let models = vec!["mimo-v2.5-free".to_string(), "future-free".to_string()];
     let now = chrono::Utc::now();
     harness
         .state
@@ -567,29 +566,35 @@ async fn zen_static_protocol_reset_restores_exact_snapshot_pairs_and_defaults_ot
         .iter()
         .find(|provider| provider["providerId"] == OPENCODE_ZEN_FREE_PROVIDER_ID)
         .unwrap();
-    assert_eq!(zen["staticProtocolSnapshotDate"], "2026-08-27");
-    let hy3 = zen["models"]
+    assert_eq!(zen["staticProtocolSnapshotDate"], "2026-09-01");
+    let official = zen["models"]
         .as_array()
         .unwrap()
         .iter()
-        .find(|model| model["modelId"] == "hy3-free")
+        .find(|model| model["modelId"] == "mimo-v2.5-free")
         .unwrap();
-    assert_eq!(hy3["protocols"]["chat_completions"]["override"], "auto");
-    assert_eq!(hy3["protocols"]["chat_completions"]["enabled"], true);
+    assert_eq!(
+        official["protocols"]["chat_completions"]["override"],
+        "auto"
+    );
+    assert_eq!(official["protocols"]["chat_completions"]["enabled"], true);
     let future = zen["models"]
         .as_array()
         .unwrap()
         .iter()
         .find(|model| model["modelId"] == "future-free")
         .unwrap();
-    for protocol in ["chat_completions", "responses", "messages"] {
-        assert_eq!(future["protocols"][protocol]["override"], "force_off");
-    }
+    assert_eq!(
+        future["protocols"]["chat_completions"]["override"],
+        "force_off"
+    );
+    assert!(future["protocols"]["responses"].is_null());
+    assert!(future["protocols"]["messages"].is_null());
     harness.stop();
 }
 
 #[tokio::test]
-async fn goat_static_protocol_reset_restores_later_models_as_family_presets() {
+async fn goat_static_protocol_reset_restores_official_family_without_enabling_extra_models() {
     let harness = start_loopback("goat-static-protocol-reset").await;
     let scope = ContractScope::provider(COMMAND_CODE_PROVIDER_ID);
     let models = vec![
@@ -626,7 +631,7 @@ async fn goat_static_protocol_reset_restores_later_models_as_family_presets() {
         .iter()
         .find(|provider| provider["providerId"] == COMMAND_CODE_PROVIDER_ID)
         .unwrap();
-    assert_eq!(goat["staticProtocolSnapshotDate"], "2026-08-27");
+    assert_eq!(goat["staticProtocolSnapshotDate"], "2026-09-01");
     let fable = goat["models"]
         .as_array()
         .unwrap()
@@ -634,10 +639,12 @@ async fn goat_static_protocol_reset_restores_later_models_as_family_presets() {
         .find(|model| model["modelId"] == "claude-fable-5")
         .unwrap();
     assert_eq!(fable["protocols"]["messages"]["override"], "auto");
-    assert_eq!(fable["protocols"]["messages"]["source"], "preset");
+    assert_eq!(fable["protocols"]["messages"]["source"], "static");
     assert_eq!(fable["protocols"]["messages"]["available"], true);
-    assert_eq!(fable["protocols"]["messages"]["enabled"], true);
+    assert_eq!(fable["protocols"]["messages"]["enabled"], false);
     assert!(fable["protocols"]["messages"]["verifiedAt"].is_null());
+    assert!(fable["protocols"]["chat_completions"].is_null());
+    assert!(fable["protocols"]["responses"].is_null());
     let stealth = goat["models"]
         .as_array()
         .unwrap()
@@ -656,8 +663,10 @@ async fn goat_static_protocol_reset_restores_later_models_as_family_presets() {
         .find(|model| model["modelId"] == "future-goat-model")
         .unwrap();
     assert_eq!(future["protocols"]["chat_completions"]["override"], "auto");
-    assert_eq!(future["protocols"]["chat_completions"]["source"], "preset");
-    assert_eq!(future["protocols"]["chat_completions"]["enabled"], true);
+    assert_eq!(future["protocols"]["chat_completions"]["source"], "static");
+    assert_eq!(future["protocols"]["chat_completions"]["enabled"], false);
+    assert!(future["protocols"]["responses"].is_null());
+    assert!(future["protocols"]["messages"].is_null());
     let (status, overridden) = send_json(&harness, Method::PUT, "/provider-contracts/provider/command-code/model-protocol-overrides", &cas(&harness, json!({"overrides":[{"modelId":"future-goat-model","protocol":"chat_completions","state":"force_off"}]}))).await;
     assert_eq!(status, StatusCode::OK, "{overridden}");
     let goat = overridden["providers"]
@@ -677,8 +686,8 @@ async fn goat_static_protocol_reset_restores_later_models_as_family_presets() {
 }
 
 #[tokio::test]
-async fn fixed_chat_provider_resets_restore_every_current_catalog_model() {
-    let harness = start_loopback("fixed-chat-static-protocol-reset").await;
+async fn fixed_provider_resets_restore_documented_chat_and_messages() {
+    let harness = start_loopback("fixed-provider-official-protocol-reset").await;
     let now = chrono::Utc::now();
     for (provider_id, model_id) in [
         (MINIMAX_PROVIDER_ID, "MiniMax-New"),
@@ -718,7 +727,7 @@ async fn fixed_chat_provider_resets_restore_every_current_catalog_model() {
             .iter()
             .find(|provider| provider["providerId"] == provider_id)
             .unwrap();
-        assert_eq!(provider["staticProtocolSnapshotDate"], "2026-08-27");
+        assert_eq!(provider["staticProtocolSnapshotDate"], "2026-09-01");
         let model = provider["models"]
             .as_array()
             .unwrap()
@@ -728,11 +737,54 @@ async fn fixed_chat_provider_resets_restore_every_current_catalog_model() {
         assert_eq!(model["protocols"]["chat_completions"]["override"], "auto");
         assert_eq!(model["protocols"]["chat_completions"]["source"], "static");
         assert_eq!(model["protocols"]["chat_completions"]["enabled"], true);
-        for protocol in ["responses", "messages"] {
-            assert_eq!(model["protocols"][protocol]["override"], "force_off");
-            assert_eq!(model["protocols"][protocol]["enabled"], false);
-        }
+        assert_eq!(model["protocols"]["messages"]["override"], "auto");
+        assert_eq!(model["protocols"]["messages"]["source"], "static");
+        assert_eq!(model["protocols"]["messages"]["enabled"], true);
+        assert!(model["protocols"]["responses"].is_null());
     }
+    harness.stop();
+}
+
+#[tokio::test]
+async fn fixed_provider_overrides_reject_protocols_outside_official_ceiling() {
+    let harness = start_loopback("fixed-provider-override-ceiling").await;
+    let (status, rejected) = send_json(
+        &harness,
+        Method::PUT,
+        "/provider-contracts/provider/minimax/model-protocol-overrides",
+        &cas(
+            &harness,
+            json!({"overrides":[{
+                "modelId":"MiniMax-M3",
+                "protocol":"responses",
+                "state":"force_on"
+            }]}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{rejected}");
+    assert!(
+        rejected["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("documented capability ceiling")
+    );
+
+    let (status, accepted) = send_json(
+        &harness,
+        Method::PUT,
+        "/provider-contracts/provider/minimax/model-protocol-overrides",
+        &cas(
+            &harness,
+            json!({"overrides":[{
+                "modelId":"MiniMax-M3",
+                "protocol":"messages",
+                "state":"force_on"
+            }]}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{accepted}");
     harness.stop();
 }
 

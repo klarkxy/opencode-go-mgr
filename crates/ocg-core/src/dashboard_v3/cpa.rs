@@ -550,7 +550,7 @@ mod tests {
         assert!(view.configured);
         assert!(view.management_key_configured);
         assert!(view.inference_key_configured);
-        assert!(view.enabled);
+        assert!(!view.enabled);
         let encoded = serde_json::to_string(&view).unwrap();
         assert!(!encoded.contains("management-secret"));
         assert!(!encoded.contains("inference-secret"));

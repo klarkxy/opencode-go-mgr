@@ -284,7 +284,7 @@ fn mixed_case_go_alias_preserves_requested_casing() {
     let set = routes_for("MiniMax-M3", &[go_account("go-1")], &config, true);
     assert_eq!(set.routes[0].plan.model, "MiniMax-M3");
     assert_eq!(set.routes[0].plan.client_model, "MiniMax-M3");
-    assert_eq!(set.routes[0].plan.upstream, ApiFormat::ChatCompletions);
+    assert_eq!(set.routes[0].plan.upstream, ApiFormat::Messages);
     let identity = native_log_identity(&set.routes[0].plan);
     assert_eq!(identity.requested_model, "MiniMax-M3");
     assert_eq!(identity.resolved_alias.as_deref(), Some("minimax-m3"));

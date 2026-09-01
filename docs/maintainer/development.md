@@ -175,9 +175,9 @@ The 17 application guides are driven by
 guide count, unique IDs, protocol endpoints, the display/copy masking
 difference, and the Claude Desktop three-role persistence behavior.
 
-The side rail is Dashboard / Access Keys / Accounts / Providers /
+The side rail is Dashboard / Access Keys / Accounts / Providers / Aliases /
 Applications / Logs / Settings. A `pricing` query is a legacy alias for
-Providers. `BrowserSession` is a session overlay, not an eighth rail item.
+Providers. `BrowserSession` is a session overlay, not a ninth rail item.
 
 ## Local Release Smoke Build (Windows)
 

@@ -680,12 +680,47 @@ pub(super) async fn put_provider_model_protocol_overrides(
     check_expectation(&state, &input.expectation)?;
     let scope = ContractScope::provider(&scope_id);
     validate_provider_scope(&state, &scope)?;
+    validate_provider_protocol_overrides(&state, &scope_id, &input.overrides)?;
     commit_model_protocol_overrides(&state, &scope, input.overrides)
 }
 
-/// Restore a built-in provider's current catalog to its static protocol
-/// snapshot. This never contacts an upstream: it deliberately clears all
-/// manual/probe evidence and makes static-unknown pairs explicitly off.
+fn validate_provider_protocol_overrides(
+    state: &CoreState,
+    scope_id: &str,
+    overrides: &[ModelProtocolOverride],
+) -> Result<(), V3ApiError> {
+    let descriptor = provider_contracts::provider_scope_descriptor(scope_id)
+        .ok_or_else(|| V3ApiError::not_found_at(state, "provider not found"))?;
+    let contracts = state.provider_contracts();
+    let scope = contracts
+        .providers
+        .get(scope_id)
+        .ok_or_else(|| V3ApiError::not_found_at(state, "provider scope not found"))?;
+    for item in overrides {
+        let model = scope.model(&item.model_id).ok_or_else(|| {
+            V3ApiError::invalid_request_at(
+                state,
+                "modelId is not present in the current provider catalog",
+            )
+        })?;
+        let protocol = crate::provider::UpstreamProtocolKind::from(item.protocol);
+        let ceiling = provider_contracts::safety_ceiling_protocols(
+            descriptor.protocol_probe,
+            &model.model_id,
+        );
+        if !ceiling.contains(&protocol) {
+            return Err(V3ApiError::invalid_request_at(
+                state,
+                "protocol is outside this provider's documented capability ceiling",
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Restore a built-in provider's current catalog to its development-time
+/// official protocol baseline. This never contacts an upstream: it clears all
+/// manual/probe evidence and makes baseline-unknown pairs explicitly off.
 pub(super) async fn reset_provider_model_protocols_to_static(
     State(state): State<CoreState>,
     Path(scope_id): Path<String>,
@@ -697,7 +732,7 @@ pub(super) async fn reset_provider_model_protocols_to_static(
     if provider_contracts::static_protocol_snapshot_date(&scope_id).is_none() {
         return Err(V3ApiError::invalid_request_at(
             &state,
-            "this provider does not support restoring a static protocol snapshot",
+            "this provider does not support restoring an official protocol baseline",
         ));
     }
     let scope = ContractScope::parse(provider_contracts::SCOPE_KIND_PROVIDER, &scope_id)
@@ -1094,8 +1129,7 @@ fn prepare_protocol_probe(
         .collect();
     protocol_probe::require_unique_probe_protocols(&requested_protocols)
         .map_err(|message| V3ApiError::invalid_request_at(state, message))?;
-    let ceiling =
-        provider_contracts::safety_ceiling_protocols(descriptor.protocol_probe, model_id, &[]);
+    let ceiling = provider_contracts::safety_ceiling_protocols(descriptor.protocol_probe, model_id);
     let protocols = requested_protocols
         .into_iter()
         .filter(|protocol| ceiling.contains(protocol))

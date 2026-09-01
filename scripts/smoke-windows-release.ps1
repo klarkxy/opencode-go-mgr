@@ -68,21 +68,6 @@ function Set-V3AutoStart {
     -Body $body | Out-Null
 }
 
-# The currently published v1.8.2 binary predates Dashboard V3. This helper is
-# intentionally limited to the pre-upgrade bootstrap phase; every candidate
-# read and write below uses V3 with CAS.
-function Set-LegacyBootstrapAutoStart {
-  param([bool]$Enabled)
-  $settingsUrl = 'http://127.0.0.1:9042/dashboard/api/settings'
-  $settings = Invoke-RestMethod $settingsUrl
-  $settings.auto_start = $Enabled
-  Invoke-RestMethod `
-    $settingsUrl `
-    -Method Post `
-    -ContentType 'application/json' `
-    -Body ($settings | ConvertTo-Json) | Out-Null
-}
-
 function Stop-InstalledGui {
   param([string]$ExecutablePath)
   if (!$ExecutablePath) { return }
@@ -177,7 +162,7 @@ try {
 
     New-Item -ItemType Directory -Force $data | Out-Null
     Set-Content $sentinel $sentinelValue
-    Set-LegacyBootstrapAutoStart -Enabled $true
+    Set-V3AutoStart -Enabled $true
     $expectedStartupValue = "`"$guiPath`" --startup"
     $startupValue = (Get-ItemProperty -LiteralPath $runKey -Name 'OCG Manager').'OCG Manager'
     if ($startupValue -ne $expectedStartupValue) { throw "Published install wrote unexpected startup value: $startupValue" }

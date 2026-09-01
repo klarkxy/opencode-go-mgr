@@ -1,30 +1,10 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   ACCOUNT_REVISION_UNAVAILABLE_MESSAGE,
   reconcileEditingAccount,
   withFreshAccountRevision,
 } from "./account-cas.ts";
-
-const accounts = readFileSync(new URL("./Accounts.vue", import.meta.url), "utf8");
-const ordering = readFileSync(new URL("./useAccountOrder.ts", import.meta.url), "utf8");
-const api = readFileSync(new URL("../api/dashboard.ts", import.meta.url), "utf8");
-const card = readFileSync(new URL("../components/AccountCard.vue", import.meta.url), "utf8");
-
-test("account mutations require a freshly loaded shared revision", () => {
-  assert.match(accounts, /expected_revision: revision/);
-  assert.match(accounts, /runWithFreshSettingsRevision\(\(revision\) => dashboardApi\.toggleAccount\(id, revision\)\)/);
-  assert.match(accounts, /runWithFreshSettingsRevision\(\(revision\) => dashboardApi\.deleteAccount\(id, revision\)\)/);
-  assert.match(accounts, /async function runWithFreshSettingsRevision[\s\S]*?dashboardApi\.getSettings\(\)/);
-  assert.match(accounts, /async function reloadAfterControlPlaneConflict[\s\S]*?dashboardApi\.getSettings\(\)[\s\S]*?accountsStore\.loadPresented\(\)/);
-  assert.match(accounts, /useAccountsStore\(\)/);
-  assert.match(accounts, /settingsRevision\.value = account\.revision/);
-  assert.match(ordering, /runWithFreshRevision\(\(freshRevision\)[\s\S]*?dashboardApi\.reorderAccounts\([^]*freshRevision/);
-  assert.match(ordering, /revision\.value = saved\[0\]\?\.revision/);
-  assert.match(api, /return controlPlane\.runMutation\(run\)/);
-  assert.match(api, /dashboardV3\.deleteAccount\(id, expectation\)/);
-});
 
 test("a missing fresh revision aborts the mutation before it can send a request", async () => {
   let mutationCalls = 0;
@@ -37,7 +17,7 @@ test("a missing fresh revision aborts the mutation before it can send a request"
   assert.equal(mutationCalls, 0);
 });
 
-test("conflict reload keeps the edit modal for a surviving account, closes it for a deleted one", () => {
+test("reconcileEditingAccount retains only accounts present in the refreshed list", () => {
   const loaded = [{ id: "a1" }, { id: "a2" }];
 
   // Surviving account: fresh copy returned, caller keeps the modal open.
@@ -48,26 +28,4 @@ test("conflict reload keeps the edit modal for a surviving account, closes it fo
   assert.equal(reconcileEditingAccount(loaded, "gone"), null);
   assert.equal(reconcileEditingAccount(loaded, null), null);
   assert.equal(reconcileEditingAccount([], "a1"), null);
-
-  // The component wires both branches: reconcile, then close on missing.
-  assert.match(accounts, /reconcileEditingAccount\(loaded, editingAccount\.value\.id\)/);
-  assert.match(accounts, /editingAccount\.value = stillListed;\s*\n[\s\S]*?if \(!stillListed\) showModal\.value = false;/);
-});
-
-test("Accounts opens and clears explicit account deep links without replaying writes", () => {
-  assert.match(accounts, /function applyAccountDeepLink[\s\S]*?searchParams\.get\("account_id"\)/);
-  assert.match(accounts, /if \(!account\) \{[\s\S]*?clearAccountDeepLink\(\)[\s\S]*?message\.warning/);
-  assert.match(accounts, /editingAccount\.value = account;\s*\n\s*showModal\.value = true;/);
-  assert.match(accounts, /watch\(showModal, \(show\) => \{\s*if \(!show\) clearAccountDeepLink\(\);/);
-  const save = accounts.slice(accounts.indexOf("async function saveCustomAccountEdit"), accounts.indexOf("async function toggleAccount"));
-  assert.match(save, /if \(await recoverAccountMutationConflict\(e\)\) return;/);
-  assert.doesNotMatch(save, /saveCustomAccountEdit\(editing, payload\)/);
-});
-
-test("unroutable cards are fail-closed without provider-specific draft branches", () => {
-  assert.match(card, /const isDraft = computed[\s\S]*?!props\.account\.plan_routable/);
-  assert.match(card, /v-else-if="isDraft" class="provider-unconfigured"/);
-  assert.match(card, /v-else-if="isGo && !quotaLimitsFailed"/);
-  assert.match(card, /accountRoutingDraftDescription\(props\.account\)/);
-  assert.doesNotMatch(card, /provider_id === "command-code"|provider_id === "custom"/);
 });

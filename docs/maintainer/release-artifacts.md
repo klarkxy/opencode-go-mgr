@@ -27,6 +27,7 @@ ocg-manager_<version>_linux-x64.deb
 ocg-manager_<version>_linux-x64.deb.sig
 ocg-manager-cli_<version>_linux-x64.tar.gz
 compose.example.yaml
+cpa-config.example.yaml
 latest.json
 SHA256SUMS
 ```
@@ -38,7 +39,7 @@ assets. Windows has no portable GUI artifact.
 The `linux/amd64` and `linux/arm64` containers are published separately as
 `ghcr.io/klarkxy/opencode-go-mgr`. A GitHub Release contains the seven platform
 payloads, the extra macOS updater archive, four updater signatures, the Compose
-example, `latest.json`, and `SHA256SUMS` — currently 15 attachments. The local
+and CPA configuration examples, `latest.json`, and `SHA256SUMS` — currently 16 attachments. The local
 verifier and the workflow both require the GitHub asset names and count to match
 the assembled `release/` directory exactly. The runtime image places `LICENSE` at
 `/usr/share/licenses/ocg-manager/LICENSE`.

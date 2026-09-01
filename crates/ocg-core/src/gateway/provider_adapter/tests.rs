@@ -5,8 +5,9 @@ use crate::models::{Account, AccountSetupStep, AccountType, AppConfig};
 use crate::provider::{
     COMMAND_CODE_GOAT_BASE_URL, COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM,
     COMMAND_CODE_PROVIDER_ID, CUSTOM_PROVIDER_ID, KIMI_CN_BASE_URL, KIMI_CN_CHAT_COMPLETIONS_PATH,
-    KIMI_PROVIDER_ID, MINIMAX_PROVIDER_ID, OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID,
-    ZEN_FREE_ACCOUNT_NAME,
+    KIMI_CN_MESSAGES_PATH, KIMI_PROVIDER_ID, MINIMAX_CN_ANTHROPIC_BASE_URL, MINIMAX_CN_BASE_URL,
+    MINIMAX_CN_CHAT_COMPLETIONS_PATH, MINIMAX_CN_MESSAGES_PATH, MINIMAX_PROVIDER_ID,
+    OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID, ZEN_FREE_ACCOUNT_NAME,
 };
 use bytes::Bytes;
 use chrono::Utc;
@@ -517,19 +518,23 @@ fn probe_route_allows_ceiling_without_static_support_production_requires_contrac
 }
 
 #[test]
-fn fixed_chat_plans_expose_the_same_sealed_chat_route_to_tests_and_provider_probes() {
+fn fixed_provider_plans_expose_documented_chat_and_messages_routes() {
     let config = AppConfig::default();
-    for (provider_id, base_url, path, model_id) in [
+    for (provider_id, chat_base, chat_path, messages_base, messages_path, model_id) in [
         (
             MINIMAX_PROVIDER_ID,
             MINIMAX_CN_BASE_URL,
             MINIMAX_CN_CHAT_COMPLETIONS_PATH,
+            MINIMAX_CN_ANTHROPIC_BASE_URL,
+            MINIMAX_CN_MESSAGES_PATH,
             "MiniMax-M3",
         ),
         (
             KIMI_PROVIDER_ID,
             KIMI_CN_BASE_URL,
             KIMI_CN_CHAT_COMPLETIONS_PATH,
+            KIMI_CN_BASE_URL,
+            KIMI_CN_MESSAGES_PATH,
             "kimi-for-coding",
         ),
     ] {
@@ -539,19 +544,22 @@ fn fixed_chat_plans_expose_the_same_sealed_chat_route_to_tests_and_provider_prob
             CredentialKind::ApiKey,
             QuotaScope::Key,
         );
-        let plan = chat_plan(
-            model_id,
-            UpstreamChannel::Go,
-            ApiFormat::ChatCompletions,
-            None,
-        );
-        let account_route = resolve_account_test_route(&account, &config, &plan)
-            .expect("account-level tests use the fixed production Chat route");
-        let provider_route = resolve_probe_route(&account, &config, &plan)
-            .expect("provider probes reuse the same fixed Chat route");
-        for route in [account_route, provider_route] {
-            assert_eq!(route.base_url, base_url);
-            assert_eq!(route.path, path);
+        for (protocol, base_url, path) in [
+            (ApiFormat::ChatCompletions, chat_base, chat_path),
+            (ApiFormat::Messages, messages_base, messages_path),
+        ] {
+            let plan = chat_plan(model_id, UpstreamChannel::Go, protocol, None);
+            let account_route = resolve_account_test_route(&account, &config, &plan)
+                .expect("account-level tests use the documented production route");
+            let provider_route = resolve_probe_route(&account, &config, &plan)
+                .expect("provider probes reuse the documented production route");
+            for route in [account_route, provider_route] {
+                assert_eq!(route.base_url, base_url);
+                assert_eq!(route.path, path);
+                assert_eq!(route.upstream, protocol);
+                assert_eq!(route.auth, UpstreamAuth::Bearer);
+                assert!(!route.follow_redirects);
+            }
         }
         assert!(
             resolve_probe_route(
@@ -560,7 +568,7 @@ fn fixed_chat_plans_expose_the_same_sealed_chat_route_to_tests_and_provider_prob
                 &chat_plan(model_id, UpstreamChannel::Go, ApiFormat::Responses, None,),
             )
             .unwrap_err()
-            .contains("only accepts Chat Completions")
+            .contains("no official upstream path")
         );
     }
 }

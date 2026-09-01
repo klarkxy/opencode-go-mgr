@@ -32,7 +32,7 @@ OCG Manager 文档按读者拆分：打开与你角色匹配的那本指南即�
 | Plan 目录 | `crates/ocg-domain/src/provider.rs`（`BUILTIN_PLANS`、密封 `ProviderRegistry`）；`crates/ocg-core/src/provider.rs` 是兼容门面加 Custom URL 检查；[`user/accounts.md`](user/accounts.md) / [`user/accounts.zh-CN.md`](user/accounts.zh-CN.md) 镜像 live 与 pending 家族；[`user/providers.md`](user/providers.md) / [`user/providers.zh-CN.md`](user/providers.zh-CN.md) 镜像控制面。Custom 是 `ConfigurableHttpAdapter`，不是基类或动态插件 |
 | 供应商合约 | `crates/ocg-core/src/provider_contracts.rs`；[`user/providers.md`](user/providers.md) / [`user/providers.zh-CN.md`](user/providers.zh-CN.md) 镜像范围、本地目录、开关、探测与请求时选择 |
 | 客户端别名 | `crates/ocg-gateway/src/alias.rs`；`crates/ocg-core/src/alias.rs` 是兼容门面；[`user/gateway.md`](user/gateway.md) / [`user/gateway.zh-CN.md`](user/gateway.zh-CN.md) 镜像约定 |
-| 本地 `GET /v1/models` | `crates/ocg-core/src/gateway/handler.rs`；已鉴权的 Go 别名 ∪ 已保存 Zen Free 别名 ∪ 有效已启用协议的合格 Custom ID；GET 本身不访问上游。镜像在 [`user/gateway.md`](user/gateway.md) |
+| 本地 `GET /v1/models` | `crates/ocg-core/src/gateway/handler.rs`；已鉴权的 Go 别名 ∪ 已保存 Zen Free 别名 ∪ 用户定义供应商公开模型 ∪ 有效已启用协议的合格 Custom ID；GET 本身不访问上游。镜像在 [`user/gateway.md`](user/gateway.md) |
 | 应用选择器列表 | `crates/ocg-core/src/dashboard_v3/`（`GET /dashboard/api/v3/application-models`）经 `control/observability.rs`；Go 可路由别名 ∩ 当前价格；不含 Custom。镜像在 [`user/applications.md`](user/applications.md) |
 | Custom API HTTP | `crates/ocg-core/src/custom.rs` + `custom_http.rs`；受信管理员目的地，Direct/Manual/Auto，不跟随重定向，独立鉴权。镜像在 [`user/accounts.md`](user/accounts.md) |
 | 模型推荐/已验证协议表 | `crates/ocg-domain/src/protocol.rs`（`MODEL_PROTOCOLS`）；转换内核 `crates/ocg-gateway/src/protocol.rs`；宿主 parse/stream `crates/ocg-core/src/gateway/protocol.rs`；[`user/protocol-conversion.md`](user/protocol-conversion.md) / [`user/protocol-conversion.zh-CN.md`](user/protocol-conversion.zh-CN.md) 镜像该表 |
@@ -53,7 +53,7 @@ Docker 示例里的版本钉应与当前发版线一致（现为 **v2.0.0**）�
 1. **新用户** — README 快速开始 → 用户指南 `overview` → `architecture` → `install` → `first-client` → `accounts`（导入 Key / 托管 Beta）→ `providers`（目录、按模型覆盖、探测、范围内价格）→ `gateway` → `routing` → `applications` → `troubleshooting`。
 2. **Docker / CLI 运维** — 用户指南 `overview` → `architecture` → `docker` 与 `cli` → `accounts` → `providers` → `routing` → `logs-settings`；托管注册需要时启用 browser profile。
 3. **集成作者** — 上游先读用户指南 [`add-provider`](user/add-provider.zh-CN.md)，下游客户端先读 [`add-application`](user/add-application.zh-CN.md)，再读维护者指南 `extending` 了解仓库施工细节。
-4. **贡献者** — 维护者指南 `layout` → `development` → `architecture` → `state-and-lifecycle` → `http-routes` → `conventions`；编码时以 `AGENTS.md` 为准（V3 crate 拆分、`/dashboard/api/v3`、当前 schema v35、`access_keys`、托管向导、刷新额度、协议表、Key 命名）。未版本化 `/dashboard/api` REST 与 Tauri `invoke` 均不是当前面板路径。
+4. **贡献者** — 维护者指南 `layout` → `development` → `architecture` → `state-and-lifecycle` → `http-routes` → `conventions`；编码时以 `AGENTS.md` 为准（V3 crate 拆分、`/dashboard/api/v3`、当前 schema v35、`access_keys`、托管向导、刷新额度、协议表、Key 命名、类型化用户定义供应商）。未版本化 `/dashboard/api` REST 与 Tauri `invoke` 均不是当前面板路径。
 5. **发版负责人** — 维护者指南 `release-artifacts` → `ci` → `releasing` → `known-debt`；发版前检查清单含托管回退与刷新额度路径。
 6. **UI / 主题** — 先读 `DESIGN.md`，再改 `src/theme.ts` 与对应 Vue 页面。
 
@@ -61,6 +61,6 @@ Docker 示例里的版本钉应与当前发版线一致（现为 **v2.0.0**）�
 
 - 成对指南保持中英标题结构与 TOC 锚点一致。
 - 优先写短而可核验的事实，少写宣传句。
-- 文档应反映当前实现：远端同步、Admin API、embeddings 与未支持的 Gemini 字段不在当前支持范围内，已知缺口见 [`user/limits.md`](user/limits.md)、[`maintainer/known-debt.md`](maintainer/known-debt.md) 与 `AGENTS.md`。Command Code GOAT 是已上线的固定官方源路由：公开目录不是 Key 验证，供应商矩阵控制模型供应，不存在账号级 GOAT/全部或 Max 模式。Custom API 已在受信管理员边界下作为可路由目的地运行，以 [`user/accounts.md`](user/accounts.md) 为准，不再使用 Phase-1 休眠或 SSRF denylist 表述。`requested_alias` 不是有效日志字段。`GET /v1/models` 与 `application-models` 不是同一份列表，后者只是 Go 可路由别名 ∩ 当前价格。存在独立的供应商页，Zen 目录刷新属于供应商页，不在账号卡中。当前 schema 版本是 v34，`sub_gateway_keys` 不再是现行 Key 表，也没有 live Tauri `invoke` command；未版本化 `/dashboard/api` REST 不是面板主路径。SPA 走 `/dashboard/api/v3`。受保护 V2 REST 返回结构化 `410`；auth/session、browser WebSocket 与推理入口语义保持独立。Provider 注册表是静态密封目录，不是动态插件。关于浏览器、可能计费的真实推理或已安装桌面版的实测结论，只在实际检查过的情况下写入。
+- 文档应反映当前实现：远端同步、Admin API、embeddings 与未支持的 Gemini 字段不在当前支持范围内，已知缺口见 [`user/limits.md`](user/limits.md)、[`maintainer/known-debt.md`](maintainer/known-debt.md) 与 `AGENTS.md`。Command Code GOAT 是已上线的固定官方源路由：公开目录不是 Key 验证，供应商矩阵控制模型供应，不存在账号级 GOAT/全部或 Max 模式。Custom API 已在受信管理员边界下作为可路由目的地运行，以 [`user/accounts.md`](user/accounts.md) 为准，不再使用 Phase-1 休眠或 SSRF denylist 表述。`requested_alias` 不是有效日志字段。`GET /v1/models` 与 `application-models` 不是同一份列表，后者只是 Go 可路由别名 ∩ 当前价格（不含 Custom 与用户定义供应商）。存在独立的供应商页，Zen 目录刷新属于供应商页，不在账号卡中。当前 schema 版本是 v35，`sub_gateway_keys` 不再是现行 Key 表，也没有 live Tauri `invoke` command；未版本化 `/dashboard/api` REST 不是面板主路径。SPA 走 `/dashboard/api/v3`。受保护 V2 REST 返回结构化 `410`；auth/session、browser WebSocket 与推理入口语义保持独立。适配器注册表静态密封；类型化 Provider 定义可作为数据持久化并绑定 Configurable HTTP。关于浏览器、可能计费的真实推理或已安装桌面版的实测结论，只在实际检查过的情况下写入。
 - 发版升版后，同步更新 [`user/docker.md`](user/docker.md)、[`.env.example`](../.env.example)、[`compose.example.yaml`](../compose.example.yaml) 中的 clone tag 与镜像钉（`pnpm run release:check` 会核对 compose/package 版本一致性）。
 - 产品 README 只保留入口内容：定位、下载、三步上手、一条 curl、Docker 指针、推荐协议分组，以及指向用户指南的链接；透传矩阵、能力表与熔断长文不属于 README 范围。

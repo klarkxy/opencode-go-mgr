@@ -30,9 +30,10 @@ use crate::models::{Account, AppConfig, UpstreamChannel};
 use crate::provider::{
     COMMAND_CODE_GOAT_BASE_URL, COMMAND_CODE_GOAT_CHAT_COMPLETIONS_PATH, COMMAND_CODE_GOAT_HOST,
     COMMAND_CODE_GOAT_MESSAGES_PATH, COMMAND_CODE_GOAT_MODELS_PATH, CPA_ACCOUNT_ID, CredentialKind,
-    InferenceAuthDescriptor, KIMI_CN_BASE_URL, KIMI_CN_CHAT_COMPLETIONS_PATH, MINIMAX_CN_BASE_URL,
-    MINIMAX_CN_CHAT_COMPLETIONS_PATH, ProviderAdapterKind, ProviderRegistry, QuotaScope,
-    UpstreamAuthScheme, ZEN_FREE_ACCOUNT_ID,
+    InferenceAuthDescriptor, KIMI_CN_BASE_URL, KIMI_CN_CHAT_COMPLETIONS_PATH,
+    KIMI_CN_MESSAGES_PATH, MINIMAX_CN_ANTHROPIC_BASE_URL, MINIMAX_CN_BASE_URL,
+    MINIMAX_CN_CHAT_COMPLETIONS_PATH, MINIMAX_CN_MESSAGES_PATH, ProviderAdapterKind,
+    ProviderRegistry, QuotaScope, UpstreamAuthScheme, ZEN_FREE_ACCOUNT_ID,
 };
 use crate::provider_contracts::EffectiveContractSet;
 use std::collections::HashMap;
@@ -363,7 +364,7 @@ fn resolve_command_code_goat(
     })
 }
 
-fn resolve_fixed_chat_plan(
+fn resolve_fixed_provider_plan(
     account: &Account,
     plan: &RequestPlan,
     policy: RoutePolicy<'_>,
@@ -381,14 +382,11 @@ fn resolve_fixed_chat_plan(
     if plan.channel != UpstreamChannel::Go {
         return Err(format!("{label} does not serve the Zen free channel"));
     }
-    if plan.upstream != ApiFormat::ChatCompletions {
-        return Err(format!("{label} only accepts Chat Completions upstream"));
-    }
     require_opencode_protocol_policy(descriptor, account, plan, policy, label)?;
     Ok(AttemptSpec {
         base_url: base_url.to_string(),
         path: path.to_string(),
-        upstream: ApiFormat::ChatCompletions,
+        upstream: plan.upstream,
         auth: descriptor_auth(descriptor.inference.auth)?,
         follow_redirects: descriptor.inference.follow_redirects,
         credential: credential_handle(account, descriptor),
@@ -402,14 +400,23 @@ fn resolve_minimax_cn(
     plan: &RequestPlan,
     policy: RoutePolicy<'_>,
 ) -> Result<AttemptSpec, String> {
-    resolve_fixed_chat_plan(
+    let (base_url, path) = match plan.upstream {
+        ApiFormat::ChatCompletions => (MINIMAX_CN_BASE_URL, MINIMAX_CN_CHAT_COMPLETIONS_PATH),
+        ApiFormat::Messages => (MINIMAX_CN_ANTHROPIC_BASE_URL, MINIMAX_CN_MESSAGES_PATH),
+        ApiFormat::Responses | ApiFormat::Gemini => {
+            return Err(
+                "MiniMax CN Token Plan has no official upstream path for this protocol".into(),
+            );
+        }
+    };
+    resolve_fixed_provider_plan(
         account,
         plan,
         policy,
         ProviderAdapterKind::MiniMaxCn,
         "MiniMax CN Token Plan",
-        MINIMAX_CN_BASE_URL,
-        MINIMAX_CN_CHAT_COMPLETIONS_PATH,
+        base_url,
+        path,
     )
 }
 
@@ -419,14 +426,21 @@ fn resolve_kimi_cn(
     plan: &RequestPlan,
     policy: RoutePolicy<'_>,
 ) -> Result<AttemptSpec, String> {
-    resolve_fixed_chat_plan(
+    let path = match plan.upstream {
+        ApiFormat::ChatCompletions => KIMI_CN_CHAT_COMPLETIONS_PATH,
+        ApiFormat::Messages => KIMI_CN_MESSAGES_PATH,
+        ApiFormat::Responses | ApiFormat::Gemini => {
+            return Err("Kimi Code CN has no official upstream path for this protocol".into());
+        }
+    };
+    resolve_fixed_provider_plan(
         account,
         plan,
         policy,
         ProviderAdapterKind::KimiCn,
         "Kimi Code CN",
         KIMI_CN_BASE_URL,
-        KIMI_CN_CHAT_COMPLETIONS_PATH,
+        path,
     )
 }
 
@@ -635,11 +649,8 @@ fn require_opencode_protocol_policy(
     label: &str,
 ) -> Result<(), String> {
     let protocol = protocol_kind_for(plan.upstream)?;
-    let ceiling = crate::provider_contracts::safety_ceiling_protocols(
-        descriptor.protocol_probe,
-        &plan.model,
-        &[],
-    );
+    let ceiling =
+        crate::provider_contracts::safety_ceiling_protocols(descriptor.protocol_probe, &plan.model);
     let static_verified =
         crate::provider_contracts::static_verified_protocols(descriptor.kind, &plan.model, &[]);
     match policy {

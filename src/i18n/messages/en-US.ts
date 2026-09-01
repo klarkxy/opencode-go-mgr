@@ -929,12 +929,12 @@ export const enUSMessages = {
   "已跳过": "Skipped",
   "失败": "Failed",
   "帮助链接": "Help link",
-  "静态协议快照 {date}；未出现的协议默认关闭": "Static protocol snapshot {date}; protocols absent from it default to off",
-  "恢复静态协议快照": "Restore static protocol snapshot",
-  "不会请求上游；将清除手动和探测判断，保留当前目录，恢复 {date} 静态协议快照，并默认关闭静态快照中没有的协议。是否继续？": "No upstream request will be made. This clears manual and probe judgments, keeps the current catalog, restores the {date} static protocol snapshot, and defaults protocols absent from it to off. Continue?",
-  "不会请求上游；将清除手动和探测判断，保留当前目录，恢复 {date} 静态协议快照，并将快照后新增的 GOAT 模型恢复为密封供应商协议预设，其余协议关闭。是否继续？": "No upstream request will be made. This clears manual and probe judgments, keeps the current catalog, restores the {date} static protocol snapshot, restores later GOAT models to the sealed provider protocol preset, and turns the other protocols off. Continue?",
-  "已恢复静态协议快照": "Static protocol snapshot restored",
-  "恢复静态协议快照失败: {error}": "Failed to restore the static protocol snapshot: {error}",
+  "官方协议基线 {date}；未列出的协议默认关闭": "Official protocol baseline {date}; protocols absent from it default to off",
+  "恢复官方协议基线": "Restore official protocol baseline",
+  "不会请求上游；将清除手动开关和探测判断，保留当前目录，恢复 {date} 开发时官方协议基线，并关闭基线中没有的协议。是否继续？": "No upstream request will be made. This clears manual switches and probe judgments, keeps the current catalog, restores the {date} development-time official protocol baseline, and turns off protocols absent from it. Continue?",
+  "已恢复官方协议基线": "Official protocol baseline restored",
+  "恢复官方协议基线失败: {error}": "Failed to restore the official protocol baseline: {error}",
+  "该模型没有可探测的官方协议端点": "This model has no probeable official protocol endpoint",
   "前往供应商": "Open provider",
   "有效协议：{protocols}": "Effective protocols: {protocols}",
   "全部供应商协议已关闭": "All supplier protocols are disabled",
@@ -1093,7 +1093,8 @@ export const enUSMessages = {
   "从无鉴权改为需要 Key 时必须填写替换 Key": "Changing from no-auth to keyed auth requires a replacement Key",
   "鉴权方式": "Auth kind",
   "测试模型": "Test model",
-  "只读汇总当前供应商合同、用户定义供应商与 Custom 账号映射；编辑 Custom 映射请回到账号页。": "Read-only summary of provider contracts, user-defined Providers, and Custom account mappings. Edit Custom mappings from Accounts.",
+  "只读汇总当前供应商合同与 Custom 账号映射；点击编辑 Custom 可直接打开对应账号。": "Read-only summary of current provider contracts and Custom account mappings. Select Edit Custom to open the matching account directly.",
+  "只读汇总当前供应商合同、用户定义供应商与 Custom 账号映射；点击编辑 Custom 可直接打开对应账号。": "Read-only summary of provider contracts, user-defined Providers, and Custom account mappings. Select Edit Custom to open the matching account directly.",
 } as const;
 
 export type MessageKey = keyof typeof enUSMessages;

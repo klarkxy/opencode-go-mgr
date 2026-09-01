@@ -6,7 +6,7 @@ This guide is for people running OCG Manager as a desktop app, a headless gatewa
 
 ## Add integrations
 
-- [Add a Provider](user/add-provider.md) — Create a user-defined Provider, connect Custom API, or contribute a sealed built-in Provider with its complete HTTP and routing contract.
+- [Add a Provider](user/add-provider.md) — Connect a compatible upstream through Custom API, or contribute a sealed built-in Provider with its complete HTTP and routing contract.
 - [Add an Application](user/add-application.md) — Connect an unlisted client to the Gateway, contribute an Applications guide, or add an optional local Desktop connector.
 
 ## Chapters
@@ -16,10 +16,10 @@ This guide is for people running OCG Manager as a desktop app, a headless gatewa
 - [Install And First Run](user/install.md) — Windows, macOS, and Linux installers; the SmartScreen ritual included.
 - [Connect Your First Client](user/first-client.md) — Copy the Key and base URL, then prove it with one request.
 - [Upgrade, Backup, Restore, And Uninstall](user/upgrade-backup.md) — Updater channel, manual upgrade, backup, restore, and uninstall.
-- [The Dashboard](user/dashboard.md) — The seven core views, Extensions group, i18n, and Connection Center.
+- [The Dashboard](user/dashboard.md) — The eight core views, Extensions group, i18n, and Connection Center.
 - [Application Guides And Model Capabilities](user/applications.md) — Client tutorials and the model capability table.
 - [Accounts](user/accounts.md) — Plans, credentials, ordering, quota behavior, and managed onboarding.
-- [Providers](user/providers.md) — Catalog, provider contracts, per-model protocol overrides, and probes.
+- [Providers](user/providers.md) — Catalog, provider contracts, per-model protocol overrides, probes, and user-defined Providers.
 - [Logs And Settings](user/logs-settings.md) — Request logs, settings, proxy modes, and theme.
 - [Gateway Behavior](user/gateway.md) — Endpoints, authentication, aliases, Zen Free, and circuit breakers.
 - [Protocol Conversion](user/protocol-conversion.md) — Preferred/supported protocols, passthrough, and conversion limits.

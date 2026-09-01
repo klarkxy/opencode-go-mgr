@@ -25,7 +25,7 @@
                   <n-button
                     text
                     size="tiny"
-                    :disabled="props.actionLocked || columnSaving(protocol)"
+                    :disabled="props.actionLocked || columnSaving(protocol) || !columnControllable(protocol)"
                     :aria-label="t('本列全部')"
                   >
                     <template #icon>
@@ -59,7 +59,7 @@
                 size="small"
                 :value="cellEnabled(modelId, protocol)"
                 :loading="cellSaving(modelId, protocol)"
-                :disabled="props.actionLocked || rowProbing(modelId)"
+                :disabled="props.actionLocked || rowProbing(modelId) || !cellControllable(modelId, protocol)"
                 :aria-label="`${modelId} ${protocolDisplayName(protocol)}`"
                 @update:value="(on) => updateSingle(modelId, protocol, on ? 'force_on' : 'force_off')"
               />
@@ -172,6 +172,10 @@ function cellEnabled(modelId: string, protocol: ProviderProtocol): boolean {
   return cellEvidence(modelId, protocol)?.enabled === true;
 }
 
+function cellControllable(modelId: string, protocol: ProviderProtocol): boolean {
+  return cellEvidence(modelId, protocol) !== undefined;
+}
+
 function cellKey(modelId: string, protocol: ProviderProtocol): string {
   return modelProtocolOverrideKey(
     props.scope.scope_kind,
@@ -187,6 +191,10 @@ function cellSaving(modelId: string, protocol: ProviderProtocol): boolean {
 
 function columnSaving(protocol: ProviderProtocol): boolean {
   return matrixModels.value.some((modelId) => cellSaving(modelId, protocol));
+}
+
+function columnControllable(protocol: ProviderProtocol): boolean {
+  return matrixModels.value.some((modelId) => cellControllable(modelId, protocol));
 }
 
 function overridesSaving(): boolean {
@@ -212,6 +220,7 @@ function makeOverrides(
   const overrides: ModelProtocolOverrideUpdate[] = [];
   for (const modelId of modelIds) {
     for (const protocol of protocols) {
+      if (!cellControllable(modelId, protocol)) continue;
       overrides.push({ model_id: modelId, protocol, state });
     }
   }

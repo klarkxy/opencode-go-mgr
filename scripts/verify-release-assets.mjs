@@ -39,6 +39,7 @@ function expectedAssets(version) {
     `ocg-manager_${version}_linux-x64.deb.sig`,
     `ocg-manager-cli_${version}_linux-x64.tar.gz`,
     "compose.example.yaml",
+    "cpa-config.example.yaml",
     "latest.json",
     "SHA256SUMS",
   ].sort();

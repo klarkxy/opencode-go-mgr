@@ -26,13 +26,14 @@ ocg-manager_<version>_linux-x64.deb
 ocg-manager_<version>_linux-x64.deb.sig
 ocg-manager-cli_<version>_linux-x64.tar.gz
 compose.example.yaml
+cpa-config.example.yaml
 latest.json
 SHA256SUMS
 ```
 
 每个 CLI 压缩包包含可执行文件、`dist/` 和 `LICENSE`；必须整体分发，`serve` 依赖同级的 `dist/`。Windows 没有便携 GUI 安装包。
 
-`linux/amd64` 与 `linux/arm64` 容器单独发布为 `ghcr.io/klarkxy/opencode-go-mgr`。GitHub Release 包含七份平台 payload、macOS 升级压缩包、四份升级签名、Compose 示例、`latest.json` 和 `SHA256SUMS`，当前共 15 个附件。本地验证器和工作流都要求 GitHub 附件的名称与数量同组装后的 `release/` 目录完全一致。运行镜像中的许可证位于 `/usr/share/licenses/ocg-manager/LICENSE`。
+`linux/amd64` 与 `linux/arm64` 容器单独发布为 `ghcr.io/klarkxy/opencode-go-mgr`。GitHub Release 包含七份平台 payload、macOS 升级压缩包、四份升级签名、Compose 与 CPA 配置示例、`latest.json` 和 `SHA256SUMS`，当前共 16 个附件。本地验证器和工作流都要求 GitHub 附件的名称与数量同组装后的 `release/` 目录完全一致。运行镜像中的许可证位于 `/usr/share/licenses/ocg-manager/LICENSE`。
 
 ## scripts/release.mjs
 

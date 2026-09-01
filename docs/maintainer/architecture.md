@@ -404,7 +404,7 @@ The CLI calls the same mutation services without an argv CAS token. There
 is no Tauri `invoke` path.
 
 ```text
-  Vue 3  (seven views, KeepAlive)
+  Vue 3  (eight core views, KeepAlive)
     Pinia: session / controlPlane / connection
            accounts / providers / settings
            |

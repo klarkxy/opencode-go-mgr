@@ -229,7 +229,7 @@ Custom API（`custom.rs` + `custom_http.rs`）接受一个语法合法的 HTTP/H
 Vue SPA 是当前唯一的面板客户端，走 HTTP Dashboard V3。CLI 调用同一组变更服务，argv 上没有 CAS 令牌。没有 Tauri `invoke` 路径。
 
 ```text
-  Vue 3  （七个视图，KeepAlive）
+  Vue 3  （八个核心视图，KeepAlive）
     Pinia: session / controlPlane / connection
            accounts / providers / settings
            |

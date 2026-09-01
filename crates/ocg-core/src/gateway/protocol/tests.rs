@@ -125,8 +125,7 @@ fn muse_spark_contributor_free_is_responses_only() {
 }
 
 #[test]
-fn multi_protocol_models_passthrough_supported_formats() {
-    // deepseek-v4-flash: 2026-08-14 probe accepts Chat, Responses, and Messages.
+fn official_model_defaults_convert_non_native_client_formats() {
     let flash_responses = prepare_request(
         ApiFormat::Responses,
         bytes(json!({
@@ -135,8 +134,8 @@ fn multi_protocol_models_passthrough_supported_formats() {
             "store": false
         })),
     )
-    .expect("flash passthroughs Responses");
-    assert_eq!(flash_responses.upstream, ApiFormat::Responses);
+    .expect("Responses converts to the official Chat endpoint");
+    assert_eq!(flash_responses.upstream, ApiFormat::ChatCompletions);
 
     let flash_messages = prepare_request(
         ApiFormat::Messages,
@@ -147,7 +146,7 @@ fn multi_protocol_models_passthrough_supported_formats() {
         })),
     )
     .unwrap();
-    assert_eq!(flash_messages.upstream, ApiFormat::Messages);
+    assert_eq!(flash_messages.upstream, ApiFormat::ChatCompletions);
 
     let minimax_chat = prepare_request(
         ApiFormat::ChatCompletions,
@@ -157,7 +156,7 @@ fn multi_protocol_models_passthrough_supported_formats() {
         })),
     )
     .unwrap();
-    assert_eq!(minimax_chat.upstream, ApiFormat::ChatCompletions);
+    assert_eq!(minimax_chat.upstream, ApiFormat::Messages);
 
     let minimax_messages = prepare_request(
         ApiFormat::Messages,
@@ -228,7 +227,7 @@ fn grok_converts_chat_and_messages_to_official_responses() {
 }
 
 #[test]
-fn kimi_k3_passthroughs_chat_and_messages() {
+fn kimi_k3_uses_the_official_chat_endpoint_for_both_clients() {
     let chat = prepare_request(
         ApiFormat::ChatCompletions,
         bytes(json!({
@@ -248,7 +247,7 @@ fn kimi_k3_passthroughs_chat_and_messages() {
         })),
     )
     .unwrap();
-    assert_eq!(messages.upstream, ApiFormat::Messages);
+    assert_eq!(messages.upstream, ApiFormat::ChatCompletions);
 }
 
 #[test]
@@ -269,7 +268,7 @@ fn minimax_highspeed_models_route_as_messages_and_preserve_priority_tier() {
 
 #[test]
 fn service_tier_preserves_string_values_and_ignores_non_string_values() {
-    // MiniMax accepts Chat natively; force Messages conversion via Responses client.
+    // MiniMax's official OpenCode route is Messages; other clients convert to it.
     let plan = prepare_request(
         ApiFormat::Responses,
         bytes(json!({
@@ -307,8 +306,8 @@ fn service_tier_preserves_string_values_and_ignores_non_string_values() {
             "service_tier": "priority"
         })),
     )
-    .expect("Chat request should passthrough");
-    assert_eq!(chat.upstream, ApiFormat::ChatCompletions);
+    .expect("Chat request should convert to Messages");
+    assert_eq!(chat.upstream, ApiFormat::Messages);
     let chat_body: Value = serde_json::from_slice(&chat.body).expect("body is JSON");
     assert_eq!(chat_body["service_tier"], "priority");
     assert!(chat_body.get("stream_options").is_none());
@@ -1306,7 +1305,7 @@ fn mixed_case_minimax_routes_to_messages_native_protocol() {
         })),
     )
     .expect("MiniMax-M3 should be routable");
-    assert_eq!(plan.upstream, ApiFormat::ChatCompletions);
+    assert_eq!(plan.upstream, ApiFormat::Messages);
     assert_eq!(plan.model, "MiniMax-M3");
 
     let plan = prepare_request(
@@ -2043,7 +2042,7 @@ fn command_code_descriptor_is_separate_from_opencode_table() {
     );
     assert!(opencode_supports_upstream(
         COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_ALIAS,
-        ApiFormat::Responses
+        ApiFormat::ChatCompletions
     ));
     assert_eq!(
         command_code_upstream_path(ApiFormat::ChatCompletions),
