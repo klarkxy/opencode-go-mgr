@@ -279,7 +279,7 @@ import {
   APP_NAVIGATION,
   APP_NAVIGATION_GROUPS,
   CORE_APP_NAVIGATION,
-  EXTERNAL_APP_NAVIGATION,
+  EXTENSION_APP_NAVIGATION,
   applyAppViewSearchParams,
   isLegacyPricingView,
   resolveAppViewKey,
@@ -372,23 +372,23 @@ function mobileMenuOption(item: AppNavigationItem): DropdownOption {
 
 const menuOptions = computed<MenuOption[]>(() => [
   ...CORE_APP_NAVIGATION.map(menuOption),
-  { type: "divider", key: "external-integrations-divider" },
+  { type: "divider", key: "extensions-divider" },
   {
     type: "group",
-    key: "external-integrations",
-    label: t(APP_NAVIGATION_GROUPS.external.label),
-    children: EXTERNAL_APP_NAVIGATION.map(menuOption),
+    key: "extensions",
+    label: t(APP_NAVIGATION_GROUPS.extensions.label),
+    children: EXTENSION_APP_NAVIGATION.map(menuOption),
   },
 ]);
 const mobileMenuOptions = computed<DropdownOption[]>(() => [
   ...CORE_APP_NAVIGATION.map(mobileMenuOption),
-  { type: "divider", key: "mobile-external-integrations-divider" },
+  { type: "divider", key: "mobile-extensions-divider" },
   {
-    label: t(APP_NAVIGATION_GROUPS.external.label),
-    key: "mobile-external-integrations-label",
+    label: t(APP_NAVIGATION_GROUPS.extensions.label),
+    key: "mobile-extensions-label",
     disabled: true,
   },
-  ...EXTERNAL_APP_NAVIGATION.map(mobileMenuOption),
+  ...EXTENSION_APP_NAVIGATION.map(mobileMenuOption),
 ]);
 const currentTitle = computed(() => t(
   APP_NAVIGATION.find(({ key }) => key === activeKey.value)?.label ?? "远程浏览器",

@@ -66,7 +66,7 @@ docker compose --profile cpa ps
 
 CPA 把 OAuth 数据保存在 `cpa-auth` 卷的 `/root/.cli-proxy-api`；OCG 不读取或复制这些文件。`cpa-auth` 必须与 `ocg-data`、`ocg-browser-profiles` 分开备份；恢复它还需要对应的 CPA 配置和 Key。`docker compose down` 保留三个命名卷，`docker compose down -v` 会永久删除它们。
 
-容器运行后打开 **外部接入 → CPA**，填入与 `cpa-config.yaml` 相同的 CPA 推理 Key 和 Management password，运行应用级检测，再在 CPA 内完成 OAuth。OCG 容器不会替你启动、停止、升级或 health-check CPA。
+容器运行后打开 **扩展 → CPA**，填入与 `cpa-config.yaml` 相同的 CPA 推理 Key 和 Management password，运行应用级检测，再在 CPA 内完成 OAuth。OCG 容器不会替你启动、停止、升级或 health-check CPA。
 
 ## 可选远程浏览器
 

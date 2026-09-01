@@ -1009,7 +1009,7 @@ export const enUSMessages = {
   "上游模型 ID 不能包含控制字符": "Upstream model IDs cannot contain control characters",
   "未找到指定账号，已清除链接参数": "The requested account was not found; the link parameter was cleared.",
   "只读汇总当前供应商合同与 Custom 账号映射；编辑 Custom 映射请回到账号页。": "Read-only summary of current provider contracts and Custom account mappings. Edit Custom mappings from Accounts.",
-  "外部接入": "External integrations",
+  "扩展": "Extensions",
   "CPA": "CPA",
   "CPA 本机接入": "Local CPA integration",
   "将 OCG 连接到你自行安装的本机 CLI Proxy API。OAuth 凭据始终由 CPA 保存。": "Connect OCG to a CLI Proxy API you installed locally. OAuth credentials always remain in CPA.",

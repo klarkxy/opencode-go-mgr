@@ -4,8 +4,8 @@
 
 External integrations are optional, locally supported services that extend OCG
 Manager without becoming a Provider, a Plan, or a plugin. The dashboard keeps
-its seven core views; the **External Integrations** group appears below the
-Settings divider only when a supported surface is available.
+its seven core views; supported surfaces appear in the general **Extensions**
+group below the Settings divider.
 
 ## CPA
 
@@ -32,7 +32,7 @@ reuse an OCG Manager Key as either CPA key.
 
 1. Install and start CPA locally, then create its distinct **Management Key**
    and **Inference Key**.
-2. Open **External Integrations → CPA**, save the local address and both keys,
+2. Open **Extensions → CPA**, save the local address and both keys,
    then run the connection test. It reports reachability, supported CPA version,
    Management authentication, and Inference authentication separately.
    OCG requires CPA 7.1.0 or newer; later major versions continue through the
@@ -55,10 +55,10 @@ other eligible OCG accounts can still be selected.
 
 ## Adding another integration
 
-Only product-approved, static external integrations belong in this group.
-They use a typed Dashboard V3 adapter and a documented local boundary. Dynamic
-Provider plugins, user scripts, generic management proxies, and runtime
-adapter loading are not supported.
+Static external integrations are one kind of non-core surface that can appear
+in **Extensions**. They require product approval, a typed Dashboard V3 adapter,
+and a documented local boundary. Dynamic Provider plugins, user scripts,
+generic management proxies, and runtime adapter loading are not supported.
 
 ---
 

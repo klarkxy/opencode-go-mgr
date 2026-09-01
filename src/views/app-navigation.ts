@@ -2,7 +2,7 @@ import type { MessageKey } from "../i18n/index.ts";
 
 export const APP_NAVIGATION_GROUPS = {
   core: { key: "core" },
-  external: { key: "external", label: "外部接入" },
+  extensions: { key: "extensions", label: "扩展" },
 } as const satisfies Record<string, { key: string; label?: MessageKey }>;
 
 export type AppNavigationGroup = keyof typeof APP_NAVIGATION_GROUPS;
@@ -33,7 +33,7 @@ export const APP_NAVIGATION = [
   { key: "apps", label: "应用", icon: "apps", group: "core" },
   { key: "logs", label: "日志", icon: "logs", group: "core" },
   { key: "settings", label: "设置", icon: "settings", group: "core" },
-  { key: "cpa", label: "CPA", icon: "cpa", group: "external" },
+  { key: "cpa", label: "CPA", icon: "cpa", group: "extensions" },
 ] as const satisfies readonly AppNavigationItem[];
 
 export type AppNavigationViewKey = (typeof APP_NAVIGATION)[number]["key"];
@@ -45,7 +45,7 @@ export const APP_VIEW_KEYS: readonly AppViewKey[] = [
 ];
 
 export const CORE_APP_NAVIGATION = APP_NAVIGATION.filter(({ group }) => group === "core");
-export const EXTERNAL_APP_NAVIGATION = APP_NAVIGATION.filter(({ group }) => group === "external");
+export const EXTENSION_APP_NAVIGATION = APP_NAVIGATION.filter(({ group }) => group === "extensions");
 
 export const LEGACY_PRICING_VIEW = "pricing";
 export const PROVIDERS_VIEW: AppViewKey = "providers";

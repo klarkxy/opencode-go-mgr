@@ -16,7 +16,7 @@
 - [安装与首次启动](user/install.zh-CN.md) — Windows、macOS、Linux 安装包；附赠 SmartScreen 仪式。
 - [接入第一个客户端](user/first-client.zh-CN.md) — 复制 Key 与 API Base URL，用一个请求验证连通。
 - [升级、备份、恢复与卸载](user/upgrade-backup.zh-CN.md) — 升级通道、手动升级、备份、恢复与卸载。
-- [管理面板](user/dashboard.zh-CN.md) — 七个核心页面、外部接入分组、国际化与接入中心。
+- [管理面板](user/dashboard.zh-CN.md) — 七个核心页面、扩展分组、国际化与接入中心。
 - [应用教程与模型能力](user/applications.zh-CN.md) — 客户端教程与模型能力表。
 - [账号](user/accounts.zh-CN.md) — Plan、凭据、排序、额度行为与托管注册。
 - [供应商](user/providers.zh-CN.md) — 目录、供应商合约、按模型协议覆盖与探测。

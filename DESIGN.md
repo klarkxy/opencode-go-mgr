@@ -52,7 +52,7 @@ The type scale has six steps, exposed as `--ocg-font-xs` … `--ocg-font-2xl`: 1
 
 ## Layout
 
-Use the spacing scale from `{spacing.xs}` through `{spacing.xxl}`. The side rail (horizontal app menu below 1024px) exposes seven fixed core views in this order: Dashboard, Access Keys, Accounts, Providers, Applications, Logs, Settings. A divider below Settings starts the optional **External Integrations** group. Its entries are static, locally supported product surfaces, not Providers, Plans, or dynamic plugins; CPA is the first entry.
+Use the spacing scale from `{spacing.xs}` through `{spacing.xxl}`. The side rail (horizontal app menu below 1024px) exposes seven fixed core views in this order: Dashboard, Access Keys, Accounts, Providers, Applications, Logs, Settings. A divider below Settings starts the optional **Extensions** group for non-core product surfaces. CPA is its first entry; its runtime boundary remains a static local-service integration rather than a Provider, Plan, or dynamic plugin.
 
 The Dashboard order is connection center, KPIs, needs-attention list, then the full-width daily Token chart. Core connection information must stay above the fold and must never be moved into a secondary rail. The connection center is the consume surface: the current Key, copy, and rotate-current stay there, plus a manage action that opens Access Keys. Create, rename, enable, delete, and reset live only on Access Keys. The primary key has no custom-value field; rotation uses the same reset control as sub keys.
 
@@ -84,7 +84,7 @@ Utility actions are circular quaternary icon buttons with a Tooltip and an expli
 
 ## Responsive
 
-At widths below 1024px, replace the sidebar with the horizontal application menu while retaining the Settings divider and External Integrations group. On narrow phones, connection rows remain full width and the mascot becomes a low-opacity background element that cannot cover controls.
+At widths below 1024px, replace the sidebar with the horizontal application menu while retaining the Settings divider and Extensions group. On narrow phones, connection rows remain full width and the mascot becomes a low-opacity background element that cannot cover controls.
 
 ## Iteration Guide
 

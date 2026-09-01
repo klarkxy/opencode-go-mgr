@@ -9,7 +9,7 @@ test("mobile navigation exposes every sidebar page without responsive overflow",
   assert.match(app, /<n-dropdown[\s\S]*class="mobile-nav-dropdown"[\s\S]*:options="mobileMenuOptions"/);
   assert.doesNotMatch(app, /<n-menu\s+mode="horizontal"\s+responsive/);
   assert.match(app, /const mobileMenuOptions = computed<DropdownOption\[\]>/);
-  assert.match(app, /CORE_APP_NAVIGATION\.map\(mobileMenuOption\)[\s\S]*mobile-external-integrations-divider[\s\S]*EXTERNAL_APP_NAVIGATION\.map\(mobileMenuOption\)/);
+  assert.match(app, /CORE_APP_NAVIGATION\.map\(mobileMenuOption\)[\s\S]*mobile-extensions-divider[\s\S]*EXTENSION_APP_NAVIGATION\.map\(mobileMenuOption\)/);
   assert.match(app, /function selectMobileView\(key: string \| number\)[\s\S]*mobileMenuShown\.value = false;[\s\S]*selectView\(String\(key\)\)/);
   assert.match(app, /aria-haspopup="menu"/);
   assert.match(app, /:aria-expanded="mobileMenuShown"/);

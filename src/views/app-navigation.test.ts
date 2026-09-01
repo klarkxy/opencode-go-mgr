@@ -5,20 +5,20 @@ import {
   APP_NAVIGATION,
   APP_NAVIGATION_GROUPS,
   CORE_APP_NAVIGATION,
-  EXTERNAL_APP_NAVIGATION,
+  EXTENSION_APP_NAVIGATION,
   applyAppViewSearchParams,
   isLegacyPricingView,
   readProviderScopeQuery,
   resolveAppViewKey,
 } from "./app-navigation.ts";
 
-test("navigation metadata keeps the fixed core order and CPA external group", () => {
+test("navigation metadata keeps the fixed core order and CPA extensions group", () => {
   assert.deepEqual(
     CORE_APP_NAVIGATION.map(({ key }) => key),
     ["dashboard", "keys", "accounts", "providers", "apps", "logs", "settings"],
   );
-  assert.deepEqual(EXTERNAL_APP_NAVIGATION.map(({ key }) => key), ["cpa"]);
-  assert.equal(APP_NAVIGATION_GROUPS.external.label, "外部接入");
+  assert.deepEqual(EXTENSION_APP_NAVIGATION.map(({ key }) => key), ["cpa"]);
+  assert.equal(APP_NAVIGATION_GROUPS.extensions.label, "扩展");
   assert.equal(APP_NAVIGATION.find(({ key }) => key === "cpa")?.label, "CPA");
 });
 

@@ -37,7 +37,7 @@ sync path, or Provider registry entry.
 ## 3. External integration: static local-service adapter
 
 Use this for a product-approved service the user deploys locally. It appears in
-the static **External Integrations** navigation group below Settings, not in
+the general **Extensions** navigation group below Settings, not in
 Providers, Plans, or the Add Account selector.
 
 - Define a narrow typed Dashboard V3 contract and CAS-protected mutations; do
