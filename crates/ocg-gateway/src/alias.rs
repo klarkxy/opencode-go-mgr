@@ -514,7 +514,7 @@ pub const CUSTOM_DYNAMIC_UPSTREAM: &str = "";
 
 struct Registry {
     aliases: BTreeMap<String, AliasEntry>,
-    /// Exact upstream model ID 鈫?every mapping that uses it.
+    /// Exact upstream model ID → every mapping that uses it.
     raw_exact: BTreeMap<String, Vec<ProviderMapping>>,
 }
 

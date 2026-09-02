@@ -154,7 +154,7 @@
                 size="small"
                 :aria-label="t('刷新额度')"
                 :loading="usageRefreshLoading"
-                :disabled="(!isOfficialCn && !isOllamaCloud && isUsageRefreshBlocked(account, now)) || usageLoading || (!isOllamaCloud && !!usageLoadError)"
+                :disabled="ollamaRefreshBlocked || (!isOfficialCn && !isOllamaCloud && isUsageRefreshBlocked(account, now)) || usageLoading || (!isOllamaCloud && !!usageLoadError)"
                 @click="emit('refresh-usage')"
               >
                 <template #icon><n-icon :component="ReloadOutlined" /></template>
@@ -385,6 +385,7 @@ import {
   usageSyncCaption,
 } from "../domain/account-display.ts";
 import type { AccountMenuOption } from "../domain/account-display.ts";
+import { isOllamaUsageRefreshBlocked } from "../domain/ollama-usage.ts";
 import {
   isCpaIntegrationAccount,
   isOllamaCloudAccount,
@@ -443,6 +444,9 @@ const isGo = computed(() => props.account.provider_id === "opencode");
 const isCustom = computed(() => isCustomApiAccount(props.account));
 const isOfficialCn = computed(() => isOfficialCnPlanAccount(props.account));
 const isOllamaCloud = computed(() => isOllamaCloudAccount(props.account));
+const ollamaRefreshBlocked = computed(() => (
+  isOllamaCloud.value && isOllamaUsageRefreshBlocked(props.ollamaUsage, props.now)
+));
 const hasValidityPeriod = computed(() => (
   accountIsReady(props.account)
   && !isCustom.value

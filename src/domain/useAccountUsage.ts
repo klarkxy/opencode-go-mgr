@@ -32,6 +32,7 @@ import {
 import { t } from "../i18n/index.ts";
 import { dashboardErrorDetail } from "../utils/errors.ts";
 import { mapWithConcurrency } from "../utils/async.ts";
+import { isOllamaUsageRefreshBlocked } from "./ollama-usage.ts";
 
 export type AccountUsageEdits = Record<UsageKey, UsageEditState>;
 
@@ -267,6 +268,8 @@ export function useAccountUsage(accounts: Ref<Account[]>, now: Ref<number>) {
     if (
       usageRefreshLoading.value[accountId]
       || usageLoading.value[accountId]
+      || (isOllamaCloudAccount(account)
+        && isOllamaUsageRefreshBlocked(ollamaUsageMap.value[accountId], now.value))
       || (!isOfficialCnPlanAccount(account) && !isOllamaCloudAccount(account) && isUsageRefreshBlocked(account))
     ) {
       return;
@@ -300,7 +303,17 @@ export function useAccountUsage(accounts: Ref<Account[]>, now: Ref<number>) {
       if (error instanceof DashboardRequestError && error.status === 429) {
         const nextAllowed = error.nextAllowedAt;
         if (nextAllowed) {
-          patchAccountUsageSync(accountId, { usage_sync_next_allowed_at: nextAllowed });
+          if (isOllamaCloudAccount(account)) {
+            const current = ollamaUsageMap.value[accountId];
+            if (current) {
+              ollamaUsageMap.value = {
+                ...ollamaUsageMap.value,
+                [accountId]: { ...current, next_eligible_at: nextAllowed },
+              };
+            }
+          } else {
+            patchAccountUsageSync(accountId, { usage_sync_next_allowed_at: nextAllowed });
+          }
         }
         const seconds = error.retryAfterSeconds;
         message.warning(

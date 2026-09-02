@@ -291,7 +291,7 @@ pub fn parse_settings_usage(html: &str) -> ParseOutcome {
     let mut windows: Vec<OllamaUsageWindow> = Vec::new();
     for (index, (track_offset, track)) in tracks.iter().enumerate() {
         let aria = track.get("aria-label").map(|value| value.as_str());
-        let window = track
+        let Some(window) = track
             .get("data-usage-window")
             .filter(|value| !value.is_empty())
             .or_else(|| {
@@ -299,9 +299,11 @@ pub fn parse_settings_usage(html: &str) -> ParseOutcome {
                     .get("data-usage-track")
                     .filter(|value| !value.is_empty())
             })
-            .map(|value| normalize_window_key(value))
+            .and_then(|value| normalize_window_key(value))
             .or_else(|| aria.and_then(window_from_usage_aria))
-            .unwrap_or_else(|| fallback_window_key(index));
+        else {
+            continue;
+        };
         let used_percent = track
             .get("data-used-percent")
             .and_then(|value| value.trim().trim_end_matches('%').parse::<f64>().ok())
@@ -335,7 +337,7 @@ pub fn parse_settings_usage(html: &str) -> ParseOutcome {
     }
     // Gauge segments without a model carry the window's used percent when the
     // track element itself does not.
-    for (_segment_offset, segment) in &segments {
+    for (segment_offset, segment) in &segments {
         if segment.contains_key("data-model") {
             continue;
         }
@@ -347,8 +349,30 @@ pub fn parse_settings_usage(html: &str) -> ParseOutcome {
         };
         let window = segment
             .get("data-usage-window")
-            .map(|value| normalize_window_key(value))
-            .or_else(|| windows.first().map(|window| window.window.clone()));
+            .and_then(|value| normalize_window_key(value))
+            .or_else(|| {
+                tracks
+                    .iter()
+                    .enumerate()
+                    .find(|(index, (track_offset, _))| {
+                        *segment_offset >= *track_offset
+                            && tracks
+                                .get(index + 1)
+                                .map(|(next_offset, _)| *segment_offset < *next_offset)
+                                .unwrap_or(true)
+                    })
+                    .and_then(|(_, (_, attrs))| {
+                        attrs
+                            .get("aria-label")
+                            .and_then(|value| window_from_usage_aria(value))
+                            .or_else(|| {
+                                attrs
+                                    .get("data-usage-window")
+                                    .or_else(|| attrs.get("data-usage-track"))
+                                    .and_then(|value| normalize_window_key(value))
+                            })
+                    })
+            });
         let existing_index = window
             .as_ref()
             .and_then(|key| windows.iter().position(|item| &item.window == key));
@@ -359,14 +383,9 @@ pub fn parse_settings_usage(html: &str) -> ParseOutcome {
                 }
             }
             None => {
-                if !windows.is_empty() && window.is_none() {
-                    // Unknown gauge segment: attribute it to the first track.
-                    if windows[0].used_percent.is_none() {
-                        windows[0].used_percent = Some(percent);
-                    }
-                } else {
+                if let Some(window) = window {
                     windows.push(OllamaUsageWindow {
-                        window: window.unwrap_or_else(|| "5h".to_string()),
+                        window,
                         used_percent: Some(percent),
                         reset_at: segment.get("data-time").cloned(),
                     });
@@ -387,7 +406,7 @@ pub fn parse_settings_usage(html: &str) -> ParseOutcome {
         let window = row
             .get("data-usage-window")
             .or_else(|| row.get("data-time"))
-            .map(|value| normalize_window_key(value))
+            .and_then(|value| normalize_window_key(value))
             .or_else(|| {
                 // Live shape: model segments sit inside their window's track
                 // region, so the enclosing track names the window.
@@ -410,10 +429,13 @@ pub fn parse_settings_usage(html: &str) -> ParseOutcome {
                                 attrs
                                     .get("data-usage-window")
                                     .filter(|value| !value.is_empty())
-                                    .map(|value| normalize_window_key(value))
+                                    .and_then(|value| normalize_window_key(value))
                             })
                     })
             });
+        let (Some(window), Some(requests)) = (window, requests) else {
+            continue;
+        };
         let entry_index = models
             .iter()
             .position(|item| item.model.eq_ignore_ascii_case(&model))
@@ -426,9 +448,9 @@ pub fn parse_settings_usage(html: &str) -> ParseOutcome {
                 models.len() - 1
             });
         let entry = &mut models[entry_index];
-        match window.as_deref() {
-            Some("7d") => entry.requests_7d = requests.or(entry.requests_7d),
-            Some("5h") => entry.requests_5h = requests.or(entry.requests_5h),
+        match window.as_str() {
+            "7d" => entry.requests_7d = Some(requests),
+            "5h" => entry.requests_5h = Some(requests),
             _ => {}
         }
     }
@@ -447,13 +469,13 @@ pub fn parse_settings_usage(html: &str) -> ParseOutcome {
     })
 }
 
-fn normalize_window_key(raw: &str) -> String {
+fn normalize_window_key(raw: &str) -> Option<String> {
     let folded = raw.trim().to_ascii_lowercase();
     match folded.as_str() {
-        "5h" | "5hour" | "five_hours" | "fivehours" | "5-hour" => "5h".to_string(),
-        "7d" | "7day" | "week" | "7-day" | "weekly" | "weekly usage" => "7d".to_string(),
-        "session" | "session usage" => "5h".to_string(),
-        other => other.to_string(),
+        "5h" | "5hour" | "five_hours" | "fivehours" | "5-hour" => Some("5h".to_string()),
+        "7d" | "7day" | "week" | "7-day" | "weekly" | "weekly usage" => Some("7d".to_string()),
+        "session" | "session usage" => Some("5h".to_string()),
+        _ => None,
     }
 }
 
@@ -481,14 +503,6 @@ fn percent_from_usage_aria(aria_label: &str) -> Option<f64> {
         .last()?;
     let token = &aria_label[token_start..percent_at];
     token.replace(',', ".").parse::<f64>().ok()
-}
-
-fn fallback_window_key(index: usize) -> String {
-    if index == 0 {
-        "5h".to_string()
-    } else {
-        "7d".to_string()
-    }
 }
 
 fn html_looks_like_login_page(html: &str) -> bool {
@@ -790,6 +804,13 @@ mod tests {
         );
         assert!(matches!(
             parse_settings_usage("<html><body>nothing here</body></html>"),
+            ParseOutcome::Failed(message) if message.contains("anchors")
+        ));
+        assert!(matches!(
+            parse_settings_usage(concat!(
+                r#"<div data-usage-track aria-label="Monthly usage"></div>"#,
+                r#"<div data-model="m" data-requests="1"></div>"#,
+            )),
             ParseOutcome::Failed(message) if message.contains("anchors")
         ));
     }

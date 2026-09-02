@@ -952,14 +952,27 @@ async function onFormSave(payload: AccountInput | AccountFormPayload) {
       }));
       replaceAccount(saved);
       const ollamaCookie = (payload as AccountFormPayload).ollama_cookie;
+      let cookieFailure: unknown = null;
       if (isOllamaCloudAccount(saved) && ollamaCookie !== undefined) {
-        await providerApi.setOllamaCookie(saved.id, ollamaCookie ?? null);
+        try {
+          await providerApi.setOllamaCookie(saved.id, ollamaCookie ?? null);
+        } catch (cookieError) {
+          cookieFailure = cookieError;
+        }
       }
       // purchase_date defines the monthly usage window and changing it clears
       // the persisted calibration offset, so the local usage snapshot must be
       // refreshed before the edited account is shown again.
       if (accountHasUsageDisplay(saved)) await loadAccountUsage(saved.id);
       message.success(t("账号已更新"));
+      if (cookieFailure !== null) {
+        // The account fields were committed before the separate Cookie write.
+        // Keep the modal and its Cookie draft open so retrying is explicit.
+        message.error(t("保存失败: {error}", {
+          error: `Cookie: ${dashboardErrorDetail(cookieFailure)}`,
+        }));
+        return;
+      }
       showModal.value = false;
     } catch (e) {
       if (await recoverAccountMutationConflict(e)) return;
@@ -1001,7 +1014,9 @@ async function onFormSave(payload: AccountInput | AccountFormPayload) {
       if (cookieFailure !== null) {
         // The account exists; only the optional Cookie write failed. Report it
         // after the success toast so the two are not contradictory.
-        message.error(t("保存失败: {error}", { error: dashboardErrorDetail(cookieFailure) }));
+        message.error(t("保存失败: {error}", {
+          error: `Cookie: ${dashboardErrorDetail(cookieFailure)}`,
+        }));
       }
       // Go uses official usage; GOAT projects locally priced OCG request logs.
       if (accountHasUsageDisplay(created) && accountIsReady(created)) {

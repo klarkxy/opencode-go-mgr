@@ -38,7 +38,8 @@ const CLIENT_ROOT_URL_ENV: &str = "OCG_CLIENT_ROOT_URL";
 // (4) http_client, (5) gateway, (6) pricing, (7) zen_free_models,
 // (8) cpa_models, (9) provider_contracts, (10) routing, (11) credential_snapshot.
 // The CPA runtime status mutex is never held while acquiring another sync lock.
-// `activate_zen_free_model_catalog` acquires db 鈫?http_client 鈫?// zen_free_models 鈫?provider_contracts, then drops those before
+// `activate_zen_free_model_catalog` acquires db → http_client →
+// zen_free_models → provider_contracts, then drops those before
 // `routing.reset()`. `reload_provider_contracts_locked` may already hold db
 // and then takes zen_free_models (read, dropped) before provider_contracts
 // (write). The desktop update-status mutex and the async pricing_refresh
@@ -49,7 +50,8 @@ const CLIENT_ROOT_URL_ENV: &str = "OCG_CLIENT_ROOT_URL";
 // acquiring another where possible. Do not hold the routing lock across DB
 // or network I/O. `gateway_clock` is immutable after construction and
 // lock-free to sample; the executor samples wall/mono before the db lock.
-// Async gates: `settings_host_effects` (settings persist 鈫?listener rebind 鈫?// compensation) is acquired before `gateway_lifecycle` when a settings write
+// Async gates: `settings_host_effects` (settings persist → listener rebind →
+// compensation) is acquired before `gateway_lifecycle` when a settings write
 // also rebinds. Never hold a parking_lot lock across those awaits.
 // Account, key, and usage-sync writers take `settings_update` only.
 pub struct CoreStateInner {
@@ -58,7 +60,7 @@ pub struct CoreStateInner {
     client_root_url_override: Option<String>,
     gateway_port_override: OnceLock<u16>,
     pub settings_update: Mutex<()>,
-    /// Serializes settings persist 鈫?listener rebind 鈫?compensation. This async
+    /// Serializes settings persist → listener rebind → compensation. This async
     /// gate may span listener bind awaits; the synchronous `settings_update`
     /// mutex may not. Account, key, and usage-sync writers do not take it.
     settings_host_effects: tokio::sync::Mutex<()>,
@@ -1167,10 +1169,10 @@ impl CoreStateInner {
         // only gap is a panic between the in-memory swap above and this
         // snapshot block, transiently leaving the database and in-memory
         // config on the new value while the snapshot still authenticates the
-        // old one —it heals on restart or at the next key API entry point
+        // old one — it heals on restart or at the next key API entry point
         // (both rebuild the snapshot from the database). Swapping the
         // snapshot first would instead leave an unpersisted credential
-        // authenticating after a failed save —a divergence that outlives
+        // authenticating after a failed save — a divergence that outlives
         // the process.
         {
             let mut snapshot = self.credential_snapshot.write();
