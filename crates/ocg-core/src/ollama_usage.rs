@@ -335,7 +335,7 @@ pub fn parse_settings_usage(html: &str) -> ParseOutcome {
     }
     // Gauge segments without a model carry the window's used percent when the
     // track element itself does not.
-    for (segment_offset, segment) in &segments {
+    for (_segment_offset, segment) in &segments {
         if segment.contains_key("data-model") {
             continue;
         }
@@ -517,8 +517,7 @@ fn extract_labeled_value(html: &str, labels: &[&str]) -> Option<String> {
             // inside a sentence — "your plan's included usage runs out…" — is
             // page copy, and the trailing "·"-separated prose must never leak
             // into the snapshot.
-            let at_text_start =
-                label_start == 0 || html[..label_start].ends_with(|ch| ch == '>' || ch == '\n');
+            let at_text_start = label_start == 0 || html[..label_start].ends_with(['>', '\n']);
             // The value must be introduced by an explicit colon run; "plan's"
             // and other prose continuations are rejected here.
             let tail = html[start..].trim_start();
