@@ -112,7 +112,7 @@ test("Ollama cards drop OpenCode-only console and profile actions but keep gener
     verification_status: "not_required",
   });
   const keys = accountMenuOptions(ollama, now).map((option) => option.key);
-  assert.deepEqual(keys, ["edit", "delete"]);
+  assert.deepEqual(keys, ["open-site", "edit", "delete"]);
   assert.ok(!keys.includes("open-console"));
   assert.ok(!keys.includes("reset-profile"));
   assert.ok(!keys.includes("continue-setup"));
@@ -128,6 +128,6 @@ test("Ollama cards drop OpenCode-only console and profile actions but keep gener
   });
   assert.deepEqual(
     accountMenuOptions(cooling, now).map((option) => option.key),
-    ["edit", "reset", "delete"],
+    ["open-site", "edit", "reset", "delete"],
   );
 });

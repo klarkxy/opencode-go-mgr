@@ -3,7 +3,7 @@ import { isCooling, isFreeCooling, isWindowCooling } from "./accounts-usage.ts";
 import type { UsageKey } from "./accounts-usage.ts";
 import { daysUntilDate, expiryTagType } from "./account-lifecycle.ts";
 import type { ExpiryTagType } from "./account-lifecycle.ts";
-import { isCpaIntegrationAccount, isZenFreeAccount } from "./account-providers.ts";
+import { isCpaIntegrationAccount, isOllamaCloudAccount, isZenFreeAccount } from "./account-providers.ts";
 import { isCustomApiAccount } from "./custom-account.ts";
 import { t } from "../i18n/index.ts";
 import type { MessageKey } from "../i18n/index.ts";
@@ -252,6 +252,14 @@ export function accountMenuOptions(account: Account, now = Date.now()): AccountM
       options.push({
         key: "open-console",
         label: t("打开 OpenCode 官网"),
+        accountId: account.id,
+        accountName: account.name,
+      });
+    }
+    if (isOllamaCloudAccount(account)) {
+      options.push({
+        key: "open-site",
+        label: t("打开 Ollama 官网"),
         accountId: account.id,
         accountName: account.name,
       });

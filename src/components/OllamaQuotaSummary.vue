@@ -25,8 +25,18 @@
             :key="window.window"
             class="ollama-usage__window"
           >
-            <span class="ollama-usage__window-label">{{ windowLabel(window.window) }}</span>
-            <span class="ollama-usage__window-value">{{ usedLabel(window.used_percent) }}</span>
+            <div class="ollama-usage__window-heading">
+              <span>{{ windowLabel(window.window) }}</span>
+              <strong>{{ usedLabel(window.used_percent) }}</strong>
+            </div>
+            <n-progress
+              type="line"
+              :percentage="window.used_percent ?? 0"
+              :status="(window.used_percent ?? 0) >= 100 ? 'error' : 'default'"
+              :show-indicator="false"
+              :height="8"
+              :border-radius="4"
+            />
             <span
               v-if="window.reset_at"
               class="ollama-usage__window-reset"
@@ -47,6 +57,7 @@
 </template>
 
 <script setup lang="ts">
+import { NProgress } from "naive-ui";
 import { computed } from "vue";
 import { t } from "../i18n/index.ts";
 import type { OllamaUsageResponse } from "../api/providers.ts";
@@ -91,3 +102,45 @@ function modelRequestsLabel(
   return `${t("按模型请求")}: ${parts.join(" · ")}${suffix}`;
 }
 </script>
+
+<style scoped>
+.ollama-usage__windows {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.ollama-usage__window {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ollama-usage__window-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--ocg-muted);
+  font-size: var(--ocg-font-sm);
+}
+
+.ollama-usage__window-heading strong {
+  color: var(--ocg-ink);
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: var(--ocg-font-md);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.ollama-usage__window-reset {
+  color: var(--ocg-muted);
+  font-size: var(--ocg-font-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 640px) {
+  .ollama-usage__windows {
+    grid-template-columns: 1fr;
+  }
+}
+</style>

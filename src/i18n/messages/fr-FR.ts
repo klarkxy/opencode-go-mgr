@@ -31,6 +31,7 @@ export const frFRMessages = {
   "注册进度已保存。继续后仍会使用该账号自己的浏览器 Profile。": "La progression de l’inscription est enregistrée. En continuant, vous utiliserez le Profile de navigateur de ce compte.",
   "继续注册": "Continuer l’inscription",
   "打开 OpenCode 官网": "Ouvrir le site web d’OpenCode",
+  "打开 Ollama 官网": "Ouvrir le site web d’Ollama",
   "重置官网登录状态": "Réinitialiser la connexion au site web",
   "重置": "Réinitialiser",
   "确定重置账号 {name} 的独立浏览器 Profile 吗？Google 与 OpenCode 登录状态会被清除，但 Key 不受影响。": "Réinitialiser le Profile de navigateur isolé de {name} ? Les connexions Google et OpenCode seront effacées, mais la Key sera conservée.",

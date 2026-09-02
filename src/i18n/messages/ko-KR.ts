@@ -28,6 +28,7 @@ const managedAccountKoKRMessages: Record<keyof typeof managedAccountEnUSMessages
   "注册进度已保存。继续后仍会使用该账号自己的浏览器 Profile。": "등록 진행 상황을 저장했습니다. 계속하면 이 계정의 브라우저 Profile을 사용합니다.",
   "继续注册": "등록 계속",
   "打开 OpenCode 官网": "OpenCode 웹사이트 열기",
+  "打开 Ollama 官网": "Ollama 웹사이트 열기",
   "重置官网登录状态": "웹사이트 로그인 상태 초기화",
   "重置": "초기화",
   "确定重置账号 {name} 的独立浏览器 Profile 吗？Google 与 OpenCode 登录状态会被清除，但 Key 不受影响。": "{name} 계정의 독립 브라우저 Profile을 초기화할까요? Google 및 OpenCode 로그인 상태는 지워지지만 Key에는 영향이 없습니다.",
