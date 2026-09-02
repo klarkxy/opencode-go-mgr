@@ -222,36 +222,61 @@ export function accountMenuOptions(account: Account, now = Date.now()): AccountM
     });
     return options;
   }
-  if (accountIsReady(account)) {
-    options.push({
-      key: "open-console",
-      label: t("打开 OpenCode 官网"),
-      accountId: account.id,
-      accountName: account.name,
-    });
-    options.push({ key: "edit", label: t("编辑账号"), accountId: account.id, accountName: account.name });
-  } else {
+  // The console link, managed setup, and browser-profile actions are
+  // OpenCode-only semantics; other sealed families stop at the generic
+  // lifecycle actions.
+  const isOpencodeGo = account.provider_id === "opencode" && account.offering_id === "go";
+  if (isOpencodeGo && !accountIsReady(account)) {
     options.push({
       key: "continue-setup",
       label: t("继续注册"),
       accountId: account.id,
       accountName: account.name,
     });
-  }
-  if (accountIsReady(account) && isCooling(account, now)) {
     options.push({
-      key: "reset",
-      label: t("重置冷却"),
+      key: "reset-profile",
+      label: t("重置官网登录状态"),
       accountId: account.id,
       accountName: account.name,
     });
+    options.push({
+      key: "delete",
+      label: t("删除账号"),
+      accountId: account.id,
+      accountName: account.name,
+    });
+    return options;
   }
-  options.push({
-    key: "reset-profile",
-    label: t("重置官网登录状态"),
-    accountId: account.id,
-    accountName: account.name,
-  });
+  if (accountIsReady(account)) {
+    if (isOpencodeGo) {
+      options.push({
+        key: "open-console",
+        label: t("打开 OpenCode 官网"),
+        accountId: account.id,
+        accountName: account.name,
+      });
+    }
+    options.push({ key: "edit", label: t("编辑账号"), accountId: account.id, accountName: account.name });
+    if (isCooling(account, now)) {
+      options.push({
+        key: "reset",
+        label: t("重置冷却"),
+        accountId: account.id,
+        accountName: account.name,
+      });
+    }
+    if (isOpencodeGo) {
+      options.push({
+        key: "reset-profile",
+        label: t("重置官网登录状态"),
+        accountId: account.id,
+        accountName: account.name,
+      });
+    }
+  } else {
+    // Non-OpenCode families have no setup flow; keep the draft editable.
+    options.push({ key: "edit", label: t("编辑账号"), accountId: account.id, accountName: account.name });
+  }
   options.push({
     key: "delete",
     label: t("删除账号"),

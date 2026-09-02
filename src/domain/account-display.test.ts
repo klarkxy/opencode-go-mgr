@@ -100,3 +100,34 @@ test("CPA accounts expose only the jump to their external-integration page", () 
     ["open-cpa"],
   );
 });
+
+test("Ollama cards drop OpenCode-only console and profile actions but keep generic lifecycle", () => {
+  const now = Date.now();
+  const ollama = draftAccount({
+    id: "ollama-1",
+    name: "s",
+    provider_id: "ollama",
+    enabled: true,
+    plan_routable: true,
+    verification_status: "not_required",
+  });
+  const keys = accountMenuOptions(ollama, now).map((option) => option.key);
+  assert.deepEqual(keys, ["edit", "delete"]);
+  assert.ok(!keys.includes("open-console"));
+  assert.ok(!keys.includes("reset-profile"));
+  assert.ok(!keys.includes("continue-setup"));
+
+  const cooling = draftAccount({
+    id: "ollama-1",
+    name: "s",
+    provider_id: "ollama",
+    enabled: true,
+    plan_routable: true,
+    verification_status: "not_required",
+    cooldown_until: new Date(now + 60_000).toISOString(),
+  });
+  assert.deepEqual(
+    accountMenuOptions(cooling, now).map((option) => option.key),
+    ["edit", "reset", "delete"],
+  );
+});
