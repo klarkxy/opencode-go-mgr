@@ -9,6 +9,7 @@
 
 pub mod application_connector_plugins;
 pub mod application_connectors;
+pub mod cpa_runtime;
 pub mod gateway;
 
 use crate::native_browser;

@@ -11,9 +11,10 @@
 //! `GET /settings/update-status` are operational reads without CAS and do not bump
 //! revision. `POST /settings/install-update` is an in-memory control-plane mutation
 //! that requires `expectedRevision` and `processGeneration` but does not bump them.
-//! Plaintext keys must not appear on `Settings` or
+//! Plaintext OCG Manager Keys must not appear on `Settings` or
 //! provider/Zen/contract DTOs — `ConnectionInfo` is the only secret-bearing
-//! V3 response DTO. `CustomModelDiscoveryRequest.apiKey` is write-only. Protocol path/switch tokens
+//! V3 response DTO for those Keys. `CpaRuntimeKeyCreated.secret` returns a
+//! newly generated CPA client inference key once. `CustomModelDiscoveryRequest.apiKey` is write-only. Protocol path/switch tokens
 //! stay `chat_completions`, `responses`, and `messages`. Pricing wire DTOs are
 //! distinct from `kernel::pricing` and from stored provider pricing blobs. Usage
 //! wire DTOs are distinct from `models::UsageWindow` and from stored quota/sync
@@ -193,6 +194,14 @@ pub const CATALOG_TYPE_NAMES: &[&str] = &[
     "CpaOAuthStart",
     "CpaOAuthStatus",
     "CpaOAuthSessionDelete",
+    "CpaRuntime",
+    "CpaRuntimePhase",
+    "CpaRuntimeCheck",
+    "CpaRuntimeInstall",
+    "CpaRuntimeLogs",
+    "CpaRuntimeKey",
+    "CpaRuntimeKeys",
+    "CpaRuntimeKeyCreated",
     "DynamicProviderAuthKind",
     "DynamicProviderModel",
     "DynamicProvider",
@@ -2659,6 +2668,14 @@ pub struct CpaIntegration {
     pub account_id: Option<String>,
     pub model_count: usize,
     pub models_refreshed_at: Option<String>,
+    pub runtime_supported: bool,
+    pub runtime_owned: bool,
+    pub runtime_running: bool,
+    pub installed_version: Option<String>,
+    pub latest_version: Option<String>,
+    pub update_available: bool,
+    pub current_operation: Option<String>,
+    pub runtime_unavailable_reason: Option<String>,
     pub revision: u64,
     pub process_generation: u64,
 }
@@ -2833,6 +2850,106 @@ pub struct CpaOAuthSessionDelete {
     #[serde(flatten)]
     pub expectation: MutationExpectation,
     pub state: String,
+}
+
+/// Secret-free CPA runtime snapshot. `supported` is true only on the
+/// installed Windows x64 desktop Host.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CpaRuntime {
+    pub supported: bool,
+    pub unavailable_reason: Option<String>,
+    pub installed: bool,
+    pub running: bool,
+    pub owned: bool,
+    pub current_version: Option<String>,
+    pub previous_version: Option<String>,
+    pub asset_sha256: Option<String>,
+    pub port: Option<u16>,
+    pub base_url: Option<String>,
+    pub phase: CpaRuntimePhase,
+    pub error: Option<String>,
+    pub latest_version: Option<String>,
+    pub update_available: bool,
+    pub current_operation: Option<String>,
+    pub revision: u64,
+    pub process_generation: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+#[schemars(rename_all = "lowercase")]
+pub enum CpaRuntimePhase {
+    Idle,
+    Checking,
+    Downloading,
+    Installing,
+    Starting,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CpaRuntimeCheck {
+    pub current_version: Option<String>,
+    pub latest_version: String,
+    pub update_available: bool,
+    pub release_url: String,
+    pub revision: u64,
+    pub process_generation: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[schemars(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CpaRuntimeInstall {
+    #[serde(flatten)]
+    pub expectation: MutationExpectation,
+    #[serde(default)]
+    pub expected_version: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CpaRuntimeLogs {
+    pub stdout: String,
+    pub stderr: String,
+    pub revision: u64,
+    pub process_generation: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CpaRuntimeKey {
+    pub fingerprint: String,
+    pub hint: String,
+    pub protected: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CpaRuntimeKeys {
+    pub keys: Vec<CpaRuntimeKey>,
+    pub revision: u64,
+    pub process_generation: u64,
+}
+
+/// One-time CPA client inference secret. The value is never persisted in this
+/// DTO after the creating response.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CpaRuntimeKeyCreated {
+    pub fingerprint: String,
+    pub hint: String,
+    pub secret: String,
+    pub revision: u64,
+    pub process_generation: u64,
 }
 
 /// Auth kind owned by a dynamic Provider. Independent of protocol.
@@ -3094,6 +3211,13 @@ pub fn contract_schema() -> Value {
     include_type::<CpaOAuthProvider>(&mut serialize);
     include_type::<CpaOAuthStart>(&mut serialize);
     include_type::<CpaOAuthStatus>(&mut serialize);
+    include_type::<CpaRuntime>(&mut serialize);
+    include_type::<CpaRuntimePhase>(&mut serialize);
+    include_type::<CpaRuntimeCheck>(&mut serialize);
+    include_type::<CpaRuntimeLogs>(&mut serialize);
+    include_type::<CpaRuntimeKey>(&mut serialize);
+    include_type::<CpaRuntimeKeys>(&mut serialize);
+    include_type::<CpaRuntimeKeyCreated>(&mut serialize);
     include_type::<DynamicProviderAuthKind>(&mut serialize);
     include_type::<DynamicProviderModel>(&mut serialize);
     include_type::<DynamicProvider>(&mut serialize);
@@ -3154,6 +3278,7 @@ pub fn contract_schema() -> Value {
     include_type::<CpaQuotaReset>(&mut deserialize);
     include_type::<CpaOAuthStartRequest>(&mut deserialize);
     include_type::<CpaOAuthSessionDelete>(&mut deserialize);
+    include_type::<CpaRuntimeInstall>(&mut deserialize);
     include_type::<DynamicProviderCreate>(&mut deserialize);
     include_type::<DynamicProviderUpdate>(&mut deserialize);
     include_type::<DynamicProviderDiscoverRequest>(&mut deserialize);

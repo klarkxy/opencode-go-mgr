@@ -84,10 +84,12 @@ pub use types::{
     ConnectionInfo, ConnectionSubKey, ContractScopeKind, ControlRevision, CpaAccount,
     CpaAccountDelete, CpaAccountStatusUpdate, CpaAccounts, CpaConnectionReport, CpaIntegration,
     CpaIntegrationUpdate, CpaModels, CpaOAuthProvider, CpaOAuthSessionDelete, CpaOAuthStart,
-    CpaOAuthStartRequest, CpaOAuthStatus, CpaQuotaReset, CpaTestRequest, CreditBalance,
-    CustomEndpointContract, CustomModelDiscoveryRequest, CustomModelDiscoveryResponse,
-    DailyModelTokens, DailyTokensByModel, DailyTokensQuery, DashboardSummary, DesktopUpdate,
-    DesktopUpdatePhase, DynamicProvider, DynamicProviderAuthKind, DynamicProviderCreate,
+    CpaOAuthStartRequest, CpaOAuthStatus, CpaQuotaReset, CpaRuntime, CpaRuntimeCheck,
+    CpaRuntimeInstall, CpaRuntimeKey, CpaRuntimeKeyCreated, CpaRuntimeKeys, CpaRuntimeLogs,
+    CpaRuntimePhase, CpaTestRequest, CreditBalance, CustomEndpointContract,
+    CustomModelDiscoveryRequest, CustomModelDiscoveryResponse, DailyModelTokens,
+    DailyTokensByModel, DailyTokensQuery, DashboardSummary, DesktopUpdate, DesktopUpdatePhase,
+    DynamicProvider, DynamicProviderAuthKind, DynamicProviderCreate,
     DynamicProviderDiscoverRequest, DynamicProviderDiscoverResponse, DynamicProviderModel,
     DynamicProviderMutation, DynamicProviderTestRequest, DynamicProviderTestResponse,
     DynamicProviderUpdate, ERROR_CONFLICT, ERROR_FORBIDDEN, ERROR_GATEWAY_TIMEOUT, ERROR_GONE,
@@ -186,6 +188,50 @@ pub fn api_router(state: CoreState) -> Router<CoreState> {
         .route(
             "/external-integrations/cpa/oauth/session",
             delete(cpa::cancel_oauth),
+        )
+        .route(
+            "/external-integrations/cpa/runtime/check-update",
+            post(cpa::check_runtime_update),
+        )
+        .route(
+            "/external-integrations/cpa/runtime/install",
+            post(cpa::install_runtime),
+        )
+        .route(
+            "/external-integrations/cpa/runtime/update",
+            post(cpa::update_runtime),
+        )
+        .route(
+            "/external-integrations/cpa/runtime",
+            get(cpa::get_runtime).delete(cpa::remove_runtime),
+        )
+        .route(
+            "/external-integrations/cpa/runtime/start",
+            post(cpa::start_runtime),
+        )
+        .route(
+            "/external-integrations/cpa/runtime/stop",
+            post(cpa::stop_runtime),
+        )
+        .route(
+            "/external-integrations/cpa/runtime/rollback",
+            post(cpa::rollback_runtime),
+        )
+        .route(
+            "/external-integrations/cpa/runtime/logs",
+            get(cpa::get_runtime_logs),
+        )
+        .route(
+            "/external-integrations/cpa/client-keys",
+            get(cpa::list_runtime_keys).post(cpa::create_runtime_key),
+        )
+        .route(
+            "/external-integrations/cpa/client-keys/{fingerprint}/rotate",
+            post(cpa::rotate_runtime_key),
+        )
+        .route(
+            "/external-integrations/cpa/client-keys/{fingerprint}",
+            delete(cpa::delete_runtime_key),
         )
         .route(
             "/applications/connectors",

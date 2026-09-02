@@ -240,7 +240,7 @@ fn catalog_type_names_append_claude_desktop_after_custom_discovery() {
         ]
     );
     assert_eq!(
-        &CATALOG_TYPE_NAMES[application_connector_start + 9..application_connector_start + 24],
+        &CATALOG_TYPE_NAMES[application_connector_start + 9..application_connector_start + 32],
         [
             "CpaIntegration",
             "CpaIntegrationUpdate",
@@ -257,10 +257,18 @@ fn catalog_type_names_append_claude_desktop_after_custom_discovery() {
             "CpaOAuthStart",
             "CpaOAuthStatus",
             "CpaOAuthSessionDelete",
+            "CpaRuntime",
+            "CpaRuntimePhase",
+            "CpaRuntimeCheck",
+            "CpaRuntimeInstall",
+            "CpaRuntimeLogs",
+            "CpaRuntimeKey",
+            "CpaRuntimeKeys",
+            "CpaRuntimeKeyCreated",
         ]
     );
     assert_eq!(
-        &CATALOG_TYPE_NAMES[application_connector_start + 24..],
+        &CATALOG_TYPE_NAMES[application_connector_start + 32..],
         [
             "DynamicProviderAuthKind",
             "DynamicProviderModel",
@@ -274,7 +282,7 @@ fn catalog_type_names_append_claude_desktop_after_custom_discovery() {
             "DynamicProviderTestResponse",
         ]
     );
-    assert_eq!(CATALOG_TYPE_NAMES.len(), application_connector_start + 34);
+    assert_eq!(CATALOG_TYPE_NAMES.len(), application_connector_start + 42);
 
     let schema = contract_schema();
     let defs = schema["$defs"].as_object().expect("$defs");

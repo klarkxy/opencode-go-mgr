@@ -2136,11 +2136,29 @@
         "configured": {
           "type": "boolean"
         },
+        "currentOperation": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "enabled": {
           "type": "boolean"
         },
         "inferenceKeyConfigured": {
           "type": "boolean"
+        },
+        "installedVersion": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "latestVersion": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "managementKeyConfigured": {
           "type": "boolean"
@@ -2165,6 +2183,24 @@
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
+        },
+        "runtimeOwned": {
+          "type": "boolean"
+        },
+        "runtimeRunning": {
+          "type": "boolean"
+        },
+        "runtimeSupported": {
+          "type": "boolean"
+        },
+        "runtimeUnavailableReason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updateAvailable": {
+          "type": "boolean"
         }
       },
       "required": [
@@ -2177,6 +2213,14 @@
         "accountId",
         "modelCount",
         "modelsRefreshedAt",
+        "runtimeSupported",
+        "runtimeOwned",
+        "runtimeRunning",
+        "installedVersion",
+        "latestVersion",
+        "updateAvailable",
+        "currentOperation",
+        "runtimeUnavailableReason",
         "revision",
         "processGeneration"
       ],
@@ -2440,6 +2484,303 @@
         "authIndex"
       ],
       "type": "object"
+    },
+    "CpaRuntime": {
+      "additionalProperties": false,
+      "description": "Secret-free CPA runtime snapshot. `supported` is true only on the\ninstalled Windows x64 desktop Host.",
+      "properties": {
+        "assetSha256": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "baseUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "currentOperation": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "currentVersion": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "installed": {
+          "type": "boolean"
+        },
+        "latestVersion": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "owned": {
+          "type": "boolean"
+        },
+        "phase": {
+          "$ref": "#/$defs/CpaRuntimePhase"
+        },
+        "port": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "previousVersion": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "processGeneration": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "running": {
+          "type": "boolean"
+        },
+        "supported": {
+          "type": "boolean"
+        },
+        "unavailableReason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updateAvailable": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "supported",
+        "unavailableReason",
+        "installed",
+        "running",
+        "owned",
+        "currentVersion",
+        "previousVersion",
+        "assetSha256",
+        "port",
+        "baseUrl",
+        "phase",
+        "error",
+        "latestVersion",
+        "updateAvailable",
+        "currentOperation",
+        "revision",
+        "processGeneration"
+      ],
+      "type": "object"
+    },
+    "CpaRuntimeCheck": {
+      "additionalProperties": false,
+      "properties": {
+        "currentVersion": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "latestVersion": {
+          "type": "string"
+        },
+        "processGeneration": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "releaseUrl": {
+          "type": "string"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "updateAvailable": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "currentVersion",
+        "latestVersion",
+        "updateAvailable",
+        "releaseUrl",
+        "revision",
+        "processGeneration"
+      ],
+      "type": "object"
+    },
+    "CpaRuntimeInstall": {
+      "additionalProperties": false,
+      "description": "Required process-scoped mutation precondition.\n\nBoth fields travel at the top level of every mutation request. The random\nprocess generation prevents a revision captured before restart from being\naccepted by a fresh process whose in-memory counter reused the same value.",
+      "properties": {
+        "expectedRevision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "expectedVersion": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "processGeneration": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "expectedRevision",
+        "processGeneration"
+      ],
+      "type": "object"
+    },
+    "CpaRuntimeKey": {
+      "additionalProperties": false,
+      "properties": {
+        "fingerprint": {
+          "type": "string"
+        },
+        "hint": {
+          "type": "string"
+        },
+        "protected": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "fingerprint",
+        "hint",
+        "protected"
+      ],
+      "type": "object"
+    },
+    "CpaRuntimeKeyCreated": {
+      "additionalProperties": false,
+      "description": "One-time CPA client inference secret. The value is never persisted in this\nDTO after the creating response.",
+      "properties": {
+        "fingerprint": {
+          "type": "string"
+        },
+        "hint": {
+          "type": "string"
+        },
+        "processGeneration": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "secret": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "fingerprint",
+        "hint",
+        "secret",
+        "revision",
+        "processGeneration"
+      ],
+      "type": "object"
+    },
+    "CpaRuntimeKeys": {
+      "additionalProperties": false,
+      "properties": {
+        "keys": {
+          "items": {
+            "$ref": "#/$defs/CpaRuntimeKey"
+          },
+          "type": "array"
+        },
+        "processGeneration": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "keys",
+        "revision",
+        "processGeneration"
+      ],
+      "type": "object"
+    },
+    "CpaRuntimeLogs": {
+      "additionalProperties": false,
+      "properties": {
+        "processGeneration": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "stderr": {
+          "type": "string"
+        },
+        "stdout": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "stdout",
+        "stderr",
+        "revision",
+        "processGeneration"
+      ],
+      "type": "object"
+    },
+    "CpaRuntimePhase": {
+      "enum": [
+        "idle",
+        "checking",
+        "downloading",
+        "installing",
+        "starting",
+        "failed"
+      ],
+      "type": "string"
     },
     "CpaTestRequest": {
       "additionalProperties": false,
@@ -6879,6 +7220,30 @@
     },
     {
       "$ref": "#/$defs/CpaOAuthSessionDelete"
+    },
+    {
+      "$ref": "#/$defs/CpaRuntime"
+    },
+    {
+      "$ref": "#/$defs/CpaRuntimePhase"
+    },
+    {
+      "$ref": "#/$defs/CpaRuntimeCheck"
+    },
+    {
+      "$ref": "#/$defs/CpaRuntimeInstall"
+    },
+    {
+      "$ref": "#/$defs/CpaRuntimeLogs"
+    },
+    {
+      "$ref": "#/$defs/CpaRuntimeKey"
+    },
+    {
+      "$ref": "#/$defs/CpaRuntimeKeys"
+    },
+    {
+      "$ref": "#/$defs/CpaRuntimeKeyCreated"
     },
     {
       "$ref": "#/$defs/DynamicProviderAuthKind"

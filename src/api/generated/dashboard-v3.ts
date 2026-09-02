@@ -156,6 +156,14 @@ export type DashboardApiV3 =
   | CpaOAuthStart
   | CpaOAuthStatus
   | CpaOAuthSessionDelete
+  | CpaRuntime
+  | CpaRuntimePhase
+  | CpaRuntimeCheck
+  | CpaRuntimeInstall
+  | CpaRuntimeLogs
+  | CpaRuntimeKey
+  | CpaRuntimeKeys
+  | CpaRuntimeKeyCreated
   | DynamicProviderAuthKind
   | DynamicProviderModel
   | DynamicProvider
@@ -274,6 +282,7 @@ export type ApplicationConnectorAction = "connect" | "restore";
 export type ApplicationConnectorStatus =
   "unsupported_runtime" | "not_detected" | "manual_only" | "ready" | "connected" | "conflict" | "partial";
 export type CpaOAuthProvider = "codex" | "anthropic" | "antigravity" | "kimi" | "xai";
+export type CpaRuntimePhase = "idle" | "checking" | "downloading" | "installing" | "starting" | "failed";
 /**
  * Auth kind owned by a dynamic Provider. Independent of protocol.
  */
@@ -1781,13 +1790,21 @@ export interface CpaIntegration {
   baseUrl: string;
   baseUrlReadOnly: boolean;
   configured: boolean;
+  currentOperation: string | null;
   enabled: boolean;
   inferenceKeyConfigured: boolean;
+  installedVersion: string | null;
+  latestVersion: string | null;
   managementKeyConfigured: boolean;
   modelCount: number;
   modelsRefreshedAt: string | null;
   processGeneration: number;
   revision: number;
+  runtimeOwned: boolean;
+  runtimeRunning: boolean;
+  runtimeSupported: boolean;
+  runtimeUnavailableReason: string | null;
+  updateAvailable: boolean;
 }
 /**
  * PUT CPA configuration. Secret fields are write-only; omission preserves
@@ -1929,6 +1946,76 @@ export interface CpaOAuthSessionDelete {
   expectedRevision: number;
   processGeneration: number;
   state: string;
+}
+/**
+ * Secret-free CPA runtime snapshot. `supported` is true only on the
+ * installed Windows x64 desktop Host.
+ */
+export interface CpaRuntime {
+  assetSha256: string | null;
+  baseUrl: string | null;
+  currentOperation: string | null;
+  currentVersion: string | null;
+  error: string | null;
+  installed: boolean;
+  latestVersion: string | null;
+  owned: boolean;
+  phase: CpaRuntimePhase;
+  port: number | null;
+  previousVersion: string | null;
+  processGeneration: number;
+  revision: number;
+  running: boolean;
+  supported: boolean;
+  unavailableReason: string | null;
+  updateAvailable: boolean;
+}
+export interface CpaRuntimeCheck {
+  currentVersion: string | null;
+  latestVersion: string;
+  processGeneration: number;
+  releaseUrl: string;
+  revision: number;
+  updateAvailable: boolean;
+}
+/**
+ * Required process-scoped mutation precondition.
+ *
+ * Both fields travel at the top level of every mutation request. The random
+ * process generation prevents a revision captured before restart from being
+ * accepted by a fresh process whose in-memory counter reused the same value.
+ */
+export interface CpaRuntimeInstall {
+  expectedRevision: number;
+  expectedVersion?: string | null;
+  processGeneration: number;
+}
+export interface CpaRuntimeLogs {
+  processGeneration: number;
+  revision: number;
+  stderr: string;
+  stdout: string;
+}
+export interface CpaRuntimeKey {
+  fingerprint: string;
+  hint: string;
+  protected: boolean;
+}
+export interface CpaRuntimeKeys {
+  keys: CpaRuntimeKey[];
+  processGeneration: number;
+  revision: number;
+}
+/**
+ * One-time CPA client inference secret. The value is never persisted in this
+ * DTO after the creating response.
+ */
+export interface CpaRuntimeKeyCreated {
+  fingerprint: string;
+  hint: string;
+  processGeneration: number;
+  revision: number;
+  secret: string;
 }
 /**
  * One public-to-upstream mapping owned by a dynamic Provider.

@@ -1049,7 +1049,7 @@ mod tests {
     }
 
     #[test]
-    fn staged_cpa_catalog_never_enters_request_alias_resolution() {
+    fn disabled_cpa_catalog_does_not_enter_request_alias_resolution() {
         let state = state_with_snapshot();
         let now = chrono::Utc::now();
         let account = crate::models::Account {
@@ -1091,6 +1091,21 @@ mod tests {
                 vec!["grok-4.5".into()],
                 crate::cpa::DEFAULT_CPA_BASE_URL,
                 now,
+            )
+            .unwrap();
+        assert_eq!(active_cpa_model_ids(&state).as_slice(), ["grok-4.5"]);
+
+        state
+            .db
+            .lock()
+            .update_account(
+                crate::provider::CPA_ACCOUNT_ID,
+                &crate::models::AccountUpdate {
+                    enabled: Some(false),
+                    ..Default::default()
+                },
+                None,
+                None,
             )
             .unwrap();
         assert!(active_cpa_model_ids(&state).is_empty());

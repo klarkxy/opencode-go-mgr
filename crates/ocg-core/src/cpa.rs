@@ -295,6 +295,32 @@ impl CpaClient {
         parse_models(&value)
     }
 
+    pub async fn api_keys(&self) -> Result<Vec<String>, CpaError> {
+        let (_, value, _) = self
+            .send_json(
+                Method::GET,
+                "v0/management/api-keys",
+                Some(&self.management_key),
+                None,
+            )
+            .await?;
+        parse_api_keys(&value)
+    }
+
+    pub async fn replace_api_keys(&self, keys: &[String]) -> Result<(), CpaError> {
+        if keys.iter().any(|key| key.trim().is_empty()) {
+            return Err(CpaError::Invalid("CPA API keys must not be empty".into()));
+        }
+        self.send_json(
+            Method::PUT,
+            "v0/management/api-keys",
+            Some(&self.management_key),
+            Some(json!(keys)),
+        )
+        .await?;
+        Ok(())
+    }
+
     pub async fn accounts(&self) -> Result<(CpaVersion, Vec<CpaAccountView>), CpaError> {
         let (headers, value, _) = self
             .send_json(
@@ -474,6 +500,41 @@ impl CpaClient {
         }
         Ok((name, auth_index))
     }
+}
+
+fn parse_api_keys(value: &Value) -> Result<Vec<String>, CpaError> {
+    let rows = match value {
+        Value::Array(rows) => rows,
+        Value::Object(object) => object
+            .get("items")
+            .or_else(|| object.get("api-keys"))
+            .or_else(|| object.get("apiKeys"))
+            .or_else(|| object.get("keys"))
+            .and_then(Value::as_array)
+            .ok_or_else(|| CpaError::Response("CPA API keys must be an array".into()))?,
+        _ => {
+            return Err(CpaError::Response("CPA API keys must be an array".into()));
+        }
+    };
+    let mut keys = Vec::new();
+    let mut seen = HashSet::new();
+    for row in rows {
+        let key = match row {
+            Value::String(value) => value.trim().to_string(),
+            Value::Object(object) => object
+                .get("key")
+                .or_else(|| object.get("api-key"))
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim()
+                .to_string(),
+            _ => String::new(),
+        };
+        if !key.is_empty() && seen.insert(key.clone()) {
+            keys.push(key);
+        }
+    }
+    Ok(keys)
 }
 
 fn parse_models(value: &Value) -> Result<Vec<String>, CpaError> {
@@ -660,6 +721,19 @@ mod tests {
     }
 
     #[test]
+    fn api_keys_are_deduplicated_from_object_or_array() {
+        assert_eq!(
+            parse_api_keys(&json!({"items": ["one", "one", "two"]})).unwrap(),
+            ["one", "two"]
+        );
+        assert_eq!(parse_api_keys(&json!(["alpha"])).unwrap(), ["alpha"]);
+        assert_eq!(
+            parse_api_keys(&json!({"keys": [{"key": "k1"}]})).unwrap(),
+            ["k1"]
+        );
+    }
+
+    #[test]
     fn model_catalog_is_deduplicated_and_nonempty() {
         let models = parse_models(&json!({
             "data": [{"id":"gpt-5"}, {"id":"gpt-5"}, {"id":"claude"}]
@@ -801,5 +875,46 @@ mod tests {
             client.delete_account("plugin-account", "plugin-1").await,
             Err(CpaError::Invalid(message)) if message.contains("read-only")
         ));
+    }
+
+    #[tokio::test]
+    async fn replace_api_keys_puts_a_json_string_array() {
+        use axum::extract::State;
+        use std::sync::{Arc, Mutex};
+
+        #[derive(Clone)]
+        struct Capture(Arc<Mutex<Option<Value>>>);
+
+        async fn list() -> Json<Value> {
+            Json(json!(["keep"]))
+        }
+        async fn put_keys(State(capture): State<Capture>, Json(body): Json<Value>) -> Json<Value> {
+            *capture.0.lock().unwrap() = Some(body);
+            Json(json!([]))
+        }
+
+        let capture = Capture(Arc::new(Mutex::new(None)));
+        let app = Router::new()
+            .route("/v0/management/api-keys", get(list).put(put_keys))
+            .with_state(capture.clone());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let client = CpaClient::new(
+            &AppConfig::default(),
+            &format!("http://{address}"),
+            "management".into(),
+            "inference".into(),
+            false,
+        )
+        .unwrap();
+        client
+            .replace_api_keys(&["keep".into(), "new".into()])
+            .await
+            .unwrap();
+        let body = capture.0.lock().unwrap().clone().unwrap();
+        assert_eq!(body, json!(["keep", "new"]));
+        assert!(body.as_array().is_some());
+        assert!(body.get("api-keys").is_none());
     }
 }

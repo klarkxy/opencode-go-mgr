@@ -13,14 +13,14 @@ import {
   resolveAppViewKey,
 } from "./app-navigation.ts";
 
-test("navigation metadata keeps the fixed core order while staged extensions stay hidden", () => {
+test("navigation metadata keeps the fixed core order and exposes CPA under Extensions", () => {
   assert.deepEqual(
     CORE_APP_NAVIGATION.map(({ key }) => key),
     ["dashboard", "keys", "accounts", "providers", "aliases", "apps", "logs", "settings"],
   );
-  assert.deepEqual(EXTENSION_APP_NAVIGATION, []);
+  assert.deepEqual(EXTENSION_APP_NAVIGATION.map(({ key }) => key), ["cpa"]);
   assert.equal(APP_NAVIGATION_GROUPS.extensions.label, "扩展");
-  assert.equal(APP_NAVIGATION.some(({ key }) => String(key) === "cpa"), false);
+  assert.equal(APP_NAVIGATION.find(({ key }) => key === "cpa")?.label, "CPA");
 });
 
 test("legacy pricing view keys resolve to providers without inventing a second entry", () => {

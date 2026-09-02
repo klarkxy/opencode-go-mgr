@@ -131,7 +131,7 @@ Zen Free 只有启用开关；不需要时直接关掉卡片。目录刷新在�
 
 ## 面板、Key 与账号卡
 
-侧栏有八个核心视图，包含 **别名**。`browser` 是托管会话覆盖页。可选 Extensions 组当前隐藏，CPA 路由强制关闭。SPA 读写 `/dashboard/api/v3`。回环监听默认跳过面板登录（带转发头时仍需登录）；客户端访问 `/v1` 仍然需要 Key。
+侧栏有八个核心视图，包含 **别名**。`browser` 是托管会话覆盖页。设置下方的可选 Extensions 分组提供本机 CPA 接入入口。SPA 读写 `/dashboard/api/v3`。回环监听默认跳过面板登录（带转发头时仍需登录）；客户端访问 `/v1` 仍然需要 Key。
 
 ```text
   Dashboard -> Access Keys -> Accounts -> Providers

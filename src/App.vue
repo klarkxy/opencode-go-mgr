@@ -244,6 +244,7 @@ import {
 import type { DropdownMenuProps, DropdownOption, MenuOption } from "naive-ui";
 import {
   AppstoreOutlined,
+  ApiOutlined,
   BgColorsOutlined,
   CheckOutlined,
   DashboardOutlined,
@@ -352,6 +353,7 @@ const navigationIcons: Record<AppNavigationItem["icon"], Component> = {
   apps: AppstoreOutlined,
   logs: FileTextOutlined,
   settings: SettingOutlined,
+  cpa: ApiOutlined,
 };
 
 function menuOption(item: AppNavigationItem): MenuOption {

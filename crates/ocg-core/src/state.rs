@@ -37,6 +37,7 @@ const CLIENT_ROOT_URL_ENV: &str = "OCG_CLIENT_ROOT_URL";
 // Note: Mutex lock ordering is (1) settings_update, (2) db, (3) config,
 // (4) http_client, (5) gateway, (6) pricing, (7) zen_free_models,
 // (8) cpa_models, (9) provider_contracts, (10) routing, (11) credential_snapshot.
+// The CPA runtime status mutex is never held while acquiring another sync lock.
 // `activate_zen_free_model_catalog` acquires db → http_client →
 // zen_free_models → provider_contracts, then drops those before
 // `routing.reset()`. `reload_provider_contracts_locked` may already hold db
@@ -100,6 +101,9 @@ pub struct CoreStateInner {
     /// Serializes typed operations against the one local CPA integration.
     /// Network calls may hold this async gate but never the SQLite mutex.
     pub cpa_operations: tokio::sync::Mutex<()>,
+    /// Process-owned CPA runtime Host. Unset outside installed Windows x64
+    /// desktop. Dashboard CPA mutations are serialized by `cpa_operations`.
+    pub(crate) cpa_runtime: crate::cpa_runtime::CpaRuntimeCapabilities,
     provider_contracts: RwLock<Arc<crate::provider_contracts::EffectiveContractSet>>,
     dynamic_providers: RwLock<Arc<Vec<crate::dynamic::DynamicProviderRuntime>>>,
     pub routing: RoutingRuntime,
@@ -358,6 +362,7 @@ impl CoreStateInner {
             provider_models_refresh: tokio::sync::Mutex::new(()),
             provider_usage_refresh: tokio::sync::Mutex::new(()),
             cpa_operations: tokio::sync::Mutex::new(()),
+            cpa_runtime: crate::cpa_runtime::CpaRuntimeCapabilities::new(),
             provider_contracts: RwLock::new(Arc::new(provider_contracts)),
             dynamic_providers: RwLock::new(Arc::new(dynamic_providers)),
             routing: RoutingRuntime::new(),

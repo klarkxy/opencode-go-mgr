@@ -24,7 +24,7 @@
 
 ## Dashboard V3 与 V2 墓碑
 
-- Dashboard V3 挂载在 `/dashboard/api/v3`。控制面变更需要 CAS（`expectedRevision`，以及 `processGeneration`；价格写入还需要 `expectedPricingRevision`）。`ConnectionInfo` 是唯一允许返回明文 Key 的 V3 响应 DTO；Key 变更响应不包含明文，客户端会重新 `GET /connection`。
+- Dashboard V3 挂载在 `/dashboard/api/v3`。控制面变更需要 CAS（`expectedRevision`，以及 `processGeneration`；价格写入还需要 `expectedPricingRevision`）。`ConnectionInfo` 是唯一允许返回明文 OCG Manager Key 的 V3 响应 DTO；Key 变更响应不包含明文，客户端会重新 `GET /connection`。创建或轮换托管 CPA 客户端 Inference Key 时，该 CPA 密钥只返回一次。
 - `GET /contract` 返回当前进程的 live revision / generation token，不是契约导出端点。
 - 节点迁移只存在于 V3：`POST /accounts/transfer/export|preview|import`，并且只允许从回环面板执行；转发 scheme 请求头不会赋予权限。导出不再做管理员二次确认。面板只会收到版本 1 的 Argon2id（64 MiB、3 次迭代、单 lane）+ AES-256-GCM 固定 AAD 密文包，绝不会收到账号或接入 Key 明文。密码学工作在进程级单飞限制下执行，且不占用设置或 SQLite 锁；全部响应都带 `Cache-Control: no-store`。预览与导入复用同一解密/校验流程，旧 payload V1 仍可读取。导入在 KDF 后重新检查 CAS，并通过一次 SQLite 事务写入数据库归并结果。payload V2 建立了稳定 ID 身份语义：同 ID 的账号/接入 Key 采用迁移包字段；Plan 或名称相同但 ID 不同的记录可并存；目标端已有账号 ID 保持当前顺序，来源端新增账号 ID 按迁移包顺序接在后面。目标端独有接入 Key 和 Provider 范围保留。不同 ID 的 Key 值冲突、归并后超过 64 个有效子 Key、包内重复 ID 或任一非法行都会拒绝并回滚整个数据库归并。V2 包含可用普通账号及验证状态、ready 账号 Key、主/有效子接入 Key、可迁移配置、Zen Free 状态/目录以及 Provider 目录/证据/覆盖。同 ID 目标记录保留本机浏览器数据和用量/冷却历史；迁移包账号凭据覆盖时会清除过时的鉴权错误和最近错误。来源端浏览器 Profile/Cookie、登录密码、邀请码、日志、用量、冷却状态和未完成托管草稿不迁移。目标端监听/根地址以及操作系统负责的开机启动/Dock 设置保持本机值。所有可能失败的运行态快照构建都读取尚未提交的归并事务；只有构建成功后 SQLite 才提交，随后执行不会失败的快照替换并只递增一次 revision。V1 导入继续采用旧的 Plan/名称重复跳过规则。
 - 当前导出细化：密码学 envelope 继续使用版本 1；新导出的 portable 内容改为 payload V4，只带 `providerId`。解密/校验拒绝 payload V1–V3，不再保留旧 offering 解析器。
@@ -62,9 +62,9 @@
 
 ## 外部接入
 
-- 外部接入是静态产品入口，不是 Provider/Plan 插件。CPA 当前仍处于专项验证阶段：常规导航入口隐藏，目录 Plan 不可路由，持久化会把单例路由账号钳为关闭。typed V3 控制面仍可用于隔离测试。OCG 不会内嵌、启动、升级或读取该服务的私有 auth 文件。
+- 外部接入是设置下方的静态产品入口，不是 Provider/Plan 插件。CPA 是首个已批准接入。OCG 可以通过 typed V3 adapter 配置和操作用户部署的本机服务，并且不会读取该服务的私有 auth 文件。仅在已安装的 Windows x64 桌面 Host 上，OCG 还可以在数据目录下安装、启动、更新、回滚和停止一个由 OCG 拥有的 CPA 子进程（`cpa/versions/<version>`、`config.yaml`、`auth/`、`logs/`、`managed.json`）。`managed.json` 是所有权标记，只保存当前/上一版本、精确资源 SHA-256 和回环端口，从不保存 PID 或密钥。启动只能手动；子进程先 CREATE_SUSPENDED，且只继承 stdout/stderr，再加入 kill-on-close 的 Job Object，并随应用退出。OCG 从不停止、替换或删除外部 CPA，也不按端口或 PID 杀进程。安装/更新是一次内存单飞操作，只使用官方 `router-for-me/CLIProxyAPI` GitHub Releases 的 Windows x64 zip 与 `checksums.txt`；解压有界，拒绝路径穿越、符号链接/重解析点和重复条目。候选激活前必须通过 health、带版本校验的 Management 鉴权，以及最强的非计费 Inference Key 检查——带鉴权的 `/models`；安装阶段不会发送可能计费的 completion。保留一份上一版本/配置，回滚不触及 `auth/`。检查/更新只能由用户触发。Management 密码只通过 `MANAGEMENT_PASSWORD` 传入，从不写入 `config.yaml`。受保护的 Inference Key 和直连客户端 Key 必然出现在 OCG 数据目录下 CPA 本地配置的 `api-keys` 中。运行时日志只是有界的 stdout/stderr 尾部。移除会先删除 OCG 拥有的 `cpa/auth` 目录及其他规范托管产物并断开数据库，最后才删除 `managed.json`；由于不设 journal，进程若在前序删除期间崩溃，可能留下仍有所有权但内容不完整的运行时，此时支持的恢复方式是重试移除。移除从不触及外部 CPA 路径或进程。其他运行时 fail closed，并给出明确的不可用原因。
 - 桌面/CLI 的 CPA 地址只允许 loopback；Compose profile 只允许固定环境覆盖 `http://cpa:8317`。禁止重定向、内嵌凭证、query/fragment、远程/LAN 主机和转发客户端 Key。CPA 推理强制直连，并与全局出站代理隔离。
-- 保留的 CPA 账号只是一张进入现有账号顺序与 selector 状态机的路由卡。CPA 内部 OAuth 账号只是实时投影；日志只归因到 CPA 订阅池，不虚构内部账号。Management 与 Inference Key 在本地加密，OAuth Token 始终留在 CPA，节点迁移排除全部 CPA 状态。
+- 保留的 CPA 账号只是一张进入现有账号顺序与 selector 状态机的路由卡。CPA 内部 OAuth 账号只是实时投影；日志只归因到 CPA 订阅池，不虚构内部账号。Management Key 在 OCG 存储中加密，只通过 `MANAGEMENT_PASSWORD` 传给子进程。受保护的 Inference Key 也在 OCG 中加密保存，但 CPA 要求它以及任何直连客户端 Key 出现在子进程本地配置的 `api-keys` 中。创建客户端 Key 时，V3 仍只返回一次明文；日志和列表保持脱敏。OAuth Token 始终留在 CPA，节点迁移排除全部 CPA 状态。
 - CPA 目录只能加入代码持有的 Alias；其他保存 ID 仍是精确 raw pin，冲突 fail closed。已知 ID 使用 OCG 协议表，未知 ID 默认 Chat Completions，禁止计费探测。CPA 成本/用量保持 unpriced/unknown；任何 CPA 故障只参与普通候选 fallback，不得影响既有路由。
 
 ## 别名

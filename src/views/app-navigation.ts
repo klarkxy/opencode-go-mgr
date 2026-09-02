@@ -14,7 +14,8 @@ export type AppNavigationIcon =
   | "aliases"
   | "apps"
   | "logs"
-  | "settings";
+  | "settings"
+  | "cpa";
 
 export interface AppNavigationItem {
   key: string;
@@ -34,19 +35,19 @@ export const APP_NAVIGATION = [
   { key: "apps", label: "应用", icon: "apps", group: "core" },
   { key: "logs", label: "日志", icon: "logs", group: "core" },
   { key: "settings", label: "设置", icon: "settings", group: "core" },
+  { key: "cpa", label: "CPA", icon: "cpa", group: "extensions" },
 ] as const satisfies readonly AppNavigationItem[];
 
 export type AppNavigationViewKey = (typeof APP_NAVIGATION)[number]["key"];
-export type AppViewKey = AppNavigationViewKey | "browser" | "cpa";
+export type AppViewKey = AppNavigationViewKey | "browser";
 
 export const APP_VIEW_KEYS: readonly AppViewKey[] = [
   ...APP_NAVIGATION.map(({ key }) => key),
-  "cpa",
   "browser",
 ];
 
 export const CORE_APP_NAVIGATION = APP_NAVIGATION.filter(({ group }) => group === "core");
-export const EXTENSION_APP_NAVIGATION: readonly AppNavigationItem[] = [];
+export const EXTENSION_APP_NAVIGATION = APP_NAVIGATION.filter(({ group }) => group === "extensions");
 
 export const LEGACY_PRICING_VIEW = "pricing";
 export const PROVIDERS_VIEW: AppViewKey = "providers";

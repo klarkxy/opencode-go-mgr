@@ -508,7 +508,7 @@ pub const BUILTIN_PROVIDERS: [BuiltinProvider; 7] = [
         ),
         verification_policy: VerificationPolicy::Required,
         verification_runtime_availability: "external_integration",
-        routable: false,
+        routable: true,
         managed_registration: false,
         pricing_availability: "unpriced",
         usage_availability: "unavailable",

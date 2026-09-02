@@ -33,7 +33,7 @@ export const KIMI_PROVIDER_ID = "kimi";
 export const ZEN_FREE_ACCOUNT_ID = "00000000-0000-0000-0000-000000000002";
 export const ZEN_FREE_PROVIDER_ID = "opencode-zen-free";
 
-/** Staged static external-integration singleton; routing is currently forced off. */
+/** Static external-integration singleton; it is routable but not a Provider Plan. */
 export const CPA_ACCOUNT_ID = "00000000-0000-0000-0000-000000000003";
 export const CPA_PROVIDER_ID = "cpa";
 

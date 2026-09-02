@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { Account } from "../api/dashboard.ts";
 import {
+  accountMenuOptions,
   accountRoutingDraftDescription,
   accountRoutingDraftLabel,
   accountStatusLabel,
@@ -85,4 +86,17 @@ test("draft status replaces disabled instead of rendering a second competing sta
   const ordinaryDisabled = draftAccount({ plan_routable: true, verification_status: "verified" });
   assert.equal(accountStatusLabel(ordinaryDisabled), "已禁用");
   assert.equal(accountStatusTagType(ordinaryDisabled), "default");
+});
+
+test("CPA accounts expose only the jump to their external-integration page", () => {
+  const cpa = draftAccount({
+    id: "00000000-0000-0000-0000-000000000003",
+    provider_id: "cpa",
+    plan_routable: true,
+    verification_status: "verified",
+  });
+  assert.deepEqual(
+    accountMenuOptions(cpa).map(({ key }) => key),
+    ["open-cpa"],
+  );
 });

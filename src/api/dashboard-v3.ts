@@ -47,6 +47,12 @@ import type {
   CpaOAuthStartRequest,
   CpaOAuthStatus,
   CpaQuotaReset,
+  CpaRuntime,
+  CpaRuntimeCheck,
+  CpaRuntimeInstall,
+  CpaRuntimeKeyCreated,
+  CpaRuntimeKeys,
+  CpaRuntimeLogs,
   CpaTestRequest,
   ContractScopeKind,
   ControlRevision,
@@ -441,6 +447,69 @@ export const dashboardV3 = {
     method: "DELETE",
     body: withExpectation(input, expectation),
   }),
+  getCpaRuntime: () => requestV3<CpaRuntime>("/external-integrations/cpa/runtime"),
+  checkCpaRuntimeUpdate: (expectation: MutationExpectation) =>
+    requestV3<CpaRuntimeCheck>("/external-integrations/cpa/runtime/check-update", {
+      method: "POST",
+      body: mutation(expectation),
+    }),
+  installCpaRuntime: (
+    input: WithoutExpectation<CpaRuntimeInstall>,
+    expectation: MutationExpectation,
+  ) => requestV3<CpaRuntime>("/external-integrations/cpa/runtime/install", {
+    method: "POST",
+    body: withExpectation(input, expectation),
+  }),
+  updateCpaRuntime: (
+    input: WithoutExpectation<CpaRuntimeInstall>,
+    expectation: MutationExpectation,
+  ) => requestV3<CpaRuntime>("/external-integrations/cpa/runtime/update", {
+    method: "POST",
+    body: withExpectation(input, expectation),
+  }),
+  startCpaRuntime: (expectation: MutationExpectation) =>
+    requestV3<CpaRuntime>("/external-integrations/cpa/runtime/start", {
+      method: "POST",
+      body: mutation(expectation),
+    }),
+  stopCpaRuntime: (expectation: MutationExpectation) =>
+    requestV3<CpaRuntime>("/external-integrations/cpa/runtime/stop", {
+      method: "POST",
+      body: mutation(expectation),
+    }),
+  rollbackCpaRuntime: (expectation: MutationExpectation) =>
+    requestV3<CpaRuntime>("/external-integrations/cpa/runtime/rollback", {
+      method: "POST",
+      body: mutation(expectation),
+    }),
+  removeCpaRuntime: (expectation: MutationExpectation) =>
+    requestV3<CpaRuntime>("/external-integrations/cpa/runtime", {
+      method: "DELETE",
+      body: mutation(expectation),
+    }),
+  getCpaRuntimeLogs: () => requestV3<CpaRuntimeLogs>("/external-integrations/cpa/runtime/logs"),
+  getCpaRuntimeKeys: () => requestV3<CpaRuntimeKeys>("/external-integrations/cpa/client-keys"),
+  createCpaRuntimeKey: (expectation: MutationExpectation) =>
+    requestV3<CpaRuntimeKeyCreated>("/external-integrations/cpa/client-keys", {
+      method: "POST",
+      body: mutation(expectation),
+    }),
+  rotateCpaRuntimeKey: (fingerprint: string, expectation: MutationExpectation) =>
+    requestV3<CpaRuntimeKeyCreated>(
+      `/external-integrations/cpa/client-keys/${encodeURIComponent(fingerprint)}/rotate`,
+      {
+        method: "POST",
+        body: mutation(expectation),
+      },
+    ),
+  deleteCpaRuntimeKey: (fingerprint: string, expectation: MutationExpectation) =>
+    requestV3<MutationAck>(
+      `/external-integrations/cpa/client-keys/${encodeURIComponent(fingerprint)}`,
+      {
+        method: "DELETE",
+        body: mutation(expectation),
+      },
+    ),
 
   // --- local Desktop application connectors ---
   getApplicationConnectors: () => requestV3<ApplicationConnectors>("/applications/connectors"),

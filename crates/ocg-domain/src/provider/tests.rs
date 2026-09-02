@@ -168,7 +168,7 @@ fn catalog_hardcodes_providers_and_keeps_unverified_providers_unroutable() {
     assert!(!is_custom_api(OPENCODE_PROVIDER_ID));
 
     let cpa = builtin_provider(CPA_PROVIDER_ID).unwrap();
-    assert!(!cpa.routable);
+    assert!(cpa.routable);
     assert_eq!(
         cpa.product_surface,
         ProviderProductSurface::ExternalIntegration
@@ -375,10 +375,7 @@ fn provider_registry_is_exhaustive_for_plans_and_adapter_kinds() {
             | ProviderAdapterKind::ConfigurableHttp
             | ProviderAdapterKind::Cpa => {
                 assert!(descriptor.inference.production_inference);
-                assert_eq!(
-                    descriptor.inference.catalog_routable,
-                    kind != ProviderAdapterKind::Cpa
-                );
+                assert!(descriptor.inference.catalog_routable);
             }
         }
     }

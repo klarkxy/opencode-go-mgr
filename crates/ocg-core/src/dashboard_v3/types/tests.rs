@@ -1779,6 +1779,14 @@ const CPA_CATALOG_TYPES: &[&str] = &[
     "CpaOAuthStart",
     "CpaOAuthStatus",
     "CpaOAuthSessionDelete",
+    "CpaRuntime",
+    "CpaRuntimePhase",
+    "CpaRuntimeCheck",
+    "CpaRuntimeInstall",
+    "CpaRuntimeLogs",
+    "CpaRuntimeKey",
+    "CpaRuntimeKeys",
+    "CpaRuntimeKeyCreated",
 ];
 const DYNAMIC_PROVIDER_CATALOG_TYPES: &[&str] = &[
     "DynamicProviderAuthKind",

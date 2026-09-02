@@ -63,6 +63,7 @@ pub fn run() {
 
     host::register_desktop_settings(&core_state);
     host::application_connectors::register(&core_state, cipher);
+    host::cpa_runtime::register(&core_state);
 
     let browser_processes = Arc::new(Mutex::new(BrowserProcessState::default()));
     host::register_native_browser(&core_state, browser_processes.clone());
@@ -107,6 +108,7 @@ pub fn run() {
         .run(move |_app_handle, event| {
             if let tauri::RunEvent::ExitRequested { .. } = event {
                 host::close_native_browsers(&app_state.browser_processes, &core_state.data_dir());
+                host::cpa_runtime::stop_on_exit(&core_state);
                 host::gateway::stop_listener(&core_state);
                 let _ = core_state
                     .db
