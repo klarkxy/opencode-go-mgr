@@ -213,6 +213,9 @@ pub const CATALOG_TYPE_NAMES: &[&str] = &[
     "DynamicProviderTestRequest",
     "DynamicProviderTestResponse",
     "OllamaUsageStatus",
+    "OllamaUsageSnapshot",
+    "OllamaUsageWindow",
+    "OllamaUsageModelRequests",
     "OllamaCookieUpdate",
     "OllamaUsageThrottleError",
 ];
@@ -2668,7 +2671,7 @@ pub struct OllamaUsageStatus {
     pub cookie_configured: bool,
     /// `unconfigured` | `ok` | `unauthorized` | `failed`.
     pub status: String,
-    pub snapshot: Option<serde_json::Value>,
+    pub snapshot: Option<OllamaUsageSnapshot>,
     /// Sanitized failure reason from the most recent attempt (≤256 chars,
     /// no HTML fragments or URL query strings); `null` after a success.
     pub last_error: Option<String>,
@@ -2678,6 +2681,40 @@ pub struct OllamaUsageStatus {
     pub failure_streak: i64,
     pub revision: u64,
     pub process_generation: u64,
+}
+
+/// Typed sanitized usage snapshot served under `OllamaUsageStatus.snapshot`.
+/// Mirrors [`crate::ollama_usage::OllamaUsageSnapshot`]; the snake_case
+/// interior is the persisted snapshot wire shape and is deliberately kept
+/// stable, unlike the camelCase V3 envelope.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct OllamaUsageSnapshot {
+    pub windows: Vec<OllamaUsageWindow>,
+    pub models: Vec<OllamaUsageModelRequests>,
+    pub plan: Option<String>,
+    pub balance: Option<String>,
+}
+
+/// One usage window. `window` is `5h` or `7d`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct OllamaUsageWindow {
+    pub window: String,
+    pub used_percent: Option<f64>,
+    pub reset_at: Option<String>,
+}
+
+/// Per-model request counts inside a snapshot window.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct OllamaUsageModelRequests {
+    pub model: String,
+    pub requests_5h: Option<u64>,
+    pub requests_7d: Option<u64>,
 }
 
 /// PUT `/accounts/{id}/ollama-cookie` body. A `null` (or absent) `cookie`

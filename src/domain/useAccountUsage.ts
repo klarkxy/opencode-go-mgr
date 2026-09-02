@@ -276,6 +276,9 @@ export function useAccountUsage(accounts: Ref<Account[]>, now: Ref<number>) {
       if (isOllamaCloudAccount(account)) {
         const result = await providerApi.refreshOllamaUsage(accountId);
         ollamaUsageMap.value = { ...ollamaUsageMap.value, [accountId]: result };
+        // The manual refresh is also the recovery path for a failed initial
+        // GET: a fresh status heals the card without another list reload.
+        usageLoadErrors.value = { ...usageLoadErrors.value, [accountId]: null };
         message.success(t("成功"));
         return;
       }

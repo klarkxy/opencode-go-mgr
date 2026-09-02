@@ -20,7 +20,7 @@ use serde_json::{Value, json};
 use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::net::TcpListener as StdTcpListener;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration as StdDuration;
 
@@ -70,7 +70,7 @@ fn base_account(state: &CoreStateInner, id: &str, key: &str) -> Account {
         username: None,
         password_cipher: None,
         key_cipher: state.encrypt_key(key).unwrap(),
-        enabled: false,
+        enabled: true,
         account_type: ocg_core::models::AccountType::Key,
         setup_step: ocg_core::models::AccountSetupStep::Ready,
         referral_code: None,
@@ -88,22 +88,6 @@ fn base_account(state: &CoreStateInner, id: &str, key: &str) -> Account {
         created_at: now,
         updated_at: now,
     }
-}
-
-/// Integration-test-only SQLite poke. The offering is fail-closed, so the
-/// unroutable account is created disabled and force-enabled exactly like the
-/// historical loopback GOAT fixtures; a later `Database::open` sanitizes it.
-fn force_enable_unroutable_account_for_loopback_test(data_dir: &Path, account_id: &str) {
-    let conn = rusqlite::Connection::open(data_dir.join("data.sqlite"))
-        .expect("loopback test sqlite should open");
-    conn.busy_timeout(StdDuration::from_millis(5_000)).unwrap();
-    let changed = conn
-        .execute(
-            "UPDATE accounts SET enabled = 1 WHERE id = ?1",
-            [account_id],
-        )
-        .expect("loopback test enable poke should execute");
-    assert_eq!(changed, 1);
 }
 
 fn build_state(base_url: String) -> (Arc<CoreStateInner>, PathBuf) {
@@ -207,7 +191,6 @@ async fn ollama_cloud_attempt_normalizes_wire_and_never_sends_cookies() {
     persist_ollama_catalog(&state, &["deepseek-v4-flash:0731", "gpt-oss:120b"]);
     let account = base_account(&state, "ollama-normalize", OLLAMA_KEY);
     state.db.lock().create_account(&account).unwrap();
-    force_enable_unroutable_account_for_loopback_test(&state.data_dir(), "ollama-normalize");
     let _route =
         install_ollama_cloud_loopback_route_for_test("ollama-normalize", base_url).unwrap();
     let (port, gateway_handle) = start_gateway(state.clone()).await;
@@ -264,7 +247,6 @@ async fn ollama_cloud_stream_backfills_reasoning_content_per_delta() {
     persist_ollama_catalog(&state, &["deepseek-v4-flash:0731", "gpt-oss:120b"]);
     let account = base_account(&state, "ollama-stream", OLLAMA_KEY);
     state.db.lock().create_account(&account).unwrap();
-    force_enable_unroutable_account_for_loopback_test(&state.data_dir(), "ollama-stream");
     let _route = install_ollama_cloud_loopback_route_for_test("ollama-stream", base_url).unwrap();
     let (port, gateway_handle) = start_gateway(state.clone()).await;
 
@@ -305,7 +287,6 @@ async fn ollama_cloud_failure_diagnostic_records_normalized_body_bytes() {
     persist_ollama_catalog(&state, &["deepseek-v4-flash:0731", "gpt-oss:120b"]);
     let account = base_account(&state, "ollama-diag", OLLAMA_KEY);
     state.db.lock().create_account(&account).unwrap();
-    force_enable_unroutable_account_for_loopback_test(&state.data_dir(), "ollama-diag");
     let _route = install_ollama_cloud_loopback_route_for_test("ollama-diag", base_url).unwrap();
     let (port, gateway_handle) = start_gateway(state.clone()).await;
 
@@ -357,7 +338,6 @@ async fn mixed_candidate_chain_keeps_go_attempt_bytes_identical() {
     state.db.lock().create_account(&go).unwrap();
     let ollama = base_account(&state, "ollama-mixed", OLLAMA_KEY);
     state.db.lock().create_account(&ollama).unwrap();
-    force_enable_unroutable_account_for_loopback_test(&state.data_dir(), "ollama-mixed");
     let _route = install_ollama_cloud_loopback_route_for_test("ollama-mixed", base_url).unwrap();
     let (port, gateway_handle) = start_gateway(state.clone()).await;
 
@@ -409,7 +389,6 @@ async fn shared_alias_served_by_ollama_is_unpriced_and_uses_the_snapshot_id_upst
     persist_ollama_catalog(&state, &["deepseek-v4-flash:0731"]);
     let account = base_account(&state, "ollama-shared", OLLAMA_KEY);
     state.db.lock().create_account(&account).unwrap();
-    force_enable_unroutable_account_for_loopback_test(&state.data_dir(), "ollama-shared");
     let _route = install_ollama_cloud_loopback_route_for_test("ollama-shared", base_url).unwrap();
     let (port, gateway_handle) = start_gateway(state.clone()).await;
 
@@ -448,7 +427,6 @@ async fn unknown_ollama_model_fails_closed_before_any_upstream_call() {
     persist_ollama_catalog(&state, &["deepseek-v4-flash:0731"]);
     let account = base_account(&state, "ollama-unknown", OLLAMA_KEY);
     state.db.lock().create_account(&account).unwrap();
-    force_enable_unroutable_account_for_loopback_test(&state.data_dir(), "ollama-unknown");
     let _route = install_ollama_cloud_loopback_route_for_test("ollama-unknown", base_url).unwrap();
     let (port, gateway_handle) = start_gateway(state.clone()).await;
 

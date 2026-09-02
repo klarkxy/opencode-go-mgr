@@ -583,29 +583,29 @@ function presentProviderPricingSnapshot(value: V3ProviderPricingSnapshot): Provi
   };
 }
 
-function presentOllamaUsage(value: V3OllamaUsage): OllamaUsageResponse {
-  const snapshot = value.snapshot as
-    | OllamaUsageResponse["snapshot"]
-    | null
-    | undefined;
+function finiteOrNull(value: number | null): number | null {
+  return value !== null && Number.isFinite(value) ? value : null;
+}
+
+export function presentOllamaUsage(value: V3OllamaUsage): OllamaUsageResponse {
+  const snapshot = value.snapshot;
   return {
     account_id: value.accountId,
     cookie_configured: value.cookieConfigured,
     status: value.status as OllamaUsageResponse["status"],
-    snapshot: snapshot === null || snapshot === undefined ? null : {
-      windows: (snapshot.windows ?? []).map((window: { window: unknown; used_percent?: unknown; reset_at?: unknown }) => ({
-        window: String(window.window),
-        used_percent: window.used_percent === undefined ? null : Number(window.used_percent),
-        reset_at: window.reset_at === undefined ? null : String(window.reset_at),
+    snapshot: snapshot === null ? null : {
+      windows: snapshot.windows.map((window) => ({
+        window: window.window,
+        used_percent: finiteOrNull(window.used_percent),
+        reset_at: window.reset_at ?? null,
       })),
-      models: (snapshot.models ?? []).map((model: { model: unknown; requests_5h?: unknown; requests_7d?: unknown }) => ({
-        model: String(model.model),
-        requests_5h: model.requests_5h === undefined ? null : Number(model.requests_5h),
-        requests_7d: model.requests_7d === undefined ? null : Number(model.requests_7d),
+      models: snapshot.models.map((model) => ({
+        model: model.model,
+        requests_5h: finiteOrNull(model.requests_5h),
+        requests_7d: finiteOrNull(model.requests_7d),
       })),
-      plan: snapshot.plan === undefined || snapshot.plan === null ? null : String(snapshot.plan),
-      balance:
-        snapshot.balance === undefined || snapshot.balance === null ? null : String(snapshot.balance),
+      plan: snapshot.plan ?? null,
+      balance: snapshot.balance ?? null,
     },
     last_error: value.lastError,
     last_success_at: value.lastSuccessAt,

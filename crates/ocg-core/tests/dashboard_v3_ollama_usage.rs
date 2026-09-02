@@ -137,7 +137,7 @@ fn base_ollama_account(id: &str) -> Account {
         username: None,
         password_cipher: None,
         key_cipher: String::new(),
-        enabled: false,
+        enabled: true,
         account_type: AccountType::Key,
         setup_step: ocg_core::models::AccountSetupStep::Ready,
         referral_code: None,
@@ -157,20 +157,8 @@ fn base_ollama_account(id: &str) -> Account {
     }
 }
 
-/// The offering is fail-closed; the disabled draft is created through the
-/// account API and force-enabled for refresh tests exactly like the
-/// historical loopback GOAT fixtures.
-fn force_enable(harness: &V3Harness, account_id: &str) {
-    let conn = rusqlite::Connection::open(harness.dir.join("data.sqlite")).unwrap();
-    conn.busy_timeout(Duration::from_millis(5_000)).unwrap();
-    let changed = conn
-        .execute(
-            "UPDATE accounts SET enabled = 1 WHERE id = ?1",
-            [account_id],
-        )
-        .unwrap();
-    assert_eq!(changed, 1);
-}
+/// The offering admits persisted enablement; disabled-account gating is
+/// exercised separately by `ollama_usage_refresh_requires_enabled_account_and_configured_cookie`.
 
 #[tokio::test]
 async fn ollama_cookie_roundtrip_validates_rejects_set_cookie_and_never_echoes() {
@@ -251,7 +239,6 @@ async fn ollama_usage_refresh_scrapes_sanitizes_and_throttles() {
     let harness = start_loopback("ollama-refresh").await;
     let account = base_ollama_account("ollama-refresh-1");
     harness.state.db.lock().create_account(&account).unwrap();
-    force_enable(&harness, "ollama-refresh-1");
     let origin = start_settings_origin(StatusCode::OK, SETTINGS_PAGE).await;
     let _guard = ocg_core::goat::install_ollama_models_origin_for_test(
         harness.state.process_generation(),
@@ -349,7 +336,6 @@ async fn ollama_usage_failures_keep_the_last_snapshot_and_throttle() {
     let harness = start_loopback("ollama-failure").await;
     let account = base_ollama_account("ollama-failure-1");
     harness.state.db.lock().create_account(&account).unwrap();
-    force_enable(&harness, "ollama-failure-1");
 
     // Seed a successful snapshot directly, then fail twice.
     let now = Utc::now();
@@ -451,7 +437,6 @@ async fn ollama_usage_redirect_is_a_failure_that_throttles() {
     let harness = start_loopback("ollama-redirect").await;
     let account = base_ollama_account("ollama-redirect-1");
     harness.state.db.lock().create_account(&account).unwrap();
-    force_enable(&harness, "ollama-redirect-1");
     // 302 Found: the scrape must treat any redirect as a failure and never
     // follow it (spec: 重定向视为失败).
     let origin = start_settings_origin(StatusCode::FOUND, LOGIN_PAGE).await;
@@ -513,7 +498,8 @@ async fn ollama_usage_redirect_is_a_failure_that_throttles() {
 #[tokio::test]
 async fn ollama_usage_refresh_requires_enabled_account_and_configured_cookie() {
     let harness = start_loopback("ollama-gates").await;
-    let disabled = base_ollama_account("ollama-gate-1");
+    let mut disabled = base_ollama_account("ollama-gate-1");
+    disabled.enabled = false;
     harness.state.db.lock().create_account(&disabled).unwrap();
 
     let (status, body) = send_json(

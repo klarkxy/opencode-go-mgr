@@ -246,7 +246,7 @@ pub(super) async fn refresh_ollama_usage(
                     "unauthorized",
                     Some("the web session expired; reconfigure the Cookie"),
                     now,
-                );
+                )?;
                 (
                     "warn",
                     format!(
@@ -258,7 +258,7 @@ pub(super) async fn refresh_ollama_usage(
             ParseOutcome::Failed(message) => {
                 // Already sanitized at construction (fetch failures pass
                 // through sanitize_error_text there).
-                record_failure(&db, &account.id, "failed", Some(&message), now);
+                record_failure(&db, &account.id, "failed", Some(&message), now)?;
                 (
                     "warn",
                     format!(
@@ -284,22 +284,26 @@ fn record_failure(
     status: &str,
     message: Option<&str>,
     now: DateTime<Utc>,
-) {
+) -> Result<(), V3ApiError> {
+    // A missing row starts the streak at 1; a read/write ERROR must surface
+    // instead of silently dropping the throttle state — reporting a recorded
+    // failure that was never persisted would let unthrottled retries hit
+    // the upstream.
     let streak = db
         .ollama_cloud_usage_state(account_id)
-        .ok()
-        .flatten()
+        .map_err(V3ApiError::internal)?
         .map(|state| state.failure_streak + 1)
         .unwrap_or(1);
     let next_eligible = manual_next_allowed_at(now);
-    let _ = db.record_ollama_cloud_usage_failure(
+    db.record_ollama_cloud_usage_failure(
         account_id,
         status,
         message,
         now,
         Some(next_eligible),
         streak,
-    );
+    )
+    .map_err(V3ApiError::internal)
 }
 
 /// Throttle decision for one stored state at `now`: the 30-second manual
@@ -407,7 +411,35 @@ fn ollama_usage_status_locked(
 
 #[cfg(test)]
 mod tests {
+    use super::super::OllamaUsageSnapshot;
     use super::*;
+
+    #[test]
+    fn persisted_snapshot_round_trips_into_the_contract_dto() {
+        // The contract DTO must keep accepting exactly the JSON that
+        // `crate::ollama_usage` persists, byte-for-byte in both directions.
+        let domain = crate::ollama_usage::OllamaUsageSnapshot {
+            windows: vec![crate::ollama_usage::OllamaUsageWindow {
+                window: "5h".into(),
+                used_percent: Some(42.5),
+                reset_at: Some("2026-09-02T12:00:00Z".into()),
+            }],
+            models: vec![crate::ollama_usage::OllamaModelRequests {
+                model: "deepseek-v4-flash:0731".into(),
+                requests_5h: Some(11),
+                requests_7d: None,
+            }],
+            plan: Some("web".into()),
+            balance: None,
+        };
+        let json = serde_json::to_string(&domain).unwrap();
+        let contract: OllamaUsageSnapshot = serde_json::from_str(&json).unwrap();
+        assert_eq!(contract.windows[0].used_percent, Some(42.5));
+        assert_eq!(contract.models[0].requests_7d, None);
+        assert_eq!(contract.plan.as_deref(), Some("web"));
+        assert!(contract.balance.is_none());
+        assert_eq!(serde_json::to_string(&contract).unwrap(), json);
+    }
 
     #[test]
     fn throttle_uses_the_thirty_second_manual_window() {

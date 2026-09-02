@@ -268,7 +268,7 @@ fn catalog_type_names_append_claude_desktop_after_custom_discovery() {
         ]
     );
     assert_eq!(
-        &CATALOG_TYPE_NAMES[application_connector_start + 32..],
+        &CATALOG_TYPE_NAMES[application_connector_start + 32..application_connector_start + 42],
         [
             "DynamicProviderAuthKind",
             "DynamicProviderModel",
@@ -282,7 +282,18 @@ fn catalog_type_names_append_claude_desktop_after_custom_discovery() {
             "DynamicProviderTestResponse",
         ]
     );
-    assert_eq!(CATALOG_TYPE_NAMES.len(), application_connector_start + 42);
+    assert_eq!(
+        &CATALOG_TYPE_NAMES[application_connector_start + 42..],
+        [
+            "OllamaUsageStatus",
+            "OllamaUsageSnapshot",
+            "OllamaUsageWindow",
+            "OllamaUsageModelRequests",
+            "OllamaCookieUpdate",
+            "OllamaUsageThrottleError",
+        ]
+    );
+    assert_eq!(CATALOG_TYPE_NAMES.len(), application_connector_start + 48);
 
     let schema = contract_schema();
     let defs = schema["$defs"].as_object().expect("$defs");

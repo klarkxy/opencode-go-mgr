@@ -175,6 +175,9 @@ export type DashboardApiV3 =
   | DynamicProviderTestRequest
   | DynamicProviderTestResponse
   | OllamaUsageStatus
+  | OllamaUsageSnapshot
+  | OllamaUsageWindow
+  | OllamaUsageModelRequests
   | OllamaCookieUpdate
   | OllamaUsageThrottleError;
 /**
@@ -2135,11 +2138,39 @@ export interface OllamaUsageStatus {
   nextEligibleAt: string | null;
   processGeneration: number;
   revision: number;
-  snapshot: any;
+  snapshot: OllamaUsageSnapshot | null;
   /**
    * `unconfigured` | `ok` | `unauthorized` | `failed`.
    */
   status: string;
+}
+/**
+ * Typed sanitized usage snapshot served under `OllamaUsageStatus.snapshot`.
+ * Mirrors [`crate::ollama_usage::OllamaUsageSnapshot`]; the snake_case
+ * interior is the persisted snapshot wire shape and is deliberately kept
+ * stable, unlike the camelCase V3 envelope.
+ */
+export interface OllamaUsageSnapshot {
+  balance: string | null;
+  models: OllamaUsageModelRequests[];
+  plan: string | null;
+  windows: OllamaUsageWindow[];
+}
+/**
+ * Per-model request counts inside a snapshot window.
+ */
+export interface OllamaUsageModelRequests {
+  model: string;
+  requests_5h: number | null;
+  requests_7d: number | null;
+}
+/**
+ * One usage window. `window` is `5h` or `7d`.
+ */
+export interface OllamaUsageWindow {
+  reset_at: string | null;
+  used_percent: number | null;
+  window: string;
 }
 /**
  * PUT `/accounts/{id}/ollama-cookie` body. A `null` (or absent) `cookie`

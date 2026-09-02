@@ -1800,6 +1800,14 @@ const DYNAMIC_PROVIDER_CATALOG_TYPES: &[&str] = &[
     "DynamicProviderTestRequest",
     "DynamicProviderTestResponse",
 ];
+const OLLAMA_USAGE_CATALOG_TYPES: &[&str] = &[
+    "OllamaUsageStatus",
+    "OllamaUsageSnapshot",
+    "OllamaUsageWindow",
+    "OllamaUsageModelRequests",
+    "OllamaCookieUpdate",
+    "OllamaUsageThrottleError",
+];
 
 #[test]
 fn catalog_type_names_append_pricing_dtos_after_the_provider_prefix() {
@@ -1895,7 +1903,12 @@ fn catalog_type_names_append_pricing_dtos_after_the_provider_prefix() {
         &CATALOG_TYPE_NAMES[cpa_end..dynamic_end],
         DYNAMIC_PROVIDER_CATALOG_TYPES
     );
-    assert_eq!(CATALOG_TYPE_NAMES.len(), dynamic_end);
+    let ollama_end = dynamic_end + OLLAMA_USAGE_CATALOG_TYPES.len();
+    assert_eq!(
+        &CATALOG_TYPE_NAMES[dynamic_end..ollama_end],
+        OLLAMA_USAGE_CATALOG_TYPES
+    );
+    assert_eq!(CATALOG_TYPE_NAMES.len(), ollama_end);
 }
 
 #[test]

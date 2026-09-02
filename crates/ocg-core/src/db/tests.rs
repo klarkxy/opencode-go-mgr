@@ -5850,6 +5850,35 @@ fn unroutable_catalog_plans_cannot_persist_enabled_true() {
     db.create_account(&go).unwrap();
     assert!(db.get_account("go-enabled").unwrap().unwrap().enabled);
 
+    // Ollama Cloud opened its enable bit once routing, control plane, and
+    // usage shipped; enabled rows must persist through the same gates.
+    let mut ollama = account("ollama-enabled");
+    ollama.provider_id = OLLAMA_PROVIDER_ID.to_string();
+    ollama.enabled = true;
+    db.create_account(&ollama).unwrap();
+    assert!(db.get_account("ollama-enabled").unwrap().unwrap().enabled);
+    db.update_account(
+        "ollama-enabled",
+        &AccountUpdate {
+            enabled: Some(false),
+            ..AccountUpdate::default()
+        },
+        None,
+        None,
+    )
+    .unwrap();
+    db.update_account(
+        "ollama-enabled",
+        &AccountUpdate {
+            enabled: Some(true),
+            ..AccountUpdate::default()
+        },
+        None,
+        None,
+    )
+    .unwrap();
+    assert!(db.get_account("ollama-enabled").unwrap().unwrap().enabled);
+
     for plan in BUILTIN_PROVIDERS
         .iter()
         .copied()
@@ -5981,6 +6010,7 @@ fn open_sanitizes_unroutable_catalog_leftovers_without_touching_go_zen_or_unknow
         Vec::<(&str, &str)>::new()
     );
     assert!(builtin_provider(CUSTOM_PROVIDER_ID).is_some_and(|plan| plan.routable));
+    assert!(builtin_provider(OLLAMA_PROVIDER_ID).is_some_and(|plan| plan.routable));
 
     let dir = temp_data_dir("unroutable-sanitation");
     let db = Database::open(dir.clone()).unwrap();
@@ -6049,6 +6079,16 @@ fn open_sanitizes_unroutable_catalog_leftovers_without_touching_go_zen_or_unknow
     );
     leftover_enable(&db, "draft-api");
 
+    // An enabled Ollama Cloud row is now legitimate (routable offering),
+    // so open must leave it untouched.
+    persist_unroutable_draft(
+        &db,
+        builtin_provider(OLLAMA_PROVIDER_ID).unwrap(),
+        "ollama-leftover",
+        "ollama-leftover-notes",
+    );
+    leftover_enable(&db, "ollama-leftover");
+
     let zen_before = sanitation_snapshot(&db, ZEN_FREE_ACCOUNT_ID);
     let go_before = sanitation_snapshot(&db, "go-keep");
     let unknown_before = sanitation_snapshot(&db, "unknown-keep");
@@ -6056,8 +6096,10 @@ fn open_sanitizes_unroutable_catalog_leftovers_without_touching_go_zen_or_unknow
     let goat_verified_before = sanitation_snapshot(&db, "goat-verified");
     let goat_failed_before = sanitation_snapshot(&db, "goat-failed");
     let custom_before = sanitation_snapshot(&db, "draft-api");
+    let ollama_before = sanitation_snapshot(&db, "ollama-leftover");
     assert!(go_before.enabled);
     assert!(custom_before.enabled);
+    assert!(ollama_before.enabled);
     assert!(unknown_before.enabled);
     assert!(goat_pending_before.enabled);
     assert!(goat_verified_before.enabled);
@@ -6124,6 +6166,13 @@ fn open_sanitizes_unroutable_catalog_leftovers_without_touching_go_zen_or_unknow
         "now-routable Custom leftovers must not be disabled at open"
     );
 
+    let ollama_after = sanitation_snapshot(&db, "ollama-leftover");
+    assert_eq!(ollama_after, ollama_before);
+    assert!(
+        ollama_after.enabled,
+        "routable Ollama leftovers must not be disabled at open"
+    );
+
     let first_pass: Vec<_> = [
         ZEN_FREE_ACCOUNT_ID,
         "go-keep",
@@ -6132,6 +6181,7 @@ fn open_sanitizes_unroutable_catalog_leftovers_without_touching_go_zen_or_unknow
         "goat-verified",
         "goat-failed",
         "draft-api",
+        "ollama-leftover",
     ]
     .into_iter()
     .map(|id| (id.to_string(), sanitation_snapshot(&db, id)))

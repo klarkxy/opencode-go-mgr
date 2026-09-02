@@ -408,6 +408,7 @@ fn adapter_kind_match_is_exhaustive_and_consistent_with_descriptors() {
             | ProviderAdapterKind::OllamaCloud => {
                 assert_eq!(descriptor.inference.auth, InferenceAuthDescriptor::Bearer);
                 assert!(!descriptor.inference.follow_redirects);
+                assert!(descriptor.inference.catalog_routable);
             }
             ProviderAdapterKind::Cpa => {
                 assert_eq!(descriptor.inference.auth, InferenceAuthDescriptor::Bearer);

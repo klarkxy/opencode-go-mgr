@@ -3,37 +3,46 @@
     <template v-if="!usage || !usage.cookie_configured">
       <p class="ollama-usage__hint">{{ t("未配置网页会话 Cookie，暂无法查询用量") }}</p>
     </template>
-    <template v-else-if="usage.status === 'unauthorized'">
-      <p class="ollama-usage__hint ollama-usage__hint--warn" role="alert">
+    <template v-else>
+      <p
+        v-if="usage.status === 'unauthorized'"
+        class="ollama-usage__hint ollama-usage__hint--warn"
+        role="alert"
+      >
         {{ t("网页会话已过期，请重新粘贴 Cookie") }}
       </p>
-    </template>
-    <template v-else-if="usage.status === 'failed'">
-      <p class="ollama-usage__hint ollama-usage__hint--warn" role="alert">
+      <p
+        v-else-if="usage.status === 'failed'"
+        class="ollama-usage__hint ollama-usage__hint--warn"
+        role="alert"
+      >
         {{ usage.last_error || t("用量查询失败，稍后可重试") }}
       </p>
-    </template>
-    <template v-else-if="usage.snapshot">
-      <div class="ollama-usage__windows">
-        <div
-          v-for="window in usage.snapshot.windows"
-          :key="window.window"
-          class="ollama-usage__window"
-        >
-          <span class="ollama-usage__window-label">{{ windowLabel(window.window) }}</span>
-          <span class="ollama-usage__window-value">{{ usedLabel(window.used_percent) }}</span>
-          <span
-            v-if="window.reset_at"
-            class="ollama-usage__window-reset"
-          >{{ t("{time}后重置", { time: formatCooldownRemainingUntil(window.reset_at, now) }) }}</span>
+      <template v-if="usage.snapshot">
+        <div class="ollama-usage__windows">
+          <div
+            v-for="window in usage.snapshot.windows"
+            :key="window.window"
+            class="ollama-usage__window"
+          >
+            <span class="ollama-usage__window-label">{{ windowLabel(window.window) }}</span>
+            <span class="ollama-usage__window-value">{{ usedLabel(window.used_percent) }}</span>
+            <span
+              v-if="window.reset_at"
+              class="ollama-usage__window-reset"
+            >{{ t("{time}后重置", { time: formatCooldownRemainingUntil(window.reset_at, now) }) }}</span>
+          </div>
         </div>
-      </div>
-      <p v-if="planLabel" class="ollama-usage__meta">{{ planLabel }}</p>
-      <p v-if="usage.snapshot.models.length" class="ollama-usage__meta">
-        {{ modelRequestsLabel(usage.snapshot.models) }}
-      </p>
+        <p v-if="planLabel" class="ollama-usage__meta">{{ planLabel }}</p>
+        <p v-if="usage.snapshot.models.length" class="ollama-usage__meta">
+          {{ modelRequestsLabel(usage.snapshot.models) }}
+        </p>
+      </template>
+      <p
+        v-else-if="usage.status !== 'unauthorized'"
+        class="ollama-usage__hint"
+      >{{ t("暂无用量快照，点击刷新查询") }}</p>
     </template>
-    <p v-else class="ollama-usage__hint">{{ t("暂无用量快照，点击刷新查询") }}</p>
   </div>
 </template>
 

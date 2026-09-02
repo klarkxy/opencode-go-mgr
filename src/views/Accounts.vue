@@ -965,17 +965,40 @@ async function onFormSave(payload: AccountInput | AccountFormPayload) {
     }
   } else {
     // Preserve every catalog-gated create field (Custom config and
-    // capabilities) rather than rebuilding a legacy-only DTO.
-    const input: AccountInput = { ...payload, key: payload.key || "" };
+    // capabilities) rather than rebuilding a legacy-only DTO. The optional
+    // create-time Ollama Cookie rides on the form payload but persists through
+    // its own account-scoped route right after the account exists — never as
+    // part of the AccountCreate body.
+    const formPayload = payload as AccountFormPayload;
+    const createCookie = typeof formPayload.ollama_cookie === "string"
+      ? formPayload.ollama_cookie.trim()
+      : "";
+    const { ollama_cookie: _ollamaCookie, ...input } = {
+      ...(payload as AccountInput & { ollama_cookie?: string }),
+      key: payload.key || "",
+    };
     busy.value = true;
     try {
       const created = await runWithFreshSettingsRevision((revision) => dashboardApi.createAccount({
         ...input,
         expected_revision: revision,
       }));
-      message.success(t("账号已添加"));
       addAccount(created);
       settingsRevision.value = created.revision ?? settingsRevision.value;
+      let cookieFailure: unknown = null;
+      if (isOllamaCloudAccount(created) && createCookie) {
+        try {
+          await providerApi.setOllamaCookie(created.id, createCookie);
+        } catch (cookieError) {
+          cookieFailure = cookieError;
+        }
+      }
+      message.success(t("账号已添加"));
+      if (cookieFailure !== null) {
+        // The account exists; only the optional Cookie write failed. Report it
+        // after the success toast so the two are not contradictory.
+        message.error(t("保存失败: {error}", { error: dashboardErrorDetail(cookieFailure) }));
+      }
       // Go uses official usage; GOAT projects locally priced OCG request logs.
       if (accountHasUsageDisplay(created) && accountIsReady(created)) {
         await loadAccountUsage(created.id);

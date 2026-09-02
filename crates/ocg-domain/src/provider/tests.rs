@@ -517,6 +517,7 @@ fn adapter_descriptors_preserve_current_capability_decisions() {
     assert!(ollama.usage.publishes_capability);
     assert!(ollama.card_actions.usage_refresh);
     assert!(ollama.card_actions.catalog_refresh);
+    assert!(ollama.card_actions.persisted_enable_allowed);
     assert!(!ollama.card_actions.protocol_probe);
     assert_eq!(
         ollama.model_catalog.kind,
