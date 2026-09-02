@@ -220,12 +220,12 @@ export function planCreateDisabledReason(
   plan: PlanDefinition,
   catalog: readonly ProviderCatalogEntry[] | null | undefined,
 ): MessageKey | null {
-  if (plan.singleton) return "鍗曚緥鏂规鐢辩郴缁熻嚜鍔ㄧ鐞?;
-  if (!catalog?.length) return plan.legacy ? null : "鏈嶅姟鍟嗙洰褰曞姞杞藉け璐?;
+  if (plan.singleton) return "单例方案由系统自动管理";
+  if (!catalog?.length) return plan.legacy ? null : "服务商目录加载失败";
   const entry = findCatalogEntry(catalog, plan.provider_id);
-  if (!entry) return "鏈嶅姟鍟嗙洰褰曟湭鎻愪緵璇ユ柟妗?;
+  if (!entry) return "服务商目录未提供该方案";
   if (entry.creation_availability !== "available") {
-    return "璇ユ柟妗堟殏涓嶅彲鐢?;
+    return "该方案暂不可用";
   }
   return null;
 }

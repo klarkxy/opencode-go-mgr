@@ -982,12 +982,10 @@ fn merge_provider_scope(
 
     let mut models = BTreeMap::new();
     for model_id in &static_models {
-        let default_source = if adapter == ProviderAdapterKind::CommandCodeGoat
-            && command_code_goat_includes_model(model_id)
-        {
-            ContractEvidenceSource::Preset
-        } else if adapter == ProviderAdapterKind::OllamaCloud
-            && crate::kernel::protocol::ollama_cloud_includes_model(model_id)
+        let default_source = if (adapter == ProviderAdapterKind::CommandCodeGoat
+            && command_code_goat_includes_model(model_id))
+            || (adapter == ProviderAdapterKind::OllamaCloud
+                && crate::kernel::protocol::ollama_cloud_includes_model(model_id))
         {
             ContractEvidenceSource::Preset
         } else {

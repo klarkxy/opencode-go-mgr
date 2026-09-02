@@ -1216,12 +1216,10 @@ fn prepare_protocol_probe(
         .iter()
         .filter(|account| {
             account.provider_id == provider_id
-                && match adapter {
-                    ProviderAdapterKind::ConfigurableHttp | ProviderAdapterKind::OllamaCloud => {
-                        false
-                    }
-                    _ => true,
-                }
+                && !matches!(
+                    adapter,
+                    ProviderAdapterKind::ConfigurableHttp | ProviderAdapterKind::OllamaCloud
+                )
                 && account_is_available_for_at(account, channel, &[], now)
         })
         .cloned()

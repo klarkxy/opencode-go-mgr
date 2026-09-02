@@ -225,7 +225,7 @@ export function accountMenuOptions(account: Account, now = Date.now()): AccountM
   // The console link, managed setup, and browser-profile actions are
   // OpenCode-only semantics; other sealed families stop at the generic
   // lifecycle actions.
-  const isOpencodeGo = account.provider_id === "opencode" && account.offering_id === "go";
+  const isOpencodeGo = account.provider_id === "opencode";
   if (isOpencodeGo && !accountIsReady(account)) {
     options.push({
       key: "continue-setup",
