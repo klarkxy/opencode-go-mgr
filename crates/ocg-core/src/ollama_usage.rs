@@ -283,21 +283,50 @@ pub fn parse_settings_usage(html: &str) -> ParseOutcome {
     let tracks = collect_tags_with_attribute(html, "data-usage-track");
     let segments = collect_tags_with_attribute(html, "data-usage-segment");
     let model_rows = collect_tags_with_attribute(html, "data-model");
+    let reset_markers = collect_tags_with_attribute(html, "data-time");
     if tracks.is_empty() && model_rows.is_empty() {
         return ParseOutcome::Failed("usage anchors were not found on the settings page".into());
     }
 
     let mut windows: Vec<OllamaUsageWindow> = Vec::new();
-    for (index, track) in tracks.iter().enumerate() {
+    for (index, (track_offset, track)) in tracks.iter().enumerate() {
+        let aria = track.get("aria-label").map(|value| value.as_str());
         let window = track
             .get("data-usage-window")
-            .or_else(|| track.get("data-usage-track"))
+            .filter(|value| !value.is_empty())
+            .or_else(|| {
+                track
+                    .get("data-usage-track")
+                    .filter(|value| !value.is_empty())
+            })
             .map(|value| normalize_window_key(value))
+            .or_else(|| aria.and_then(window_from_usage_aria))
             .unwrap_or_else(|| fallback_window_key(index));
-        let reset_at = track.get("data-time").cloned();
         let used_percent = track
             .get("data-used-percent")
-            .and_then(|value| value.trim().trim_end_matches('%').parse::<f64>().ok());
+            .and_then(|value| value.trim().trim_end_matches('%').parse::<f64>().ok())
+            .or_else(|| aria.and_then(percent_from_usage_aria));
+        // Live shape: the reset stamp is a sibling element carrying its own
+        // `data-time`; attribute it to the track region it follows.
+        let next_offset = tracks
+            .get(index + 1)
+            .map(|(next_offset, _)| *next_offset)
+            .unwrap_or(html.len());
+        let reset_at = track.get("data-time").cloned().or_else(|| {
+            reset_markers
+                .iter()
+                .find(|(marker_offset, marker)| {
+                    // Only a timestamp-shaped value is a reset stamp;
+                    // legacy model rows use data-time as a window tag.
+                    let looks_like_timestamp = marker
+                        .get("data-time")
+                        .is_some_and(|value| value.contains('-') && value.contains(':'));
+                    *marker_offset > *track_offset
+                        && *marker_offset < next_offset
+                        && looks_like_timestamp
+                })
+                .and_then(|(_, marker)| marker.get("data-time").cloned())
+        });
         windows.push(OllamaUsageWindow {
             window,
             used_percent,
@@ -306,7 +335,7 @@ pub fn parse_settings_usage(html: &str) -> ParseOutcome {
     }
     // Gauge segments without a model carry the window's used percent when the
     // track element itself does not.
-    for segment in &segments {
+    for (segment_offset, segment) in &segments {
         if segment.contains_key("data-model") {
             continue;
         }
@@ -347,7 +376,7 @@ pub fn parse_settings_usage(html: &str) -> ParseOutcome {
     }
 
     let mut models: Vec<OllamaModelRequests> = Vec::new();
-    for row in &model_rows {
+    for (row_offset, row) in &model_rows {
         let model = match row.get("data-model") {
             Some(model) if !model.is_empty() => model.clone(),
             _ => continue,
@@ -358,7 +387,33 @@ pub fn parse_settings_usage(html: &str) -> ParseOutcome {
         let window = row
             .get("data-usage-window")
             .or_else(|| row.get("data-time"))
-            .map(|value| normalize_window_key(value));
+            .map(|value| normalize_window_key(value))
+            .or_else(|| {
+                // Live shape: model segments sit inside their window's track
+                // region, so the enclosing track names the window.
+                tracks
+                    .iter()
+                    .enumerate()
+                    .find(|(index, (track_offset, _))| {
+                        *row_offset >= *track_offset
+                            && tracks
+                                .get(index + 1)
+                                .map(|(next_offset, _)| *row_offset < *next_offset)
+                                .unwrap_or(true)
+                    })
+                    .and_then(|(_, (_, attrs))| {
+                        attrs
+                            .get("aria-label")
+                            .map(|value| value.as_str())
+                            .and_then(window_from_usage_aria)
+                            .or_else(|| {
+                                attrs
+                                    .get("data-usage-window")
+                                    .filter(|value| !value.is_empty())
+                                    .map(|value| normalize_window_key(value))
+                            })
+                    })
+            });
         let entry_index = models
             .iter()
             .position(|item| item.model.eq_ignore_ascii_case(&model))
@@ -396,9 +451,36 @@ fn normalize_window_key(raw: &str) -> String {
     let folded = raw.trim().to_ascii_lowercase();
     match folded.as_str() {
         "5h" | "5hour" | "five_hours" | "fivehours" | "5-hour" => "5h".to_string(),
-        "7d" | "7day" | "week" | "7-day" | "weekly" => "7d".to_string(),
+        "7d" | "7day" | "week" | "7-day" | "weekly" | "weekly usage" => "7d".to_string(),
+        "session" | "session usage" => "5h".to_string(),
         other => other.to_string(),
     }
+}
+
+/// The live settings page labels each usage track with
+/// `aria-label="Session usage 12.5% used"` / `"Weekly usage 19.8% used"`.
+/// Map the window name and pull the percentage out of the same label.
+fn window_from_usage_aria(aria_label: &str) -> Option<String> {
+    let lowered = aria_label.trim().to_ascii_lowercase();
+    if lowered.contains("session") {
+        Some("5h".to_string())
+    } else if lowered.contains("week") {
+        Some("7d".to_string())
+    } else {
+        None
+    }
+}
+
+fn percent_from_usage_aria(aria_label: &str) -> Option<f64> {
+    let percent_at = aria_label.find("% used")?;
+    let token_start = aria_label[..percent_at]
+        .char_indices()
+        .rev()
+        .take_while(|(_, ch)| ch.is_ascii_digit() || *ch == '.' || *ch == ',')
+        .map(|(idx, _)| idx)
+        .last()?;
+    let token = &aria_label[token_start..percent_at];
+    token.replace(',', ".").parse::<f64>().ok()
 }
 
 fn fallback_window_key(index: usize) -> String {
@@ -462,26 +544,38 @@ fn extract_labeled_value(html: &str, labels: &[&str]) -> Option<String> {
 }
 
 /// Extract one tag's attributes as a flat map. Attributes without a value
-/// map to an empty string. Bounded to the tag text; no nesting.
+/// map to an empty string. Bounded to the tag text; no nesting. Each hit
+/// carries the byte offset of the tag's opening `<` so callers can do
+/// sibling/region attribution.
 fn collect_tags_with_attribute(
     html: &str,
     attribute: &str,
-) -> Vec<std::collections::BTreeMap<String, String>> {
-    let needle = format!("{}=", attribute);
+) -> Vec<(usize, std::collections::BTreeMap<String, String>)> {
     let mut tags = Vec::new();
     let mut search_from = 0;
-    while let Some(found) = html[search_from..].find(&needle) {
+    while let Some(found) = html[search_from..].find(attribute) {
         let attribute_at = search_from + found;
-        let tag_start = html[..attribute_at].rfind('<').unwrap_or(0);
-        let Some(tag_end_rel) = html[tag_start..].find('>') else {
-            break;
-        };
-        let tag_end = tag_start + tag_end_rel;
-        let tag = &html[tag_start..tag_end];
-        if tag.starts_with('<') && !tag.starts_with("<!--") {
-            tags.push(parse_tag_attributes(tag));
+        let before_ok = attribute_at == 0
+            || !html[..attribute_at]
+                .ends_with(|ch: char| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_');
+        let after = &html[attribute_at + attribute.len()..];
+        let after_ok =
+            after.starts_with(|ch: char| ch == '=' || ch.is_whitespace() || ch == '>' || ch == '/');
+        let mut hit = attribute_at + attribute.len();
+        if before_ok && after_ok {
+            let tag_start = html[..attribute_at].rfind('<').unwrap_or(0);
+            if let Some(tag_end_rel) = html[tag_start..].find('>') {
+                let tag_end = tag_start + tag_end_rel;
+                let tag = &html[tag_start..tag_end];
+                if tag.starts_with('<') && !tag.starts_with("<!--") {
+                    tags.push((tag_start, parse_tag_attributes(tag)));
+                }
+                search_from = tag_end + 1;
+                continue;
+            }
         }
-        search_from = tag_end + 1;
+        hit += 1;
+        search_from = hit;
     }
     tags
 }
@@ -610,6 +704,59 @@ mod tests {
         );
         let long = sanitize_error_text(&"x".repeat(5_000));
         assert!(long.chars().count() <= MAX_ERROR_TEXT_CHARS);
+    }
+
+    #[test]
+    fn live_settings_shape_parses_windows_segments_and_models() {
+        // Mirrors the live ollama.com/settings markup: bare data-usage-track
+        // with an aria-label carrying window name + percent, per-model
+        // segments inside the track region, and a sibling data-time reset.
+        let page = concat!(
+            r#"<div>"#,
+            r#"<div data-usage-track aria-label="Session usage 12.5% used">"#,
+            r#"<button data-usage-segment data-model="deepseek-v4-flash:0731" data-requests="2" aria-label="deepseek-v4-flash:0731: 2 requests"></button>"#,
+            r#"</div>"#,
+            r#"<div class="hint" data-time="2026-09-02T18:00:00Z">Resets in 3 hours.</div>"#,
+            r#"<div data-usage-track aria-label="Weekly usage 19.8% used">"#,
+            r#"<button data-usage-segment data-model="glm-5.3-flash" data-requests="551" aria-label="glm-5.3-flash: 551 requests"></button>"#,
+            r#"<button data-usage-segment data-model="deepseek-v4-flash:0731" data-requests="1" aria-label="deepseek-v4-flash:0731: 1 request"></button>"#,
+            r#"</div>"#,
+            r#"<div class="hint" data-time="2026-09-07T00:00:00Z">Resets Monday.</div>"#,
+            "</div>"
+        );
+        let ParseOutcome::Snapshot(snapshot) = parse_settings_usage(page) else {
+            panic!("expected a snapshot");
+        };
+        assert_eq!(
+            snapshot.windows,
+            vec![
+                OllamaUsageWindow {
+                    window: "5h".into(),
+                    used_percent: Some(12.5),
+                    reset_at: Some("2026-09-02T18:00:00Z".into()),
+                },
+                OllamaUsageWindow {
+                    window: "7d".into(),
+                    used_percent: Some(19.8),
+                    reset_at: Some("2026-09-07T00:00:00Z".into()),
+                },
+            ]
+        );
+        assert_eq!(
+            snapshot.models,
+            vec![
+                OllamaModelRequests {
+                    model: "deepseek-v4-flash:0731".into(),
+                    requests_5h: Some(2),
+                    requests_7d: Some(1),
+                },
+                OllamaModelRequests {
+                    model: "glm-5.3-flash".into(),
+                    requests_5h: None,
+                    requests_7d: Some(551),
+                },
+            ]
+        );
     }
 
     #[test]

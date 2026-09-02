@@ -97,7 +97,7 @@
 ## Ollama Cloud
 
 - 家族密封且固定源：`https://ollama.com`，仅 Chat Completions，Bearer，不跟随重定向，`ProcessWideNoRedirect` 代理语义（方向默认段；本家族模型 id 不参与按模型例外段匹配）。协议事实存于 `ocg_domain::protocol` 的家族独立种子（`OLLAMA_CLOUD_*`）；`MODEL_PROTOCOLS` 必须保持无 Ollama 专属 id——该表派生 Go 已发布别名。adapter 标记 `WireNormalization::OllamaCloud`；forwarder 按尝试改写请求字节（assistant `reasoning_content` 缺失时补 `reasoning`，`max_tokens`/`max_completion_tokens` 钳制到 65535），并对响应/SSE 帧做规范化（`reasoning`/`thinking` → 补 `reasoning_content`）。混合候选链中非 Ollama 尝试的请求字节必须逐字节不变；`upstream_body_bytes` 记录实际发送字节；面向客户端的归因保留请求名。
-- Cookie 用量为 opt-in 且仅手动：存储的网页会话 Cookie（与 Key 同级混淆设施，非 AEAD）仅用于抓取固定 `https://ollama.com/settings` 页（不重定向，15 秒超时，512KB 上限，进程级出站默认段）。解析锚定 `data-usage-track`/`data-usage-segment`/`data-model`/`data-requests`/`data-time`/`data-usage-window`；快照仅持久化脱敏 JSON，失败只更新状态且不动上次成功快照，`unauthorized` 表示会话过期。手动刷新 30 秒限速（成败都计）；**用量路径的任何失败绝不写推理冷却、绝不改变账号启用状态、绝不影响路由资格**。状态存于 `ollama_cloud_usage_state`（schema v36，随账号级联删除）。Cookie 与用量快照不进导出载荷；载荷结构与版本不变。
+- Cookie 用量为 opt-in 且仅手动：存储的网页会话 Cookie（与 Key 同级混淆设施，非 AEAD）仅用于抓取固定 `https://ollama.com/settings` 页（不重定向，15 秒超时，512KB 上限，进程级出站默认段）。解析锚定 `data-usage-track`/`data-usage-segment`/`data-model`/`data-requests`/`data-time`/`data-usage-window` 及轨道的 `aria-label`（现网页面使用裸 `data-usage-track` + `aria-label="Session|Weekly usage N% used"`、兄弟 `data-time` 重置时间戳，以及按模型的 `data-usage-segment` 按钮）；快照仅持久化脱敏 JSON，失败只更新状态且不动上次成功快照，`unauthorized` 表示会话过期。手动刷新 30 秒限速（成败都计）；**用量路径的任何失败绝不写推理冷却、绝不改变账号启用状态、绝不影响路由资格**。状态存于 `ollama_cloud_usage_state`（schema v36，随账号级联删除）。Cookie 与用量快照不进导出载荷；载荷结构与版本不变。
 - 别名追加守卫：目录刷新仅在剥除 `:` 标签后恰好命中一个目录 id 时，向 Go 拥有的别名（如共享词干）追加一个可路由 Ollama 映射；同词干多快照并存时该映射退出，别名仍由既有家族服务，管理员矩阵钉定会被后续刷新尊重。带日期标签的快照 id 是运行时目录数据，严禁写进代码。
 
 ## 用量同步
