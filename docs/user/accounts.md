@@ -2,12 +2,12 @@
 
 # Accounts
 
-Accounts is the tenant list. Every card binds one **Plan** (`provider_id` only)
-and, when the Plan demands it, one credential. Quota authority is Plan-specific:
+Accounts is the tenant list. A Provider and a Plan are the same product
+identity (`provider_id` only), and every card belongs to one Provider with one
+credential when that Provider requires it. Quota authority is Provider-specific:
 OpenCode Go counts usage by account **Key**, Zen Free shares free cooldown by
-egress IP, and Custom API keeps no provider-side quota — one of the three has
-to be the roommate who never buys milk. All cards share one manually persisted
-global order; capability filtering runs first, then strict priority, global
+egress IP, and Custom API keeps no provider-side quota. All cards share one
+manually persisted global order; capability filtering runs first, then strict priority, global
 sticky, and round-robin all read from that order. There is no per-model quota
 pool.
 
@@ -25,16 +25,16 @@ request logs accumulate against the public `$14 / $35 / $70` windows. Traffic
 outside OCG and unpriced rows are not included; manual calibration can correct
 the displayed baseline.
 
-The registry is sealed. Built-in Plan families are:
+The Adapter Registry is sealed. Built-in Provider families are:
 
-| Family | Plan | Live routing | Notes |
+| Family | Provider ID | Live routing | Notes |
 | --- | --- | --- | --- |
-| OpenCode Go | `opencode` / `go` | Yes | One officially distributable API key per card; managed signup remains Beta |
-| Zen Free | `opencode-zen-free` / `anonymous-free` | Yes | One credentialless, anonymous singleton; sortable and enableable, not deletable; quota shared by egress IP |
-| Command Code GOAT | `command-code` / `goat` | Yes | Public Provider catalog; GOAT preset models default on, additional models default off in the Providers matrix; no account-level GOAT/All or Max mode |
-| MiniMax CN Token Plan | `minimax` / `cn` | Yes | Dedicated `sk-cp` Key; fixed official Chat route, authenticated model directory, and manual official Token Plan usage refresh |
-| Kimi Code CN | `kimi` / `cn` | Yes | Dedicated Kimi Code Key; fixed official Chat route, authenticated model directory, and manual official weekly/rate-window usage refresh |
-| Custom API | `custom` / `api` | Yes | Trusted-administrator destination; one API URL, one account-wide upstream protocol, and public-name → upstream-ID mappings per account; common base URLs are completed automatically; new accounts default on; eligible public names appear on `/v1/models`; unpriced/unknown cost, no quota debit |
+| OpenCode Go | `opencode` | Yes | One officially distributable API key per card; managed signup remains Beta |
+| Zen Free | `opencode-zen-free` | Yes | One credentialless, anonymous singleton; sortable and enableable, not deletable; quota shared by egress IP |
+| Command Code GOAT | `command-code` | Yes | Public Provider catalog; GOAT preset models default on, additional models default off in the Providers matrix; no account-level GOAT/All or Max mode |
+| MiniMax CN Token Plan | `minimax` | Yes | Dedicated `sk-cp` Key; fixed official Chat and Messages routes, authenticated model directory, and manual official Token Plan usage refresh |
+| Kimi Code CN | `kimi` | Yes | Dedicated Kimi Code Key; fixed official Chat and Messages routes, authenticated model directory, and manual official weekly/rate-window usage refresh |
+| Custom API | `custom` | Yes | Trusted-administrator destination; one API URL, one account-wide upstream protocol, and public-name → upstream-ID mappings per account; common base URLs are completed automatically; new accounts default on; eligible public names appear on `/v1/models`; unpriced/unknown cost, no quota debit |
 
 ## Move a node configuration
 

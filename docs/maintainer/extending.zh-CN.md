@@ -8,13 +8,13 @@
 
 只用于 OCG 自己拥有完整路由、目录、协议、Key 与故障契约的上游家族。
 
-1. 在 `ocg-domain`（`ids.rs`、`provider.rs`）加入身份与目录事实，为每个 Provider/Offering 合约声明唯一静态 `contract_scope_id`，并穷尽扩展 `ProviderAdapterKind`。既有 scope id 是兼容身份，不能复用，也不能在运行时临时推导。Custom 保持 `ConfigurableHttp`，不是超类。
+1. 在 `ocg-domain`（`ids.rs`、`provider.rs`）加入身份与目录事实，穷尽扩展 `ProviderAdapterKind`，并保持每个静态 Provider 的合约范围稳定。Provider 与 Plan 是同一个 `provider_id` 身份；不得重新引入 Offering 维度或在运行时推导身份。Custom 保持 `ConfigurableHttp`，不是超类。
 2. 在 `ocg-domain::protocol` 加所需协议行，在 `ocg-gateway::alias` 加 Alias mapping。请求路径不会用来试探协议。
 3. 在 `ocg-core` 实现只返回 `AttemptSpec` 的 `resolve_route`。适配器不能持有 DB、`CoreState` 或原始 reqwest client。
 4. 控制面与路由语义未完成前保持 fail closed，完成后测试 domain、gateway 与 core 边界。
 
 Provider 注册表始终静态、密封；不提供插件加载器、动态库、用户脚本或运行时发现的适配器。
-同一 Provider 可以包含多个 Offering，但每个 Offering 都拥有独立合约范围、目录、证据与覆盖状态。
+每个静态 Provider 在自己的单一 `provider_id` 身份下拥有目录、证据与覆盖状态。
 
 ## 2. 应用连接器：本机 Desktop 能力
 

@@ -8,7 +8,7 @@ Use this guide when you want OCG Manager to route to another upstream service. T
 | --- | --- | --- |
 | Add a named Provider this node can reuse across accounts | **Providers** → **New Provider** (user-defined) | No |
 | Connect one OpenAI- or Anthropic-compatible endpoint on a single account | Add a **Custom API** account | No |
-| Ship a named Provider/Plan to every OCG Manager user | Add a sealed built-in Provider | Yes, reviewed code and tests |
+| Ship a named built-in Provider (the product's Provider/Plan identity) to every OCG Manager user | Add a sealed built-in Provider | Yes, reviewed code and tests |
 
 The **Adapter Registry** stays static and sealed. User-defined Providers are typed persisted definitions; every one binds the code-owned Configurable HTTP adapter. OCG never loads user scripts, plugins, or binaries. Unknown `provider_id` values fail closed unless they match a saved definition. Custom API remains a distinct account-owned path: it keeps Endpoint, protocol, and model mappings on the account card.
 
@@ -21,7 +21,7 @@ The **Adapter Registry** stays static and sealed. User-defined Providers are typ
 5. **Test model** is optional. Confirm the warning first: a real test can consume upstream quota or incur charges.
 6. Save. The write is one atomic `POST /providers` and does not require a successful probe.
 
-Edit replaces the whole Provider configuration through `PATCH /providers/{id}`. The Provider id is immutable. Changing none-auth to keyed auth requires an explicit replacement Key. Delete is allowed only after every referencing account is removed; there is no cascade.
+Edit replaces the whole Provider configuration through `PATCH /providers/{id}`. The Provider id is immutable. Changing no-auth to keyed auth requires an explicit replacement Key. Delete is allowed only after every referencing account is removed; there is no cascade.
 
 Provider-owned fields stay on **Providers**. Account **Key**, enablement, order, notes, cooldown, and tests stay on **Accounts**. User-defined Providers are always unpriced: no official usage, quota estimate, or pricing rows. Request logs still attribute provider, account, and model.
 
@@ -80,7 +80,7 @@ Each usable row needs a non-empty string `id`. For pagination, set `has_more: tr
 
 A built-in integration is appropriate only when the Provider needs product-owned identity, catalog, account lifecycle, routing, pricing/usage, or other semantics that Custom API cannot express. Start from the current code, not an older requirements document.
 
-1. Define stable Provider/Offering identities, the Plan row, credential/quota semantics, and an exhaustive `ProviderAdapterKind` mapping in `crates/ocg-domain/src/ids.rs` and `provider.rs`.
+1. Define one stable `provider_id`, its Provider row, credential/quota semantics, and an exhaustive `ProviderAdapterKind` mapping in `crates/ocg-domain/src/ids.rs` and `provider.rs`. Do not add a separate Offering or Plan identity: Provider and Plan are one product concept.
 2. Add only verified protocol facts to `crates/ocg-domain/src/protocol.rs`. Request routing must never probe a billable endpoint to guess a protocol.
 3. Add code-owned client Alias mappings in `crates/ocg-gateway/src/alias.rs`. Preserve exact upstream IDs and reject ambiguous raw IDs; a discovered row must not silently invent a public Alias.
 4. Implement the host route resolver in `ocg-core`. The adapter returns an `AttemptSpec`; database access, Key decryption, proxy selection, and outbound HTTP remain host-owned.

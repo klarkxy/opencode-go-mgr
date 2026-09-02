@@ -4,7 +4,7 @@
 
 ## 日志
 
-**日志** 视图默认打开 **请求日志**，它是 Gateway 转发请求和显式供应商协议探测的滚动记账本：时间戳、选中的 provider、route account、credential account、模型、状态码、上游错误（如果有），以及上游吐出 usage chunk 时的流式用量。探测行的 token 为零、费用不适用、不归因到客户端 Key，也不会出现在运行日志。账号选择前发生的已认证解析、校验或路由失败同样显示在这里，并采用“未解析/Gateway”归因；运行日志只保留进程与控制面事件。可按 provider、route account、credential account、模型、状态、时间范围与客户端 Key 筛选。它不会修你的提示词，但会告诉你这次是谁背的锅。每条存储行把请求身份与上游身份分开，没有 `requested_alias` 字段：
+**日志** 视图默认打开 **请求日志**，它是 Gateway 转发请求和显式供应商协议探测的滚动记账本：时间戳、选中的 provider、route account、credential account、模型、状态码、上游错误（如果有），以及上游返回 usage chunk 时的流式用量。探测行的 token 为零、费用不适用、不归因到客户端 Key，也不会出现在运行日志。账号选择前发生的已认证解析、校验或路由失败同样显示在这里，并采用“未解析/Gateway”归因；运行日志只保留进程与控制面事件。可按 provider、route account、credential account、模型、状态、时间范围与客户端 Key 筛选。每条存储行把请求身份与上游身份分开，没有 `requested_alias` 字段：
 
 - `requested_model` — 客户端发送的公开名称或 Alias
 - `resolved_alias` — 存在时解析出的公开 Alias

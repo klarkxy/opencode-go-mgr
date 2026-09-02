@@ -3,7 +3,7 @@
 # 发布流程
 
 1. 确定 `X.Y.Z`（或 `X.Y.Z-beta.N` 这类不可变 SemVer 预发布版本），同步修改 `package.json`、`src-tauri/tauri.conf.json`、 workspace `Cargo.toml`、`src-tauri/Cargo.toml`，以及 `compose.example.yaml` 的标题、主镜像与浏览器镜像默认值。
-2. 运行 `cargo check --workspace --all-targets` 刷新 `Cargo.lock`，再运行 `pnpm install --frozen-lockfile`、`cargo fmt --all -- --check`、 `pnpm run test`、`pnpm run design:lint`、`pnpm run contract:v3:check`、 `pnpm run release:check` 和 `pnpm run build`。提交预期的 lockfile 改动；这些改动应由 `cargo check` 与 `pnpm install` 自动生成。
+2. 运行 `cargo check --workspace --all-targets` 刷新 `Cargo.lock`，再运行 `pnpm install --frozen-lockfile`、`cargo fmt --all -- --check`、 `pnpm run test`、`pnpm run test:tooling`、`pnpm run design:lint`、`pnpm run contract:v3:check`、 `pnpm run release:check` 和 `pnpm run build`。提交预期的 lockfile 改动；这些改动应由 `cargo check` 与 `pnpm install` 自动生成。
 3. 与上一个公开 tag 比较，复核 diff 和当前平台的 `release/` payload，然后提交版本、lockfile、文档与 Release notes 改动。
 4. 先合并已经审查的改动，再在 `main` 的最终 commit 上执行 `git tag -a vX.Y.Z -m "OCG Manager vX.Y.Z"`（如为预发布，保留对应后缀）创建附注 tag 并推送。避免在之后还会 squash merge 的分支 commit 上打 tag。
 5. 等待 `quality`、`preflight`、全部原生矩阵 job、`draft-release`、 `verify-release` 和 `publish-release` 通过。确认公开的是同一个已验证 draft，再复核与组装产物逐名一致的附件集合、冒烟日志、平台警告，以及基于上一个 tag diff 编写的说明。
@@ -41,7 +41,7 @@
       Key，并实际启动 Claude Desktop 与 Gemini CLI 各完成一次文本和工具调用。
 - [ ] 覆盖 schema v16 迁移、schema v27（`access_keys`、pre-v3 备份 + SHA-256
       sidecar、删除 `sub_gateway_keys` 与 `accounts.usage_sync_*`、密文只校验
-      不重加密）、v29 SCNet 清理、v30/v31 合约兼容、v32 Custom 单协议转换、别名 / 上游日志身份、可选原生成本、历史 GOAT 验证状态统一为 `not_required`、Zen Free 模型
+      不重加密）、v29 SCNet 清理、v30/v31 合约兼容、v32 Custom 单协议转换、v33 上游模型身份、v34 CPA 单例状态、v35 Provider/Plan 身份迁移及其预检备份、别名 / 上游日志身份、可选原生成本、历史 GOAT 验证状态统一为 `not_required`、Zen Free 模型
       快照持久化、供应商合约范围 / 模型协议表、旧账号 `key + ready`、托管状态
       机（前进一格 / 回退更早步骤、不支持跳步）、Pending 路由隔离、邀请 URL 白
       名单与演示默认写回，以及 Key 验证的 `2xx`/`429`/`401`/`403`/网络/`5xx`

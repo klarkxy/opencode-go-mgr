@@ -11,9 +11,9 @@ Use this only for an OCG-owned upstream family with a complete routing,
 catalog, protocol, key, and failure contract.
 
 1. Add identities and catalog facts in `ocg-domain` (`ids.rs`, `provider.rs`),
-   declare one unique static `contract_scope_id` for every Provider/Offering
-   contract, and extend `ProviderAdapterKind` exhaustively. Existing scope ids
-   are compatibility identities; never reuse or derive them at runtime. Keep
+   extend `ProviderAdapterKind` exhaustively, and keep each static Provider's
+   contract scope stable. Provider and Plan are one `provider_id` identity;
+   do not add an Offering dimension or derive identities at runtime. Keep
    Custom as `ConfigurableHttp`, not a superclass.
 2. Add required protocol rows in `ocg-domain::protocol` and Alias mappings in
    `ocg-gateway::alias`. Never probe protocols on the request path.
@@ -24,8 +24,8 @@ catalog, protocol, key, and failure contract.
 
 The Provider registry remains static and sealed. There is no plugin loader,
 dynamic library, user script, or runtime-discovered adapter.
-Multiple Offerings may share a Provider identity, but each owns a distinct
-contract scope, catalog, evidence, and override state.
+Each static Provider owns its catalog, evidence, and override state under its
+single `provider_id` identity.
 
 ## 2. Application connector: local Desktop capability
 

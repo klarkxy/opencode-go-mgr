@@ -16,7 +16,9 @@
 
 ## 明确非目标
 
-- 动态 / 插件式供应商扩展、用户自定义适配器，或持有 SQLite、`CoreState`、原始 `reqwest::Client` 的适配器。
+- 动态适配器/插件加载、用户自定义适配器实现，或持有 SQLite、`CoreState`、原始
+  `reqwest::Client` 的适配器。类型化用户定义 Provider 仍受支持，但它只是绑定到
+  密封 Configurable HTTP 适配器的数据。
 - 远端节点同步、Admin API 或多租户控制面。
 - Tauri `invoke` 不是面板数据路径；WebView command 保持移除。
 - 不会在 `GET /v1/models` 或 `GET /dashboard/api/v3/application-models` 上做请求时上游发现。

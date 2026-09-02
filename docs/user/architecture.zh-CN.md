@@ -1,222 +1,83 @@
 [English](architecture.md)
 
-# 架构图
+# 架构
 
-这是一组单个本地节点的文字版图。按当前 HEAD：已上线路由是 OpenCode Go、Zen Free、Command Code GOAT、MiniMax CN Token Plan、Kimi Code CN、Custom API，以及你在 **供应商** 页创建的用户定义供应商。每张图下面链接到负责详情的章节；图与章节冲突时，以章节和代码为准。
+OCG Manager 是一个本地节点。Desktop、CLI 与 Docker 只是承载同一
+`ocg-core` 进程的不同 Host，不会形成多套控制面。默认监听地址为
+`127.0.0.1:9042`；没有远端同步、Admin API 或遥测。
 
-## 目录
+## 一个本地节点
 
-- [同一节点、同一端口](#同一节点同一端口)
-- [一次客户端请求](#一次客户端请求)
-- [Plan](#plan)
-- [面板、Key 与账号卡](#面板key-与账号卡)
-- [两份本地模型列表](#两份本地模型列表)
-- [协议转换](#协议转换)
-- [接下来读哪一章](#接下来读哪一章)
+[![OCG Manager 单节点架构](../diagrams/local-node.visual-check.1440x900.light.png)](https://klarkxy.github.io/opencode-go-mgr/diagrams/local-node/)
 
-## 同一节点、同一端口
+[在 GitHub Pages 打开交互图](https://klarkxy.github.io/opencode-go-mgr/diagrams/local-node/)可以切换主题、追踪关系或导出其他格式。
 
-桌面、CLI 与 Docker 只是同一份 `ocg-core` 进程的三种启动方式。默认绑定 `127.0.0.1:9042`。托盘应用用系统浏览器打开面板，不会通过 Tauri `invoke` 远程操控面板。没有远端同步、Admin API 或遥测。
+Dashboard 与推理入口共用 `9042`，但使用两类不同凭据。客户端 **Key** 用于 AI
+工具向 OCG Manager 鉴权；选定账号后，账号凭据只会发往该账号配置的上游，Zen
+Free 没有凭据。Vue SPA 通过 HTTP Dashboard V3 通信，不使用 Tauri `invoke`
+数据路径。
 
-```text
-   桌面托盘              CLI `serve`           Docker
-   (ocg-manager)      (ocg-manager-cli)   (ghcr.io/.../opencode-go-mgr)
-           \                  |                    /
-            \                 |                   /
-             +----------------+------------------+
-             |            ocg-core               |
-             |         127.0.0.1:9042            |
-             +----------------+------------------+
-                    /                    \
-                   /                      \
-        GET /dashboard/              推理入口
-        Vue 3 SPA                    /v1/chat/completions
-        （系统浏览器）                /v1/responses
-                                     /v1/messages
-                                     /v1/models
-                                     Gemini generateContent
-                                     /claude-desktop/v1/...
-                   \                      /
-                    \                    /
-             +----------------+------------------+
-             |         SQLite schema v35         |
-             |  桌面  ~/.ocg-mgr                 |
-             |  CLI   ~/.ocg-mgr-cli             |
-             +-----------------------------------+
-```
+## 请求生命周期
 
-安装、首个客户端、CLI 与 Docker：[安装](install.zh-CN.md)、
-[接入第一个客户端](first-client.zh-CN.md)、[CLI](cli.zh-CN.md)、
-[Docker](docker.zh-CN.md)。
+一次推理请求按固定顺序执行：
 
-## 一次客户端请求
+1. 使用 `access_keys` 中的客户端 **Key** 完成鉴权。
+2. 解析客户端协议，并解析 Alias、精确内置 raw ID、用户定义 Provider 公开模型，
+   或符合条件的 Custom 模型 ID。
+3. 物化兼容账号，再按卡片顺序应用严格优先、全局粘性或轮询策略。
+4. 由密封适配器构建一次尝试，解析所选账号凭据，并发送一次上游请求。请求路径
+   不会试探协议。
+5. 把响应或 SSE 流转换回客户端格式，随后记录请求身份、上游身份、用量与冷却状态。
 
-面板签发的 **Key** 让客户端接入本节点。选中账号的凭据才是本节点发给上游的东西——Zen Free 没有上游 Key。额度条只是警告，不会停流量；只有上游 `429` 会冷却一张卡。
+未知模型返回 `400`。有歧义的精确 raw ID 返回 `ambiguous_model_id`，不会调用
+上游。符合条件的发送前错误或 Provider 特定错误可以继续账号 fallback；有歧义或
+不安全的请求在账号选择前失败。
 
-```text
-  AI 客户端                         本节点                          Plan
-  ---------                         ------                          ----
-      |                                  |                              |
-      |  Key + 别名 / Custom ID          |                              |
-      |--------------------------------->|                              |
-      |                                  | 1. 校验 Key                  |
-      |                                  |    Bearer / x-api-key /      |
-      |                                  |    x-goog-api-key            |
-      |                                  | 2. 解析别名                  |
-      |                                  | 3. 挑选可用账号卡            |
-      |                                  | 4. 透传或转换协议            |
-      |                                  |----------------------------->|
-      |                                  |                              |
-      |                                  |<-----------------------------|
-      |                                  | 5. 转换响应                  |
-      |                                  | 6. 记录 requested_model、    |
-      |                                  |    resolved_alias、          |
-      |                                  |    upstream_model            |
-      |<---------------------------------|                              |
-```
+## 产品归属
 
-`GET /v1/models` 是本地列表，不会访问上游。未知模型名在 Chat、Responses、
-Messages 与 Gemini generate / stream 上均为 `400`。重叠的原始 ID 返回
-`400` `ambiguous_model_id`，且不会调用上游。
+| 界面 | 负责 | 不负责 |
+| --- | --- | --- |
+| **访问密钥** | 面向客户端的主 Key 与子 Key | 上游账号凭据 |
+| **账号** | 账号 Key、启停、顺序、备注、冷却与用量状态 | Provider 目录或共享协议合约 |
+| **供应商** | 内置目录、模型/协议合约、价格范围，以及用户定义 Provider 的 Endpoint/鉴权/映射 | Custom API 账号映射 |
+| **Custom API 账号** | 一个 API URL、一个账号级上游协议、公开模型 → 上游 ID 映射 | 动态适配器代码或共享 Provider 定义 |
+| **扩展 / CPA** | 一个经过批准的本机外部集成边界 | 通用插件或任意远端进程控制 |
+| **应用** | 客户端教程与可选本机 Desktop 连接器 | 第二个 Gateway 或远端配置服务 |
 
-鉴权、别名、选择与熔断：[Gateway 行为](gateway.zh-CN.md)、
-[路由](routing.zh-CN.md)。
+Adapter Registry 静态密封。用户定义 Provider 仅作为类型化数据持久化，并始终绑定
+Configurable HTTP。OCG Manager 不加载用户脚本、适配器插件或二进制。
 
-## Plan
+## 本地模型列表
 
-每张账号卡对应一个 Plan（只有 `provider_id`）。内置家族以及你创建的用户定义供应商均可路由。
+这些读取只使用本地状态，不会在请求时访问上游。目录刷新只能由 **供应商** 页显式触发。
 
-```text
-  已上线（可路由）
-  ----------------
-  OpenCode Go
-    官方 Key，/zen/go
-  Zen Free
-    无上游 Key
-    在供应商页刷新目录
-  Command Code GOAT
-    官方 Provider API；在供应商页刷新目录
-    GOAT 预置行默认开启；额外发现行默认关闭
-  MiniMax CN Token Plan
-    固定官方 Chat 路由；需认证的目录刷新
-  Kimi Code CN
-    固定官方 Chat 路由；需认证的目录刷新
-  Custom API
-    一个受信管理员 HTTP/HTTPS API URL：根地址、/v1 基址或兼容的完整 Endpoint
-    一个上游协议；鉴权自动推导
-  用户定义供应商
-    在供应商页保存类型化定义；绑定 Configurable HTTP
-    Endpoint/协议/鉴权/映射归供应商所有
-    账号 Key/启停/顺序留在账号页；价格与官方用量始终未知
+| Endpoint | 公布内容 |
+| --- | --- |
+| 已鉴权 `GET /v1/models` | 当前可路由的代码持有 Alias、已保存 Zen/Command/CN 映射、用户定义 Provider 公开模型，以及符合条件的 Custom 声明 ID |
+| `GET /dashboard/api/v3/application-models` | Go 可路由 Alias 与当前 Go 价格快照的交集；不含 Custom API、用户定义 Provider 与 CN Plan |
+| `GET /claude-desktop/v1/models` | 只公布三个 Claude Desktop 角色 Alias |
 
-
-  Custom API 生命周期
-
-    保存 / 更新  ->  pending 时也可启用
-           |
-           v
-    用第一个声明模型验证所选协议
-    （向解析后的推理 Endpoint 发送一次最小非流式请求；
-     须返回一个 2xx JSON object）
-           |
-           v
-    验证状态变为 verified
-    （账号可能已在路由中）
-
-  Key、API 地址、声明能力或协议变更
-  会使验证状态变为 pending，但保持该卡启用。
-```
-
-Zen Free 只有启用开关；不需要时直接关掉卡片。目录刷新在供应商页，不在账号卡上。账号与供应商见 [账号](accounts.zh-CN.md) 和 [供应商](providers.zh-CN.md)。
-
-## 面板、Key 与账号卡
-
-侧栏有八个核心视图，包含 **别名**。`browser` 是托管会话覆盖页。设置下方的可选 Extensions 分组提供本机 CPA 接入入口。SPA 读写 `/dashboard/api/v3`。回环监听默认跳过面板登录（带转发头时仍需登录）；客户端访问 `/v1` 仍然需要 Key。
-
-```text
-  Dashboard -> Access Keys -> Accounts -> Providers
-      ^                                      |
-      |                                      v
-  Settings <- Logs <- Applications <---------+
-
-  接入中心（Dashboard 首屏）
-    复制 API 根地址 / Key / 轮换当前 Key
-  Access Keys
-    创建、重命名、启用、删除、重置
-    主 Key 不可禁用、不可删除
-
-
-  两种密钥、两个方向
-
-    AI 客户端 --Key--> 本节点 --账号凭据--> Plan
-
-    Key            access_keys（当前 schema v35）
-                   主 Key + 可选子 Key（活跃上限 64）
-    账号凭据       Go Key、Custom Key，或 Zen Free（无）
-```
-
-唯一会返回 Key 明文的 V3 响应是 `GET /dashboard/api/v3/connection`。视图、CAS 与数据目录见 [管理面板](dashboard.zh-CN.md) 和 [数据与安全](data-security.zh-CN.md)。
-
-## 两份本地模型列表
-
-这两条 GET 都不会在请求时做上游发现。目录刷新必须由管理员在供应商页显式触发，不属于任何一条 GET。
-
-```text
-  GET /v1/models                         （客户端；需要 Key）
-    Go 表或密封 CN 映射授权且当前可路由的 Alias
-      ∪ 合格 Custom 声明 ID
-    保存行只激活代码持有的映射；未知行只保留 raw ID
-    合格 Custom = enabled + ready + 非空 Key（验证为可选）
-    Custom ID 不得抢走已公布的内置 Alias
-
-  GET /dashboard/api/v3/application-models   （面板会话）
-    Go 可路由别名 ∩ 当前 Go 价格快照
-    highspeed 变体继承基价行
-    空交集为 []
-    不含 Custom ID
-
-  GET /claude-desktop/v1/models
-    只公布三个角色别名（sonnet / opus / haiku）
-```
-
-应用选择器与客户端列表：[应用教程](applications.zh-CN.md)、
-[Gateway 行为](gateway.zh-CN.md)。
+保存目录行不会自行创建新的内置 Alias。未知行在代码分配 Alias 前只保留精确 raw
+pin；Custom ID 不能抢占已经公布的内置 Alias。
 
 ## 协议转换
 
-请求路径不会试探协议——避免双计费。Gemini 只是客户端格式；Gateway 不会把流量发到 Google。
+客户端可以使用 OpenAI Chat Completions、OpenAI Responses、Anthropic Messages、
+Gemini `generateContent` / `streamGenerateContent` 或 Claude Desktop 入口。客户端与
+上游协议组合同时受支持且启用时直接透传；否则整份请求与响应会转换到模型的 effective
+上游协议，再转换回来。Gemini 只是客户端格式，OCG Manager 不会把请求发送给 Google。
 
-```text
-  客户端线路
-    Chat Completions / Responses / Messages / Gemini generateContent
-           |
-           v
-  已解析别名并选中账号卡
-           |
-           +-- 客户端协议 ∈ supported 且已启用？ -- 是 --> 透传
-           |                                              |
-           否                                             |
-           v                                              |
-  把请求体转到该 Plan 的 preferred / 声明上游协议         |
-           |                                              |
-           +----------------------+-----------------------+
-                                  v
-                             上游 Plan
-                                  |
-                                  v
-                      把响应（或 SSE）转回客户端协议
-```
+完整推荐/支持矩阵和转换限制见[协议转换](protocol-conversion.zh-CN.md)。
 
-推荐/已验证协议表与转换边界：[协议转换](protocol-conversion.zh-CN.md)。
+## 继续阅读
 
-## 接下来读哪一章
-
-| 如果你要… | 打开 |
+| 任务 | 指南 |
 | --- | --- |
-| 安装与第一条 curl | [安装](install.zh-CN.md)、[接入第一个客户端](first-client.zh-CN.md) |
-| 额度条与真正的冷却 | [路由](routing.zh-CN.md) |
-| 出站代理模式 | [日志与设置](logs-settings.zh-CN.md) |
-| crate DAG、`host_router`、executor | [维护者架构](../maintainer/architecture.zh-CN.md) |
+| 安装并接入客户端 | [安装](install.zh-CN.md)、[首个客户端](first-client.zh-CN.md) |
+| 添加账号并排序 | [账号](accounts.zh-CN.md)、[路由](routing.zh-CN.md) |
+| 管理目录与合约 | [供应商](providers.zh-CN.md) |
+| 理解 Alias 与错误 | [Gateway](gateway.zh-CN.md) |
+| 查看 crate 与 Host 边界 | [维护者架构](../maintainer/architecture.zh-CN.md) |
 
 ---
 

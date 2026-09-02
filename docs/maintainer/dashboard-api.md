@@ -55,6 +55,25 @@ fallbacks, or recursive case conversion.
 handlers. Retired `/dashboard/api/...` REST paths are tombstoned in
 `host_router` before they reach `dashboard.rs`.
 
+## Settings mutation workflow
+
+[![Dashboard V3 settings mutation workflow](../diagrams/dashboard-v3-mutation.visual-check.1440x900.light.png)](https://klarkxy.github.io/opencode-go-mgr/diagrams/dashboard-v3-mutation/)
+
+[Open the interactive diagram on GitHub Pages](https://klarkxy.github.io/opencode-go-mgr/diagrams/dashboard-v3-mutation/).
+
+This sequence is specific to CAS-protected Settings writes; discovery,
+diagnostic, and read operations may skip CAS as described above. The client
+submits `expectedRevision` and `processGeneration`. A mismatch returns `409`;
+the client refreshes the tokens and affected resource, but does not replay the
+write automatically.
+
+After CAS succeeds, the Host persists the new settings and releases the
+settings lock. It rebinds the listener only when the port changed and a
+listener is running. If rebind fails, the request returns `500` with code
+`internal`. Compensation restores the previous port only when the live config
+still contains the failed committed port, so a later successful write is not
+overwritten.
+
 ## Retired V2 REST
 
 Protected Dashboard V2 REST is retired.

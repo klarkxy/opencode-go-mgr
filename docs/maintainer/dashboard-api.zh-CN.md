@@ -24,6 +24,16 @@
 
 `dashboard.rs` 提供 SPA 并保留 V2 鉴权与浏览器 WebSocket 处理器。已退役的 `/dashboard/api/...` REST 路径在到达 `dashboard.rs` 之前由 `host_router` 墓碑拦截。
 
+## Settings 变更流程
+
+[![Dashboard V3 Settings 变更流程](../diagrams/dashboard-v3-mutation.visual-check.1440x900.light.png)](https://klarkxy.github.io/opencode-go-mgr/diagrams/dashboard-v3-mutation/)
+
+[在 GitHub Pages 打开交互式流程图](https://klarkxy.github.io/opencode-go-mgr/diagrams/dashboard-v3-mutation/)。
+
+这条流程只描述受 CAS 保护的 Settings 写入；发现、诊断和读取操作可能按上文所述跳过 CAS。客户端提交 `expectedRevision` 与 `processGeneration`。令牌不匹配时返回 `409`；客户端刷新令牌与受影响资源，但不会自动重放写入。
+
+CAS 成功后，Host 先持久化新设置并释放设置锁。只有端口发生变化且监听器正在运行时才会重绑。若重绑失败，请求以 `internal` 代码返回 `500`。补偿逻辑仅在实时配置仍等于本次失败写入的端口时恢复旧端口，避免覆盖随后成功的写入。
+
 ## 已退役的 V2 REST
 
 受保护的 Dashboard V2 REST 已退役。

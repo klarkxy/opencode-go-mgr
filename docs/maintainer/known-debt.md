@@ -42,8 +42,10 @@
 
 ## Deliberate Non-Goals
 
-- Dynamic / plugin provider extension, user-defined adapters, or adapters
-  that own SQLite, `CoreState`, or a raw `reqwest::Client`.
+- Dynamic adapter/plugin loading, user-defined adapter implementations, or
+  adapters that own SQLite, `CoreState`, or a raw `reqwest::Client`. Typed
+  user-defined Provider definitions remain supported data bound to the sealed
+  Configurable HTTP adapter.
 - Remote node sync, an Admin API, or a multi-tenant control plane.
 - Tauri `invoke` as a dashboard data path; WebView commands stay removed.
 - Request-time upstream discovery on `GET /v1/models` or

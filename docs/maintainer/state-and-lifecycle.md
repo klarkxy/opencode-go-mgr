@@ -73,8 +73,22 @@ Managed setup may move **forward exactly one step** or **rewind to any
 earlier unfinished step**. Skipping forward is rejected; the setup API
 must not enter `ready` directly. A real key probe returning `2xx`
 transitions to `ready + enabled`; `429` also proves validity and records
-cooldown. `401`/`403`, network errors, and `5xx` remain at
+cooldown. Any other HTTP response—including redirects, `4xx` other than
+`429`, and `5xx`—plus network or timeout errors remains at
 `key_verification`.
+
+### Managed account setup lifecycle
+
+[![Managed account setup lifecycle](../diagrams/managed-account-lifecycle.visual-check.1440x900.light.png)](https://klarkxy.github.io/opencode-go-mgr/diagrams/managed-account-lifecycle/)
+
+[Open the interactive diagram on GitHub Pages](https://klarkxy.github.io/opencode-go-mgr/diagrams/managed-account-lifecycle/).
+
+The ordinary setup PATCH may advance exactly one step or return to an earlier
+unfinished step; it never writes `ready`. A separate key-verification request
+moves the account to `ready + enabled` on `2xx` or `429`. Invalid-key `4xx`
+responses and redirects keep the draft pending and return `400`; network,
+timeout, and `5xx` failures keep it pending and return `502`, so the user can
+retry or rewind.
 
 Official Go usage (`go_usage.rs`, `https://opencode.ai/zen/go/v1/usage`) is
 the calibration baseline; `usage_sync.rs` coordinates it. Manual
@@ -196,6 +210,13 @@ Historical versions still matter on upgrade:
   Custom rows choose Chat Completions, then Responses, then Messages, and are
   disabled/pending for administrator review while non-selected protocol state
   is removed in the same migration.
+- **v33:** adds non-null `account_model_capabilities.upstream_model`,
+  backfilled from `model_id`.
+- **v34:** adds the singleton CPA integration configuration.
+- **v35:** collapses Provider and Plan identity to `provider_id` after a
+  fail-closed preflight and rebuild; it also persists typed user-defined
+  Provider definitions. See [Storage and migrations](storage-migration.md)
+  for the pre-v35 backup and rollback procedure.
 
 GUI data directory: Windows `%USERPROFILE%\.ocg-mgr` or macOS/Linux
 `~/.ocg-mgr`. CLI default: `~/.ocg-mgr-cli`. Docker stores SQLite, keys,

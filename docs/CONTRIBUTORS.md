@@ -22,8 +22,9 @@ OCG Manager 由 [Klarkxy](https://github.com/klarkxy) 维护，也受益于社�
 - [#43](https://github.com/klarkxy/opencode-go-mgr/pull/43) (v1.7.0): multiple client access keys with per-key usage attribution, including the database-owned `access_keys` storage redesign.
 - [#46](https://github.com/klarkxy/opencode-go-mgr/pull/46) (v1.8.1): multi-architecture container releases — native `linux/amd64` and `linux/arm64` builds merged into one OCI index per tag.
 - [#48](https://github.com/klarkxy/opencode-go-mgr/pull/48): per-model list proxy routing, the fourth outbound proxy mode (allowlist/denylist by model).
+- [#53](https://github.com/klarkxy/opencode-go-mgr/pull/53): fixed cached-token totals in request logs so cache reads are not counted twice.
 
-贡献了多客户端 Key 与按 Key 用量归因（含 `access_keys` 数据库化重构）、 amd64/arm64 多架构容器发布，以及按模型名单的第四种出站代理模式。
+贡献了多客户端 Key 与按 Key 用量归因（含 `access_keys` 数据库化重构）、amd64/arm64 多架构容器发布、按模型名单的第四种出站代理模式，以及请求日志缓存 token 去重统计。
 
 ### [Mark Yan (@xyzs996)](https://github.com/xyzs996)
 

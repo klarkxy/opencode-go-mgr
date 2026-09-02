@@ -13,6 +13,21 @@
 - **尊重 `parking_lot::Mutex` 不可重入**。CLI 与 core 均使用。函数需要调用另一个持锁函数时，先 `drop` 外层 guard。
 - **风格与周围一致**。注释密度、命名、惯用法跟现有代码保持一致。
 
+## 文档归属与编辑
+
+- 当前行为以代码为准。修改运行时事实前，先按 `AGENTS.md` 中对应的权威来源指针
+  核对；不要把本页扩写成第二份项目事实清单。
+- 根 README 是落地页。详细能力、转换与集成材料放在 `docs/user/` 的对应章节；维护
+  流程放在 `docs/maintainer/`。
+- 用户可见工作流属于成对的 `docs/user/*.md` 和 `*.zh-CN.md` 指南。保持标题结构、
+  链接与 TOC 锚点同步；先写英文，再同步中文。
+- `DESIGN.md` 与 `src/theme.ts` 负责视觉 token 和面向用户的 **Key** 名称。包清单与
+  `compose.example.yaml` 负责发行版本钉；同一次发版变更中同步更新相应 Docker 示例。
+- 只描述当前行为和明确限制。已知缺口放入 `docs/user/limits.md` 或
+  `docs/maintainer/known-debt.md`；只有实际运行过相应检查，才能声称浏览器、可能
+  计费的推理或已安装桌面版可用。
+- 文档索引只做读者路由。事实归属和编辑约定放在本页，不再放进另一张很长的索引表。
+
 ---
 
 [维护者指南索引](../MAINTAINER.zh-CN.md) · [English](conventions.md) · [文档索引](../README.zh-CN.md)

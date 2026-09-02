@@ -9,7 +9,7 @@ and verify them against the release's `SHA256SUMS`:
 on macOS, or `sha256sum <file>` on Linux. Backups, restores, and removal are
 the kind of operations that are boring right up until they aren't.
 
-## Database Migration And Access Keys (Schema v33)
+## Database Migration And Access Keys (Schema v35)
 
 The database schema is **v35**; historical databases migrate in place on
 startup. Upgrading from a single-key version keeps your existing credential

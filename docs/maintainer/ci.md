@@ -4,15 +4,16 @@
 
 ## quality.yml — the reusable quality gate
 
-`.github/workflows/quality.yml` runs on pull requests and pushes to `main`.
-`release.yml` calls it once for production tag releases. Manual candidate
-dispatches skip it: they build a commit that already passed the gate. The gate
-is three parallel jobs so frontend failures surface without waiting for Rust,
-and Windows does not rebuild the dashboard:
+`.github/workflows/quality.yml` runs directly for pull requests and pushes to
+`main`, and is also reusable through `workflow_call`. `release.yml` invokes it
+for a production tag release, while manual candidate dispatches skip it. Its
+three jobs run in parallel, and Windows does not rebuild the dashboard:
 
-- **Web** — `pnpm run contract:v3:check`, Node tests (`scripts/*.test.mjs`
-  and `src/**/*.test.ts`), `pnpm run build:web` (TypeScript checking plus a
-  Vite production bundle), `DESIGN.md` lint, and Compose validation.
+- **Web** — `pnpm run contract:v3:check`, `pnpm run typecheck`,
+  `pnpm run test:web` (only `src/**/*.test.ts`), Vite production build, and
+  `DESIGN.md` lint, followed by `docker compose -f compose.example.yaml config
+  --quiet`. Release-tooling tests are deliberately separate under `pnpm run
+  test:tooling`.
 - **Rust** — `cargo fmt`, locked workspace tests, and Clippy. The desktop
   crate is excluded (`--exclude ocg-manager`): only it needs WebKit headers
   and a stub `dist/index.html`, and the Windows job already covers it, so
@@ -298,13 +299,32 @@ and app stores remain unsupported. Signed in-app update is limited to
 updater-enabled installed desktop builds; 1.4.1, development builds, CLI, and
 Docker keep the direct/manual path.
 
+## pages.yml — architecture gallery
+
+`.github/workflows/pages.yml` publishes the static `docs/` tree to GitHub
+Pages after relevant changes reach `main`; maintainers can also run it through
+`workflow_dispatch`. The site entry point is `docs/index.html`. Clean diagram
+URLs under `/diagrams/<name>/` wrap the checked-in Archify HTML, while PNG
+previews remain usable in GitHub and offline docs. `scripts/build-pages.mjs`
+stages the artifact and removes the optional Google Fonts links from the
+published copies; diagram source and checked-in validation artifacts stay
+unchanged.
+
+The workflow is independent from quality, release, and container jobs. It has
+only `contents: read`, `pages: write`, and `id-token: write`, deploys through
+the `github-pages` environment, and pins every official Pages action. The
+repository must select **GitHub Actions** as its Pages source before the first
+deployment. A successful workflow deployment is the live-site proof; a local
+HTML preview alone is not.
+
 ## CI Coverage Boundaries
 
-Pull requests run the three-job quality gate: frontend checks (including the
-Dashboard V3 contract), Linux workspace Rust tests and Clippy excluding the
-Tauri desktop crate, and the Windows job that covers desktop-crate compilation
-and unit tests including Windows-only Tauri behavior. Native installer and
-package smokes run only on manual release candidates or tag runs. The
+The reusable quality gate covers frontend checks (including the Dashboard V3
+contract), Linux workspace Rust tests and Clippy excluding the Tauri desktop
+crate, and Windows desktop-crate compilation and unit tests. It runs directly
+for pull requests and `main` pushes, and is called by production tag releases;
+native installer and package smokes run only on manual release candidates or
+tag runs. The
 container workflow covers `linux/amd64` and `linux/arm64`, each built on its
 native runner and smoke-tested on amd64 only; it runs after a release is
 published or is manually dispatched.

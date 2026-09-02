@@ -2,7 +2,9 @@
 
 # Connect Your First Client
 
-Once the gateway is running, connecting a client is mostly a copy-paste exercise — the hard part is pretending you understand why the base URL ends in `/v1`.
+Once the gateway is running, connecting a client is mostly a copy-and-paste
+task. Use the exact base URL shown in Connection Center; most OpenAI-compatible
+clients expect the trailing `/v1`.
 
 1. In **Accounts**, add an OpenCode Go account with an officially distributable
    API key. The login account is optional; when entered first, it is copied

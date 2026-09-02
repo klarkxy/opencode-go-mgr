@@ -2,38 +2,36 @@
 
 # OCG Manager
 
-A local gateway that keeps your provider API keys in one SQLite database and
-speaks five client protocols on one port (`http://127.0.0.1:9042`) — so every
-AI tool on your machine can stop pretending it has its own key manager.
+A local gateway that keeps provider credentials in one SQLite database and
+serves five client protocols on one port (`http://127.0.0.1:9042`). Your local
+AI tools share routing and access control instead of maintaining a separate
+provider setup in every client.
 
-Each account card binds one Plan (provider/offering) and, when the Plan needs
-one, one credential. Clients speak OpenAI, Anthropic, Gemini, or Claude
-Desktop and send local aliases; the gateway converts each request to the
-Plan's upstream protocol and the answer back. Live routing: OpenCode Go,
-Zen Free, Command Code GOAT, MiniMax CN Token Plan, Kimi Code CN, and Custom
-API. No telemetry, no remote sync — your keys never leave the machine.
-
-<p align="center">
-  <a href="https://github.com/klarkxy/opencode-go-mgr">
-    <img src="assets/star.webp" alt="Star this repository on GitHub" width="420">
-  </a>
-</p>
+Each account belongs to one Provider/Plan (`provider_id`) and, when required,
+one credential. Clients send local aliases; the gateway converts requests to
+the Plan's upstream protocol and converts responses back. Built-in routes cover
+OpenCode Go, OpenCode Zen Free, Command Code GOAT, MiniMax CN Token Plan, Kimi
+Code CN, and Custom API. Typed user-defined Providers use Configurable HTTP
+without loading plugin code; CPA is an optional local Extension. OCG Manager
+has no telemetry or remote sync.
 
 ## Highlights
 
 - **One port, five wire formats** — OpenAI Chat Completions, OpenAI Responses,
   Anthropic Messages, Gemini `generateContent` / `streamGenerateContent`, and
-  Claude Desktop. Your clients never learn which one the upstream wanted.
+  Claude Desktop.
 - **Drag to reroute** — account cards persist one global order; strict
   priority, sticky, and round-robin reuse it after capability filtering.
-- **Quota bars are warnings, not walls** — 5-hour / weekly / monthly usage is
-  a local estimate. A full bar stops nothing; only an upstream `429` cools an
-  account down.
-- **17 client guides** — copy-ready snippets for Claude Code, Codex, Gemini
-  CLI, and 14 other tools.
+- **Quota bars are warnings, not walls** — local estimates never stop traffic;
+  only an upstream `429` cools an account down.
 - **Desktop, CLI, Docker** — a Tauri v2 tray app, `ocg-manager-cli`, and
-  `ghcr.io/klarkxy/opencode-go-mgr`. Installed desktops update themselves,
-  signed, from Settings.
+  `ghcr.io/klarkxy/opencode-go-mgr` for local operation.
+
+## Architecture At A Glance
+
+[![OCG Manager local-node architecture](https://klarkxy.github.io/opencode-go-mgr/diagrams/local-node.visual-check.1440x900.light.png)](https://klarkxy.github.io/opencode-go-mgr/diagrams/local-node/)
+
+[Explore all interactive architecture and workflow diagrams](https://klarkxy.github.io/opencode-go-mgr/).
 
 ## Download
 
@@ -50,8 +48,7 @@ Linux):
 | Linux x64 | `ocg-manager_<version>_linux-x64.AppImage` and `.deb` | `ocg-manager-cli_<version>_linux-x64.tar.gz` |
 
 Keep `dist/` beside the CLI executable, or `serve` has no dashboard to serve.
-Platform caveats (SmartScreen, Gatekeeper, no ARM64 / RPM / Snap / stores):
-[User guide](docs/user/install.md).
+Platform caveats: [install guide](docs/user/install.md).
 
 ## Quick Start
 
@@ -60,12 +57,11 @@ Gateway: http://127.0.0.1:9042/v1
 Auth:    Authorization: Bearer <key>
 ```
 
-1. Install and launch. The dashboard opens in your system browser once the
+1. Install and launch. The dashboard opens in your system browser when the
    gateway is ready; the tray icon brings it back.
-2. In **Accounts**, import an OpenCode Go account key, pick credential-free
-   Zen Free, or add a Custom API destination (declare protocols and models,
-   then enable — verification is optional). Copy the
-   **Key** — the only secret your client ever sees.
+2. In **Accounts**, add a Plan and its credential when needed. Copy a client
+   **Key** from **Access Keys**; it is the only OCG Manager credential your
+   client needs.
 3. Point your client at `http://127.0.0.1:9042/v1`. **Applications** has
    per-client setup guides.
 
@@ -76,59 +72,33 @@ curl http://127.0.0.1:9042/v1/chat/completions \
   -d '{"model":"glm-5.2","messages":[{"role":"user","content":"hello"}],"stream":true}'
 ```
 
-Install details, per-protocol first-client checks, backup, and upgrades:
-[User guide](docs/USER.md).
-
-## Add Your Provider Or Application
-
-- **Another upstream API:** [Add a Provider](docs/user/add-provider.md) explains the no-code Custom API path and the reviewed built-in Provider path, including URL resolution, authentication, model discovery, and inference contracts.
-- **Another client application:** [Add an Application](docs/user/add-application.md) lists every Gateway interface and explains how to contribute a guide or an optional local Desktop connector.
+Install details, first-client checks, backup, and upgrades: [User guide](docs/USER.md).
 
 ## Docker
 
-Save [`compose.example.yaml`](compose.example.yaml) as `compose.yaml` and run:
+Run it with the published image or from source; browser sidecar, backup, HTTPS,
+image pins, and Compose instructions are in the [Docker guide](docs/user/docker.md).
 
-```bash
-docker compose pull
-docker compose up -d --no-build
-```
+## Preferred Protocol Groups
 
-Image: `ghcr.io/klarkxy/opencode-go-mgr` (`linux/amd64, linux/arm64`,
-anonymous pull). Open `http://127.0.0.1:9042/dashboard/` — bare `/` is not
-the dashboard. Browser sidecar, backup, HTTPS, image pins, source builds:
-[User guide — Docker](docs/user/docker.md).
+OpenCode Go models have a preferred upstream protocol. Matching supported
+client protocols pass through; other supported clients are converted. The gateway never probes protocols on a request path.
 
-## Models
-
-Each OpenCode Go model has a hardcoded **preferred** upstream protocol and a
-probed **supported** set: matching client protocols pass through, the rest
-get converted. The gateway never probes at request time — that could
-double-bill.
-
-| Preferred upstream | Models |
+| Preferred upstream | Group |
 | --- | --- |
-| OpenAI Chat Completions | `glm-5.3`, `glm-5.2`, `glm-5.1`, `glm-5`, `kimi-k3`, `kimi-k2.7-code`, `kimi-k2.6`, `kimi-k2.5`, `deepseek-v4-pro`, `deepseek-v4-flash`, `mimo-v2.5`, `mimo-v2.5-pro`, `hy3`, `ox-alpha-free` |
-| OpenAI Responses | `grok-4.5`, `gpt-5.6-luna`, `muse-spark-1.2`, `muse-spark-1.2-contributor` |
-| Anthropic Messages | `minimax-m3`, `minimax-m2.7`, `minimax-m2.7-highspeed`, `minimax-m2.5`, `minimax-m2.5-highspeed`, `qwen3.8-max`, `qwen3.7-max`, `qwen3.7-plus`, `qwen3.6-plus`, `qwen3.5-plus` |
+| OpenAI Chat Completions | General and free OpenCode Go models |
+| OpenAI Responses | Reasoning and contributor models |
+| Anthropic Messages | MiniMax and Qwen models |
 
-Yes, `ox-alpha-free` says `free` and still rides `/zen/go` — naming is hard.
-Zen Free has no fixed list: an administrator refreshes the official catalog
-and the last good snapshot wins. Gemini is a client format only; nothing is
-sent to Google. Passthrough matrix, capabilities, and conversion limits:
-[model capabilities](docs/user/applications.md) and
+Zen Free uses a saved official catalog snapshot. Gemini is a client format, not
+an upstream destination. Complete model, capability, and conversion tables are in [model capabilities](docs/user/applications.md) and
 [protocol conversion](docs/user/protocol-conversion.md).
 
-## Documentation
+## Next
 
-| Audience | English | 简体中文 |
-| --- | --- | --- |
-| End users | [User guide](docs/USER.md) | [用户指南](docs/USER.zh-CN.md) |
-| Maintainers | [Maintainer guide](docs/MAINTAINER.md) | [维护者指南](docs/MAINTAINER.zh-CN.md) |
-| Policy | [Anti-abuse statement](docs/OPENCODE_GO_ANTI_ABUSE.md) | [防滥用声明](docs/OPENCODE_GO_ANTI_ABUSE.zh-CN.md) |
-| Index | [docs/](docs/README.md) | [文档索引](docs/README.zh-CN.md) |
-
-Also: [Contributors](docs/CONTRIBUTORS.md), [DESIGN.md](DESIGN.md),
-[AGENTS.md](AGENTS.md).
+[User guide](docs/USER.md) · [Maintainer guide](docs/MAINTAINER.md) ·
+[Documentation index](docs/README.md) · [Contributors](docs/CONTRIBUTORS.md) ·
+[DESIGN.md](DESIGN.md) · [AGENTS.md](AGENTS.md)
 
 ## Community
 
@@ -137,17 +107,6 @@ Join the OCG Manager QQ group: **1104321231**.
 <p align="center">
   <img src="assets/qq-group.png" alt="OCG Manager QQ group QR code" width="360" />
 </p>
-
-## Development
-
-```bash
-pnpm install
-pnpm run dev
-```
-
-Quit the release tray app first — the single-instance lock and port `9042`
-don't share. Checks, builds, and the release pipeline:
-[Maintainer guide](docs/MAINTAINER.md).
 
 ## License
 

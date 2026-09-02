@@ -6,7 +6,7 @@
 
 ## 新增集成
 
-- [新增供应商](user/add-provider.zh-CN.md) — 通过 Custom API 接入兼容上游，或贡献一个具备完整 HTTP 与路由契约的密封内置供应商。
+- [新增供应商](user/add-provider.zh-CN.md) — 创建用户定义供应商、通过 Custom API 接入单个兼容上游，或贡献一个具备完整 HTTP 与路由契约的密封内置供应商。
 - [新增应用](user/add-application.zh-CN.md) — 把未收录客户端接到 Gateway、贡献应用教程，或新增可选的本机 Desktop 连接器。
 
 ## 章节

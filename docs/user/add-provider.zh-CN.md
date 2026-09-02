@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | 给本节点增加可跨账号复用的具名供应商 | **供应商** → **新建供应商**（用户定义） | 否 |
 | 给一张账号接入 OpenAI 或 Anthropic 兼容端点 | 新增 **Custom API** 账号 | 否 |
-| 让所有 OCG Manager 用户获得一个具名 Provider/Plan | 新增密封的内置供应商 | 是，需要经过审查的代码与测试 |
+| 让所有 OCG Manager 用户获得一个具名内置 Provider（产品中的 Provider/Plan 身份） | 新增密封的内置供应商 | 是，需要经过审查的代码与测试 |
 
 **适配器注册表**保持静态密封。用户定义供应商是类型化的持久定义；每一条都绑定代码持有的 Configurable HTTP 适配器。OCG 从不加载用户脚本、插件或二进制。未知 `provider_id` 除非匹配已保存的定义，否则 fail closed。Custom API 仍是独立的账号所有路径：Endpoint、协议和模型映射留在账号卡上。
 
@@ -80,7 +80,7 @@ OCG 根据协议派生鉴权。它不会同时发送两类鉴权头，不会在 
 
 只有当供应商需要产品持有的身份、目录、账号生命周期、路由、价格/用量或 Custom API 无法表达的其他语义时，才适合新增内置集成。以当前代码为准，不要从旧需求文档推断实现。
 
-1. 在 `crates/ocg-domain/src/ids.rs` 与 `provider.rs` 定义稳定的 Provider 身份、Plan 行、凭据/额度语义，并穷尽扩展 `ProviderAdapterKind` 映射。
+1. 在 `crates/ocg-domain/src/ids.rs` 与 `provider.rs` 定义一个稳定的 `provider_id`、对应 Provider 行、凭据/额度语义，并穷尽扩展 `ProviderAdapterKind` 映射。不要新增独立 Offering 或 Plan 身份：Provider 与 Plan 是同一个产品概念。
 2. 只把已经验证的协议事实加入 `crates/ocg-domain/src/protocol.rs`。请求路由绝不能通过可计费端点猜测协议。
 3. 在 `crates/ocg-gateway/src/alias.rs` 添加由代码持有的客户端 Alias 映射。保留准确上游 ID，拒绝有歧义的 raw ID；发现的新目录行不能擅自创造公开 Alias。
 4. 在 `ocg-core` 实现宿主路由 resolver。适配器只返回 `AttemptSpec`；数据库访问、Key 解密、代理选择和出站 HTTP 继续由宿主持有。

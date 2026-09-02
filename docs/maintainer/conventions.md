@@ -29,6 +29,27 @@
 - **Match the surrounding style.** Same comment density, naming, and idiom as
   the existing code.
 
+## Documentation ownership and editing
+
+- Code is authoritative for current behavior. Before changing a runtime fact,
+  follow the relevant source-of-truth pointer in `AGENTS.md`; do not turn this
+  page into a second project-fact inventory.
+- The root README is a landing page. Keep detailed capability, conversion, and
+  integration material in the matching chapters under `docs/user/`; keep
+  maintenance procedures in `docs/maintainer/`.
+- User-visible workflows belong to paired `docs/user/*.md` and
+  `*.zh-CN.md` guides. Keep their heading structure, links, and TOC anchors
+  aligned; write English first, then synchronize Chinese.
+- `DESIGN.md` and `src/theme.ts` own visual tokens and the user-facing **Key**
+  name. Package manifests and `compose.example.yaml` own release version pins;
+  update matching Docker examples in the same release change.
+- Describe current behavior and explicit limits only. Put known gaps in
+  `docs/user/limits.md` or `docs/maintainer/known-debt.md`, and claim browser,
+  billable inference, or installed-desktop behavior only when that exact check
+  was run.
+- Keep the documentation index as an audience router. Its source ownership and
+  editing guidance belongs here, not in another long index table.
+
 ---
 
 [Maintainer guide index](../MAINTAINER.md) · [简体中文](conventions.zh-CN.md) · [Docs index](../README.md)

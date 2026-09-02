@@ -45,7 +45,7 @@ ocg-manager/
 Workspace members are declared in the root `Cargo.toml`: `ocg-domain`,
 `ocg-gateway`, `ocg-infra`, `ocg-core`, `ocg-cli`, `ocg-browser-worker`,
 `src-tauri` (package `ocg-manager`). Binaries: `ocg-manager-cli` and the
-Tauri app. Current workspace version is `2.0.0`; `rust-version` is `1.85.0`;
+Tauri app. Current workspace version is `2.1.0`; `rust-version` is `1.85.0`;
 edition is `2024`.
 
 The production dashboard uses HTTP Dashboard V3 (`src/api/dashboard-v3.ts`

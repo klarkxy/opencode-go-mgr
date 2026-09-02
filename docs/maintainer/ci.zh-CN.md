@@ -4,12 +4,11 @@
 
 ## quality.yml —— 可复用质量门
 
-`.github/workflows/quality.yml` 在 PR 和 `main` push 上自动运行。
-`release.yml` 只在生产 tag 发布时调用一次；手动候选构建跳过它，因为候选构建的
-commit 已经在 PR/main 上通过质量门。质量门拆成三个并行 job，前端失败不必等
-Rust，Windows 也不必重做 dashboard 构建：
+`.github/workflows/quality.yml` 会直接在 pull request 与 `main` push 上运行，也可通过
+`workflow_call` 复用。`release.yml` 只在生产 tag 发布时调用它；手动候选构建跳过。
+门禁由三条并行 job 组成，前端失败不必等 Rust，Windows 也不必重做 dashboard 构建：
 
-- **Web** —— `pnpm run contract:v3:check`、Node 测试（`scripts/*.test.mjs` 与 `src/**/*.test.ts`）、`pnpm run build:web`（TypeScript 检查 + Vite 生产构建）、`DESIGN.md` lint 与 Compose 校验。
+- **Web** —— `pnpm run contract:v3:check`、`pnpm run typecheck`、`pnpm run test:web`（只跑 `src/**/*.test.ts`）、Vite 生产构建、`DESIGN.md` lint，以及 `docker compose -f compose.example.yaml config --quiet`。发版工具测试有意单独放在 `pnpm run test:tooling`。
 - **Rust** —— `cargo fmt`、锁定依赖的 workspace 测试与 Clippy。桌面 crate 被排除（`--exclude ocg-manager`）：只有它需要 WebKit 头文件和占位 `dist/index.html`，而 Windows job 已经覆盖它，所以这个 leg 不安装任何系统包。`src-tauri` 的 Linux 编译覆盖由 release 构建矩阵承担。
 - **Windows Tauri** —— 对 `ocg-manager` 跑 `cargo test --lib`/`clippy`，用占位 `dist/index.html` 满足 tauri-build。这是质量门中唯一编译桌面 crate 的 job，同时覆盖 Windows 专属自动启动，不装 pnpm 也不跑 Vite。
 
@@ -198,13 +197,25 @@ provenance statement；项目当前没有另加独立 Cosign 镜像签名。
 的应用内升级只用于支持升级的已安装桌面版；开发构建、CLI、Docker 仍走直接/手动路
 径。
 
+## pages.yml —— 架构图展厅
+
+`.github/workflows/pages.yml` 会在相关变更进入 `main` 后，把静态 `docs/` 目录发布到
+GitHub Pages；维护者也可通过 `workflow_dispatch` 手工运行。站点入口是
+`docs/index.html`。`/diagrams/<name>/` 下的无扩展名 URL 包装已检入的 Archify
+HTML；PNG 预览仍可在 GitHub 与离线文档中使用。`scripts/build-pages.mjs` 负责暂存
+产物，并从发布副本移除可选的 Google Fonts 链接；图源与已检入验证产物保持不变。
+
+该工作流与质量、发布、容器工作流相互独立，只持有 `contents: read`、`pages: write`
+与 `id-token: write`，通过 `github-pages` environment 部署，并固定所有官方 Pages
+Action。首次部署前，仓库必须把 Pages Source 设为 **GitHub Actions**。只有成功的工作流
+部署才证明在线站点可用，本地打开 HTML 不算上线验证。
+
 ## CI 覆盖边界
 
-PR 自动运行三路并行质量门：前端检查（含 Dashboard V3 契约）、Linux workspace Rust
-测试与 Clippy（排除 Tauri 桌面 crate），以及覆盖桌面 crate 编译和单测（含 Windows
-专属 Tauri 行为）的 Windows job。原生安装包与打包冒烟只在手动候选或 tag 流程运
-行。容器工作流覆盖 `linux/amd64` 与 `linux/arm64`，各自在原生 runner 上构建且仅
-amd64 冒烟；它在 Release 发布后或手动触发时运行。
+可复用质量门覆盖前端检查（含 Dashboard V3 契约）、Linux workspace Rust 测试与 Clippy（排除
+Tauri 桌面 crate），以及 Windows 上桌面 crate 的编译和单元测试。它会直接在 PR 与 `main`
+push 上运行，也会由生产 tag 发布调用；原生安装包与打包冒烟只在手动候选或 tag 流程运行。
+容器工作流覆盖 `linux/amd64` 与 `linux/arm64`，各自在原生 runner 上构建且仅 amd64 冒烟；它在 Release 发布后或手动触发时运行。
 
 CI 不操作真实桌面 UI，也不启动真实 Claude Desktop 或 Gemini CLI，不测试备份恢复、
 数据库降级、迁移回滚、真实上游账号或真实 Gateway 请求。Rust 测试覆盖 Gemini/Claude

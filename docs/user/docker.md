@@ -6,12 +6,11 @@ OCG Manager runs headlessly in Docker, serving the same dashboard and gateway
 on port `9042` without a tray icon to click. Pull the image from GHCR
 anonymously — it ships `linux/amd64` and `linux/arm64`, and Docker picks the
 right variant. Save the release's `compose.example.yaml` as `compose.yaml`,
-add `.env` if you want, and run the commands below. Or use a checkout of the
-matching tag. It is the only version that does not complain when you close
-your laptop lid.
+add `.env` if needed, and run the commands below. You can also use a checkout
+of the matching tag.
 
 ```bash
-git clone --branch v2.0.0 --depth 1 https://github.com/klarkxy/opencode-go-mgr.git
+git clone --branch v2.1.0 --depth 1 https://github.com/klarkxy/opencode-go-mgr.git
 cd opencode-go-mgr
 cp .env.example .env
 # PowerShell: Copy-Item .env.example .env
@@ -28,7 +27,7 @@ Image tags move; decide how pinned you want to be.
 - The checkout's `compose.yaml` defaults to `latest`; the Release
   `compose.example.yaml` pins its matching full version.
 - For repeatable production deployments, set `OCG_IMAGE` in `.env` to a full
-  release tag such as `ghcr.io/klarkxy/opencode-go-mgr:2.0.0`.
+  release tag such as `ghcr.io/klarkxy/opencode-go-mgr:2.1.0`.
 - Full-version and `sha-<commit>` tags identify one release and are intended
   not to move; `1.5` and `latest` do. Only a digest such as
   `ghcr.io/klarkxy/opencode-go-mgr@sha256:...` is truly immutable.
@@ -211,13 +210,13 @@ provenance, and a GitHub signed provenance attestation. Inspect and verify a
 release with:
 
 ```bash
-docker buildx imagetools inspect ghcr.io/klarkxy/opencode-go-mgr:2.0.0
-docker buildx imagetools inspect ghcr.io/klarkxy/opencode-go-mgr-browser:2.0.0
+docker buildx imagetools inspect ghcr.io/klarkxy/opencode-go-mgr:2.1.0
+docker buildx imagetools inspect ghcr.io/klarkxy/opencode-go-mgr-browser:2.1.0
 gh attestation verify \
-  oci://ghcr.io/klarkxy/opencode-go-mgr:2.0.0 \
+  oci://ghcr.io/klarkxy/opencode-go-mgr:2.1.0 \
   --repo klarkxy/opencode-go-mgr
 gh attestation verify \
-  oci://ghcr.io/klarkxy/opencode-go-mgr-browser:2.0.0 \
+  oci://ghcr.io/klarkxy/opencode-go-mgr-browser:2.1.0 \
   --repo klarkxy/opencode-go-mgr
 ```
 

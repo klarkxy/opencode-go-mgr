@@ -4,7 +4,7 @@
 
 OCG Manager speaks five client protocols on one port, then translates each
 request into whatever the upstream Plan actually understands. The conversion
-layer is deliberately incurious: it resolves the Alias, checks account
+layer is deterministic: it resolves the Alias, checks account
 eligibility, applies the adapter ceiling and saved provider contract, checks
 the per-model/per-protocol effective state, and only then passthroughs or
 converts. A force_off or globally closed protocol wins — even if the model
@@ -19,23 +19,25 @@ effectively enabled, request and response pass through. Otherwise the gateway
 converts the **request body** to the preferred upstream protocol and the
 **response body** — or SSE stream — back to the client protocol. Custom API
 does the same to the account's declared upstream protocol, then honors that
-endpoint's contract and per-model overrides. Conversion covers text, system instructions, images,
-tool calls and results, reasoning content, completion status, errors, and
-usage fields. `glm-5.2` passthroughs Chat, Responses, and Messages;
-`grok-4.5` is Responses-only and converts Chat / Messages / Gemini entries;
-`gpt-5.6-luna` prefers Responses but also passthroughs Chat; `glm-5.3` is
-Chat-only.
+endpoint's contract and per-model overrides. Conversion covers text, system
+instructions, images, tool calls and results, reasoning content, completion
+status, errors, and usage fields. `grok-4.6`, `grok-4.5`, and
+`gpt-5.6-luna` are Responses-only; `glm-5.3` and `glm-5.2` are Chat-only.
+Other client formats, including Gemini, convert instead of triggering an
+upstream protocol trial.
 
 | Preferred upstream | Models |
 | --- | --- |
-| OpenAI Chat Completions | `glm-5.3`, `glm-5.2`, `glm-5.1`, `glm-5`, `kimi-k3`, `kimi-k2.7-code`, `kimi-k2.6`, `kimi-k2.5`, `deepseek-v4-pro`, `deepseek-v4-flash`, `mimo-v2.5`, `mimo-v2.5-pro`, `hy3`, `ox-alpha-free`, `big-pickle`, `mimo-v2.5-free`, `hy3-free`, `deepseek-v4-flash-free`, `ling-3.0-flash-free`, `laguna-s-2.1-free`, `longcat-2.0-free`, `north-mini-code-free`, `nemotron-3-ultra-free`, `nemotron-3.5-lightning-free` |
-| OpenAI Responses | `grok-4.5`, `gpt-5.6-luna`, `muse-spark-1.2`, `muse-spark-1.2-contributor`, `muse-spark-1.2-contributor-free` |
-| Anthropic Messages | `minimax-m3`, `minimax-m2.7`, `minimax-m2.7-highspeed`, `minimax-m2.5`, `minimax-m2.5-highspeed`, `qwen3.8-max`, `qwen3.7-max`, `qwen3.7-plus`, `qwen3.6-plus`, `qwen3.5-plus` |
+| OpenAI Chat Completions | `glm-5.3-flash`, `glm-5.3`, `glm-5.2`, `glm-5.1`, `glm-5`, `kimi-k3`, `kimi-k2.7-code`, `kimi-k2.6`, `kimi-k2.5`, `deepseek-v4-pro`, `deepseek-v4-flash`, `deepseek-v4-flash-vision-exp`, `mimo-v2.5`, `mimo-v2.5-pro`, `hy3`, `longcat-2.0`, `ox-alpha-free`, `big-pickle`, `hy3-free`, `deepseek-v4-flash-free`, `mimo-v2.5-free`, `ling-3.0-flash-free`, `laguna-s-2.1-free`, `longcat-2.0-free`, `north-mini-code-free`, `nemotron-3-ultra-free`, `nemotron-3.5-lightning-free`, `ling-3.0-flash-fin-free`, `hy4-preview` |
+| OpenAI Responses | `grok-4.6`, `grok-4.5`, `gpt-5.6-luna`, `muse-spark-1.2`, `muse-spark-1.2-contributor`, `muse-spark-1.2-contributor-free` |
+| Anthropic Messages | `minimax-m3`, `minimax-m2.7`, `minimax-m2.7-highspeed`, `minimax-m2.5`, `minimax-m2.5-highspeed`, `qwen3.8-max`, `qwen3.8-flash`, `qwen3.7-max`, `qwen3.7-plus`, `qwen3.6-plus`, `qwen3.5-plus` |
 
-Passthrough matrix (live test-account probe, 2026-08-14). ✓ = client protocol
-is forwarded as-is; empty = converted to the model's preferred protocol.
-Source of truth: `MODEL_PROTOCOLS` in
-`crates/ocg-domain/src/protocol.rs`.
+Passthrough matrix (checked-in official baseline, 2026-09-01). ✓ = the client
+protocol is forwarded as-is; empty = the baseline has no direct-passthrough
+evidence for that protocol. Provider catalogs and effective contracts still
+decide whether the model is routeable; a known but inadmissible model is
+rejected locally rather than converted or sent upstream. Source of truth:
+`MODEL_PROTOCOLS` in `crates/ocg-domain/src/protocol.rs`.
 
 `reasoning.effort` aliases (applied before forwarding or conversion):
 `muse-spark-1.2`, `muse-spark-1.2-contributor`, and
@@ -44,45 +46,52 @@ Source of truth: `MODEL_PROTOCOLS` in
 
 | Model | Preferred | Chat | Responses | Messages |
 | --- | --- | :---: | :---: | :---: |
+| `grok-4.6` | Responses | | ✓ | |
 | `grok-4.5` | Responses | | ✓ | |
+| `glm-5.3-flash` | Chat | ✓ | | |
 | `glm-5.3` | Chat | ✓ | | |
-| `glm-5.2` | Chat | ✓ | ✓ | ✓ |
-| `glm-5.1` | Chat | ✓ | ✓ | ✓ |
-| `glm-5` | Chat | ✓ | ✓ | ✓ |
-| `gpt-5.6-luna` | Responses | ✓ | ✓ | |
+| `glm-5.2` | Chat | ✓ | | |
+| `glm-5.1` | Chat | ✓ | | |
+| `glm-5` | Chat | ✓ | | |
+| `gpt-5.6-luna` | Responses | | ✓ | |
 | `muse-spark-1.2` | Responses | | ✓ | |
-| `muse-spark-1.2-contributor` | Responses | ✓ | ✓ | |
+| `muse-spark-1.2-contributor` | Responses | | ✓ | |
 | `muse-spark-1.2-contributor-free` | Responses | | ✓ | |
-| `kimi-k3` | Chat | ✓ | | ✓ |
+| `kimi-k3` | Chat | ✓ | | |
 | `kimi-k2.7-code` | Chat | ✓ | | |
 | `kimi-k2.6` | Chat | ✓ | | |
 | `kimi-k2.5` | Chat | ✓ | | |
-| `deepseek-v4-pro` | Chat | ✓ | ✓ | ✓ |
-| `deepseek-v4-flash` | Chat | ✓ | ✓ | ✓ |
+| `deepseek-v4-pro` | Chat | ✓ | | |
+| `deepseek-v4-flash` | Chat | ✓ | | |
+| `deepseek-v4-flash-vision-exp` | Chat | ✓ | | |
 | `mimo-v2.5` | Chat | ✓ | | |
 | `mimo-v2.5-pro` | Chat | ✓ | | |
 | `hy3` | Chat | ✓ | | |
-| `ox-alpha-free` | Chat | ✓ | | |
+| `longcat-2.0` | Chat | ✓ | | |
+| `ox-alpha-free` | Chat | | | |
 | `big-pickle` | Chat | ✓ | | |
-| `mimo-v2.5-free` | Chat | ✓ | | |
 | `hy3-free` | Chat | ✓ | | |
-| `deepseek-v4-flash-free` | Chat | ✓ | | |
-| `ling-3.0-flash-free` | Chat | ✓ | | |
-| `laguna-s-2.1-free` | Chat | ✓ | | |
-| `longcat-2.0-free` | Chat | ✓ | | |
-| `north-mini-code-free` | Chat | ✓ | | |
+| `deepseek-v4-flash-free` | Chat | | | |
+| `mimo-v2.5-free` | Chat | ✓ | | |
+| `ling-3.0-flash-free` | Chat | | | |
+| `laguna-s-2.1-free` | Chat | | | |
+| `longcat-2.0-free` | Chat | | | |
+| `north-mini-code-free` | Chat | | | |
 | `nemotron-3-ultra-free` | Chat | ✓ | | |
 | `nemotron-3.5-lightning-free` | Chat | ✓ | | |
-| `minimax-m3` | Messages | ✓ | | ✓ |
-| `minimax-m2.7` | Messages | ✓ | | ✓ |
-| `minimax-m2.7-highspeed` | Messages | ✓ | | ✓ |
-| `minimax-m2.5` | Messages | ✓ | | ✓ |
-| `minimax-m2.5-highspeed` | Messages | ✓ | | ✓ |
-| `qwen3.8-max` | Messages | ✓ | | ✓ |
-| `qwen3.7-max` | Messages | ✓ | | ✓ |
-| `qwen3.7-plus` | Messages | ✓ | | ✓ |
-| `qwen3.6-plus` | Messages | ✓ | | ✓ |
-| `qwen3.5-plus` | Messages | ✓ | | ✓ |
+| `ling-3.0-flash-fin-free` | Chat | ✓ | | |
+| `hy4-preview` | Chat | ✓ | | |
+| `minimax-m3` | Messages | | | ✓ |
+| `minimax-m2.7` | Messages | | | ✓ |
+| `minimax-m2.7-highspeed` | Messages | | | |
+| `minimax-m2.5` | Messages | | | ✓ |
+| `minimax-m2.5-highspeed` | Messages | | | |
+| `qwen3.8-max` | Messages | | | ✓ |
+| `qwen3.8-flash` | Messages | | | ✓ |
+| `qwen3.7-max` | Messages | | | ✓ |
+| `qwen3.7-plus` | Messages | | | ✓ |
+| `qwen3.6-plus` | Messages | | | ✓ |
+| `qwen3.5-plus` | Messages | | | ✓ |
 
 Unknown model names return `400` on every supported client format — Chat
 Completions, Responses, Messages, and Gemini `generateContent` /

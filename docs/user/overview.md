@@ -3,12 +3,13 @@
 # What OCG Manager Does
 
 OCG Manager is a local gateway that stores provider API keys in a SQLite
-database — including supported provider-plan keys and trusted Custom API
-destinations — and exposes a loopback gateway at `http://127.0.0.1:9042/v1`.
-Each account card is one **Plan** (provider + offering). Clients send
-**aliases** from the local registry or eligible Custom model IDs; live routing
-is OpenCode Go, Zen Free, Command Code GOAT, MiniMax CN Token Plan, Kimi Code
-CN, and Custom API. The Vue 3 dashboard is at
+database — including built-in Provider keys, trusted Custom API destinations,
+and user-defined Provider definitions — and exposes a loopback gateway at
+`http://127.0.0.1:9042/v1`. A Provider and a Plan are one product identity,
+keyed only by `provider_id`; each account card belongs to one such Provider.
+Clients send **aliases** from the local registry or eligible Custom model IDs;
+live routing includes OpenCode Go, Zen Free, Command Code GOAT, MiniMax CN
+Token Plan, Kimi Code CN, Custom API, and saved user-defined Providers. The Vue 3 dashboard is at
 `/dashboard/` and the current SPA talks JSON at `/dashboard/api/v3`. Every node
 is independent: no remote sync, no Admin API, no telemetry.
 
@@ -32,21 +33,9 @@ Desktop, CLI, and Docker all run one `ocg-core` process on `127.0.0.1:9042`.
 The dashboard opens in your system browser; clients hit `/v1` in OpenAI,
 Anthropic, Gemini, or Claude Desktop format.
 
-```text
-   Desktop tray / CLI `serve` / Docker
-                    |
-                    v
-              ocg-core @ 127.0.0.1:9042
-               /                    \
-    /dashboard/  Vue SPA          /v1  inference
-    (system browser)              clients + Key
-               \                    /
-                v                  v
-              SQLite schema v35 (local only)
-```
-
-Text diagrams for request flow, Plans, the eight dashboard views, and protocol
-conversion: [Architecture diagrams](architecture.md).
+The consolidated [architecture diagram](architecture.md#one-local-node) shows
+the control plane, inference plane, SQLite state, and the separate client-Key
+and account-credential paths.
 
 ---
 

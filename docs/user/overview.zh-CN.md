@@ -2,7 +2,7 @@
 
 # 产品定位
 
-OCG Manager 是一台本地 Gateway：把受支持的供应商 Plan Key 与受信的 Custom API 目的地保存在 SQLite 数据库里，并通过回环地址 `http://127.0.0.1:9042/v1` 暴露给客户端。每张账号卡对应一个 **Plan**（provider + offering）。客户端发送本地注册表里的 **别名** 或符合要求的 Custom 模型 ID；当前可路由的是 OpenCode Go、Zen Free、Command Code GOAT、MiniMax CN Token Plan、Kimi Code CN 与 Custom API。Vue 3 管理面板在 `/dashboard/`，当前 SPA 通过 `/dashboard/api/v3` 读写 JSON。每个节点独立运行——没有远端同步，没有 Admin API，也没有遥测。
+OCG Manager 是一台本地 Gateway：把内置供应商 Key、受信的 Custom API 目的地和用户定义供应商定义保存在 SQLite 数据库里，并通过回环地址 `http://127.0.0.1:9042/v1` 暴露给客户端。Provider 与 Plan 是同一个产品身份，只以 `provider_id` 为键；每张账号卡归属其中一个 Provider。客户端发送本地注册表里的 **别名** 或符合要求的 Custom 模型 ID；当前可路由的是 OpenCode Go、Zen Free、Command Code GOAT、MiniMax CN Token Plan、Kimi Code CN、Custom API 与已保存的用户定义供应商。Vue 3 管理面板在 `/dashboard/`，当前 SPA 通过 `/dashboard/api/v3` 读写 JSON。每个节点独立运行——没有远端同步，没有 Admin API，也没有遥测。
 
 Gateway 只做四件事，顺序基本符合直觉：
 
@@ -17,21 +17,8 @@ Gateway 只做四件事，顺序基本符合直觉：
 面板在系统浏览器里打开；AI 客户端用 OpenAI、Anthropic、Gemini 或 Claude Desktop
 格式访问 `/v1`。
 
-```text
-   桌面托盘 / CLI `serve` / Docker
-                    |
-                    v
-              ocg-core @ 127.0.0.1:9042
-               /                    \
-    /dashboard/  Vue SPA          /v1  推理
-    （系统浏览器）                 客户端 + Key
-               \                    /
-                v                  v
-              SQLite schema v35（仅本地）
-```
-
-请求路径、Plan、八个面板视图和协议转换的文字图见
-[架构图](architecture.zh-CN.md)。
+整合后的[架构图](architecture.zh-CN.md#一个本地节点)展示控制面、推理面、SQLite
+状态，以及彼此独立的客户端 Key 与账号凭据路径。
 
 ---
 

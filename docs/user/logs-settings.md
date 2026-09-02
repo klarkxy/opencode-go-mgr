@@ -10,8 +10,7 @@ selected provider, route account, credential account, model, status
 code, the upstream error if any, and the streamed usage when the upstream emits
 a usage chunk. Probe rows carry zero token values and no applicable cost, have no client Key
 attribution, and never appear in Runtime Logs. Filters cover provider, route
-account, credential account, model, status, time range, and client Key. It will
-not fix your prompt, but it will tell you exactly which account took the fall.
+account, credential account, model, status, time range, and client Key.
 Authenticated parse, validation, or routing failures that happen before account
 selection also appear here with unresolved/Gateway attribution. Runtime Logs are
 reserved for process and control-plane events.

@@ -85,7 +85,7 @@ are actually required; the complete pre-tag sequence remains in
   dashboard. Do not run it again immediately after `pnpm run test`: that
   command already performs the same TypeScript check and Vite build.
 - `pnpm run test` runs `pnpm run test:web` (Node `--experimental-strip-types`
-  over `scripts/*.test.mjs` and `src/**/*.test.ts`), `vue-tsc --noEmit`,
+  over `src/**/*.test.ts`), `vue-tsc --noEmit`,
   `vite build`, then `cargo test --workspace --locked`.
 - `pnpm run test:rust` is the locked workspace Rust suite by itself.
 - `pnpm run contract:v3:check` regenerates the Dashboard V3 JSON Schema from
@@ -166,8 +166,9 @@ revision; this is intentional and not the CLI path.
 
 Frontend unit tests live next to the code (`src/**/*.test.ts`) and run with
 Node's `--experimental-strip-types` — no extra test runner is required.
-Script-level tests live in `scripts/*.test.mjs` (release helpers, Dashboard V3
-contract, container publish). Pair them with `pnpm run build:web` and
+Release-tooling tests live in `scripts/*.test.mjs` and run only through
+`pnpm run test:tooling`; they are a release/tooling gate, not part of
+`pnpm run test`. Pair dashboard-contract work with `pnpm run build:web` and
 `pnpm run contract:v3:check`.
 
 The 17 application guides are driven by

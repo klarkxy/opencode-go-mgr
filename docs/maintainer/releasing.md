@@ -8,8 +8,8 @@
    default main and browser images in `compose.example.yaml`.
 2. Run `cargo check --workspace --all-targets` to refresh `Cargo.lock`, then
    run `pnpm install --frozen-lockfile`, `cargo fmt --all -- --check`,
-   `pnpm run test`, `pnpm run design:lint`, `pnpm run contract:v3:check`,
-   `pnpm run release:check`, and `pnpm run build`. Commit the intended
+   `pnpm run test`, `pnpm run test:tooling`, `pnpm run design:lint`,
+   `pnpm run contract:v3:check`, `pnpm run release:check`, and `pnpm run build`. Commit the intended
    lockfile changes; never hand-edit them.
 3. Compare against the previous public tag, review the diff and
    current-platform `release/` payloads, then commit the version, lockfile,
@@ -75,7 +75,9 @@ desktop-specific steps need a real machine.
 - [ ] Cover schema v16 migration, schema v27 (`access_keys`, pre-v3 backup +
       SHA-256 sidecar, dropped `sub_gateway_keys` and `accounts.usage_sync_*`,
       ciphertext validated not rewritten), v29 SCNet removal, v30/v31 contract
-      compatibility, v32 single-protocol Custom conversion, Alias / upstream log identity, optional native
+      compatibility, v32 single-protocol Custom conversion, v33 upstream-model
+      identity, v34 CPA singleton state, v35 Provider/Plan identity migration
+      and its preflight backup, Alias / upstream log identity, optional native
       cost, historical GOAT verification states normalize to `not_required`, Zen Free catalog
       persistence, provider contract scopes / model-protocol tables, legacy
       `key + ready`, managed transitions (forward one step / rewind earlier

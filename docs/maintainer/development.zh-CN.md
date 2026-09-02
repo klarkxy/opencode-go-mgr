@@ -67,7 +67,7 @@ pnpm run hooks:install
 tag 前检查序列仍以 `releasing.zh-CN.md` 为准。
 
 - `pnpm run build:web` 是 **纯前端** 生产构建（`vue-tsc && vite build`），只验证面板时用它。不要在 `pnpm run test` 后立即再跑一次：后者已经执行相同的 TypeScript 检查与 Vite 构建。
-- `pnpm run test` 跑 `pnpm run test:web`（Node `--experimental-strip-types` 覆盖 `scripts/*.test.mjs` 与 `src/**/*.test.ts`）、`vue-tsc --noEmit`、`vite build`，然后 `cargo test --workspace --locked`。
+- `pnpm run test` 跑 `pnpm run test:web`（Node `--experimental-strip-types` 覆盖 `src/**/*.test.ts`）、`vue-tsc --noEmit`、`vite build`，然后 `cargo test --workspace --locked`。
 - `pnpm run test:rust` 单独跑锁定依赖的 workspace Rust 套件。
 - `pnpm run contract:v3:check` 用 `ocg-core` 的 `export_dashboard_v3_schema` example 重新生成 Dashboard V3 JSON Schema，若 `schema/dashboard-api-v3.schema.json` 或 `src/api/generated/dashboard-v3.ts` 漂移则失败。写入用 `pnpm run contract:v3:generate`。
 - `pnpm run design:lint` 用 `@google/design.md` lint `DESIGN.md`。
@@ -130,9 +130,10 @@ bump 该进程的 `settings_revision`。它不能创建 Custom 账号、子 Key 
 ## 前端检查
 
 前端单元测试与代码同目录（`src/**/*.test.ts`），用 Node 的
-`--experimental-strip-types` 运行，不需要额外测试框架。脚本级测试在
-`scripts/*.test.mjs`（发版辅助、Dashboard V3 契约、容器发布）。最后跑
-`pnpm run build:web` 与 `pnpm run contract:v3:check`。
+`--experimental-strip-types` 运行，不需要额外测试框架。发版工具测试在
+`scripts/*.test.mjs`，只通过 `pnpm run test:tooling` 运行；它们属于发版/工具
+门禁，不属于 `pnpm run test`。面板契约改动最后跑 `pnpm run build:web` 与
+`pnpm run contract:v3:check`。
 
 17 个应用教程由 `src/views/application-guides.ts` 驱动；改动注册表时检查教程
 数量、唯一 ID、协议端点、display/copy 脱敏差异，以及 Claude Desktop 三个角色

@@ -27,7 +27,15 @@ schema v16 给账号增加 `account_type`（`key | managed`）与 `setup_step` �
 
 `AppConfig::default()` 的 `opencode_invite_url` 带演示默认值（`DEFAULT_OPENCODE_INVITE_URL`）。规范化后只接受最长 2048 字符、无用户名密码的 HTTPS URL，主机严格限定为 `opencode.ai` 或 `console.opencode.ai`。创建托管草稿时可编辑邀请链接；与设置不同时写回 SQLite。注册/支付/验证码仍由用户在浏览器中完成，Key 由用户复制回填；OCG Manager 不会使用 CDP 自动填表或代点支付。
 
-托管状态允许 **向前一步** 或 **回退到任意更早的未完成步骤**；跳步前进不被允许，setup API 也不会直接进入 `ready`。Key 实测返回 `2xx` 时进入 `ready + enabled`；`429` 同样证明 Key 有效并写入冷却；`401`/`403`、网络错误或 `5xx` 保持 `key_verification`。
+托管状态允许 **向前一步** 或 **回退到任意更早的未完成步骤**；跳步前进不被允许，setup API 也不会直接进入 `ready`。Key 实测返回 `2xx` 时进入 `ready + enabled`；`429` 同样证明 Key 有效并写入冷却；其他 HTTP 响应——包括重定向、`429` 以外的 `4xx` 与 `5xx`——以及网络或超时错误都保持 `key_verification`。
+
+### 托管账号 setup 生命周期
+
+[![托管账号 setup 生命周期](../diagrams/managed-account-lifecycle.visual-check.1440x900.light.png)](https://klarkxy.github.io/opencode-go-mgr/diagrams/managed-account-lifecycle/)
+
+[在 GitHub Pages 打开交互式流程图](https://klarkxy.github.io/opencode-go-mgr/diagrams/managed-account-lifecycle/)。
+
+普通 setup PATCH 只能向前一步，或回到更早的未完成步骤；它不会写入 `ready`。独立的 Key 验证请求在收到 `2xx` 或 `429` 时将账号置为 `ready + enabled`。Key 无效等 `4xx` 与重定向让草稿保持 pending 并返回 `400`；网络、超时与 `5xx` 同样保持 pending，但返回 `502`，用户可重试或回退步骤。
 
 官方 Go usage（`go_usage.rs`，`https://opencode.ai/zen/go/v1/usage`）是校准基线，由 `usage_sync.rs` 协调。手动 `POST /dashboard/api/v3/accounts/{id}/usage/refresh` 与后台对账共用同一条 fetch + key CAS + 三窗口校准路径。
 
@@ -73,6 +81,9 @@ Profile 删除先停浏览器，校验账号 ID 防目录穿越，再把新旧 P
 - **v30：** 将 `account_custom_configs.upstream_protocol` 回填为 JSON `upstream_protocols` 集合（1–3 个 chat_completions / responses / messages）；Custom 配置/能力编辑保持账号启用，但将 `verification_status` 重置为 `pending`。
 - **v31：** 新增 `provider_contract_model_protocol_overrides` 表以支持按模型/按协议启用，并停止读取已弃用的 `provider_contract_scopes` 开关列。
 - **v32：** Custom API 由 `base_url`、协议集合 JSON 与可配置鉴权收敛为一个完整 `endpoint_url` 和一个 `upstream_protocol`。历史 Custom 行按 Chat Completions → Responses → Messages 选择协议，并置为 disabled/pending 供管理员复核；非所选协议状态在同一迁移事务中移除。
+- **v33：** 新增非空 `account_model_capabilities.upstream_model`，由 `model_id` 回填。
+- **v34：** 新增 CPA 接入单例配置。
+- **v35：** 经 fail-closed 预检与重建后，将 Provider 与 Plan 身份收敛为 `provider_id`；同时持久化类型化用户定义 Provider。pre-v35 备份与回滚流程见[存储与迁移](storage-migration.zh-CN.md)。
 
 GUI 数据目录：Windows `%USERPROFILE%\.ocg-mgr` 或 macOS/Linux `~/.ocg-mgr`。 CLI 默认 `~/.ocg-mgr-cli`。Docker 将 SQLite、Key 与 `.encryption-key` 放在 `ocg-data`，长期 Cookie 与浏览器状态放在 `ocg-browser-profiles`。两卷都是高敏感持久状态，必须在服务停止后成对备份；`ocg-browser-runtime` 只含运行时控制 token，不应加入备份。浏览器 Profile 不由 OCG Manager 加密。
 

@@ -2,9 +2,8 @@
 
 # 账号
 
-账号视图是租户名单。每张账号卡绑定一个 **Plan**（只有 `provider_id`）；该 Plan
-需要时再绑定一份凭据。额度权威随 Plan 而异：OpenCode Go 按账号 / Key 统计，Zen
-Free 按出口 IP 共享额度与冷却，Custom API 不做供应商额度核算——总得有个人不记账。所有卡片共享一份可手动持久化的全局顺序；请求先经过能力过滤，严格优先级、全局粘性和轮询再复用这份顺序。不存在按模型划分的额度池。
+账号视图是租户名单。Provider 与 Plan 是同一个产品身份（只有 `provider_id`）；每张账号卡归属一个 Provider，并在该 Provider 需要时绑定一份凭据。额度权威随 Provider 而异：OpenCode Go 按账号 / Key 统计，Zen
+Free 按出口 IP 共享额度与冷却，Custom API 不做供应商额度核算。所有卡片共享一份可手动持久化的全局顺序；请求先经过能力过滤，严格优先级、全局粘性和轮询再复用这份顺序。不存在按模型划分的额度池。
 
 **账号** 负责身份、账号 **Key**、验证、启用状态、卡片顺序、托管注册，以及可用的账号用量
 / 冷却状态。账号卡刻意不展示供应商合约与协议细节。本地目录、协议探测、按模型协议覆盖、用户定义供应商的 Endpoint/协议/映射，以及范围内价格都在
@@ -12,16 +11,16 @@ Free 按出口 IP 共享额度与冷却，Custom API 不做供应商额度核算
 OCG 内已定价请求日志按公开的 `$14 / $35 / $70` 三个窗口累计。其他客户端流量与未定价日志不会计入，
 可通过手工校准修正显示基线。
 
-注册表是密封的。内置 Plan 家族如下：
+适配器注册表是静态密封的。内置 Provider 家族如下：
 
-| 家族 | Plan | 可路由 | 说明 |
+| 家族 | Provider ID | 可路由 | 说明 |
 | --- | --- | --- | --- |
-| OpenCode Go | `opencode` / `go` | 是 | 每张卡一份官方分发的 API Key；托管注册仍是 Beta |
-| Zen Free | `opencode-zen-free` / `anonymous-free` | 是 | 一张不带鉴权头、无需凭据的匿名单例卡；可排序、可启停，不可删除；额度按出口 IP 共享 |
-| Command Code GOAT | `command-code` / `goat` | 是 | 使用公开的供应商目录；GOAT 预设模型默认开启，额外模型在供应商矩阵中默认关闭；没有账号级 GOAT/全部或 Max 模式 |
-| MiniMax CN Token Plan | `minimax` / `cn` | 是 | 使用独立 `sk-cp` Key；固定官方 Chat 路由、鉴权模型目录与手工官方 Token Plan 用量刷新 |
-| Kimi Code CN | `kimi` / `cn` | 是 | 使用独立 Kimi Code Key；固定官方 Chat 路由、鉴权模型目录与手工官方周额度/限频窗口刷新 |
-| Custom API | `custom` / `api` | 是 | 受信管理员目的地；每张账号卡保存一个 API 地址、一个账号级上游协议，以及多条公开名称 → 上游 ID 映射；常见基址会自动补全；新建账号默认启用；合格公开名称会出现在 `/v1/models`；费用 unpriced/unknown，不扣额度 |
+| OpenCode Go | `opencode` | 是 | 每张卡一份官方分发的 API Key；托管注册仍是 Beta |
+| Zen Free | `opencode-zen-free` | 是 | 一张不带鉴权头、无需凭据的匿名单例卡；可排序、可启停，不可删除；额度按出口 IP 共享 |
+| Command Code GOAT | `command-code` | 是 | 使用公开的供应商目录；GOAT 预设模型默认开启，额外模型在供应商矩阵中默认关闭；没有账号级 GOAT/全部或 Max 模式 |
+| MiniMax CN Token Plan | `minimax` | 是 | 使用独立 `sk-cp` Key；固定官方 Chat 与 Messages 路由、鉴权模型目录与手工官方 Token Plan 用量刷新 |
+| Kimi Code CN | `kimi` | 是 | 使用独立 Kimi Code Key；固定官方 Chat 与 Messages 路由、鉴权模型目录与手工官方周额度/限频窗口刷新 |
+| Custom API | `custom` | 是 | 受信管理员目的地；每张账号卡保存一个 API 地址、一个账号级上游协议，以及多条公开名称 → 上游 ID 映射；常见基址会自动补全；新建账号默认启用；合格公开名称会出现在 `/v1/models`；费用 unpriced/unknown，不扣额度 |
 
 ## 在节点之间迁移配置
 

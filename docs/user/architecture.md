@@ -1,225 +1,95 @@
 [简体中文](architecture.zh-CN.md)
 
-# Architecture Diagrams
+# Architecture
 
-These are text maps of a single local node, current as of HEAD. Live routes: OpenCode Go, Zen Free, Command Code GOAT, MiniMax CN Token Plan, Kimi Code CN, Custom API, and any user-defined Providers created on **Providers**. Each diagram points to the chapter that owns the details; when a picture and a chapter disagree, trust the chapter and the code.
+OCG Manager is one local node. Desktop, CLI, and Docker are alternative hosts
+for the same `ocg-core` process; they do not create separate control planes.
+The default listener is `127.0.0.1:9042`, with no remote sync, Admin API, or
+telemetry.
 
-## Contents
+## One local node
 
-- [One node, one port](#one-node-one-port)
-- [A client request](#a-client-request)
-- [Plans](#plans)
-- [Dashboard, Key, and account cards](#dashboard-key-and-account-cards)
-- [Two local model lists](#two-local-model-lists)
-- [Protocol conversion](#protocol-conversion)
-- [Where to read next](#where-to-read-next)
+[![OCG Manager local-node architecture](../diagrams/local-node.visual-check.1440x900.light.png)](https://klarkxy.github.io/opencode-go-mgr/diagrams/local-node/)
 
-## One node, one port
+[Open the interactive diagram on GitHub Pages](https://klarkxy.github.io/opencode-go-mgr/diagrams/local-node/) to switch themes,
+trace relationships, or export another format.
 
-Desktop, CLI, and Docker are just three ways to host the same `ocg-core` process. The default bind is `127.0.0.1:9042`. The tray app opens the dashboard in your system browser; it does not remote-control the UI through Tauri `invoke`. There is no remote sync, Admin API, or telemetry.
+The Dashboard and inference endpoints share port `9042`, but they use different
+credentials. A client **Key** authenticates an AI tool to OCG Manager. After
+selection, the account credential is sent only to that account's configured
+upstream; Zen Free has no credential. The Vue SPA talks HTTP Dashboard V3 and
+does not use a Tauri `invoke` data path.
 
-```text
-   Desktop tray          CLI `serve`           Docker
-   (ocg-manager)      (ocg-manager-cli)   (ghcr.io/.../opencode-go-mgr)
-           \                  |                    /
-            \                 |                   /
-             +----------------+------------------+
-             |            ocg-core               |
-             |         127.0.0.1:9042            |
-             +----------------+------------------+
-                    /                    \
-                   /                      \
-        GET /dashboard/              inference
-        Vue 3 SPA                    /v1/chat/completions
-        (system browser)             /v1/responses
-                                     /v1/messages
-                                     /v1/models
-                                     Gemini generateContent
-                                     /claude-desktop/v1/...
-                   \                      /
-                    \                    /
-             +----------------+------------------+
-             |         SQLite schema v35         |
-             |  GUI  ~/.ocg-mgr                  |
-             |  CLI  ~/.ocg-mgr-cli              |
-             +-----------------------------------+
-```
+## Request lifecycle
 
-Install, first client, CLI, and Docker: [Install](install.md),
-[First client](first-client.md), [CLI](cli.md), [Docker](docker.md).
+One inference request follows a fixed order:
 
-## A client request
+1. Authenticate the client **Key** from `access_keys`.
+2. Parse the client protocol and resolve an Alias, exact built-in raw ID,
+   user-defined Provider public model, or eligible Custom model ID.
+3. Materialize compatible accounts, then apply card order and the selected
+   strict-priority, global-sticky, or round-robin policy.
+4. Build one sealed adapter attempt, resolve that account's credential, and
+   send one upstream request. The request path never probes a protocol.
+5. Convert the response or SSE stream back to the client format, then record
+   request identity, upstream identity, usage, and cooldown state.
 
-The dashboard **Key** authenticates the client to this node. The selected account's credential is what this node sends upstream — Zen Free has none. Quota bars are warnings, not gates; only an upstream `429` cools a card.
+Unknown model names return `400`. Ambiguous exact raw IDs return
+`ambiguous_model_id` without an upstream call. Account fallback may continue
+after eligible pre-send or provider-specific failures; ambiguous or unsafe
+requests fail before selection.
 
-```text
-  AI client                         this node                         Plan
-  ---------                         ---------                         ----
-      |                                  |                              |
-      |  Key + alias / Custom ID         |                              |
-      |--------------------------------->|                              |
-      |                                  | 1. authenticate Key          |
-      |                                  |    Bearer / x-api-key /      |
-      |                                  |    x-goog-api-key            |
-      |                                  | 2. resolve alias             |
-      |                                  | 3. pick a usable card        |
-      |                                  | 4. passthrough or convert    |
-      |                                  |----------------------------->|
-      |                                  |                              |
-      |                                  |<-----------------------------|
-      |                                  | 5. convert response          |
-      |                                  | 6. log requested_model,      |
-      |                                  |    resolved_alias,           |
-      |                                  |    upstream_model            |
-      |<---------------------------------|                              |
-```
+## Product ownership
 
-`GET /v1/models` is a local list and does not call upstream. Unknown names
-return `400` on Chat, Responses, Messages, and Gemini generate / stream.
-Overlapping raw IDs return `400` `ambiguous_model_id` and never call
-upstream.
+| Surface | Owns | Does not own |
+| --- | --- | --- |
+| **Access Keys** | Client-facing primary and sub Keys | Upstream account credentials |
+| **Accounts** | Account Key, enablement, order, notes, cooldown, usage state | Provider catalogs or shared protocol contracts |
+| **Providers** | Built-in catalogs, model/protocol contracts, pricing scopes, typed user-defined Provider Endpoint/auth/mappings | Custom API account mappings |
+| **Custom API account** | One API URL, one account-wide upstream protocol, public-model → upstream-ID mappings | Dynamic adapter code or shared Provider definitions |
+| **Extensions / CPA** | One approved local external-integration boundary | General plugins or arbitrary remote process control |
+| **Applications** | Client guides and optional local Desktop connectors | A second Gateway or remote configuration service |
 
-Auth, aliases, selection, and breakers: [Gateway](gateway.md),
-[Routing](routing.md).
+The Adapter Registry is static and sealed. User-defined Providers persist as
+typed data and always bind Configurable HTTP. OCG Manager never loads user
+scripts, adapter plugins, or binaries.
 
-## Plans
+## Local model lists
 
-Every account card is one Plan (`provider_id` only). Built-in families and any user-defined Providers you create are live and routable.
+These reads use local state and never perform request-time upstream discovery.
+Catalog refreshes are explicit actions on **Providers**.
 
-```text
-  LIVE (routable)
-  -----------------
-  OpenCode Go
-    official key, /zen/go
-  Zen Free
-    no upstream key
-    catalog refresh on Providers
-  Command Code GOAT
-    official Provider API; catalog refresh on Providers
-    GOAT preset rows default on; additional discovered rows default off
-  MiniMax CN Token Plan
-    fixed official Chat route; authenticated catalog refresh
-  Kimi Code CN
-    fixed official Chat route; authenticated catalog refresh
-  Custom API
-    one trusted-admin HTTP/HTTPS API URL: root, /v1 base, or compatible complete Endpoint
-    one upstream protocol; auth is derived automatically
-  User-defined Provider
-    typed definition on Providers; binds Configurable HTTP
-    Endpoint/protocol/auth/mappings are Provider-owned
-    account Key/enablement/order stay on Accounts; unpriced/unknown usage
+| Endpoint | Published models |
+| --- | --- |
+| Authenticated `GET /v1/models` | Currently routeable code-owned Aliases, saved Zen/Command/CN mappings, saved user-defined Provider public models, and eligible Custom declared IDs |
+| `GET /dashboard/api/v3/application-models` | Go-routeable Aliases intersected with the current Go pricing snapshot; excludes Custom API, user-defined Providers, and CN Plans |
+| `GET /claude-desktop/v1/models` | The three Claude Desktop role aliases only |
 
-
-  Custom API lifecycle
-
-    save / update  ->  can be enabled while pending
-           |
-           v
-    verify the selected protocol
-    with the first declared model
-    (one minimal non-stream request to the resolved inference Endpoint;
-     one 2xx JSON object)
-           |
-           v
-    verification status becomes verified
-    (account may already be routable)
-
-  Key, API URL, declared capability, or protocol change
-  re-pends verification but keeps the card enabled.
-```
-
-Zen Free has only an enable switch; turn the card off if you do not want it. Catalog refresh is a Providers action, not an account-card action. For accounts and providers, see [Accounts](accounts.md) and [Providers](providers.md).
-
-## Dashboard, Key, and account cards
-
-The sidebar has eight core views, including **Aliases**. `browser` is a hosted-session overlay. The optional Extensions group below Settings exposes the local CPA integration. The SPA reads and writes `/dashboard/api/v3`. Loopback listeners skip dashboard login unless forwarding headers are present; clients still need the Key for `/v1`.
-
-```text
-  Dashboard -> Access Keys -> Accounts -> Providers
-      ^                                      |
-      |                                      v
-  Settings <- Logs <- Applications <---------+
-
-  Connection Center (Dashboard, first screen)
-    copy API root / Key / rotate the current Key
-  Access Keys
-    create, rename, enable, delete, reset
-    Primary Key cannot be disabled or deleted
-
-
-  two secrets, two directions
-
-    AI client --Key--> this node --account credential--> Plan
-
-    Key            access_keys (current schema v35)
-                   Primary + optional sub keys (64 active cap)
-    Account cred   Go key, Custom key, or Zen Free (none)
-```
-
-The only V3 payload that returns Key plaintext is `GET /dashboard/api/v3/connection`. For views, CAS, and where data lives, see [Dashboard](dashboard.md) and [Data and security](data-security.md).
-
-## Two local model lists
-
-Neither GET makes an upstream discovery call. Catalog refreshes are explicit Providers actions, not part of either GET.
-
-```text
-  GET /v1/models                         (clients; Key required)
-    routeable aliases authorized by the Go table or sealed CN maps
-      union eligible Custom declared IDs
-    saved rows activate only code-owned mappings; unknown rows stay raw-only
-    eligible Custom = enabled + ready + non-empty key (verification optional)
-    Custom IDs must not steal published built-in aliases
-
-  GET /dashboard/api/v3/application-models   (dashboard session)
-    Go routeable aliases intersect current Go pricing snapshot
-    highspeed variants inherit the base price row
-    empty intersection is []
-    no Custom IDs
-
-  GET /claude-desktop/v1/models
-    only the three role aliases (sonnet / opus / haiku)
-```
-
-Applications picker vs client list: [Applications](applications.md),
-[Gateway](gateway.md).
+Saved catalog rows do not invent new built-in Aliases. Unknown rows remain
+exact raw pins until code assigns an Alias, and a Custom ID cannot take over an
+already published built-in Alias.
 
 ## Protocol conversion
 
-The request path never probes a protocol — that would double-bill. Gemini is a client format only; no traffic reaches Google.
+Clients may use OpenAI Chat Completions, OpenAI Responses, Anthropic Messages,
+Gemini `generateContent` / `streamGenerateContent`, or Claude Desktop entry
+points. A supported and enabled client/upstream pair passes through; otherwise
+the whole request and response are converted to and from the model's effective
+upstream protocol. Gemini is a client format only—OCG Manager does not send the
+request to Google.
 
-```text
-  client wire
-    Chat Completions / Responses / Messages / Gemini generateContent
-           |
-           v
-  alias resolved and a card selected
-           |
-           +-- client protocol in supported and enabled? -- yes --> passthrough
-           |                                                      |
-           no                                                     |
-           v                                                      |
-  convert request body to the Plan's preferred / declared         |
-  upstream protocol                                               |
-           |                                                      |
-           +--------------------------+---------------------------+
-                                      v
-                               upstream Plan
-                                      |
-                                      v
-                          convert response (or SSE) back
-```
-
-Preferred / supported table and conversion limits:
+The complete preferred/supported matrix and conversion limits live in
 [Protocol conversion](protocol-conversion.md).
 
 ## Where to read next
 
-| If you want… | Open |
+| Task | Guide |
 | --- | --- |
-| Install and a first curl | [Install](install.md), [First client](first-client.md) |
-| Quota bars vs real cooldowns | [Routing](routing.md) |
-| Proxy modes | [Logs and settings](logs-settings.md) |
-| Crate DAG, `host_router`, executor | [Maintainer architecture](../maintainer/architecture.md) |
+| Install and connect a client | [Install](install.md), [First client](first-client.md) |
+| Add and order accounts | [Accounts](accounts.md), [Routing](routing.md) |
+| Manage catalogs and contracts | [Providers](providers.md) |
+| Understand aliases and errors | [Gateway](gateway.md) |
+| Inspect the crate and Host boundaries | [Maintainer architecture](../maintainer/architecture.md) |
 
 ---
 
