@@ -1310,7 +1310,7 @@ async fn forward_request_impl(
         }
     }
 
-    // Success path —for non-stream, record breaker success now.
+    // Success path — for non-stream, record breaker success now.
     // For streams, don't pre-record success; the stream error handler
     // records errors, and we haven't proven success until the stream completes.
 
@@ -1705,7 +1705,7 @@ async fn forward_request_impl(
             );
             // `unfold` is a clean "run once, then end" stream. The DB write is the
             // unfold's state transition, the body emits a single empty chunk, and
-            // the stream then terminates —no need for once() + flatten gymnastics.
+            // the stream then terminates — no need for once() + flatten gymnastics.
             futures_util::stream::unfold(
                 FinalizerState::Init {
                     db_h,
@@ -2775,9 +2775,9 @@ fn extract_data_payload(event: &[u8]) -> Option<String> {
     }
 }
 
-// ponytail: ignore_err on JSON parse —SSE frames may be comments or keep-alive
+// ponytail: ignore_err on JSON parse — SSE frames may be comments or keep-alive
 // heartbeats. Silent skip; the last non-null usage frame still wins.
-// ponytail: bounded buffer —if the upstream never sends a complete event
+// ponytail: bounded buffer — if the upstream never sends a complete event
 // (malformed stream, CRLF-only chunks, dropped keep-alive framing), drop the
 // garbage so memory can't grow unbounded.
 fn process_chunk_for_usage(

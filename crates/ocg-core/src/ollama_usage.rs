@@ -458,7 +458,7 @@ pub fn parse_settings_usage(html: &str) -> ParseOutcome {
     let plan = extract_labeled_value(html, &["Plan", "套餐"]);
     let balance = extract_labeled_value(html, &["Balance", "余额"]);
 
-    if windows.is_empty() && models.is_empty() {
+    if !windows.iter().any(|window| window.used_percent.is_some()) && models.is_empty() {
         return ParseOutcome::Failed("usage anchors were not found on the settings page".into());
     }
     ParseOutcome::Snapshot(OllamaUsageSnapshot {
@@ -811,6 +811,10 @@ mod tests {
                 r#"<div data-usage-track aria-label="Monthly usage"></div>"#,
                 r#"<div data-model="m" data-requests="1"></div>"#,
             )),
+            ParseOutcome::Failed(message) if message.contains("anchors")
+        ));
+        assert!(matches!(
+            parse_settings_usage(r#"<div data-usage-track="5h"></div>"#),
             ParseOutcome::Failed(message) if message.contains("anchors")
         ));
     }
