@@ -428,27 +428,29 @@ fn extract_labeled_value(html: &str, labels: &[&str]) -> Option<String> {
         let needle = label.to_ascii_lowercase();
         let mut search_from = 0;
         while let Some(found) = lowered[search_from..].find(&needle) {
-            let start = search_from + found + needle.len();
-            let tail = &html[start..];
-            let mut chars = tail.char_indices();
-            // Skip one separator run (":" / "：" / whitespace) then read the
-            // value up to the next tag or newline, bounded to 64 chars.
-            let mut value_start = None;
-            let mut value_end = None;
-            for (offset, ch) in chars.by_ref() {
-                if value_start.is_none() {
-                    if ch.is_whitespace() || ch == ':' || ch == '：' {
-                        continue;
+            let label_start = search_from + found;
+            let start = label_start + needle.len();
+            // A labeled field must open an element's text run: start of the
+            // document, right after a tag close, or after a line break. A hit
+            // inside a sentence — "your plan's included usage runs out…" — is
+            // page copy, and the trailing "·"-separated prose must never leak
+            // into the snapshot.
+            let at_text_start =
+                label_start == 0 || html[..label_start].ends_with(|ch| ch == '>' || ch == '\n');
+            // The value must be introduced by an explicit colon run; "plan's"
+            // and other prose continuations are rejected here.
+            let tail = html[start..].trim_start();
+            let value_body = tail.strip_prefix('：').or_else(|| tail.strip_prefix(':'));
+            if let (true, Some(value_body)) = (at_text_start, value_body) {
+                let mut value_end = None;
+                for (offset, ch) in value_body.char_indices() {
+                    if ch == '<' || ch == '\n' || offset > 96 {
+                        value_end = Some(offset);
+                        break;
                     }
-                    value_start = Some(offset);
                 }
-                if ch == '<' || ch == '\n' || offset > 96 {
-                    value_end = Some(offset);
-                    break;
-                }
-            }
-            if let (Some(value_start), Some(value_end)) = (value_start, value_end) {
-                let value = html[start + value_start..start + value_end].trim();
+                let value_end = value_end.unwrap_or(value_body.len());
+                let value = value_body[..value_end].trim();
                 if !value.is_empty() && value.len() <= 64 {
                     return Some(value.to_string());
                 }
@@ -608,6 +610,28 @@ mod tests {
         );
         let long = sanitize_error_text(&"x".repeat(5_000));
         assert!(long.chars().count() <= MAX_ERROR_TEXT_CHARS);
+    }
+
+    #[test]
+    fn plan_label_ignores_page_prose_mentions() {
+        // The live settings page carries copy like "…your plan's included
+        // usage runs out on <date> · Upgrade…". A bare substring hit on
+        // "plan" inside that sentence is page copy and must never become
+        // snapshot.plan.
+        let page = concat!(
+            r#"<div class="wrap">"#,
+            r#"<p>Upgrade — your plan's included usage runs out on Aug 5 · compare plans</p>"#,
+            r#"<div data-usage-track="5h" data-time="2026-09-01T00:00:00Z" data-used-percent="42"></div>"#,
+            r#"<div data-model="gpt-oss:120b" data-requests="12" data-usage-window="5h"></div>"#,
+            "</div>"
+        );
+        let ParseOutcome::Snapshot(snapshot) = parse_settings_usage(page) else {
+            panic!("expected a snapshot");
+        };
+        assert_eq!(snapshot.plan, None);
+        assert_eq!(snapshot.balance, None);
+        assert_eq!(snapshot.windows.len(), 1);
+        assert_eq!(snapshot.models.len(), 1);
     }
 
     #[test]
