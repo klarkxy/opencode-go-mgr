@@ -11,5 +11,6 @@ description = "Protocol, policy, and execution boundaries for the OCG Manager in
 [dependencies]
 anyhow = "1"
 base64 = "0.22"
+bytes = "1"
 ocg-domain = { path = "../ocg-domain" }
 serde_json = "1"

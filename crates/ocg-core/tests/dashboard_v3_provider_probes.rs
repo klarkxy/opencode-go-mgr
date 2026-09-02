@@ -379,6 +379,11 @@ fn load_go_evidence(
         .unwrap()
 }
 
+#[test]
+fn dashboard_v3_schema_version_stays_at_v35() {
+    assert_eq!(ocg_core::db::CURRENT_SCHEMA_VERSION, 35);
+}
+
 #[tokio::test]
 async fn protocol_probes_require_the_v3_session() {
     let harness = start_public("probes-auth").await;
@@ -2192,5 +2197,6 @@ async fn v2_duplicate_custom_and_ceiling_probes_coexist() {
     assert_eq!(stored.provider_id, CUSTOM_PROVIDER_ID);
     assert_eq!(stored.offering_id, CUSTOM_API_OFFERING_ID);
     assert!(stored.enabled);
+    assert_eq!(ocg_core::db::CURRENT_SCHEMA_VERSION, 35);
     harness.stop();
 }

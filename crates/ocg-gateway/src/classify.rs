@@ -176,6 +176,7 @@ fn policy_for_kind(kind: ProviderAdapterKind) -> ProviderErrorPolicy {
         ProviderAdapterKind::CommandCodeGoat
         | ProviderAdapterKind::MiniMaxCn
         | ProviderAdapterKind::KimiCn
+        | ProviderAdapterKind::OllamaCloud
         | ProviderAdapterKind::ConfigurableHttp
         | ProviderAdapterKind::Cpa => ProviderErrorPolicy {
             inference_401: Auth401Policy::RotatePersistAuthError,

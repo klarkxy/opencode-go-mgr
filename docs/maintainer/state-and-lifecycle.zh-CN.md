@@ -8,7 +8,7 @@
 
 锁顺序：(1) `settings_update`，(2) `db`，(3) `config`，(4) `http_client`， (5) `gateway`，(6) `pricing`，(7) `zen_free_models`，(8) `provider_contracts`，(9) `routing`，(10) `credential_snapshot`。反向获取会造成死锁；持有 `routing` 锁时不应执行 DB 或网络 I/O。异步闸口：设置写同时重绑时， `settings_host_effects`（持久化 → 监听器重绑 → 补偿）先于 `gateway_lifecycle`。这些 await 期间应释放 `parking_lot` 锁。
 
-两层凭证共用一张 `access_keys` 表（当前 schema v34）和一份鉴权快照：
+两层凭证共用一张 `access_keys` 表（当前 schema v35）和一份鉴权快照：
 
 - 主 Key：固定 id `00000000-0000-0000-0000-000000000001`，显示名 `"Primary"`。始终启用，没有删除入口。公开 `AppConfig` 与面板 API 仍暴露 `gateway_key`；v27 之后经消毒的 config JSON **不再** 是该值的数据库权威。
 - 子 Key：非主行，活跃上限 64，软删保留身份/名称并清除明文。只经 `/dashboard/api/v3/keys*` 生命周期 API 变更。CLI 没有子 Key 命令。

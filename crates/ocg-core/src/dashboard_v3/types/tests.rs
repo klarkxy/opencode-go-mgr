@@ -1883,7 +1883,12 @@ fn catalog_type_names_append_pricing_dtos_after_the_provider_prefix() {
         &CATALOG_TYPE_NAMES[application_connector_end..cpa_end],
         CPA_CATALOG_TYPES
     );
-    assert_eq!(CATALOG_TYPE_NAMES.len(), cpa_end);
+    let ollama_end = cpa_end + OLLAMA_USAGE_CATALOG_TYPES.len();
+    assert_eq!(
+        &CATALOG_TYPE_NAMES[cpa_end..ollama_end],
+        OLLAMA_USAGE_CATALOG_TYPES
+    );
+    assert_eq!(CATALOG_TYPE_NAMES.len(), ollama_end);
 }
 
 #[test]
@@ -3054,3 +3059,28 @@ fn usage_refresh_dtos_are_camel_case_secret_free_and_append_only() {
     );
     assert_secret_free(&throttle_value);
 }
+
+#[test]
+fn persisted_ollama_snapshot_round_trips_into_the_contract_dto() {
+    // The contract DTO must keep accepting exactly the JSON that
+    // `crate::ollama_usage` persists, byte-for-byte in both directions.
+    let json = r#"{"windows":[{"window":"5h","used_percent":42.5,"reset_at":"2026-09-02T12:00:00Z"}],"models":[{"model":"deepseek-v4-flash:0731","requests_5h":11,"requests_7d":null}],"plan":"web","balance":null}"#;
+    let contract: OllamaUsageSnapshot = serde_json::from_str(json).unwrap();
+    assert_eq!(contract.windows[0].used_percent, Some(42.5));
+    assert_eq!(contract.models[0].requests_7d, None);
+    assert_eq!(contract.plan.as_deref(), Some("web"));
+    assert!(contract.balance.is_none());
+    assert_eq!(
+        serde_json::to_string(&contract).unwrap(),
+        json.trim_matches('"')
+    );
+}
+
+const OLLAMA_USAGE_CATALOG_TYPES: &[&str] = &[
+    "OllamaUsageStatus",
+    "OllamaUsageSnapshot",
+    "OllamaUsageWindow",
+    "OllamaUsageModelRequests",
+    "OllamaCookieUpdate",
+    "OllamaUsageThrottleError",
+];

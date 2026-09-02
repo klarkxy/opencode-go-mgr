@@ -424,7 +424,7 @@ is no Tauri `invoke` path.
   account_control / gateway_keys / settings / ...
            |
            v
-  SQLite schema v34
+  SQLite schema v35
            ^
            |
   ocg-manager-cli  same services, no argv CAS
@@ -441,7 +441,7 @@ databases and is dropped by the migration. GUI data dir is
 defaults to `~/.ocg-mgr-cli`.
 
 ```text
-  data.sqlite                         CURRENT_SCHEMA_VERSION = 34
+  data.sqlite                         CURRENT_SCHEMA_VERSION = 35
     access_keys                       Primary id PRIMARY_KEY_ID
                                       cannot disable/delete Primary
                                       64 active sub-key cap

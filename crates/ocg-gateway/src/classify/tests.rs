@@ -30,6 +30,7 @@ fn provider_error_policy_covers_every_adapter_kind() {
             ProviderAdapterKind::CommandCodeGoat
             | ProviderAdapterKind::MiniMaxCn
             | ProviderAdapterKind::KimiCn
+            | ProviderAdapterKind::OllamaCloud
             | ProviderAdapterKind::ConfigurableHttp
             | ProviderAdapterKind::Cpa => {
                 assert_eq!(policy.inference_401, Auth401Policy::RotatePersistAuthError);

@@ -33,6 +33,7 @@ mod custom_discovery;
 mod keys;
 mod managed_key_verify;
 mod observability;
+mod ollama_usage;
 mod pricing;
 mod providers;
 mod proxy_test;
@@ -94,19 +95,21 @@ pub use types::{
     ForwardLog, ForwardLogClientKey, ForwardLogKeys, ForwardLogModels, ForwardLogQuery,
     ForwardLogSummary, ForwardLogs, GatewayLog, GatewayLogQuery, GatewayLogs, GatewayStatus,
     InstallUpdate, KeyCreate, KeyUpdate, ModelProtocolOverride, ModelProtocolOverridesUpdate,
-    MutationAck, MutationExpectation, PricingAdjustment, PricingAvailability, PricingLimits,
-    PricingModel, PricingMultiplierChange, PricingMultiplierWrite, PricingMultipliersUpdate,
-    PricingRefresh, PricingRefreshPolicy, PricingRefreshStatus, PricingRefreshUpdate,
-    PricingRevision, PricingSnapshot, PricingTimeWindow, ProtocolOverrideState,
-    ProtocolProbeRequest, ProtocolProbeResponse, ProtocolProbeResult, ProviderAccountChoice,
-    ProviderCatalog, ProviderCatalogEntry, ProviderCatalogFormField, ProviderCatalogRiskNotice,
-    ProviderContractGroup, ProviderContracts, ProviderModelCapability, ProviderOfferingChoice,
-    ProviderPricing, ProviderPricingRefresh, ProviderPricingRefreshUpdate, ProviderUsage,
-    ProxyListDirection, ProxyMode, ProxySupportedModel, ProxyTestRequest, ProxyTestResponse,
-    QuotaWindow, RoutingMode, Settings, SettingsUpdate, UpdateCheck, UsageAvailability,
-    UsageMutation, UsageRefresh, UsageRefreshThrottleError, UsageRefreshUpdate, UsageSyncState,
-    UsageWindow, V3Error, ZenFreeModel, ZenFreeModels, ZenFreeSettings, ZenFreeSettingsUpdate,
-    contract_schema, contract_schema_pretty,
+    MutationAck, MutationExpectation, OllamaCookieUpdate, OllamaUsageModelRequests,
+    OllamaUsageSnapshot, OllamaUsageStatus, OllamaUsageThrottleError, OllamaUsageWindow,
+    PricingAdjustment, PricingAvailability, PricingLimits, PricingModel, PricingMultiplierChange,
+    PricingMultiplierWrite, PricingMultipliersUpdate, PricingRefresh, PricingRefreshPolicy,
+    PricingRefreshStatus, PricingRefreshUpdate, PricingRevision, PricingSnapshot,
+    PricingTimeWindow, ProtocolOverrideState, ProtocolProbeRequest, ProtocolProbeResponse,
+    ProtocolProbeResult, ProviderAccountChoice, ProviderCatalog, ProviderCatalogEntry,
+    ProviderCatalogFormField, ProviderCatalogRiskNotice, ProviderContractGroup, ProviderContracts,
+    ProviderModelCapability, ProviderOfferingChoice, ProviderPricing, ProviderPricingRefresh,
+    ProviderPricingRefreshUpdate, ProviderUsage, ProxyListDirection, ProxyMode,
+    ProxySupportedModel, ProxyTestRequest, ProxyTestResponse, QuotaWindow, RoutingMode, Settings,
+    SettingsUpdate, UpdateCheck, UsageAvailability, UsageMutation, UsageRefresh,
+    UsageRefreshThrottleError, UsageRefreshUpdate, UsageSyncState, UsageWindow, V3Error,
+    ZenFreeModel, ZenFreeModels, ZenFreeSettings, ZenFreeSettingsUpdate, contract_schema,
+    contract_schema_pretty,
 };
 pub use updater::{GITHUB_LATEST_RELEASE_API, GITHUB_LATEST_RELEASE_URL};
 
@@ -282,6 +285,18 @@ pub fn api_router(state: CoreState) -> Router<CoreState> {
         .route(
             "/accounts/{id}/provider-usage",
             get(usage::get_provider_usage).post(usage::refresh_provider_usage),
+        )
+        .route(
+            "/accounts/{id}/ollama-usage",
+            get(ollama_usage::get_ollama_usage),
+        )
+        .route(
+            "/accounts/{id}/ollama-usage/refresh",
+            post(ollama_usage::refresh_ollama_usage),
+        )
+        .route(
+            "/accounts/{id}/ollama-cookie",
+            put(ollama_usage::put_ollama_cookie),
         )
         .route(
             "/accounts/{id}/verify",

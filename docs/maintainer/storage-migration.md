@@ -33,7 +33,7 @@ Downgrades are not supported: never point an older binary at a migrated database
 
 ## Schema v27 and the pre-v3 snapshot
 
-`CURRENT_SCHEMA_VERSION = 34` (`crates/ocg-core/src/db.rs`). Opening a historical database first migrates canonically to v26, then the v27 rewrite copies the primary Key and every `sub_gateway_keys` row into one `access_keys` table (live primary id `00000000-0000-0000-0000-000000000001`), drops `sub_gateway_keys`, and drops the five legacy `accounts.usage_sync_*` columns (usage-sync metadata lives in `provider_usage_sync_state`). v33 adds the exact Custom upstream model identity; v34 adds the singleton CPA configuration table without importing or exporting CPA state. Account `key_cipher` / `password_cipher` bytes are validated with the Host cipher and never re-encrypted.
+`CURRENT_SCHEMA_VERSION = 35` (`crates/ocg-core/src/db.rs`). Opening a historical database first migrates canonically to v26, then the v27 rewrite copies the primary Key and every `sub_gateway_keys` row into one `access_keys` table (live primary id `00000000-0000-0000-0000-000000000001`), drops `sub_gateway_keys`, and drops the five legacy `accounts.usage_sync_*` columns (usage-sync metadata lives in `provider_usage_sync_state`). v33 adds the exact Custom upstream model identity; v34 adds the singleton CPA configuration table without importing or exporting CPA state. Account `key_cipher` / `password_cipher` bytes are validated with the Host cipher and never re-encrypted.
 
 ## Schema v31 — per-model/per-protocol overrides
 
@@ -50,6 +50,30 @@ Existing rows are backfilled from `model_id`, preserving their former
 public-name = upstream-ID behavior exactly. New Custom mappings may retain a
 distinct public model name and exact upstream model ID; no suffix normalization
 or generated Alias is applied by this migration.
+
+## Schema v35 — Ollama Cloud usage state
+
+v35 creates the `ollama_cloud_usage_state` table. One row per configured
+account holds:
+
+- `cookie_cipher` — the obfuscated browser-session Cookie for the usage
+  scrape. It uses the same `.encryption-key`-derived facility as account keys
+  and is explicitly not AEAD; it is never returned by any API and never enters
+  an export payload.
+- `status` — `unconfigured`, `ok`, `unauthorized`, or `failed`.
+- `snapshot` — the sanitized JSON from the last successful scrape (5h/7d
+  windows, per-model request counts, optional plan/balance). Written only on
+  success; failures update status/backoff columns and never clear it.
+- `last_success_at`, `last_attempt_at`, `next_eligible_at`,
+  `failure_streak` — manual-refresh throttle and the fixed backoff ladder
+  (5m → 15m → 1h → 6h cap).
+
+The row is keyed by `account_id` with `ON DELETE CASCADE` against
+`accounts(id)`, so account deletion removes the usage state; clearing the
+Cookie deletes the row and returns the capability to the unconfigured state.
+The migration is additive-only: no existing table, row, or routing fact
+changes, and because the step runs after v27 it does not create a new pre-v3
+snapshot.
 
 Before any v27 write, an existing (non-empty) library gets a unique, never-overwritten sibling snapshot:
 

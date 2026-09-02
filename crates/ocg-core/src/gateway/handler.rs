@@ -249,7 +249,6 @@ pub async fn models(
 }
 
 fn published_alias_models_response(state: &CoreState) -> axum::response::Response {
-    let zen_catalog = state.zen_free_model_catalog();
     let contracts = state.provider_contracts();
     let go_ids = provider_catalog_model_ids(
         &contracts,
@@ -272,7 +271,14 @@ fn published_alias_models_response(state: &CoreState) -> axum::response::Respons
         crate::provider::KIMI_CN_OFFERING_ID,
     );
     let cpa_ids = active_cpa_model_ids(state);
+    let ollama_ids = provider_catalog_model_ids(
+        &contracts,
+        crate::provider::OLLAMA_PROVIDER_ID,
+        crate::provider::OLLAMA_CLOUD_OFFERING_ID,
+    );
+    let ollama_pinned_ids = crate::provider_contracts::ollama_cloud_pinned_model_ids(&contracts);
     let custom_ids = eligible_custom_public_models(state, &contracts);
+    let zen_catalog = state.zen_free_model_catalog();
     let catalogs = crate::alias::RuntimeCatalogs {
         go: &go_ids,
         zen_free: &zen_catalog.models,
@@ -281,6 +287,8 @@ fn published_alias_models_response(state: &CoreState) -> axum::response::Respons
         minimax: &minimax_ids,
         kimi: &kimi_ids,
         cpa: &cpa_ids,
+        ollama: &ollama_ids,
+        ollama_pinned: &ollama_pinned_ids,
     };
     let published = crate::alias::published_routeable_aliases_with_runtime_catalogs(catalogs);
     let mut data: Vec<serde_json::Value> = published
@@ -533,6 +541,13 @@ async fn proxy_handler_inner(
         crate::provider::KIMI_CN_OFFERING_ID,
     );
     let cpa_model_ids = active_cpa_model_ids(&state);
+    let ollama_model_ids = provider_catalog_model_ids(
+        &contracts,
+        crate::provider::OLLAMA_PROVIDER_ID,
+        crate::provider::OLLAMA_CLOUD_OFFERING_ID,
+    );
+    let ollama_pinned_model_ids =
+        crate::provider_contracts::ollama_cloud_pinned_model_ids(&contracts);
     let zen_catalog = state.zen_free_model_catalog();
     let catalogs = crate::alias::RuntimeCatalogs {
         go: &go_model_ids,
@@ -542,6 +557,8 @@ async fn proxy_handler_inner(
         minimax: &minimax_model_ids,
         kimi: &kimi_model_ids,
         cpa: &cpa_model_ids,
+        ollama: &ollama_model_ids,
+        ollama_pinned: &ollama_pinned_model_ids,
     };
     let resolved = match crate::alias::resolve_with_runtime_catalogs(&routing_model, catalogs) {
         Ok(resolved) => resolved,
@@ -657,6 +674,13 @@ async fn gemini_proxy_handler(
         crate::provider::KIMI_CN_OFFERING_ID,
     );
     let cpa_model_ids = active_cpa_model_ids(&state);
+    let ollama_model_ids = provider_catalog_model_ids(
+        &contracts,
+        crate::provider::OLLAMA_PROVIDER_ID,
+        crate::provider::OLLAMA_CLOUD_OFFERING_ID,
+    );
+    let ollama_pinned_model_ids =
+        crate::provider_contracts::ollama_cloud_pinned_model_ids(&contracts);
     let zen_catalog = state.zen_free_model_catalog();
     let catalogs = crate::alias::RuntimeCatalogs {
         go: &go_model_ids,
@@ -666,6 +690,8 @@ async fn gemini_proxy_handler(
         minimax: &minimax_model_ids,
         kimi: &kimi_model_ids,
         cpa: &cpa_model_ids,
+        ollama: &ollama_model_ids,
+        ollama_pinned: &ollama_pinned_model_ids,
     };
     let resolved = match crate::alias::resolve_with_runtime_catalogs(&routing_model, catalogs) {
         Ok(resolved) => resolved,

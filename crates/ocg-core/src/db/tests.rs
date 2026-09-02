@@ -5853,6 +5853,36 @@ fn unroutable_catalog_plans_cannot_persist_enabled_true() {
         assert_eq!(edited.name, format!("{id}-renamed"));
     }
 
+    // Ollama Cloud opened its enable bit once routing, control plane, and
+    // usage shipped; enabled rows must persist through the same gates.
+    let mut ollama = account("ollama-enabled");
+    ollama.provider_id = OLLAMA_PROVIDER_ID.to_string();
+    ollama.offering_id = OLLAMA_CLOUD_OFFERING_ID.to_string();
+    ollama.enabled = true;
+    db.create_account(&ollama).unwrap();
+    assert!(db.get_account("ollama-enabled").unwrap().unwrap().enabled);
+    db.update_account(
+        "ollama-enabled",
+        &AccountUpdate {
+            enabled: Some(false),
+            ..AccountUpdate::default()
+        },
+        None,
+        None,
+    )
+    .unwrap();
+    db.update_account(
+        "ollama-enabled",
+        &AccountUpdate {
+            enabled: Some(true),
+            ..AccountUpdate::default()
+        },
+        None,
+        None,
+    )
+    .unwrap();
+    assert!(db.get_account("ollama-enabled").unwrap().unwrap().enabled);
+
     db.update_account(
         "go-enabled",
         &AccountUpdate {
@@ -5964,6 +5994,16 @@ fn open_sanitizes_unroutable_catalog_leftovers_without_touching_go_zen_or_unknow
     );
     leftover_enable(&db, "draft-api");
 
+    // An enabled Ollama Cloud row is now legitimate (routable offering), so
+    // open must leave it untouched.
+    persist_unroutable_draft(
+        &db,
+        builtin_plan(OLLAMA_PROVIDER_ID, OLLAMA_CLOUD_OFFERING_ID).unwrap(),
+        "ollama-leftover",
+        "ollama-leftover-notes",
+    );
+    leftover_enable(&db, "ollama-leftover");
+
     let zen_before = sanitation_snapshot(&db, ZEN_FREE_ACCOUNT_ID);
     let go_before = sanitation_snapshot(&db, "go-keep");
     let unknown_before = sanitation_snapshot(&db, "unknown-keep");
@@ -6039,6 +6079,13 @@ fn open_sanitizes_unroutable_catalog_leftovers_without_touching_go_zen_or_unknow
         "now-routable Custom leftovers must not be disabled at open"
     );
 
+    let ollama_after = sanitation_snapshot(&db, "ollama-leftover");
+    assert_eq!(ollama_after.name, "ollama-leftover");
+    assert!(
+        ollama_after.enabled,
+        "routable Ollama leftovers must not be disabled at open"
+    );
+
     let first_pass: Vec<_> = [
         ZEN_FREE_ACCOUNT_ID,
         "go-keep",
@@ -6047,6 +6094,7 @@ fn open_sanitizes_unroutable_catalog_leftovers_without_touching_go_zen_or_unknow
         "goat-verified",
         "goat-failed",
         "draft-api",
+        "ollama-leftover",
     ]
     .into_iter()
     .map(|id| (id.to_string(), sanitation_snapshot(&db, id)))
@@ -6629,6 +6677,74 @@ fn cpa_singleton_upsert_catalog_and_disconnect_are_idempotent_and_atomic() {
     assert!(db.cpa_integration().unwrap().is_none());
     assert!(db.cpa_model_catalog().unwrap().is_none());
     assert!(db.get_account(CPA_ACCOUNT_ID).unwrap().is_none());
+    drop(db);
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn v34_to_v35_creates_ollama_usage_state_without_touching_existing_data() {
+    let dir = temp_data_dir("v34-v35-ollama-usage");
+    let db = Database::open(dir.clone()).unwrap();
+    let mut ollama = account("ollama-v34");
+    ollama.provider_id = OLLAMA_PROVIDER_ID.to_string();
+    ollama.offering_id = OLLAMA_CLOUD_OFFERING_ID.to_string();
+    ollama.enabled = false;
+    db.create_account(&ollama).unwrap();
+    let go = account("go-v34");
+    db.create_account(&go).unwrap();
+    drop(db);
+
+    // Rewind to a canonical v34 source: the usage table does not exist yet.
+    let conn = Connection::open(dir.join("data.sqlite")).unwrap();
+    conn.execute_batch(
+        "DROP TABLE IF EXISTS ollama_cloud_usage_state;
+         DELETE FROM schema_version;
+         INSERT INTO schema_version (version) VALUES (34);",
+    )
+    .unwrap();
+    drop(conn);
+
+    let backups_before = pre_v3_backup_paths(&dir);
+    let migrated = Database::open(dir.clone()).unwrap();
+    assert_eq!(migrated.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
+    assert!(
+        table_exists(&migrated.conn, "ollama_cloud_usage_state").unwrap(),
+        "v35 creates the Ollama usage state table"
+    );
+    // Non-destructive: routing-relevant rows survive untouched and the
+    // pre-v3 backup policy is untouched by post-v27 steps.
+    assert!(migrated.get_account("go-v34").unwrap().is_some());
+    assert!(migrated.get_account("ollama-v34").unwrap().is_some());
+    assert!(
+        migrated
+            .ollama_cloud_usage_state("ollama-v34")
+            .unwrap()
+            .is_none(),
+        "the capability starts unconfigured after migration"
+    );
+    assert_eq!(pre_v3_backup_paths(&dir), backups_before);
+
+    // Idempotent reopen and cascade semantics.
+    drop(migrated);
+    let mut db = Database::open(dir.clone()).unwrap();
+    let cipher = db
+        .conn
+        .query_row(
+            "SELECT key_cipher FROM accounts WHERE id = 'ollama-v34'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .unwrap();
+    db.set_ollama_cloud_cookie("ollama-v34", &cipher).unwrap();
+    let state = db.ollama_cloud_usage_state("ollama-v34").unwrap().unwrap();
+    assert!(state.cookie_configured);
+    assert_eq!(state.status, "unconfigured");
+    assert!(state.snapshot.is_none());
+    db.delete_account("ollama-v34").unwrap();
+    assert!(
+        db.ollama_cloud_usage_state("ollama-v34").unwrap().is_none(),
+        "deleting the account cascades the usage state row"
+    );
     drop(db);
     fs::remove_dir_all(dir).unwrap();
 }

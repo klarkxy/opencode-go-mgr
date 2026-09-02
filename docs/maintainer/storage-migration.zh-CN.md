@@ -33,7 +33,7 @@ GUI 或 CLI 启动时会原地执行 SQLite 迁移。打开新版二进制前：
 
 ## Schema v27 与 pre-v3 快照
 
-`CURRENT_SCHEMA_VERSION = 34`（`crates/ocg-core/src/db.rs`）。打开历史库会先规范迁移到 v26，再由 v27 重写把主 Key 与全部 `sub_gateway_keys` 行复制进一张 `access_keys` 表（主 Key 固定 id `00000000-0000-0000-0000-000000000001`），删除 `sub_gateway_keys`，并删除 `accounts` 上遗留的五列 `usage_sync_*`（用量同步元数据在 `provider_usage_sync_state`）。v33 新增 Custom 精确上游模型身份；v34 新增 CPA 单例配置表，但不会导入或导出 CPA 状态。账号 `key_cipher` / `password_cipher` 用 Host cipher 就地校验，**不会重新加密**。
+`CURRENT_SCHEMA_VERSION = 35`（`crates/ocg-core/src/db.rs`）。打开历史库会先规范迁移到 v26，再由 v27 重写把主 Key 与全部 `sub_gateway_keys` 行复制进一张 `access_keys` 表（主 Key 固定 id `00000000-0000-0000-0000-000000000001`），删除 `sub_gateway_keys`，并删除 `accounts` 上遗留的五列 `usage_sync_*`（用量同步元数据在 `provider_usage_sync_state`）。v33 新增 Custom 精确上游模型身份；v34 新增 CPA 单例配置表，但不会导入或导出 CPA 状态。账号 `key_cipher` / `password_cipher` 用 Host cipher 就地校验，**不会重新加密**。
 
 ## Schema v31 — 按模型/按协议覆盖
 
@@ -48,6 +48,19 @@ v32 用 `endpoint_url` 与单值 `upstream_protocol` 替换 `account_custom_conf
 v33 新增非空列 `account_model_capabilities.upstream_model`。历史行以 `model_id`
 回填，完整保留原先“公开名称 = 上游 ID”的行为。新建 Custom 映射可保留不同的
 公开模型名称与精确上游模型 ID；迁移不做后缀规范化，也不生成 Alias。
+
+## Schema v35 — Ollama Cloud 用量状态
+
+v35 创建 `ollama_cloud_usage_state` 表。每个已配置账号一行，包含：
+
+- `cookie_cipher` —— 抓取 `https://ollama.com/settings` 用量页所需的浏览器会话
+  Cookie 混淆密文。它与账号 Key 使用同一 `.encryption-key` 派生设施，明确不是
+  AEAD；任何 API 都不回显，也绝不进入导出载荷。
+- `status` —— `unconfigured` / `ok` / `unauthorized` / `failed`。
+- `snapshot` —— 最近一次成功抓取的脱敏 JSON（5 小时/每周窗口、按模型请求计数、
+  可选 plan/余额）。仅在成功时写入；失败只更新状态与退避列，从不清除它。
+- `last_success_at`、`last_attempt_at`、`next_eligible_at`、`failure_streak` ——
+  手动刷新节流与固定退避阶梯（5 分钟 → 15 分钟 → 1 小时 → 6 小时封顶）。
 
 在任何 v27 写入前，既有（非空）库会得到一份唯一、不覆盖的同目录快照：
 

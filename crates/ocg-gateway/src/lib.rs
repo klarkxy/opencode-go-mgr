@@ -35,3 +35,10 @@ pub mod selector;
 /// Do not glob-reexport.
 #[doc(hidden)]
 pub mod protocol;
+
+/// Pure provider wire normalization (`Bytes -> Bytes` / `Value -> Value`).
+///
+/// Public only as the cross-crate bridge; the host crate's `gateway::wire`
+/// facade keeps these paths crate-private.
+#[doc(hidden)]
+pub mod wire;

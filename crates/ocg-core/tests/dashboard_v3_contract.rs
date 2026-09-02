@@ -38,6 +38,11 @@ fn checked_in_schema_matches_rust_dtos() {
 }
 
 #[test]
+fn schema_version_stays_at_v35() {
+    assert_eq!(ocg_core::db::CURRENT_SCHEMA_VERSION, 35);
+}
+
+#[test]
 fn process_generation_is_stable_per_core_state_and_differs_across_fresh_states() {
     let first = state("generation-a");
     let generation = first.process_generation();

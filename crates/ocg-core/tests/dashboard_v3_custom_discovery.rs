@@ -351,6 +351,11 @@ async fn create_custom_account(harness: &V3Harness, base_url: &str, _auth: &str)
         .to_string()
 }
 
+#[test]
+fn dashboard_v3_schema_version_stays_at_v35() {
+    assert_eq!(ocg_core::db::CURRENT_SCHEMA_VERSION, 35);
+}
+
 #[tokio::test]
 async fn discovery_requires_the_v3_session() {
     let harness = start_public("discover-auth").await;
@@ -987,6 +992,7 @@ async fn v2_discovery_coexists_and_keeps_snake_case() {
     assert!(!v3_text.contains(CUSTOM_KEY), "{v3_auth}");
     assert_eq!(v3["revision"], before);
     assert_eq!(harness.state.settings_revision(), before);
+    assert_eq!(ocg_core::db::CURRENT_SCHEMA_VERSION, 35);
     harness.stop();
 }
 

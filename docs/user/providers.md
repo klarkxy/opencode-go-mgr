@@ -75,6 +75,21 @@ lowercase kebab Aliases. Kimi maps `kimi-for-coding` → `kimi-k2.7-code`,
 and `k3-256k` → `kimi-k3-256k`. Forwarding retains every exact upstream ID.
 No request-time upstream lookup is performed.
 
+Ollama Cloud refreshes the public keyless directory
+`https://ollama.com/v1/models` without selecting an account; the endpoint is
+catalog discovery, never a Key check. Every exact id (including `:` tags such
+as size variants) is registered as-is and stays a raw pin. The family is fixed
+Chat Completions: discovered rows enable Chat immediately, Responses and
+Messages are unsupported, and there is no protocol-probe entry. Ollama Cloud
+never creates or steals a published Alias: its only alias contribution is
+appending one routeable mapping to a Go-owned alias when stripping the `:` tag
+leaves exactly one catalog match (for example the shared `deepseek-v4-flash`
+stem). When two snapshots of the same stem coexist after an upstream rotation,
+that mapping drops out — the alias keeps being served by its existing families
+until you pin one exact id in the matrix, and that pin survives later
+refreshes. Date-tagged snapshot ids are runtime catalog data and never appear
+in code or releases.
+
 Before the first successful refresh, the built-in static catalog is the initial
 preset. After success, the saved official snapshot is authoritative and
 replaces that preset. Models newly added by a refresh are visible in the matrix.
@@ -155,6 +170,11 @@ refreshes those Plans only. Refresh stays manual:
 - Zen Free has no price (egress-IP-shared free quota).
 - Custom API is unpriced: successful forwards log `cost_state=unknown` with
   no quota debit and no official usage refresh.
+- Ollama Cloud is unpriced: forwards log `cost_state=unpriced`, never a Go
+  price conversion, and usage comes from an opt-in Cookie scrape of the fixed
+  `https://ollama.com/settings` page (manual refresh with a 30-second
+  throttle and a fixed 5m/15m/1h/6h failure backoff). Usage failures never
+  write inference cooldowns or change routing eligibility.
 - MiniMax CN and Kimi Code CN are unpriced in OCG, but their account cards can
   manually read the official subscription windows (`/token_plan/remains` and
   `/usages`). These snapshots are display-only, never auto-polled, and never

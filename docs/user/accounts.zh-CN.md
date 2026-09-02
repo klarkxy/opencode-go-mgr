@@ -21,6 +21,7 @@ OCG 内已定价请求日志按公开的 `$14 / $35 / $70` 三个窗口累计。
 | Command Code GOAT | `command-code` / `goat` | 是 | 使用公开的供应商目录；GOAT 预设模型默认开启，额外模型在供应商矩阵中默认关闭；没有账号级 GOAT/全部或 Max 模式 |
 | MiniMax CN Token Plan | `minimax` / `cn` | 是 | 使用独立 `sk-cp` Key；固定官方 Chat 路由、鉴权模型目录与手工官方 Token Plan 用量刷新 |
 | Kimi Code CN | `kimi` / `cn` | 是 | 使用独立 Kimi Code Key；固定官方 Chat 路由、鉴权模型目录与手工官方周额度/限频窗口刷新 |
+| Ollama Cloud | `ollama` / `cloud` | 是 | 固定源、仅 Chat Completions（`https://ollama.com`，Bearer）；公开无鉴权目录刷新；账号级可选网页会话 Cookie，用于手动抓取 `https://ollama.com/settings` 用量页；unpriced |
 | Custom API | `custom` / `api` | 是 | 受信管理员目的地；每张账号卡保存一个 API 地址、一个账号级上游协议，以及多条公开名称 → 上游 ID 映射；常见基址会自动补全；新建账号默认启用；合格公开名称会出现在 `/v1/models`；费用 unpriced/unknown，不扣额度 |
 
 ## 在节点之间迁移配置

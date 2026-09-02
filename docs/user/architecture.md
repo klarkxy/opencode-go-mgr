@@ -39,7 +39,7 @@ Desktop, CLI, and Docker are just three ways to host the same `ocg-core` process
                    \                      /
                     \                    /
              +----------------+------------------+
-             |         SQLite schema v34         |
+             |         SQLite schema v35         |
              |  GUI  ~/.ocg-mgr                  |
              |  CLI  ~/.ocg-mgr-cli              |
              +-----------------------------------+
@@ -147,7 +147,7 @@ The sidebar has eight views. `browser` is a hosted-session overlay, not a hidden
 
     AI client --Key--> this node --account credential--> Plan
 
-    Key            access_keys (current schema v34)
+    Key            access_keys (current schema v35)
                    Primary + optional sub keys (64 active cap)
     Account cred   Go key, Custom key, or Zen Free (none)
 ```

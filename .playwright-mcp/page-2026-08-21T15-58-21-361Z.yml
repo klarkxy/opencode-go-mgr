@@ -1,0 +1,327 @@
+- generic [ref=e5]:
+  - complementary [ref=e6]:
+    - generic [ref=e7]:
+      - generic [ref=e8]:
+        - generic [ref=e9]: OCG
+        - generic [ref=e10]: Manager
+      - menu [ref=e11]:
+        - menuitem "仪表盘" [ref=e12]
+        - menuitem "接入 Key" [ref=e15]
+        - menuitem "账号" [ref=e18]
+        - menuitem "价格表" [ref=e21]
+        - menuitem "应用" [ref=e24]
+        - menuitem "日志" [ref=e27]
+        - menuitem "设置" [ref=e30]
+  - generic [ref=e39]:
+    - generic [ref=e40]:
+      - generic [ref=e41]: 设置
+      - generic [ref=e42]:
+        - button "语言：简体中文" [ref=e43] [cursor=pointer]
+        - button "主题：默认 · 皓白" [ref=e48] [cursor=pointer]
+    - main [ref=e53]:
+      - generic [ref=e259]:
+        - region [ref=e260]:
+          - heading "转发" [level=2] [ref=e263]
+          - generic [ref=e267]:
+            - generic [ref=e268]:
+              - generic [ref=e269]: 上游地址
+              - textbox "上游地址" [ref=e275]:
+                - /placeholder: https://opencode.ai/zen/go
+                - text: https://opencode.ai/zen/go
+            - region [ref=e276]:
+              - heading "出站代理" [level=3] [ref=e277]
+              - paragraph [ref=e278]: 统一用于模型转发、账号测试、用量与价格刷新等 OpenCode 出站请求。
+              - generic [ref=e279]:
+                - generic [ref=e280] [cursor=pointer]:
+                  - generic [ref=e281]:
+                    - radio "自动（系统 / 环境）"
+                  - generic [ref=e283]: 自动（系统 / 环境）
+                - generic [ref=e284] [cursor=pointer]:
+                  - generic [ref=e285]:
+                    - radio "手动 HTTP 代理"
+                  - generic [ref=e287]: 手动 HTTP 代理
+                - generic [ref=e288] [cursor=pointer]:
+                  - generic [ref=e289]:
+                    - radio "强制直连"
+                  - generic [ref=e291]: 强制直连
+                - generic [ref=e292] [cursor=pointer]:
+                  - generic [ref=e293]:
+                    - radio "按模型名单" [checked]
+                  - generic [ref=e295]: 按模型名单
+              - paragraph [ref=e296]: 按模型名单分流：只有名单内模型按方向走代理或直连；“测试连接”验证的是方向默认段。
+              - generic [ref=e508]:
+                - generic [ref=e509]: 代理地址
+                - generic [ref=e514]:
+                  - textbox "代理地址" [ref=e515]:
+                    - /placeholder: http://127.0.0.1:7890
+                  - generic: http://127.0.0.1:7890
+                - generic [ref=e518]: 名单模式需要填写代理地址
+              - generic [ref=e521]:
+                - generic [ref=e522]: 名单方向
+                - generic [ref=e525]:
+                  - generic [ref=e526] [cursor=pointer]:
+                    - generic [ref=e527]:
+                      - radio "白名单（名单内走代理）" [checked]
+                    - generic [ref=e529]: 白名单（名单内走代理）
+                  - generic [ref=e530] [cursor=pointer]:
+                    - generic [ref=e531]:
+                      - radio "黑名单（名单内直连）"
+                    - generic [ref=e533]: 黑名单（名单内直连）
+              - paragraph [ref=e534]: 名单内模型走代理地址，名单外模型直连；非聊天出站（价格 / 用量 / 升级检查）将改为直连。
+              - generic [ref=e535]:
+                - generic [ref=e536]: 名单内模型
+                - group "名单内模型" [ref=e539]:
+                  - generic [ref=e540]:
+                    - generic [ref=e541]: grok-4.5
+                    - generic [ref=e542]: Responses
+                  - generic [ref=e543]:
+                    - generic [ref=e544]: glm-5.3
+                    - generic [ref=e545]: Chat
+                  - generic [ref=e546]:
+                    - generic [ref=e547]: glm-5.2
+                    - generic [ref=e548]: Chat
+                  - generic [ref=e549]:
+                    - generic [ref=e550]: glm-5.1
+                    - generic [ref=e551]: Chat
+                  - generic [ref=e552]:
+                    - generic [ref=e553]: glm-5
+                    - generic [ref=e554]: Chat
+                  - generic [ref=e555]:
+                    - generic [ref=e556]: gpt-5.6-luna
+                    - generic [ref=e557]: Responses
+                  - generic [ref=e558]:
+                    - generic [ref=e559]: muse-spark-1.2
+                    - generic [ref=e560]: Responses
+                  - generic [ref=e561]:
+                    - generic [ref=e562]: muse-spark-1.2-contributor
+                    - generic [ref=e563]: Responses
+                  - generic [ref=e564]:
+                    - generic [ref=e565]: muse-spark-1.2-contributor-free
+                    - generic [ref=e566]: Responses
+                    - generic [ref=e567]: Zen free 额度按出口 IP 共享，走代理会改变额度归属
+                  - generic [ref=e568]:
+                    - generic [ref=e569]: kimi-k3
+                    - generic [ref=e570]: Chat
+                  - generic [ref=e571]:
+                    - generic [ref=e572]: kimi-k2.7-code
+                    - generic [ref=e573]: Chat
+                  - generic [ref=e574]:
+                    - generic [ref=e575]: kimi-k2.6
+                    - generic [ref=e576]: Chat
+                  - generic [ref=e577]:
+                    - generic [ref=e578]: kimi-k2.5
+                    - generic [ref=e579]: Chat
+                  - generic [ref=e580]:
+                    - generic [ref=e581]: deepseek-v4-pro
+                    - generic [ref=e582]: Chat
+                  - generic [ref=e583]:
+                    - generic [ref=e584]: deepseek-v4-flash
+                    - generic [ref=e585]: Chat
+                  - generic [ref=e586]:
+                    - generic [ref=e587]: mimo-v2.5
+                    - generic [ref=e588]: Chat
+                  - generic [ref=e589]:
+                    - generic [ref=e590]: mimo-v2.5-pro
+                    - generic [ref=e591]: Chat
+                  - generic [ref=e592]:
+                    - generic [ref=e593]: hy3
+                    - generic [ref=e594]: Chat
+                  - generic [ref=e595]:
+                    - generic [ref=e596]: ox-alpha-free
+                    - generic [ref=e597]: Chat
+                  - generic [ref=e598]:
+                    - generic [ref=e599]: minimax-m3
+                    - generic [ref=e600]: Messages
+                  - generic [ref=e601]:
+                    - generic [ref=e602]: minimax-m2.7
+                    - generic [ref=e603]: Messages
+                  - generic [ref=e604]:
+                    - generic [ref=e605]: minimax-m2.7-highspeed
+                    - generic [ref=e606]: Messages
+                  - generic [ref=e607]:
+                    - generic [ref=e608]: minimax-m2.5
+                    - generic [ref=e609]: Messages
+                  - generic [ref=e610]:
+                    - generic [ref=e611]: minimax-m2.5-highspeed
+                    - generic [ref=e612]: Messages
+                  - generic [ref=e613]:
+                    - generic [ref=e614]: qwen3.8-max
+                    - generic [ref=e615]: Messages
+                  - generic [ref=e616]:
+                    - generic [ref=e617]: qwen3.7-max
+                    - generic [ref=e618]: Messages
+                  - generic [ref=e619]:
+                    - generic [ref=e620]: qwen3.7-plus
+                    - generic [ref=e621]: Messages
+                  - generic [ref=e622]:
+                    - generic [ref=e623]: qwen3.6-plus
+                    - generic [ref=e624]: Messages
+                  - generic [ref=e625]:
+                    - generic [ref=e626]: qwen3.5-plus
+                    - generic [ref=e627]: Messages
+                  - generic [ref=e628]:
+                    - generic [ref=e629]: big-pickle
+                    - generic [ref=e630]: Chat
+                    - generic [ref=e631]: Zen free 额度按出口 IP 共享，走代理会改变额度归属
+                  - generic [ref=e632]:
+                    - generic [ref=e633]: hy3-free
+                    - generic [ref=e634]: Chat
+                    - generic [ref=e635]: Zen free 额度按出口 IP 共享，走代理会改变额度归属
+                  - generic [ref=e636]:
+                    - generic [ref=e637]: deepseek-v4-flash-free
+                    - generic [ref=e638]: Chat
+                  - generic [ref=e639]:
+                    - generic [ref=e640]: mimo-v2.5-free
+                    - generic [ref=e641]: Chat
+                    - generic [ref=e642]: Zen free 额度按出口 IP 共享，走代理会改变额度归属
+                  - generic [ref=e643]:
+                    - generic [ref=e644]: ling-3.0-flash-free
+                    - generic [ref=e645]: Chat
+                  - generic [ref=e646]:
+                    - generic [ref=e647]: laguna-s-2.1-free
+                    - generic [ref=e648]: Chat
+                    - generic [ref=e649]: Zen free 额度按出口 IP 共享，走代理会改变额度归属
+                  - generic [ref=e650]:
+                    - generic [ref=e651]: longcat-2.0-free
+                    - generic [ref=e652]: Chat
+                  - generic [ref=e653]:
+                    - generic [ref=e654]: north-mini-code-free
+                    - generic [ref=e655]: Chat
+                  - generic [ref=e656]:
+                    - generic [ref=e657]: nemotron-3-ultra-free
+                    - generic [ref=e658]: Chat
+                    - generic [ref=e659]: Zen free 额度按出口 IP 共享，走代理会改变额度归属
+                  - generic [ref=e660]:
+                    - generic [ref=e661]: nemotron-3.5-lightning-free
+                    - generic [ref=e662]: Chat
+                    - generic [ref=e663]: Zen free 额度按出口 IP 共享，走代理会改变额度归属
+              - generic [ref=e297]:
+                - button "测试连接" [disabled] [ref=e298]
+                - generic [ref=e300]: 测试当前表单值，不会保存设置；收到任意 HTTP 响应即表示链路可用。
+            - generic [ref=e301]:
+              - generic [ref=e302]: OpenCode 邀请链接（注册新账号）
+              - textbox "OpenCode 邀请链接（注册新账号）" [ref=e308]:
+                - /placeholder: https://opencode.ai/go?ref=68XPB6NP8V
+                - text: https://opencode.ai/go?ref=68XPB6NP8V
+              - generic [ref=e311]: 仅用于注册向导打开邀请页面。注册前请改为你自己的邀请链接；默认链接仅作演示，注册收益归链接所有者。
+            - generic [ref=e315]:
+              - generic [ref=e316]: 下游访问根地址（可选）
+              - generic [ref=e319]:
+                - generic [ref=e322]:
+                  - textbox "下游访问根地址（可选）" [ref=e323]:
+                    - /placeholder: http://127.0.0.1:9042
+                  - generic: http://127.0.0.1:9042
+                - paragraph:
+                  - generic [ref=e324]: 未配置时自动使用：http://127.0.0.1:9042（API Base URL：http://127.0.0.1:9042/v1）；自动值不会写入设置。
+              - generic [ref=e325]: 未配置时自动使用：http://127.0.0.1:9042（API Base URL：http://127.0.0.1:9042/v1）；自动值不会写入设置。
+            - region [ref=e328]:
+              - heading "账号路由" [level=3] [ref=e329]
+              - paragraph [ref=e330]: 基础路由方案同一时刻只能选一个；对话粘性是可叠加开关，不会替换基础方案。
+              - generic [ref=e331]:
+                - generic [ref=e332]:
+                  - generic "严格优先级" [ref=e333] [cursor=pointer]:
+                    - generic [ref=e334]:
+                      - radio "严格优先级" [checked]
+                  - generic [ref=e337]:
+                    - paragraph [ref=e338]: 每次新请求按账号排序选择第一个可用账号。
+                    - paragraph [ref=e339]: 优点：行为确定，高优先级账号恢复后立即接管。
+                    - paragraph [ref=e340]: 缺点：冷却恢复可能切换账号，影响按凭据隔离的 prompt cache。
+                - generic [ref=e341]:
+                  - generic "全局粘性" [ref=e342] [cursor=pointer]:
+                    - generic [ref=e343]:
+                      - radio "全局粘性"
+                  - generic [ref=e346]:
+                    - paragraph [ref=e347]: 无对话绑定时优先沿用当前全局账号，不可用时再按排序切换。
+                    - paragraph [ref=e348]: 优点：低并发时更容易保持 prompt cache，不会因高优先级恢复而无谓抢切。
+                    - paragraph [ref=e349]: 缺点：所有并发对话共享一个账号，恢复后不会自动抢回流量。
+                - generic [ref=e350]:
+                  - generic "轮询" [ref=e351] [cursor=pointer]:
+                    - generic [ref=e352]:
+                      - radio "轮询"
+                  - generic [ref=e355]:
+                    - paragraph [ref=e356]: 每个新请求从上次位置之后循环选择下一个可用账号。
+                    - paragraph [ref=e357]: 优点：多账号可用时分摊请求、额度和风险。
+                    - paragraph [ref=e358]: 缺点：账号切换最频繁，prompt cache 命中通常较差，且不是加权均衡。
+              - generic [ref=e359]:
+                - generic [ref=e360]:
+                  - generic [ref=e361]: 对话粘性
+                  - switch "对话粘性" [ref=e362]:
+                    - generic [ref=e364] [cursor=pointer]:
+                      - generic [ref=e365]: 开启
+                      - generic [ref=e366]: 关闭
+                - paragraph [ref=e367]: 优先使用请求头 X-OCG-Conversation-Id；未提供时用 Prompt 指纹启发式（system/tools/首条 user）。无法生成会话 key 时回退基础路由。指纹可能把相似会话绑到同一账号。
+            - region [ref=e368]:
+              - heading "Free 模型策略" [level=3] [ref=e369]
+              - paragraph [ref=e370]: 控制是否允许使用 OpenCode Zen 免费模型，以及是否在上下文允许时把同名 Go 请求优先路由到 free。
+              - generic [ref=e371]:
+                - generic [ref=e372]:
+                  - generic "禁止 Free 模型" [ref=e373] [cursor=pointer]:
+                    - generic [ref=e374]:
+                      - radio "禁止 Free 模型"
+                  - paragraph [ref=e378]: 拒绝已登记的 Zen free 模型（如 big-pickle），不拦截 Go 上名字带 free 的模型（如 ox-alpha-free），也不把 Go 模型改写到 Zen。
+                - generic [ref=e379]:
+                  - generic "仅显式使用 Free 模型" [ref=e380] [cursor=pointer]:
+                    - generic [ref=e381]:
+                      - radio "仅显式使用 Free 模型" [checked]
+                  - paragraph [ref=e385]: 只有客户端显式请求 free 模型时才走 Zen free 通道；Go 模型保持 Go 上游。Free 按 IP 限额，429 后整通道冷却，不换 Key。
+                - generic [ref=e386]:
+                  - generic "自动优先同名 Free 模型" [ref=e387] [cursor=pointer]:
+                    - generic [ref=e388]:
+                      - radio "自动优先同名 Free 模型"
+                  - paragraph [ref=e392]: 对已映射的 Go 模型（如 deepseek-v4-flash、mimo-v2.5），在上下文装得下时优先 free；free 按 IP 限额，429 后整通道冷却并回落 Go，不换 Key。
+              - paragraph [ref=e393]: Free 模型为限时促销，额度按出口 IP 共享（429 后整通道冷却，不换 Key），且请求数据可能用于改进模型；请勿提交机密内容。
+            - region [ref=e394]:
+              - heading "请求超时" [level=3] [ref=e395]
+              - generic [ref=e396]:
+                - generic [ref=e397]: 连接超时
+                - generic [ref=e400]:
+                  - generic [ref=e403]:
+                    - textbox "连接超时（秒）" [ref=e405]:
+                      - /placeholder: 请输入
+                      - text: "30"
+                    - generic [ref=e406]:
+                      - generic [ref=e407]: 秒
+                      - button [ref=e408] [cursor=pointer]
+                      - button [ref=e412] [cursor=pointer]
+                  - generic [ref=e417]: 建立上游连接的初始超时（秒）
+              - generic [ref=e418]:
+                - generic [ref=e419]: 非流式总超时
+                - generic [ref=e422]:
+                  - generic [ref=e425]:
+                    - textbox "非流式总超时（秒）" [ref=e427]:
+                      - /placeholder: 请输入
+                      - text: "900"
+                    - generic [ref=e428]:
+                      - generic [ref=e429]: 秒
+                      - button [ref=e430] [cursor=pointer]
+                      - button [ref=e434] [cursor=pointer]
+                  - generic [ref=e439]: 非流式请求从发起到完整响应的总超时（秒）
+              - generic [ref=e440]:
+                - generic [ref=e441]: 流式空闲超时
+                - generic [ref=e444]:
+                  - generic [ref=e447]:
+                    - textbox "流式空闲超时（秒）" [ref=e449]:
+                      - /placeholder: 请输入
+                      - text: "300"
+                    - generic [ref=e450]:
+                      - generic [ref=e451]: 秒
+                      - button [ref=e452] [cursor=pointer]
+                      - button [ref=e456] [cursor=pointer]
+                  - generic [ref=e461]: 流式响应两次数据块之间的最大空闲时间（秒）
+          - button "保存设置" [disabled] [ref=e462]
+        - generic [ref=e464]:
+          - region [ref=e465]:
+            - generic [ref=e467]:
+              - heading "外观" [level=2] [ref=e468]
+              - paragraph [ref=e472]: 当前：默认 · 皓白
+            - group "选择主题" [ref=e473]:
+              - button "默认" [pressed] [ref=e474] [cursor=pointer]
+              - button "皓白" [ref=e480] [cursor=pointer]
+              - button "曜黑" [ref=e483] [cursor=pointer]
+              - button "藤紫" [ref=e486] [cursor=pointer]
+              - button "霁蓝" [ref=e489] [cursor=pointer]
+              - button "青瓷" [ref=e492] [cursor=pointer]
+              - button "暖铜" [ref=e495] [cursor=pointer]
+          - region [ref=e498]:
+            - heading "检查更新" [level=2] [ref=e501]
+            - button "检查更新" [ref=e506] [cursor=pointer]

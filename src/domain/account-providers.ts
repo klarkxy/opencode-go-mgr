@@ -33,6 +33,8 @@ export const COMMAND_CODE_GOAT_OFFERING_ID = "goat";
 export const MINIMAX_PROVIDER_ID = "minimax";
 export const KIMI_PROVIDER_ID = "kimi";
 export const CN_OFFERING_ID = "cn";
+export const OLLAMA_PROVIDER_ID = "ollama";
+export const OLLAMA_CLOUD_OFFERING_ID = "cloud";
 
 /** Built-in singleton Zen Free account; created and owned by the backend. */
 export const ZEN_FREE_ACCOUNT_ID = "00000000-0000-0000-0000-000000000002";
@@ -90,6 +92,14 @@ export function isOfficialCnPlanAccount(
 ): boolean {
   return (account.provider_id === MINIMAX_PROVIDER_ID || account.provider_id === KIMI_PROVIDER_ID)
     && account.offering_id === CN_OFFERING_ID;
+}
+
+/** Ollama Cloud accounts scrape usage with an account-level web Cookie. */
+export function isOllamaCloudAccount(
+  account: Pick<Account, "provider_id" | "offering_id">,
+): boolean {
+  return account.provider_id === OLLAMA_PROVIDER_ID
+    && account.offering_id === OLLAMA_CLOUD_OFFERING_ID;
 }
 
 export function findProviderOffering(

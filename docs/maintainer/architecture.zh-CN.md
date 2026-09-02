@@ -250,7 +250,7 @@ Vue SPA 是当前唯一的面板客户端，走 HTTP Dashboard V3。CLI 调用�
   account_control / gateway_keys / settings / ...
            |
            v
-  SQLite schema v34
+  SQLite schema v35
            ^
            |
   ocg-manager-cli  同一组服务，无 argv CAS
@@ -263,7 +263,7 @@ Vue SPA 是当前唯一的面板客户端，走 HTTP Dashboard V3。CLI 调用�
 权威 schema 是 v34。`sub_gateway_keys` 只出现在迁到 v27 之前的历史库，迁完即丢弃。GUI 数据目录在 Windows 为 `%USERPROFILE%\.ocg-mgr`，在 macOS/Linux 为 `~/.ocg-mgr`；CLI 默认 `~/.ocg-mgr-cli`。
 
 ```text
-  data.sqlite                         CURRENT_SCHEMA_VERSION = 34
+  data.sqlite                         CURRENT_SCHEMA_VERSION = 35
     access_keys                       主 Key id PRIMARY_KEY_ID
                                       主 Key 不可禁用/删除
                                       子 Key 活跃上限 64

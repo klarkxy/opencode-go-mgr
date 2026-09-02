@@ -1,0 +1,327 @@
+- generic [ref=f1e5]:
+  - complementary [ref=f1e6]:
+    - generic [ref=f1e7]:
+      - generic [ref=f1e8]:
+        - generic [ref=f1e9]: OCG
+        - generic [ref=f1e10]: Manager
+      - menu [ref=f1e11]:
+        - menuitem "仪表盘" [ref=f1e12]
+        - menuitem "接入 Key" [ref=f1e15]
+        - menuitem "账号" [ref=f1e18]
+        - menuitem "价格表" [ref=f1e21]
+        - menuitem "应用" [ref=f1e24]
+        - menuitem "日志" [ref=f1e27]
+        - menuitem "设置" [ref=f1e30]
+  - generic [ref=f1e39]:
+    - generic [ref=f1e40]:
+      - generic [ref=f1e41]: 设置
+      - generic [ref=f1e42]:
+        - button "语言：简体中文" [ref=f1e43] [cursor=pointer]
+        - button "主题：默认 · 皓白" [ref=f1e48] [cursor=pointer]
+    - main [ref=f1e53]:
+      - generic [ref=f1e54]:
+        - region [ref=f1e55]:
+          - heading "转发" [level=2] [ref=f1e58]
+          - generic [ref=f1e62]:
+            - generic [ref=f1e63]:
+              - generic [ref=f1e64]: 上游地址
+              - textbox "上游地址" [ref=f1e70]:
+                - /placeholder: https://opencode.ai/zen/go
+                - text: https://opencode.ai/zen/go
+            - region [ref=f1e71]:
+              - heading "出站代理" [level=3] [ref=f1e72]
+              - paragraph [ref=f1e73]: 统一用于模型转发、账号测试、用量与价格刷新等 OpenCode 出站请求。
+              - generic [ref=f1e74]:
+                - generic [ref=f1e75] [cursor=pointer]:
+                  - generic [ref=f1e76]:
+                    - radio "自动（系统 / 环境）"
+                  - generic [ref=f1e78]: 自动（系统 / 环境）
+                - generic [ref=f1e79] [cursor=pointer]:
+                  - generic [ref=f1e80]:
+                    - radio "手动 HTTP 代理"
+                  - generic [ref=f1e82]: 手动 HTTP 代理
+                - generic [ref=f1e83] [cursor=pointer]:
+                  - generic [ref=f1e84]:
+                    - radio "强制直连"
+                  - generic [ref=f1e86]: 强制直连
+                - generic [ref=f1e87] [cursor=pointer]:
+                  - generic [ref=f1e88]:
+                    - radio "按模型名单" [checked]
+                  - generic [ref=f1e90]: 按模型名单
+              - paragraph [ref=f1e91]: 按模型名单分流：只有名单内模型按方向走代理或直连；“测试连接”验证的是方向默认段。
+              - generic [ref=f1e92]:
+                - generic [ref=f1e93]: 代理地址
+                - generic [ref=f1e98]:
+                  - textbox "代理地址" [ref=f1e99]:
+                    - /placeholder: http://127.0.0.1:7890
+                  - generic: http://127.0.0.1:7890
+                - generic [ref=f1e102]: 名单模式需要填写代理地址
+              - generic [ref=f1e105]:
+                - generic [ref=f1e106]: 名单方向
+                - generic [ref=f1e109]:
+                  - generic [ref=f1e110] [cursor=pointer]:
+                    - generic [ref=f1e111]:
+                      - radio "白名单（名单内走代理）" [checked]
+                    - generic [ref=f1e113]: 白名单（名单内走代理）
+                  - generic [ref=f1e114] [cursor=pointer]:
+                    - generic [ref=f1e115]:
+                      - radio "黑名单（名单内直连）"
+                    - generic [ref=f1e117]: 黑名单（名单内直连）
+              - paragraph [ref=f1e118]: 名单内模型走代理地址，名单外模型直连；非聊天出站（价格 / 用量 / 升级检查）将改为直连。
+              - generic [ref=f1e119]:
+                - generic [ref=f1e120]: 名单内模型
+                - group "名单内模型" [ref=f1e123]:
+                  - generic [ref=f1e124]:
+                    - checkbox "grok-4.5" [ref=f1e125] [cursor=pointer]
+                    - generic [ref=f1e133]: Responses
+                  - generic [ref=f1e134]:
+                    - checkbox "glm-5.3" [ref=f1e135] [cursor=pointer]
+                    - generic [ref=f1e143]: Chat
+                  - generic [ref=f1e144]:
+                    - checkbox "glm-5.2" [ref=f1e145] [cursor=pointer]
+                    - generic [ref=f1e153]: Chat
+                  - generic [ref=f1e154]:
+                    - checkbox "glm-5.1" [ref=f1e155] [cursor=pointer]
+                    - generic [ref=f1e163]: Chat
+                  - generic [ref=f1e164]:
+                    - checkbox "glm-5" [ref=f1e165] [cursor=pointer]
+                    - generic [ref=f1e173]: Chat
+                  - generic [ref=f1e174]:
+                    - checkbox "gpt-5.6-luna" [checked] [active] [ref=f1e175] [cursor=pointer]
+                    - generic [ref=f1e183]: Responses
+                  - generic [ref=f1e184]:
+                    - checkbox "muse-spark-1.2" [ref=f1e185] [cursor=pointer]
+                    - generic [ref=f1e193]: Responses
+                  - generic [ref=f1e194]:
+                    - checkbox "muse-spark-1.2-contributor" [ref=f1e195] [cursor=pointer]
+                    - generic [ref=f1e203]: Responses
+                  - generic [ref=f1e204]:
+                    - checkbox "muse-spark-1.2-contributor-free" [ref=f1e205] [cursor=pointer]
+                    - generic [ref=f1e213]: Responses
+                    - generic [ref=f1e214]: Zen free 额度按出口 IP 共享，走代理会改变额度归属
+                  - generic [ref=f1e215]:
+                    - checkbox "kimi-k3" [ref=f1e216] [cursor=pointer]
+                    - generic [ref=f1e224]: Chat
+                  - generic [ref=f1e225]:
+                    - checkbox "kimi-k2.7-code" [ref=f1e226] [cursor=pointer]
+                    - generic [ref=f1e234]: Chat
+                  - generic [ref=f1e235]:
+                    - checkbox "kimi-k2.6" [ref=f1e236] [cursor=pointer]
+                    - generic [ref=f1e244]: Chat
+                  - generic [ref=f1e245]:
+                    - checkbox "kimi-k2.5" [ref=f1e246] [cursor=pointer]
+                    - generic [ref=f1e254]: Chat
+                  - generic [ref=f1e255]:
+                    - checkbox "deepseek-v4-pro" [ref=f1e256] [cursor=pointer]
+                    - generic [ref=f1e264]: Chat
+                  - generic [ref=f1e265]:
+                    - checkbox "deepseek-v4-flash" [ref=f1e266] [cursor=pointer]
+                    - generic [ref=f1e274]: Chat
+                  - generic [ref=f1e275]:
+                    - checkbox "mimo-v2.5" [ref=f1e276] [cursor=pointer]
+                    - generic [ref=f1e284]: Chat
+                  - generic [ref=f1e285]:
+                    - checkbox "mimo-v2.5-pro" [ref=f1e286] [cursor=pointer]
+                    - generic [ref=f1e294]: Chat
+                  - generic [ref=f1e295]:
+                    - checkbox "hy3" [ref=f1e296] [cursor=pointer]
+                    - generic [ref=f1e304]: Chat
+                  - generic [ref=f1e305]:
+                    - checkbox "ox-alpha-free" [ref=f1e306] [cursor=pointer]
+                    - generic [ref=f1e314]: Chat
+                  - generic [ref=f1e315]:
+                    - checkbox "minimax-m3" [ref=f1e316] [cursor=pointer]
+                    - generic [ref=f1e324]: Messages
+                  - generic [ref=f1e325]:
+                    - checkbox "minimax-m2.7" [ref=f1e326] [cursor=pointer]
+                    - generic [ref=f1e334]: Messages
+                  - generic [ref=f1e335]:
+                    - checkbox "minimax-m2.7-highspeed" [ref=f1e336] [cursor=pointer]
+                    - generic [ref=f1e344]: Messages
+                  - generic [ref=f1e345]:
+                    - checkbox "minimax-m2.5" [ref=f1e346] [cursor=pointer]
+                    - generic [ref=f1e354]: Messages
+                  - generic [ref=f1e355]:
+                    - checkbox "minimax-m2.5-highspeed" [ref=f1e356] [cursor=pointer]
+                    - generic [ref=f1e364]: Messages
+                  - generic [ref=f1e365]:
+                    - checkbox "qwen3.8-max" [ref=f1e366] [cursor=pointer]
+                    - generic [ref=f1e374]: Messages
+                  - generic [ref=f1e375]:
+                    - checkbox "qwen3.7-max" [ref=f1e376] [cursor=pointer]
+                    - generic [ref=f1e384]: Messages
+                  - generic [ref=f1e385]:
+                    - checkbox "qwen3.7-plus" [ref=f1e386] [cursor=pointer]
+                    - generic [ref=f1e394]: Messages
+                  - generic [ref=f1e395]:
+                    - checkbox "qwen3.6-plus" [ref=f1e396] [cursor=pointer]
+                    - generic [ref=f1e404]: Messages
+                  - generic [ref=f1e405]:
+                    - checkbox "qwen3.5-plus" [ref=f1e406] [cursor=pointer]
+                    - generic [ref=f1e414]: Messages
+                  - generic [ref=f1e415]:
+                    - checkbox "big-pickle" [ref=f1e416] [cursor=pointer]
+                    - generic [ref=f1e424]: Chat
+                    - generic [ref=f1e425]: Zen free 额度按出口 IP 共享，走代理会改变额度归属
+                  - generic [ref=f1e426]:
+                    - checkbox "hy3-free" [ref=f1e427] [cursor=pointer]
+                    - generic [ref=f1e435]: Chat
+                    - generic [ref=f1e436]: Zen free 额度按出口 IP 共享，走代理会改变额度归属
+                  - generic [ref=f1e437]:
+                    - checkbox "deepseek-v4-flash-free" [ref=f1e438] [cursor=pointer]
+                    - generic [ref=f1e446]: Chat
+                  - generic [ref=f1e447]:
+                    - checkbox "mimo-v2.5-free" [ref=f1e448] [cursor=pointer]
+                    - generic [ref=f1e456]: Chat
+                    - generic [ref=f1e457]: Zen free 额度按出口 IP 共享，走代理会改变额度归属
+                  - generic [ref=f1e458]:
+                    - checkbox "ling-3.0-flash-free" [ref=f1e459] [cursor=pointer]
+                    - generic [ref=f1e467]: Chat
+                  - generic [ref=f1e468]:
+                    - checkbox "laguna-s-2.1-free" [ref=f1e469] [cursor=pointer]
+                    - generic [ref=f1e477]: Chat
+                    - generic [ref=f1e478]: Zen free 额度按出口 IP 共享，走代理会改变额度归属
+                  - generic [ref=f1e479]:
+                    - checkbox "longcat-2.0-free" [ref=f1e480] [cursor=pointer]
+                    - generic [ref=f1e488]: Chat
+                  - generic [ref=f1e489]:
+                    - checkbox "north-mini-code-free" [ref=f1e490] [cursor=pointer]
+                    - generic [ref=f1e498]: Chat
+                  - generic [ref=f1e499]:
+                    - checkbox "nemotron-3-ultra-free" [ref=f1e500] [cursor=pointer]
+                    - generic [ref=f1e508]: Chat
+                    - generic [ref=f1e509]: Zen free 额度按出口 IP 共享，走代理会改变额度归属
+                  - generic [ref=f1e510]:
+                    - checkbox "nemotron-3.5-lightning-free" [ref=f1e511] [cursor=pointer]
+                    - generic [ref=f1e519]: Chat
+                    - generic [ref=f1e520]: Zen free 额度按出口 IP 共享，走代理会改变额度归属
+              - generic [ref=f1e521]:
+                - button "测试连接" [disabled] [ref=f1e522]
+                - generic [ref=f1e524]: 测试当前表单值，不会保存设置；收到任意 HTTP 响应即表示链路可用。
+            - generic [ref=f1e525]:
+              - generic [ref=f1e526]: OpenCode 邀请链接（注册新账号）
+              - textbox "OpenCode 邀请链接（注册新账号）" [ref=f1e532]:
+                - /placeholder: https://opencode.ai/go?ref=68XPB6NP8V
+                - text: https://opencode.ai/go?ref=68XPB6NP8V
+              - generic [ref=f1e535]: 仅用于注册向导打开邀请页面。注册前请改为你自己的邀请链接；默认链接仅作演示，注册收益归链接所有者。
+            - generic [ref=f1e539]:
+              - generic [ref=f1e540]: 下游访问根地址（可选）
+              - generic [ref=f1e543]:
+                - generic [ref=f1e546]:
+                  - textbox "下游访问根地址（可选）" [ref=f1e547]:
+                    - /placeholder: http://127.0.0.1:9042
+                  - generic: http://127.0.0.1:9042
+                - paragraph:
+                  - generic [ref=f1e548]: 未配置时自动使用：http://127.0.0.1:9042（API Base URL：http://127.0.0.1:9042/v1）；自动值不会写入设置。
+              - generic [ref=f1e549]: 未配置时自动使用：http://127.0.0.1:9042（API Base URL：http://127.0.0.1:9042/v1）；自动值不会写入设置。
+            - region [ref=f1e552]:
+              - heading "账号路由" [level=3] [ref=f1e553]
+              - paragraph [ref=f1e554]: 基础路由方案同一时刻只能选一个；对话粘性是可叠加开关，不会替换基础方案。
+              - generic [ref=f1e555]:
+                - generic [ref=f1e556]:
+                  - generic "严格优先级" [ref=f1e557] [cursor=pointer]:
+                    - generic [ref=f1e558]:
+                      - radio "严格优先级" [checked]
+                  - generic [ref=f1e561]:
+                    - paragraph [ref=f1e562]: 每次新请求按账号排序选择第一个可用账号。
+                    - paragraph [ref=f1e563]: 优点：行为确定，高优先级账号恢复后立即接管。
+                    - paragraph [ref=f1e564]: 缺点：冷却恢复可能切换账号，影响按凭据隔离的 prompt cache。
+                - generic [ref=f1e565]:
+                  - generic "全局粘性" [ref=f1e566] [cursor=pointer]:
+                    - generic [ref=f1e567]:
+                      - radio "全局粘性"
+                  - generic [ref=f1e570]:
+                    - paragraph [ref=f1e571]: 无对话绑定时优先沿用当前全局账号，不可用时再按排序切换。
+                    - paragraph [ref=f1e572]: 优点：低并发时更容易保持 prompt cache，不会因高优先级恢复而无谓抢切。
+                    - paragraph [ref=f1e573]: 缺点：所有并发对话共享一个账号，恢复后不会自动抢回流量。
+                - generic [ref=f1e574]:
+                  - generic "轮询" [ref=f1e575] [cursor=pointer]:
+                    - generic [ref=f1e576]:
+                      - radio "轮询"
+                  - generic [ref=f1e579]:
+                    - paragraph [ref=f1e580]: 每个新请求从上次位置之后循环选择下一个可用账号。
+                    - paragraph [ref=f1e581]: 优点：多账号可用时分摊请求、额度和风险。
+                    - paragraph [ref=f1e582]: 缺点：账号切换最频繁，prompt cache 命中通常较差，且不是加权均衡。
+              - generic [ref=f1e583]:
+                - generic [ref=f1e584]:
+                  - generic [ref=f1e585]: 对话粘性
+                  - switch "对话粘性" [ref=f1e586]:
+                    - generic [ref=f1e588] [cursor=pointer]:
+                      - generic [ref=f1e589]: 开启
+                      - generic [ref=f1e590]: 关闭
+                - paragraph [ref=f1e591]: 优先使用请求头 X-OCG-Conversation-Id；未提供时用 Prompt 指纹启发式（system/tools/首条 user）。无法生成会话 key 时回退基础路由。指纹可能把相似会话绑到同一账号。
+            - region [ref=f1e592]:
+              - heading "Free 模型策略" [level=3] [ref=f1e593]
+              - paragraph [ref=f1e594]: 控制是否允许使用 OpenCode Zen 免费模型，以及是否在上下文允许时把同名 Go 请求优先路由到 free。
+              - generic [ref=f1e595]:
+                - generic [ref=f1e596]:
+                  - generic "禁止 Free 模型" [ref=f1e597] [cursor=pointer]:
+                    - generic [ref=f1e598]:
+                      - radio "禁止 Free 模型"
+                  - paragraph [ref=f1e602]: 拒绝已登记的 Zen free 模型（如 big-pickle），不拦截 Go 上名字带 free 的模型（如 ox-alpha-free），也不把 Go 模型改写到 Zen。
+                - generic [ref=f1e603]:
+                  - generic "仅显式使用 Free 模型" [ref=f1e604] [cursor=pointer]:
+                    - generic [ref=f1e605]:
+                      - radio "仅显式使用 Free 模型" [checked]
+                  - paragraph [ref=f1e609]: 只有客户端显式请求 free 模型时才走 Zen free 通道；Go 模型保持 Go 上游。Free 按 IP 限额，429 后整通道冷却，不换 Key。
+                - generic [ref=f1e610]:
+                  - generic "自动优先同名 Free 模型" [ref=f1e611] [cursor=pointer]:
+                    - generic [ref=f1e612]:
+                      - radio "自动优先同名 Free 模型"
+                  - paragraph [ref=f1e616]: 对已映射的 Go 模型（如 deepseek-v4-flash、mimo-v2.5），在上下文装得下时优先 free；free 按 IP 限额，429 后整通道冷却并回落 Go，不换 Key。
+              - paragraph [ref=f1e617]: Free 模型为限时促销，额度按出口 IP 共享（429 后整通道冷却，不换 Key），且请求数据可能用于改进模型；请勿提交机密内容。
+            - region [ref=f1e618]:
+              - heading "请求超时" [level=3] [ref=f1e619]
+              - generic [ref=f1e620]:
+                - generic [ref=f1e621]: 连接超时
+                - generic [ref=f1e624]:
+                  - generic [ref=f1e627]:
+                    - textbox "连接超时（秒）" [ref=f1e629]:
+                      - /placeholder: 请输入
+                      - text: "30"
+                    - generic [ref=f1e630]:
+                      - generic [ref=f1e631]: 秒
+                      - button [ref=f1e632] [cursor=pointer]
+                      - button [ref=f1e636] [cursor=pointer]
+                  - generic [ref=f1e641]: 建立上游连接的初始超时（秒）
+              - generic [ref=f1e642]:
+                - generic [ref=f1e643]: 非流式总超时
+                - generic [ref=f1e646]:
+                  - generic [ref=f1e649]:
+                    - textbox "非流式总超时（秒）" [ref=f1e651]:
+                      - /placeholder: 请输入
+                      - text: "900"
+                    - generic [ref=f1e652]:
+                      - generic [ref=f1e653]: 秒
+                      - button [ref=f1e654] [cursor=pointer]
+                      - button [ref=f1e658] [cursor=pointer]
+                  - generic [ref=f1e663]: 非流式请求从发起到完整响应的总超时（秒）
+              - generic [ref=f1e664]:
+                - generic [ref=f1e665]: 流式空闲超时
+                - generic [ref=f1e668]:
+                  - generic [ref=f1e671]:
+                    - textbox "流式空闲超时（秒）" [ref=f1e673]:
+                      - /placeholder: 请输入
+                      - text: "300"
+                    - generic [ref=f1e674]:
+                      - generic [ref=f1e675]: 秒
+                      - button [ref=f1e676] [cursor=pointer]
+                      - button [ref=f1e680] [cursor=pointer]
+                  - generic [ref=f1e685]: 流式响应两次数据块之间的最大空闲时间（秒）
+          - button "保存设置" [disabled] [ref=f1e686]
+        - generic [ref=f1e688]:
+          - region [ref=f1e689]:
+            - generic [ref=f1e691]:
+              - heading "外观" [level=2] [ref=f1e692]
+              - paragraph [ref=f1e696]: 当前：默认 · 皓白
+            - group "选择主题" [ref=f1e697]:
+              - button "默认" [pressed] [ref=f1e698] [cursor=pointer]
+              - button "皓白" [ref=f1e704] [cursor=pointer]
+              - button "曜黑" [ref=f1e707] [cursor=pointer]
+              - button "藤紫" [ref=f1e710] [cursor=pointer]
+              - button "霁蓝" [ref=f1e713] [cursor=pointer]
+              - button "青瓷" [ref=f1e716] [cursor=pointer]
+              - button "暖铜" [ref=f1e719] [cursor=pointer]
+          - region [ref=f1e722]:
+            - heading "检查更新" [level=2] [ref=f1e725]
+            - button "检查更新" [ref=f1e730] [cursor=pointer]

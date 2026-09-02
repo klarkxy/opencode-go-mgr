@@ -1,0 +1,21 @@
+- generic [ref=f1e5]:
+  - complementary [ref=f1e6]:
+    - generic [ref=f1e7]:
+      - generic [ref=f1e8]:
+        - generic [ref=f1e9]: OCG
+        - generic [ref=f1e10]: Manager
+      - menu [ref=f1e11]:
+        - menuitem "仪表盘" [ref=f1e12]
+        - menuitem "接入 Key" [ref=f1e15]
+        - menuitem "账号" [ref=f1e18]
+        - menuitem "价格表" [ref=f1e21]
+        - menuitem "应用" [ref=f1e24]
+        - menuitem "日志" [ref=f1e27]
+        - menuitem "设置" [ref=f1e30]
+  - generic [ref=f1e39]:
+    - generic [ref=f1e40]:
+      - generic [ref=f1e41]: 设置
+      - generic [ref=f1e42]:
+        - button "语言：简体中文" [ref=f1e43] [cursor=pointer]
+        - button "主题：默认 · 皓白" [ref=f1e48] [cursor=pointer]
+    - main [ref=f1e53]

@@ -36,6 +36,10 @@ pub(crate) struct FakeCall {
     pub body: String,
     pub accept_encoding: Option<String>,
     pub conversation_header: Option<String>,
+    /// Verbatim inbound `Cookie` header; tests assert inference egress never
+    /// carries one. Not every suite reads it, hence the allow.
+    #[allow(dead_code)]
+    pub cookie: Option<String>,
 }
 
 type Replies = Arc<Mutex<HashMap<String, VecDeque<FakeReply>>>>;
@@ -191,6 +195,7 @@ async fn fake_reply(
             body,
             accept_encoding: header(&headers, axum::http::header::ACCEPT_ENCODING),
             conversation_header: header(&headers, "x-ocg-conversation-id"),
+            cookie: header(&headers, "cookie"),
         });
 
     let reply = {

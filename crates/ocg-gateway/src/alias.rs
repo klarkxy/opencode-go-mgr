@@ -30,8 +30,8 @@ use ocg_domain::ids::{
     COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM, COMMAND_CODE_PROVIDER_ID, CPA_OFFERING_ID,
     CPA_PROVIDER_ID, CUSTOM_API_OFFERING_ID, CUSTOM_PROVIDER_ID, GO_OFFERING_ID, GOAT_OFFERING_ID,
     KIMI_CN_OFFERING_ID, KIMI_PROVIDER_ID, MINIMAX_CN_OFFERING_ID, MINIMAX_PROVIDER_ID,
-    OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID, custom_model_id_matches, is_free_model,
-    looks_raw_shaped,
+    OLLAMA_CLOUD_OFFERING_ID, OLLAMA_PROVIDER_ID, OPENCODE_PROVIDER_ID,
+    OPENCODE_ZEN_FREE_PROVIDER_ID, custom_model_id_matches, is_free_model, looks_raw_shaped,
 };
 use ocg_domain::protocol::supported_model_ids;
 use ocg_domain::provider::is_custom_api;
@@ -90,6 +90,10 @@ pub struct RuntimeCatalogs<'a> {
     pub minimax: &'a [String],
     pub kimi: &'a [String],
     pub cpa: &'a [String],
+    /// Ollama Cloud persisted catalog ids and the administrator-pinned
+    /// subset used as tie-breaker when snapshot tags rotate.
+    pub ollama: &'a [String],
+    pub ollama_pinned: &'a [String],
 }
 
 impl ProviderMapping {
@@ -120,6 +124,10 @@ impl ProviderMapping {
 
     pub fn is_cpa(&self) -> bool {
         self.provider_id == CPA_PROVIDER_ID && self.offering_id == CPA_OFFERING_ID
+    }
+
+    pub fn is_ollama_cloud(&self) -> bool {
+        self.provider_id == OLLAMA_PROVIDER_ID && self.offering_id == OLLAMA_CLOUD_OFFERING_ID
     }
 }
 
@@ -281,6 +289,7 @@ fn build_runtime_registry(catalogs: RuntimeCatalogs<'_>) -> Registry {
     );
     insert_goat_catalog(&mut registry, catalogs.command_code);
     insert_cpa_catalog(&mut registry, catalogs.cpa);
+    insert_ollama_catalog(&mut registry, catalogs.ollama, catalogs.ollama_pinned);
     registry
 }
 
@@ -314,6 +323,75 @@ fn insert_sealed_catalog(
         insert_raw_mapping(registry, provider_mapping.clone());
         if let Some(alias) = alias_for_model(model_id) {
             insert_mapping(registry, alias, provider_mapping);
+        }
+    }
+}
+
+/// Strip the trailing `:` tag from an Ollama Cloud catalog id
+/// (`model:tag` → `model`). Ids without a tag keep their exact spelling;
+/// the stem is only ever compared against code-owned alias stems, never
+/// published on its own. Tag values are upstream runtime data: this function
+/// must stay free of hardcoded snapshot ids.
+fn ollama_catalog_stem(model_id: &str) -> &str {
+    let trimmed = model_id.trim();
+    match trimmed.rsplit_once(':') {
+        Some((stem, tag)) if !stem.is_empty() && !tag.is_empty() => stem,
+        _ => trimmed,
+    }
+}
+
+fn ollama_mapping(upstream_model: &str, routeable: bool) -> ProviderMapping {
+    ProviderMapping {
+        provider_id: OLLAMA_PROVIDER_ID,
+        offering_id: OLLAMA_CLOUD_OFFERING_ID,
+        upstream_model: upstream_model.to_string(),
+        routeable,
+    }
+}
+
+/// Ollama Cloud catalog overlay. Every exact catalog id (including `:` tags)
+/// becomes a raw pin. The family never creates or steals an alias: the only
+/// contribution is appending one routeable mapping to a code-owned shared
+/// alias when the stem guard resolves exactly one candidate — directly, or
+/// through the administrator-pinned subset when the catalog rotates and old
+/// and new tags coexist. Zero or ambiguous matches leave this family's
+/// mapping out entirely; the alias keeps serving its existing families.
+fn insert_ollama_catalog(
+    registry: &mut Registry,
+    model_ids: &[String],
+    pinned_model_ids: &[String],
+) {
+    for model_id in model_ids {
+        upsert_mapping(registry, None, ollama_mapping(model_id, true));
+    }
+    for stem in ocg_domain::protocol::ollama_cloud_shared_alias_stems() {
+        let matches: Vec<&String> = model_ids
+            .iter()
+            .filter(|id| ollama_catalog_stem(id).eq_ignore_ascii_case(stem))
+            .collect();
+        let binding = match matches.len() {
+            1 => Some(matches[0].clone()),
+            0 => None,
+            _ => {
+                // Old and new snapshot tags coexist: only an explicit
+                // administrator pin may pick one (fail-closed, no guessing).
+                let pinned: Vec<&String> = matches
+                    .iter()
+                    .copied()
+                    .filter(|id| {
+                        pinned_model_ids
+                            .iter()
+                            .any(|pinned| pinned.trim().eq_ignore_ascii_case(id.trim()))
+                    })
+                    .collect();
+                (pinned.len() == 1).then(|| pinned[0].clone())
+            }
+        };
+        let Some(binding) = binding else {
+            continue;
+        };
+        if is_code_owned_alias(registry, stem) {
+            insert_mapping(registry, stem, ollama_mapping(&binding, true));
         }
     }
 }
@@ -671,6 +749,8 @@ pub fn resolve_with_extended_catalogs(
             minimax: minimax_model_ids,
             kimi: kimi_model_ids,
             cpa: &[],
+            ollama: &[],
+            ollama_pinned: &[],
         },
     )
 }
@@ -1087,6 +1167,8 @@ pub fn published_routeable_aliases_with_extended_catalogs(
         minimax: minimax_model_ids,
         kimi: kimi_model_ids,
         cpa: &[],
+        ollama: &[],
+        ollama_pinned: &[],
     })
 }
 
@@ -1233,6 +1315,18 @@ pub fn canonical_alias_for_provider_model(
             .map(str::to_string)
             .unwrap_or_default();
     }
+    if provider_id == OLLAMA_PROVIDER_ID {
+        let stem = ollama_catalog_stem(upstream_model);
+        return if is_code_owned_alias(&registry, stem)
+            && ocg_domain::protocol::ollama_cloud_shared_alias_stems()
+                .iter()
+                .any(|authorized| authorized.eq_ignore_ascii_case(stem))
+        {
+            stem.to_string()
+        } else {
+            String::new()
+        };
+    }
     if provider_id == CUSTOM_PROVIDER_ID {
         return upstream_model.trim().to_string();
     }
@@ -1316,6 +1410,8 @@ pub fn routeable_aliases_for_with_extended_catalogs(
             minimax: minimax_model_ids,
             kimi: kimi_model_ids,
             cpa: &[],
+            ollama: &[],
+            ollama_pinned: &[],
         },
     )
 }

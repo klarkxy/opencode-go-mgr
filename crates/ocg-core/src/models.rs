@@ -98,6 +98,26 @@ pub struct AccountCustomConfigInput {
     pub upstream_protocol: UpstreamProtocolKind,
 }
 
+/// Ollama Cloud Cookie-usage state for one account. The Cookie ciphertext
+/// itself never leaves [`crate::db`]: this view only says whether one is
+/// configured. `snapshot` is the sanitized JSON (no HTML/Cookie/session
+/// fields) from the last successful scrape and survives later failures.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OllamaCloudUsageState {
+    pub account_id: String,
+    pub cookie_configured: bool,
+    /// `unconfigured` | `ok` | `unauthorized` | `failed`.
+    pub status: String,
+    pub snapshot: Option<String>,
+    /// Sanitized (≤256 chars, HTML/query-free) reason from the last failed
+    /// attempt; cleared on the next success.
+    pub last_error: Option<String>,
+    pub last_success_at: Option<DateTime<Utc>>,
+    pub last_attempt_at: Option<DateTime<Utc>>,
+    pub next_eligible_at: Option<DateTime<Utc>>,
+    pub failure_streak: i64,
+}
+
 /// One explicitly user-triggered, non-persisting Custom API model-list probe.
 /// A create form supplies `api_key`; an edit form may instead identify the
 /// existing Custom account so the dashboard can use its already stored key.

@@ -30,6 +30,7 @@ The registry is sealed. Built-in Plan families are:
 | Command Code GOAT | `command-code` / `goat` | Yes | Public Provider catalog; GOAT preset models default on, additional models default off in the Providers matrix; no account-level GOAT/All or Max mode |
 | MiniMax CN Token Plan | `minimax` / `cn` | Yes | Dedicated `sk-cp` Key; fixed official Chat route, authenticated model directory, and manual official Token Plan usage refresh |
 | Kimi Code CN | `kimi` / `cn` | Yes | Dedicated Kimi Code Key; fixed official Chat route, authenticated model directory, and manual official weekly/rate-window usage refresh |
+| Ollama Cloud | `ollama` / `cloud` | Yes | Fixed-origin Chat Completions only (`https://ollama.com`, Bearer); public keyless catalog refresh; account-level optional web-session Cookie for a manual usage scrape of `https://ollama.com/settings`; unpriced |
 | Custom API | `custom` / `api` | Yes | Trusted-administrator destination; one API URL, one account-wide upstream protocol, and public-name → upstream-ID mappings per account; common base URLs are completed automatically; new accounts default on; eligible public names appear on `/v1/models`; unpriced/unknown cost, no quota debit |
 
 ## Move a node configuration
@@ -85,6 +86,17 @@ dashboard actions. OCG does not poll either subscription endpoint, and usage
 display never changes routing eligibility. Before the first successful usage
 refresh, the account card still shows a neutral **Not yet refreshed** quota bar;
 official windows replace it after refresh.
+
+Ollama Cloud accounts may also store an optional **web-session Cookie** used
+only to scrape the fixed `https://ollama.com/settings` usage page. Paste the
+Cookie **request header** (`name=value` pairs) — Set-Cookie response forms,
+duplicate names, `$`-prefixed names, and empty values are rejected. The Cookie
+is stored with the same obfuscation facility as account Keys, never echoed by
+any API, and never included in an export file. Usage refresh is manual with a
+30-second throttle and a fixed failure backoff (5m → 15m → 1h → 6h cap); a
+failed or expired-session scrape never writes inference cooldowns and never
+changes routing eligibility. Clearing the Cookie returns the capability to the
+unconfigured state.
 
 Command Code's official `GET /models` is public and refreshes one Provider-level
 catalog. It does not prove that a stored Key is valid. The Providers matrix is

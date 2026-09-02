@@ -219,6 +219,11 @@ fn key_mutation_routes(id: &str) -> Vec<(Method, String)> {
     ]
 }
 
+#[test]
+fn dashboard_v3_schema_version_stays_at_v35() {
+    assert_eq!(ocg_core::db::CURRENT_SCHEMA_VERSION, 35);
+}
+
 #[tokio::test]
 async fn dashboard_v3_key_routes_require_the_v3_session() {
     let harness = start_public("keys-auth").await;

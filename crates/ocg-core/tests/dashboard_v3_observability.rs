@@ -259,6 +259,11 @@ async fn dashboard_summary_counts_routable_goat_and_custom_accounts() {
     harness.stop();
 }
 
+#[test]
+fn dashboard_v3_schema_version_stays_at_v35() {
+    assert_eq!(ocg_core::db::CURRENT_SCHEMA_VERSION, 35);
+}
+
 #[tokio::test]
 async fn dashboard_v3_observability_routes_require_the_v3_session() {
     let harness = start_public("obs-auth").await;

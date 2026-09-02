@@ -343,6 +343,14 @@ async fn cli_enable_rejects_unroutable_catalog_plans_without_mutation() {
     let cipher = test_cipher();
     let state = build_state(dir.clone(), cipher.clone()).unwrap();
     let now = Utc::now();
+    // No plan currently merges fail-closed (Ollama Cloud opened its gate);
+    // the loop below stays armed for the next unroutable offering.
+    assert!(
+        !BUILTIN_PLANS
+            .iter()
+            .any(|plan| !plan.routable && plan.offering.singleton_account_id.is_none()),
+        "a new unroutable plan must extend this CLI gate fixture"
+    );
     for plan in BUILTIN_PLANS
         .iter()
         .copied()

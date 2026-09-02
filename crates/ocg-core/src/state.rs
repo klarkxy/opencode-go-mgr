@@ -97,6 +97,8 @@ pub struct CoreStateInner {
     pub zen_free_models_refresh: tokio::sync::Mutex<()>,
     pub provider_models_refresh: tokio::sync::Mutex<()>,
     pub provider_usage_refresh: tokio::sync::Mutex<()>,
+    /// Single-flight lock for the Ollama Cloud manual usage refresh.
+    pub ollama_usage_refresh: tokio::sync::Mutex<()>,
     /// Serializes typed operations against the one local CPA integration.
     /// Network calls may hold this async gate but never the SQLite mutex.
     pub cpa_operations: tokio::sync::Mutex<()>,
@@ -361,6 +363,7 @@ impl CoreStateInner {
             zen_free_models_refresh: tokio::sync::Mutex::new(()),
             provider_models_refresh: tokio::sync::Mutex::new(()),
             provider_usage_refresh: tokio::sync::Mutex::new(()),
+            ollama_usage_refresh: tokio::sync::Mutex::new(()),
             cpa_operations: tokio::sync::Mutex::new(()),
             provider_contracts: RwLock::new(Arc::new(provider_contracts)),
             routing: RoutingRuntime::new(),

@@ -2837,6 +2837,7 @@ version = "2.1.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
+ "bytes",
  "ocg-domain",
  "serde_json",
 ]

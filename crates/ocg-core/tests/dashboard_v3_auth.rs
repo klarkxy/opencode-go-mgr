@@ -171,6 +171,11 @@ fn assert_secret_free(body: &Value, secrets: &[&str]) {
 }
 
 #[test]
+fn dashboard_v3_schema_version_stays_at_v35() {
+    assert_eq!(ocg_core::db::CURRENT_SCHEMA_VERSION, 35);
+}
+
+#[test]
 fn auth_catalog_types_append_after_pricing_without_rewriting_the_prefix() {
     assert_eq!(CATALOG_TYPE_NAMES[0], "ControlRevision");
     let auth_start = CATALOG_TYPE_NAMES

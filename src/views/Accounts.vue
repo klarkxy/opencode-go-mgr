@@ -103,6 +103,7 @@
           :catalog="providerCatalog"
           :usage="getUsage(account.id)"
           :provider-usage="providerUsageMap[account.id] ?? null"
+          :ollama-usage="ollamaUsageMap[account.id] ?? null"
           :limits="usageLimitsFor(account)"
           :edits="usageEdits[account.id]"
           :now="now"
@@ -281,7 +282,12 @@ import type {
 } from "../api/dashboard";
 import { isCooling } from "../domain/accounts-usage.ts";
 import { accountIsReady, accountMenuOptions } from "../domain/account-display.ts";
-import { isCommandCodeGoatAccount, isOfficialCnPlanAccount, isZenFreeAccount } from "../domain/account-providers.ts";
+import {
+  isCommandCodeGoatAccount,
+  isOfficialCnPlanAccount,
+  isOllamaCloudAccount,
+  isZenFreeAccount,
+} from "../domain/account-providers.ts";
 import {
   executeCustomAccountEdit,
   isCustomApiAccount,
@@ -360,6 +366,8 @@ const openingBrowserTarget = ref<BrowserTarget | null>(null);
 const busy = ref(false);
 const now = ref(Date.now());
 const planFilter = ref<AccountPlanFilter>("all");
+const OLLAMA_WEBSITE_URL = "https://ollama.com";
+
 const statusFilter = ref<AccountStatusFilter>("all");
 const providerCatalog = ref<ProviderCatalogEntry[] | null>(null);
 const catalogLoading = ref(false);
@@ -387,6 +395,7 @@ const {
   loadQuotaLimits,
   loadAccountUsage,
   retryQuotaLimits,
+  ollamaUsageMap,
 } = useAccountUsage(accounts, now);
 
 const {
@@ -468,6 +477,8 @@ const statusFilterOptions = computed(() => [
 function handleMenuSelect(key: string | number, accountId: string) {
   if (key === "open-console") {
     void openAccountBrowser(accountId, "console");
+  } else if (key === "open-site") {
+    window.open(OLLAMA_WEBSITE_URL, "_blank", "noopener,noreferrer");
   } else if (key === "continue-setup") {
     openManagedWizard(accountId);
   } else if (key === "edit") {
@@ -783,6 +794,7 @@ function removeAccountState(id: string): void {
 function accountHasUsageDisplay(account: Account): boolean {
   return isCommandCodeGoatAccount(account)
     || isOfficialCnPlanAccount(account)
+    || isOllamaCloudAccount(account)
     || (account.provider_id === "opencode" && account.offering_id === "go");
 }
 
@@ -833,6 +845,7 @@ async function loadAccounts() {
       quotaLimits.value
       || loaded.some(isCommandCodeGoatAccount)
       || loaded.some(isOfficialCnPlanAccount)
+      || loaded.some(isOllamaCloudAccount)
     ) {
       await mapWithConcurrency(
         loaded.filter((account) => (
@@ -840,6 +853,7 @@ async function loadAccounts() {
           && (
             isCommandCodeGoatAccount(account)
             || isOfficialCnPlanAccount(account)
+            || isOllamaCloudAccount(account)
             || (
               quotaLimits.value
               && account.provider_id === "opencode"
@@ -919,12 +933,20 @@ async function onFormSave(payload: AccountInput | AccountFormPayload) {
       notes: payload.notes ?? "",
     };
     if (payload.key !== undefined) update.key = payload.key;
+    const ollamaCookie = (payload as AccountFormPayload).ollama_cookie;
+    const wantsOllamaCookieWrite = isOllamaCloudAccount(editing) && ollamaCookie !== undefined;
     busy.value = true;
     try {
       const saved = await runWithFreshSettingsRevision((revision) => dashboardApi.updateAccount(editing.id, {
         ...update,
         expected_revision: revision,
       }));
+      if (wantsOllamaCookieWrite) {
+        // providerApi.setOllamaCookie drives its own control-plane tokens,
+        // mirroring the Custom edit flow: a stale token 409s into the shared
+        // conflict recovery below.
+        await providerApi.setOllamaCookie(saved.id, ollamaCookie ?? null);
+      }
       replaceAccount(saved);
       // purchase_date defines the monthly usage window and changing it clears
       // the persisted calibration offset, so the local usage snapshot must be
@@ -940,17 +962,40 @@ async function onFormSave(payload: AccountInput | AccountFormPayload) {
     }
   } else {
     // Preserve every catalog-gated create field (Custom config and
-    // capabilities) rather than rebuilding a legacy-only DTO.
-    const input: AccountInput = { ...payload, key: payload.key || "" };
+    // capabilities) rather than rebuilding a legacy-only DTO. The optional
+    // create-time Ollama Cookie rides on the form payload but persists through
+    // its own account-scoped route right after the account exists — never as
+    // part of the AccountCreate body.
+    const formPayload = payload as AccountFormPayload;
+    const createCookie = typeof formPayload.ollama_cookie === "string"
+      ? formPayload.ollama_cookie.trim()
+      : "";
+    const { ollama_cookie: _ollamaCookie, ...input } = {
+      ...(payload as AccountInput & { ollama_cookie?: string }),
+      key: payload.key || "",
+    };
     busy.value = true;
     try {
       const created = await runWithFreshSettingsRevision((revision) => dashboardApi.createAccount({
         ...input,
         expected_revision: revision,
       }));
-      message.success(t("账号已添加"));
       addAccount(created);
       settingsRevision.value = created.revision ?? settingsRevision.value;
+      let cookieFailure: unknown = null;
+      if (isOllamaCloudAccount(created) && createCookie) {
+        try {
+          await providerApi.setOllamaCookie(created.id, createCookie);
+        } catch (cookieError) {
+          cookieFailure = cookieError;
+        }
+      }
+      message.success(t("账号已添加"));
+      if (cookieFailure !== null) {
+        // The account exists; only the optional Cookie write failed. Report it
+        // after the success toast so the two are not contradictory.
+        message.error(t("保存失败: {error}", { error: dashboardErrorDetail(cookieFailure) }));
+      }
       // Go uses official usage; GOAT projects locally priced OCG request logs.
       if (accountHasUsageDisplay(created) && accountIsReady(created)) {
         await loadAccountUsage(created.id);

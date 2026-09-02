@@ -1065,6 +1065,22 @@ export const enUSMessages = {
   "可路由": "Routable",
   "编辑 Custom": "Edit Custom",
   "加载 Custom Alias 账号失败: {error}": "Failed to load Custom Alias accounts: {error}",
+  "未配置网页会话 Cookie，暂无法查询用量": "No web-session Cookie configured; usage is unavailable",
+  "网页会话已过期，请重新粘贴 Cookie": "Web session expired; paste the Cookie again",
+  "用量查询失败，稍后可重试": "Usage lookup failed; try again later",
+  "套餐: {plan}": "Plan: {plan}",
+  "余额: {balance}": "Balance: {balance}",
+  "按模型请求": "Requests by model",
+  "暂无用量快照，点击刷新查询": "No usage snapshot yet; refresh to query",
+  "网页会话 Cookie（可选）": "Web-session Cookie (optional)",
+  "粘贴浏览器 Cookie 请求头，如 session=...; theme=...；留空保持不变": "Paste the browser Cookie request header, e.g. session=...; theme=...; leave blank to keep unchanged",
+  "Cookie 超过 16KB 上限": "Cookie exceeds the 16KB limit",
+  "请粘贴 Cookie 请求头（name=value 形式），而不是 Set-Cookie 响应头": "Paste the Cookie request header (name=value pairs), not a Set-Cookie response header",
+  "Cookie 名称不能以 $ 开头": "Cookie names must not start with $",
+  "Cookie 名称重复: {name}": "Duplicate cookie name: {name}",
+  "清除已保存的网页会话 Cookie，用量状态一并归零": "Clear the stored web-session Cookie; usage state resets too",
+  "Cookie 值包含非法字符: {name}": "Cookie value for {name} contains forbidden characters",
+  "清除": "Clear",
 } as const;
 
 export type MessageKey = keyof typeof enUSMessages;

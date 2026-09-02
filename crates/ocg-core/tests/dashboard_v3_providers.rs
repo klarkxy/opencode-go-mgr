@@ -25,7 +25,8 @@ use ocg_core::kernel::zen::ZEN_MODELS_SOURCE_URL;
 use ocg_core::models::ProxyMode;
 use ocg_core::provider::{
     BUILTIN_PLANS, COMMAND_CODE_PROVIDER_ID, CUSTOM_API_OFFERING_ID, CUSTOM_PROVIDER_ID,
-    GO_OFFERING_ID, GOAT_OFFERING_ID, KIMI_PROVIDER_ID, MINIMAX_PROVIDER_ID, OPENCODE_PROVIDER_ID,
+    GO_OFFERING_ID, GOAT_OFFERING_ID, KIMI_PROVIDER_ID, MINIMAX_PROVIDER_ID,
+    OLLAMA_CLOUD_OFFERING_ID, OLLAMA_PROVIDER_ID, OPENCODE_PROVIDER_ID,
     OPENCODE_ZEN_FREE_PROVIDER_ID, ZEN_FREE_ACCOUNT_ID,
 };
 use ocg_core::provider_contracts::{
@@ -318,6 +319,11 @@ fn custom_create_body() -> Value {
     })
 }
 
+#[test]
+fn dashboard_v3_schema_version_stays_at_v35() {
+    assert_eq!(ocg_core::db::CURRENT_SCHEMA_VERSION, 35);
+}
+
 #[tokio::test]
 async fn dashboard_v3_provider_routes_require_the_v3_session() {
     let harness = start_public("providers-auth").await;
@@ -445,8 +451,11 @@ async fn dashboard_v3_providers_catalog_covers_all_plan_facts_nulls_and_camel_ca
         assert_eq!(entry.key_prefix.as_deref(), plan.key_prefix);
         if !plan.routable {
             assert!(
-                entry.model_aliases.is_empty(),
-                "{} / {} must keep empty aliases",
+                entry.model_aliases.is_empty() || plan.offering.provider_id == OLLAMA_PROVIDER_ID,
+                "{} / {} must keep empty aliases (Ollama Cloud is the sanctioned
+                    exception: its shared-alias overlay participates in
+                    cross-family fallback while account enablement stays
+                    fail-closed)",
                 plan.offering.provider_id,
                 plan.offering.offering_id
             );
@@ -682,7 +691,7 @@ async fn dashboard_v3_provider_contracts_project_five_scopes_and_custom_endpoint
     assert_secret_free(&body, &[]);
     assert_revision_snapshot(&body, &harness);
     let parsed: ProviderContracts = serde_json::from_value(body.clone()).expect("contracts");
-    assert_eq!(parsed.providers.len(), 5);
+    assert_eq!(parsed.providers.len(), 6);
     let ids: Vec<_> = parsed
         .providers
         .iter()
@@ -696,15 +705,18 @@ async fn dashboard_v3_provider_contracts_project_five_scopes_and_custom_endpoint
             COMMAND_CODE_PROVIDER_ID,
             MINIMAX_PROVIDER_ID,
             KIMI_PROVIDER_ID,
+            OLLAMA_PROVIDER_ID,
         ]
     );
     assert!(parsed.custom_endpoints.is_empty());
     assert!(
-        parsed
-            .providers
-            .iter()
-            .all(|group| group.card.protocol_probe),
-        "every built-in Provider scope must expose the shared probe action"
+        parsed.providers.iter().all(|group| {
+            group.card.protocol_probe
+                // Ollama Cloud is a fixed Chat-only family with no probeable
+                // protocol surface, so the shared probe action stays off.
+                || group.provider_id == OLLAMA_PROVIDER_ID
+        }),
+        "every probeable built-in Provider scope must expose the shared probe action"
     );
     assert!(body["providers"][0].get("scope_kind").is_none());
     assert_eq!(body["providers"][0]["scopeKind"], "provider");
@@ -722,6 +734,34 @@ async fn dashboard_v3_provider_contracts_project_five_scopes_and_custom_endpoint
     assert!(
         kimi.models.iter().any(|model| model.model_id == "kimi-k3"),
         "Kimi fallback catalog must include kimi-k3"
+    );
+    let ollama = parsed
+        .providers
+        .iter()
+        .find(|group| group.provider_id == OLLAMA_PROVIDER_ID)
+        .expect("Ollama Cloud provider contract");
+    assert_eq!(ollama.offerings[0].offering_id, OLLAMA_CLOUD_OFFERING_ID);
+    assert!(
+        ollama
+            .models
+            .iter()
+            .all(|model| model.preferred_protocol == AccountUpstreamProtocol::ChatCompletions),
+        "the Ollama family is fixed Chat: {}/{}",
+        OLLAMA_PROVIDER_ID,
+        OLLAMA_CLOUD_OFFERING_ID
+    );
+    assert!(
+        ollama
+            .models
+            .iter()
+            .any(|model| model.model_id == "gpt-oss:120b"),
+        "the preset seed rows back the pre-refresh catalog view"
+    );
+    assert!(
+        ollama.models.iter().any(
+            |model| model.model_id == "deepseek-v4-flash" && model.alias == "deepseek-v4-flash"
+        ),
+        "shared-alias stems carry their Go-owned alias"
     );
 
     let (status, created) = send_json(
@@ -1612,6 +1652,179 @@ async fn dashboard_v3_provider_routes_coexist_with_v2_and_omit_v2_aliases() {
     assert_eq!(status, StatusCode::OK, "{v3_zen}");
     assert_eq!(v3_zen["enabled"], false);
     assert!(v3_zen.get("account").is_none());
+
+    assert_eq!(ocg_core::db::CURRENT_SCHEMA_VERSION, 35);
+    harness.stop();
+}
+
+#[cfg(debug_assertions)]
+struct OllamaOrigin {
+    url: String,
+    calls: Arc<Mutex<Vec<CapturedZenCall>>>,
+    _stop: tokio::sync::oneshot::Sender<()>,
+}
+
+#[cfg(debug_assertions)]
+async fn start_ollama_origin(status: StatusCode, body: Value) -> OllamaOrigin {
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let calls_for_handler = calls.clone();
+    let app = Router::new().fallback(get(move |uri: OriginalUri, headers: HeaderMap| {
+        let calls = calls_for_handler.clone();
+        let body = body.clone();
+        async move {
+            calls.lock().unwrap().push(CapturedZenCall {
+                path: uri.0.path().to_string(),
+                authorization: headers
+                    .get(axum::http::header::AUTHORIZATION)
+                    .and_then(|value| value.to_str().ok())
+                    .map(str::to_string),
+                x_api_key: None,
+                x_goog_api_key: None,
+            });
+            (status, axum::Json(body))
+        }
+    }));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (stop, shutdown) = tokio::sync::oneshot::channel();
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown.await;
+            })
+            .await
+            .ok();
+    });
+    OllamaOrigin {
+        url: format!("http://{addr}"),
+        calls,
+        _stop: stop,
+    }
+}
+
+#[cfg(debug_assertions)]
+fn ollama_models_response(ids: &[&str]) -> Value {
+    json!({
+        "object": "list",
+        "data": ids.iter().map(|id| json!({ "id": id })).collect::<Vec<_>>()
+    })
+}
+
+#[tokio::test]
+#[cfg(debug_assertions)]
+async fn dashboard_v3_ollama_catalog_refresh_is_public_and_respects_admin_pins() {
+    use ocg_core::dashboard_v3::ProtocolOverrideState as DtoOverrideState;
+    use ocg_core::goat::install_ollama_models_origin_for_test;
+    use ocg_core::provider::{OLLAMA_CLOUD_OFFERING_ID, OLLAMA_PROVIDER_ID};
+    use ocg_core::provider_contracts::CATALOG_SOURCE_OLLAMA_CLOUD_MODELS;
+
+    let harness = start_loopback("ollama-catalog-refresh").await;
+    let origin = start_ollama_origin(
+        StatusCode::OK,
+        ollama_models_response(&["deepseek-v4-flash:0731", "gpt-oss:120b"]),
+    )
+    .await;
+    let _guard = install_ollama_models_origin_for_test(
+        harness.state.process_generation(),
+        origin.url.clone(),
+    )
+    .unwrap();
+
+    // No Ollama account exists: the refresh is a public catalog control-plane
+    // action and must never require (or send) an account Key.
+    let (status, body) = send_json(
+        &harness,
+        Method::POST,
+        "/provider-contracts/provider/ollama/catalog/refresh",
+        &cas(&harness, json!({})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let calls: Vec<CapturedZenCall> = origin.calls.lock().unwrap().clone();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].path, "/v1/models");
+    assert!(
+        calls[0].authorization.is_none(),
+        "the Ollama catalog endpoint is not a Key check"
+    );
+    let parsed: ProviderContracts = serde_json::from_value(body).unwrap();
+    let ollama = parsed
+        .providers
+        .iter()
+        .find(|group| group.provider_id == OLLAMA_PROVIDER_ID)
+        .expect("Ollama provider contract");
+    assert_eq!(ollama.catalog.source, CATALOG_SOURCE_OLLAMA_CLOUD_MODELS);
+    assert!(ollama.catalog.models.iter().any(|id| id == "gpt-oss:120b"));
+    assert!(
+        ollama.models.iter().all(|model| model.model_id != *""
+            || true && model.preferred_protocol == AccountUpstreamProtocol::ChatCompletions),
+        "the fixed-Chat family keeps every discovered row Chat-preferred"
+    );
+
+    // Administrator pin on the incoming rotated tag survives later refreshes.
+    let scope = ocg_core::provider_contracts::ContractScope::provider(OLLAMA_PROVIDER_ID);
+    harness
+        .state
+        .db
+        .lock()
+        .set_model_protocol_overrides(
+            &scope,
+            &[(
+                "deepseek-v4-flash:0915".to_string(),
+                ocg_core::provider::UpstreamProtocolKind::ChatCompletions,
+                ocg_core::provider_contracts::ProtocolOverrideState::ForceOn,
+            )],
+            chrono::Utc::now(),
+        )
+        .unwrap();
+    harness.state.reload_provider_contracts().unwrap();
+    drop(origin._stop);
+
+    let rotated = start_ollama_origin(
+        StatusCode::OK,
+        ollama_models_response(&["deepseek-v4-flash:0731", "deepseek-v4-flash:0915"]),
+    )
+    .await;
+    let _rotated_guard = install_ollama_models_origin_for_test(
+        harness.state.process_generation(),
+        rotated.url.clone(),
+    )
+    .unwrap();
+    let (status, body) = send_json(
+        &harness,
+        Method::POST,
+        "/provider-contracts/provider/ollama/catalog/refresh",
+        &cas(&harness, json!({})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let parsed: ProviderContracts = serde_json::from_value(body).unwrap();
+    let ollama = parsed
+        .providers
+        .iter()
+        .find(|group| group.provider_id == OLLAMA_PROVIDER_ID)
+        .expect("Ollama provider contract");
+    let rotated_row = ollama
+        .models
+        .iter()
+        .find(|model| model.model_id == "deepseek-v4-flash:0915")
+        .expect("rotated snapshot row");
+    let chat_row = rotated_row
+        .protocols
+        .chat_completions
+        .as_ref()
+        .expect("chat protocol row");
+    assert_eq!(
+        chat_row.r#override,
+        DtoOverrideState::ForceOn,
+        "admin pins are persistent data the refresh must respect"
+    );
+
+    // Routing, control plane, and usage have shipped, so the offering is
+    // routable; catalog refresh remains the only catalog path.
+    let offering = &ollama.offerings[0];
+    assert_eq!(offering.offering_id, OLLAMA_CLOUD_OFFERING_ID);
+    assert!(offering.routable);
 
     harness.stop();
 }

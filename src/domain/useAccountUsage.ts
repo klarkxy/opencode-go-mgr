@@ -4,7 +4,11 @@ import { useMessage } from "naive-ui";
 import { DashboardRequestError, dashboardApi } from "../api/dashboard";
 import type { Account, PricingLimits, UsageWindow } from "../api/dashboard";
 import { providerApi } from "../api/providers.ts";
-import type { ProviderQuotaWindow, ProviderUsageResponse } from "../api/providers.ts";
+import type {
+  OllamaUsageResponse,
+  ProviderQuotaWindow,
+  ProviderUsageResponse,
+} from "../api/providers.ts";
 import {
   defaultResetsInMinutes,
   isUsageLimitReached,
@@ -20,7 +24,11 @@ import {
 } from "./accounts-usage.ts";
 import type { UsageEditState, UsageKey } from "./accounts-usage.ts";
 import { accountIsReady, isUsageRefreshBlocked } from "./account-display.ts";
-import { isCommandCodeGoatAccount, isOfficialCnPlanAccount } from "./account-providers.ts";
+import {
+  isCommandCodeGoatAccount,
+  isOfficialCnPlanAccount,
+  isOllamaCloudAccount,
+} from "./account-providers.ts";
 import { t } from "../i18n/index.ts";
 import { dashboardErrorDetail } from "../utils/errors.ts";
 import { mapWithConcurrency } from "../utils/async.ts";
@@ -84,6 +92,7 @@ export function useAccountUsage(accounts: Ref<Account[]>, now: Ref<number>) {
 
   const usageMap = ref<Record<string, UsageWindow>>({});
   const providerUsageMap = ref<Record<string, ProviderUsageResponse>>({});
+  const ollamaUsageMap = ref<Record<string, OllamaUsageResponse>>({});
   const usageEdits = ref<Record<string, AccountUsageEdits>>({});
   const usageLoading = ref<Record<string, boolean>>({});
   const usageLoadErrors = ref<Record<string, string | null>>({});
@@ -258,12 +267,21 @@ export function useAccountUsage(accounts: Ref<Account[]>, now: Ref<number>) {
     if (
       usageRefreshLoading.value[accountId]
       || usageLoading.value[accountId]
-      || (!isOfficialCnPlanAccount(account) && isUsageRefreshBlocked(account))
+      || (!isOfficialCnPlanAccount(account) && !isOllamaCloudAccount(account) && isUsageRefreshBlocked(account))
     ) {
       return;
     }
     usageRefreshLoading.value = { ...usageRefreshLoading.value, [accountId]: true };
     try {
+      if (isOllamaCloudAccount(account)) {
+        const result = await providerApi.refreshOllamaUsage(accountId);
+        ollamaUsageMap.value = { ...ollamaUsageMap.value, [accountId]: result };
+        // The manual refresh is also the recovery path for a failed initial
+        // GET: a fresh status heals the card without another list reload.
+        usageLoadErrors.value = { ...usageLoadErrors.value, [accountId]: null };
+        message.success(t("成功"));
+        return;
+      }
       if (isOfficialCnPlanAccount(account)) {
         const result = await providerApi.refreshProviderUsage(accountId);
         providerUsageMap.value = { ...providerUsageMap.value, [accountId]: result };
@@ -318,6 +336,12 @@ export function useAccountUsage(accounts: Ref<Account[]>, now: Ref<number>) {
     usageLoadErrors.value[accountId] = null;
     try {
       const account = accounts.value.find(({ id }) => id === accountId);
+      if (account && isOllamaCloudAccount(account)) {
+        const ollamaUsage = await providerApi.getOllamaUsage(accountId);
+        ollamaUsageMap.value = { ...ollamaUsageMap.value, [accountId]: ollamaUsage };
+        usageMap.value[accountId] = blankUsage(accountId);
+        return;
+      }
       if (account && isOfficialCnPlanAccount(account)) {
         const providerUsage = await providerApi.getProviderUsage(accountId);
         providerUsageMap.value = { ...providerUsageMap.value, [accountId]: providerUsage };
@@ -366,6 +390,7 @@ export function useAccountUsage(accounts: Ref<Account[]>, now: Ref<number>) {
     usageLimitsFor,
     usageMap,
     providerUsageMap,
+    ollamaUsageMap,
     usageEdits,
     usageLoading,
     usageLoadErrors,

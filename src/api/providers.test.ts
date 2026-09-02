@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { providerApi } from "./providers.ts";
+import { presentOllamaUsage, providerApi } from "./providers.ts";
 import { installFetchMock, setupControlPlane } from "../test-helpers/dashboard-v3-fetch.ts";
 
 test("Go protocol probe sends only provider, model, and protocol intent", async () => {
@@ -249,4 +249,60 @@ test("Zen Free enable switch writes the catalog provider through PATCH /provider
       processGeneration: 42,
     },
   });
+});
+
+test("presentOllamaUsage keeps null snapshot fields null instead of coercing them", () => {
+  const presented = presentOllamaUsage({
+    accountId: "ollama-1",
+    cookieConfigured: true,
+    status: "failed",
+    snapshot: {
+      windows: [
+        { window: "5h", used_percent: null, reset_at: null },
+        { window: "7d", used_percent: 42.5, reset_at: "2026-09-02T12:00:00Z" },
+      ],
+      models: [
+        { model: "deepseek-v4-flash:0731", requests_5h: null, requests_7d: 9 },
+      ],
+      plan: null,
+      balance: null,
+    },
+    lastError: "upstream failed",
+    lastSuccessAt: null,
+    lastAttemptAt: "2026-09-02T10:00:00Z",
+    nextEligibleAt: null,
+    failureStreak: 2,
+    revision: 1,
+    processGeneration: 1,
+  });
+
+  assert.equal(presented.account_id, "ollama-1");
+  assert.equal(presented.cookie_configured, true);
+  assert.equal(presented.status, "failed");
+  assert.equal(presented.last_error, "upstream failed");
+  // null must stay null: Number(null) is 0 and String(null) is "null".
+  assert.deepEqual(presented.snapshot?.windows, [
+    { window: "5h", used_percent: null, reset_at: null },
+    { window: "7d", used_percent: 42.5, reset_at: "2026-09-02T12:00:00Z" },
+  ]);
+  assert.deepEqual(presented.snapshot?.models, [
+    { model: "deepseek-v4-flash:0731", requests_5h: null, requests_7d: 9 },
+  ]);
+  assert.equal(presented.snapshot?.plan, null);
+  assert.equal(presented.snapshot?.balance, null);
+
+  const unconfigured = presentOllamaUsage({
+    accountId: "ollama-2",
+    cookieConfigured: false,
+    status: "unconfigured",
+    snapshot: null,
+    lastError: null,
+    lastSuccessAt: null,
+    lastAttemptAt: null,
+    nextEligibleAt: null,
+    failureStreak: 0,
+    revision: 1,
+    processGeneration: 1,
+  });
+  assert.equal(unconfigured.snapshot, null);
 });

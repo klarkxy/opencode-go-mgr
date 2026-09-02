@@ -40,7 +40,7 @@
 
 ## 持久化
 
-- 当前 schema 是 **v34**。v33 新增非空 `account_model_capabilities.upstream_model` 并从 `model_id` 回填；v34 新增单例 `cpa_integration` 行。CPA 推理凭证、启停与顺序仍归保留账号，模型快照仍在 `provider_model_catalogs`。两次迁移都不会合成 Alias。详见 `storage-migration.zh-CN.md`。
+- 当前 schema 是 **v35**。v33 新增非空 `account_model_capabilities.upstream_model` 并从 `model_id` 回填；v34 新增单例 `cpa_integration` 行。CPA 推理凭证、启停与顺序仍归保留账号，模型快照仍在 `provider_model_catalogs`。v35 创建 `ollama_cloud_usage_state`（Ollama Cloud Cookie 用量状态，详见 `storage-migration.zh-CN.md`）两次迁移都不会合成 Alias。详见 `storage-migration.zh-CN.md`。
 - SQLite 到 **v32** 的迁移历史继续保留：v27 把主 Key 与 `sub_gateway_keys` 复制进 `access_keys`，并删除 `accounts` 上遗留的五个 `usage_sync_*` 列。v29 移除 SCNet Token Plans，v30 引入过渡期 Custom 多协议 JSON 集合，v31 新增按模型/按协议覆盖表。v32 将每条 Custom 配置替换为 `endpoint_url` 与单值 `upstream_protocol`；历史行按 Chat → Responses → Messages 选择协议并拼出标准推理路径，清理非所选协议的能力/证据/覆盖，同时把账号设为 disabled/pending。已有非空库在跨越主要 schema 边界前生成不覆盖的 `data.sqlite.pre-v3.<UTC>.bak` 与 `.sha256`；全新空库直接创建当前 schema。GUI 数据目录在 Windows 为 `%USERPROFILE%\.ocg-mgr`，macOS/Linux 为 `~/.ocg-mgr`；CLI 默认为 `~/.ocg-mgr-cli`。升级与回滚详见 `docs/maintainer/storage-migration.zh-CN.md`。
 - 下游访问根 URL 优先级：非空 `OCG_CLIENT_ROOT_URL` > SQLite 手动值 > 前端从生产 origin / 开发 Gateway 端口自动推导。环境变量覆盖是只读的，不得写回 SQLite。
 
@@ -93,6 +93,12 @@
 ## 托管账号（Beta）
 
 - `setup_step` 顺序为 `google_account`（UI：登录身份，可跳过）→ `opencode_registration` → `payment` → `key_verification` → `ready`。`PATCH /dashboard/api/v3/accounts/{id}/setup` 允许前进一步或回退到更早步骤；禁止跳过步骤或直达 `ready`。草稿创建可编辑邀请链接并写回 `opencode_invite_url`（`DEFAULT_OPENCODE_INVITE_URL` 是演示默认值）。浏览器目标包括 Google/GitHub 注册与登录、邀请 URL，以及控制台 `https://opencode.ai/auth`。托管页可通过 dashboard HTTP 打开浏览器；桌面原生浏览器是 Host hook，不是 WebView invoke。
+
+## Ollama Cloud
+
+- 家族密封且固定源：`https://ollama.com`，仅 Chat Completions，Bearer，不跟随重定向，`ProcessWideNoRedirect` 代理语义（方向默认段；本家族模型 id 不参与按模型例外段匹配）。协议事实存于 `ocg_domain::protocol` 的家族独立种子（`OLLAMA_CLOUD_*`）；`MODEL_PROTOCOLS` 必须保持无 Ollama 专属 id——该表派生 Go 已发布别名。adapter 标记 `WireNormalization::OllamaCloud`；forwarder 按尝试改写请求字节（assistant `reasoning_content` 缺失时补 `reasoning`，`max_tokens`/`max_completion_tokens` 钳制到 65535），并对响应/SSE 帧做规范化（`reasoning`/`thinking` → 补 `reasoning_content`）。混合候选链中非 Ollama 尝试的请求字节必须逐字节不变；`upstream_body_bytes` 记录实际发送字节；面向客户端的归因保留请求名。
+- Cookie 用量为 opt-in 且仅手动：存储的网页会话 Cookie（与 Key 同级混淆设施，非 AEAD）仅用于抓取固定 `https://ollama.com/settings` 页（不重定向，15 秒超时，512KB 上限，进程级出站默认段）。解析锚定 `data-usage-track`/`data-usage-segment`/`data-model`/`data-requests`/`data-time`/`data-usage-window` 及轨道的 `aria-label`（现网页面使用裸 `data-usage-track` + `aria-label="Session|Weekly usage N% used"`、兄弟 `data-time` 重置时间戳，以及按模型的 `data-usage-segment` 按钮）；快照仅持久化脱敏 JSON，失败只更新状态/退避且不动上次成功快照，`unauthorized` 表示会话过期。手动刷新 30 秒限速（成败都计），固定退避 5 分钟 → 15 分钟 → 1 小时 → 6 小时；**用量路径的任何失败绝不写推理冷却、绝不改变账号启用状态、绝不影响路由资格**。状态存于 `ollama_cloud_usage_state`（schema v35，随账号级联删除）。Cookie 与用量快照不进导出载荷；载荷结构与版本不变。
+- 别名追加守卫：目录刷新仅在剥除 `:` 标签后恰好命中一个目录 id 时，向 Go 拥有的别名（如共享词干）追加一个可路由 Ollama 映射；同词干多快照并存时该映射退出，别名仍由既有家族服务，管理员矩阵钉定会被后续刷新尊重。带日期标签的快照 id 是运行时目录数据，严禁写进代码。
 
 ## 用量同步
 

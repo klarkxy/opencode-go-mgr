@@ -260,6 +260,12 @@ mod tests {
                     assert!(!capability.automatic_sync);
                     assert!(!capability.authoritative_for_quota);
                 }
+                ProviderAdapterKind::OllamaCloud => {
+                    let capability = capability.expect("Ollama Cloud publishes local-state usage");
+                    assert_eq!(capability.evidence, ProviderUsageEvidence::Unavailable);
+                    assert!(!capability.automatic_sync);
+                    assert!(!capability.authoritative_for_quota);
+                }
                 ProviderAdapterKind::MiniMaxCn | ProviderAdapterKind::KimiCn => {
                     let capability = capability.expect("sealed CN Plan publishes usage");
                     assert_eq!(capability.evidence, ProviderUsageEvidence::Authoritative);

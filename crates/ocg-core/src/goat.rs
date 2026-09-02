@@ -171,6 +171,81 @@ pub fn opencode_go_models_url_for_base(base: &str) -> String {
     }
 }
 
+pub fn ollama_cloud_models_url_for_base(base: &str) -> String {
+    format!(
+        "{}{}",
+        base.trim_end_matches('/'),
+        crate::kernel::ids::OLLAMA_CLOUD_MODELS_PATH
+    )
+}
+
+/// Public, keyless Ollama Cloud GET `/models` refresh. Auth-free by design:
+/// the endpoint is the catalog discovery surface, never a Key check.
+pub async fn refresh_ollama_cloud_models(
+    config: &AppConfig,
+    base_url: &str,
+) -> Result<Vec<String>, GoatVerifyFailure> {
+    let url = ollama_cloud_models_url_for_base(base_url);
+    probe_public_provider_models_at_url(config, &url, "Ollama Cloud").await
+}
+
+/// Debug-only loopback origin substitute for Ollama Cloud GET `/models`
+/// tests. Mirrors the GOAT verify seam but never appends a provider path.
+#[cfg(debug_assertions)]
+static OLLAMA_MODELS_ORIGINS: LazyLock<RwLock<HashMap<u64, String>>> =
+    LazyLock::new(|| RwLock::new(HashMap::new()));
+
+#[cfg(debug_assertions)]
+#[doc(hidden)]
+pub struct OllamaModelsOriginGuard {
+    process_generation: u64,
+    origin: String,
+}
+
+#[cfg(debug_assertions)]
+impl Drop for OllamaModelsOriginGuard {
+    fn drop(&mut self) {
+        if let Ok(mut origins) = OLLAMA_MODELS_ORIGINS.write()
+            && origins
+                .get(&self.process_generation)
+                .is_some_and(|origin| origin == &self.origin)
+        {
+            origins.remove(&self.process_generation);
+        }
+    }
+}
+
+#[cfg(debug_assertions)]
+#[doc(hidden)]
+pub fn install_ollama_models_origin_for_test(
+    process_generation: u64,
+    origin: impl Into<String>,
+) -> Result<OllamaModelsOriginGuard, String> {
+    let origin = origin.into();
+    ensure_loopback_origin(&origin)?;
+    let origin = origin.trim_end_matches('/').to_string();
+    let guard = OllamaModelsOriginGuard {
+        process_generation,
+        origin: origin.clone(),
+    };
+    OLLAMA_MODELS_ORIGINS
+        .write()
+        .map_err(|_| "Ollama models origin lock is poisoned".to_string())?
+        .insert(process_generation, origin);
+    Ok(guard)
+}
+
+#[cfg(debug_assertions)]
+pub fn ollama_cloud_models_base_url(process_generation: Option<u64>) -> String {
+    if let Some(generation) = process_generation
+        && let Ok(origins) = OLLAMA_MODELS_ORIGINS.read()
+        && let Some(origin) = origins.get(&generation)
+    {
+        return origin.trim_end_matches('/').to_string();
+    }
+    crate::kernel::ids::OLLAMA_CLOUD_BASE_URL.to_string()
+}
+
 pub async fn probe_goat_models(
     config: &AppConfig,
     _api_key: &str,

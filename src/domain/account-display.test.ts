@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { Account } from "../api/dashboard.ts";
 import {
+  accountMenuOptions,
   accountRoutingDraftDescription,
   accountRoutingDraftLabel,
   accountStatusLabel,
@@ -86,4 +87,37 @@ test("draft status replaces disabled instead of rendering a second competing sta
   const ordinaryDisabled = draftAccount({ plan_routable: true, verification_status: "verified" });
   assert.equal(accountStatusLabel(ordinaryDisabled), "已禁用");
   assert.equal(accountStatusTagType(ordinaryDisabled), "default");
+});
+
+test("account menu keeps OpenCode-only actions off other sealed families", () => {
+  const now = Date.now();
+  const base = {
+    setup_step: "ready" as const,
+    plan_routable: true,
+    verification_status: "not_required" as const,
+  };
+  const ollama = {
+    ...base,
+    id: "ollama-1",
+    name: "s",
+    provider_id: "ollama",
+    offering_id: "cloud",
+    enabled: true,
+  } as unknown as Parameters<typeof accountMenuOptions>[0];
+  const keys = accountMenuOptions(ollama, now).map((option) => option.key);
+  assert.deepEqual(keys, ["open-site", "edit", "delete"]);
+
+  const opencodeGo = {
+    ...base,
+    id: "go-1",
+    name: "go",
+    provider_id: "opencode",
+    offering_id: "go",
+    enabled: true,
+  } as unknown as Parameters<typeof accountMenuOptions>[0];
+  const goKeys = accountMenuOptions(opencodeGo, now).map((option) => option.key);
+  assert.ok(goKeys.includes("open-console"));
+  assert.ok(goKeys.includes("reset-profile"));
+  assert.ok(goKeys.includes("edit"));
+  assert.ok(goKeys.includes("delete"));
 });

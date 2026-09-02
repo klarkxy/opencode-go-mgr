@@ -133,7 +133,7 @@ fn singleton_and_pair_validation_is_fail_closed() {
 
 #[test]
 fn catalog_hardcodes_plans_and_keeps_unverified_offerings_unroutable() {
-    assert_eq!(BUILTIN_PLANS.len(), 7);
+    assert_eq!(BUILTIN_PLANS.len(), 8);
     let goat = builtin_plan(COMMAND_CODE_PROVIDER_ID, GOAT_OFFERING_ID).unwrap();
     assert!(goat.routable);
     assert_eq!(goat.verification_policy, VerificationPolicy::NotRequired);
@@ -391,6 +391,7 @@ fn provider_registry_is_exhaustive_for_plans_and_adapter_kinds() {
                     | ProviderAdapterKind::CommandCodeGoat
                     | ProviderAdapterKind::MiniMaxCn
                     | ProviderAdapterKind::KimiCn
+                    | ProviderAdapterKind::OllamaCloud
                     | ProviderAdapterKind::Cpa
             )
         );
@@ -428,7 +429,7 @@ fn provider_registry_is_exhaustive_for_plans_and_adapter_kinds() {
     assert_eq!(seen.len(), ProviderAdapterKind::ALL.len());
     assert!(ProviderAdapterKind::from_offering("unknown", "unknown").is_none());
     assert!(ProviderRegistry::get("unknown", "unknown").is_none());
-    assert_eq!(ProviderAdapterKind::ALL.len(), 7);
+    assert_eq!(ProviderAdapterKind::ALL.len(), 8);
 }
 
 #[test]

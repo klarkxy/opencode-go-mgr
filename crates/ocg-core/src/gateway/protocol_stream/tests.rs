@@ -1422,3 +1422,69 @@ fn truncated_stream_is_not_synthesized_as_success() {
     let error = converter.finish().expect_err("truncated stream must fail");
     assert!(error.message.contains("terminal event"));
 }
+
+#[test]
+fn same_protocol_opaque_frames_pass_through_and_never_fail_the_stream() {
+    let mut plan = plan(ApiFormat::ChatCompletions, ApiFormat::ChatCompletions);
+    plan.model = "deepseek-v4-flash:0731".into();
+    plan.client_model = "deepseek-v4-flash".into();
+    let mut converter = StreamConverter::new_with_known_secret_and_normalization(
+        &plan,
+        None,
+        WireNormalization::OllamaCloud,
+    );
+    let input = concat!(
+        "data: ping\n\n",
+        "data: {\"id\":\"c\",\"model\":\"deepseek-v4-flash:0731\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"thinking\":\"why\"},\"finish_reason\":null}]}\n\n",
+        "data: ping\n\n",
+        "data: {\"id\":\"c\",\"model\":\"deepseek-v4-flash:0731\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let output = converter
+        .process_chunk(Bytes::from_static(input.as_bytes()))
+        .expect("opaque non-JSON frames must not fail the same-protocol stream");
+    let text = String::from_utf8(output.concat()).unwrap();
+    // The keepalive frames stay byte-identical; the JSON deltas still get
+    // the wire-normalization backfill and the model rename.
+    assert_eq!(text.matches("data: ping\n\n").count(), 2);
+    assert!(text.contains("\"reasoning_content\":\"why\""));
+    assert!(text.contains("\"thinking\":\"why\""));
+    assert!(text.contains("\"content\":\"ok\""));
+    assert!(text.contains("\"model\":\"deepseek-v4-flash\""));
+    assert!(!text.contains("deepseek-v4-flash:0731"));
+}
+
+#[test]
+fn same_protocol_opaque_frames_redact_the_known_secret() {
+    let plan = plan(ApiFormat::ChatCompletions, ApiFormat::ChatCompletions);
+    let mut converter = StreamConverter::new_with_known_secret(&plan, Some("sk-opaque-secret"));
+    let input = concat!(
+        "data: ping sk-opaque-secret\n\n",
+        "data: {\"id\":\"c\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let mut output = converter
+        .process_chunk(Bytes::from_static(input.as_bytes()))
+        .expect("opaque frames must not fail the stream");
+    output.extend(converter.finish().expect("stream should finish"));
+    let text = String::from_utf8(output.concat()).unwrap();
+    assert!(
+        !text.contains("sk-opaque-secret"),
+        "opaque data lines must not leak the known secret: {text}"
+    );
+    assert!(text.contains("data: ping <redacted>"), "{text}");
+    assert!(text.contains("\"content\":\"ok\""));
+}
+
+#[test]
+fn cross_protocol_opaque_frames_are_dropped_without_failing_the_stream() {
+    let source = concat!(
+        "data: ping\n\n",
+        "data: {\"id\":\"c\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"reasoning_content\":\"why\",\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let anthropic = convert(ApiFormat::Messages, ApiFormat::ChatCompletions, source);
+    assert!(anthropic.contains("\"type\":\"thinking_delta\""));
+    assert!(anthropic.contains("ok"));
+    assert!(!anthropic.contains("ping"));
+}

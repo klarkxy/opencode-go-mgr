@@ -10,6 +10,7 @@ import type {
   ProviderPricingSnapshot as V3ProviderPricingSnapshot,
   ProviderModels as V3ProviderModels,
   ProviderUsage as V3ProviderUsage,
+  OllamaUsageStatus as V3OllamaUsage,
   ProtocolOverrideState as V3ProtocolOverrideState,
   ProtocolProbeResponse as V3ProtocolProbeResponse,
   ZenFreeModels as V3ZenFreeModels,
@@ -146,6 +147,25 @@ export interface ProviderUsageSyncState {
   next_eligible_at: string | null;
   failure_streak: number;
   last_expedited_at: string | null;
+}
+
+/** Sanitized Ollama Cloud Cookie-usage status (never carries the Cookie). */
+export interface OllamaUsageResponse {
+  account_id: string;
+  cookie_configured: boolean;
+  status: "unconfigured" | "ok" | "unauthorized" | "failed";
+  snapshot: {
+    windows: { window: string; used_percent: number | null; reset_at: string | null }[];
+    models: { model: string; requests_5h: number | null; requests_7d: number | null }[];
+    plan: string | null;
+    balance: string | null;
+  } | null;
+  /** Sanitized failure reason (≤256 chars, no HTML/query strings) or null. */
+  last_error: string | null;
+  last_success_at: string | null;
+  last_attempt_at: string | null;
+  next_eligible_at: string | null;
+  failure_streak: number;
 }
 
 export interface ProviderUsageResponse {
@@ -533,6 +553,38 @@ function presentProviderPricingSnapshot(value: V3ProviderPricingSnapshot): Provi
   };
 }
 
+function finiteOrNull(value: number | null): number | null {
+  return value !== null && Number.isFinite(value) ? value : null;
+}
+
+export function presentOllamaUsage(value: V3OllamaUsage): OllamaUsageResponse {
+  const snapshot = value.snapshot;
+  return {
+    account_id: value.accountId,
+    cookie_configured: value.cookieConfigured,
+    status: value.status as OllamaUsageResponse["status"],
+    snapshot: snapshot === null ? null : {
+      windows: snapshot.windows.map((window) => ({
+        window: window.window,
+        used_percent: finiteOrNull(window.used_percent),
+        reset_at: window.reset_at ?? null,
+      })),
+      models: snapshot.models.map((model) => ({
+        model: model.model,
+        requests_5h: finiteOrNull(model.requests_5h),
+        requests_7d: finiteOrNull(model.requests_7d),
+      })),
+      plan: snapshot.plan ?? null,
+      balance: snapshot.balance ?? null,
+    },
+    last_error: value.lastError,
+    last_success_at: value.lastSuccessAt,
+    last_attempt_at: value.lastAttemptAt,
+    next_eligible_at: value.nextEligibleAt,
+    failure_streak: value.failureStreak,
+  };
+}
+
 function presentProviderUsage(value: V3ProviderUsage): ProviderUsageResponse {
   return {
     account_id: value.accountId,
@@ -652,6 +704,27 @@ export const providerApi = {
   },
   getProviderUsage: async (accountId: string) =>
     presentProviderUsage(await dashboardV3.getProviderUsage(accountId)),
+  getOllamaUsage: async (accountId: string): Promise<OllamaUsageResponse> =>
+    presentOllamaUsage(await dashboardV3.getOllamaUsage(accountId)),
+  refreshOllamaUsage: async (accountId: string): Promise<OllamaUsageResponse> => {
+    const control = useControlPlaneStore();
+    if (!control.hasTokens()) await control.refresh();
+    return presentOllamaUsage(
+      await control.runMutation((expectation) =>
+        dashboardV3.refreshOllamaUsage(accountId, expectation)),
+    );
+  },
+  setOllamaCookie: async (
+    accountId: string,
+    cookie: string | null,
+  ): Promise<OllamaUsageResponse> => {
+    const control = useControlPlaneStore();
+    if (!control.hasTokens()) await control.refresh();
+    return presentOllamaUsage(
+      await control.runMutation((expectation) =>
+        dashboardV3.setOllamaCookie(accountId, cookie, expectation)),
+    );
+  },
   refreshProviderUsage: async (accountId: string) => {
     const control = useControlPlaneStore();
     if (!control.hasTokens()) await control.refresh();

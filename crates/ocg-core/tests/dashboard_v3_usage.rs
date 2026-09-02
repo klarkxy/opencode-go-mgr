@@ -282,6 +282,40 @@ fn seed_credit_balance(harness: &V3Harness, account_id: &str) {
     );
 }
 
+#[test]
+fn dashboard_v3_schema_version_stays_at_v35() {
+    assert_eq!(ocg_core::db::CURRENT_SCHEMA_VERSION, 35);
+}
+
+#[test]
+fn usage_slice_keeps_outbound_io_behind_the_sealed_plan_client() {
+    let source = include_str!("../src/dashboard_v3/usage.rs");
+    for needle in [
+        "reqwest",
+        "crate::go_usage",
+        "use crate::usage_sync",
+        "crate::usage_sync",
+        "fetch_official_snapshot",
+        "refresh_official_usage",
+        "bump_settings_revision",
+        "crate::dashboard::",
+        "crate::gateway",
+    ] {
+        assert!(
+            !source.contains(needle),
+            "usage.rs must not contain `{needle}`"
+        );
+    }
+    assert!(source.contains("crate::plan_usage::fetch"));
+    assert!(
+        !source.lines().any(|line| {
+            let trimmed = line.trim_start();
+            trimmed.starts_with("trait ") || trimmed.starts_with("pub trait")
+        }),
+        "usage.rs must not introduce a trait hierarchy"
+    );
+}
+
 #[tokio::test]
 async fn dashboard_v3_usage_routes_require_the_v3_session() {
     let harness = start_public("usage-auth").await;

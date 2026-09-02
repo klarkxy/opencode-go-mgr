@@ -22,6 +22,7 @@
 //! Items are rust-public only as the cross-crate bridge; the host crate's
 //! `gateway::attempt` compatibility facade keeps them crate-private.
 
+use crate::wire::WireNormalization;
 use ocg_domain::protocol::ApiFormat;
 use std::time::Duration;
 
@@ -111,6 +112,12 @@ pub struct AttemptSpec {
     pub credential: CredentialHandle,
     #[doc(hidden)]
     pub proxy_routing: ProxyRoutingModel,
+    /// Fixed provider wire normalization applied per attempt. Data-only
+    /// marker: every adapter except Ollama Cloud leaves it `None` and the
+    /// forwarder must send the shared request-plan bytes untouched, keeping
+    /// mixed candidate chains byte-isolated per family.
+    #[doc(hidden)]
+    pub wire_normalization: WireNormalization,
 }
 
 impl AttemptSpec {
@@ -351,6 +358,7 @@ mod tests {
             follow_redirects,
             credential,
             proxy_routing,
+            wire_normalization: WireNormalization::None,
         }
     }
 

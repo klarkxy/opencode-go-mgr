@@ -265,6 +265,11 @@ fn assert_no_inference_cooldown(harness: &V3Harness, account_id: &str) {
     assert!(account.cooldown_free_until.is_none(), "{account:?}");
 }
 
+#[test]
+fn dashboard_v3_schema_version_stays_at_v35() {
+    assert_eq!(ocg_core::db::CURRENT_SCHEMA_VERSION, 35);
+}
+
 #[tokio::test]
 async fn dashboard_v3_usage_refresh_requires_the_v3_session() {
     let harness = start_public("usage-refresh-auth").await;

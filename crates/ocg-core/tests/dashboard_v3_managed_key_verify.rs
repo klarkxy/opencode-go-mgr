@@ -438,6 +438,11 @@ fn assert_no_secret_logs(harness: &V3Harness, extra: &[&str]) {
     }
 }
 
+#[test]
+fn dashboard_v3_schema_version_stays_at_v35() {
+    assert_eq!(ocg_core::db::CURRENT_SCHEMA_VERSION, 35);
+}
+
 #[tokio::test]
 async fn dashboard_v3_managed_key_verify_requires_the_v3_session() {
     let harness = start_public("verify-key-auth").await;

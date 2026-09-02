@@ -65,10 +65,10 @@ pub(crate) struct MaterializedRouteSet {
 }
 
 /// Diagnostics are not a candidate protocol decision. If a resolution can use
-/// Custom or Command Code GOAT, preserve the client wire format until each
-/// actual mapping/account is materialized. Unique GOAT catalog IDs are not in
-/// OpenCode `MODEL_PROTOCOLS`. Pure builtin resolutions keep their normal
-/// early validation.
+/// Custom, Command Code GOAT, or Ollama Cloud, preserve the client wire format
+/// until each actual mapping/account is materialized. Unique GOAT and Ollama
+/// catalog IDs are not in OpenCode `MODEL_PROTOCOLS`. Pure builtin
+/// resolutions keep their normal early validation.
 pub(crate) fn diagnostic_forced_upstream(
     resolved: &ResolvedModel,
     client: ApiFormat,
@@ -83,15 +83,18 @@ pub(crate) fn diagnostic_forced_upstream(
         );
     }
     let preserve_client = match resolved {
-        ResolvedModel::PinnedRaw { mapping, .. } => {
-            mapping_is_configurable_http(mapping) || mapping_is_command_code_goat(mapping)
-        }
-        ResolvedModel::Alias { mappings, .. } => mappings.iter().any(|mapping| {
-            mapping.routeable
-                && (mapping_is_configurable_http(mapping) || mapping_is_command_code_goat(mapping))
-        }),
+        ResolvedModel::PinnedRaw { mapping, .. } => mapping_preserves_client_wire(mapping),
+        ResolvedModel::Alias { mappings, .. } => mappings
+            .iter()
+            .any(|mapping| mapping.routeable && mapping_preserves_client_wire(mapping)),
     };
     preserve_client.then_some(client)
+}
+
+fn mapping_preserves_client_wire(mapping: &ProviderMapping) -> bool {
+    mapping_is_configurable_http(mapping)
+        || mapping_is_command_code_goat(mapping)
+        || mapping_is_ollama_cloud(mapping)
 }
 
 fn mapping_adapter_kind(mapping: &ProviderMapping) -> Option<ProviderAdapterKind> {
@@ -104,6 +107,10 @@ fn mapping_is_configurable_http(mapping: &ProviderMapping) -> bool {
 
 fn mapping_is_zen_free(mapping: &ProviderMapping) -> bool {
     mapping_adapter_kind(mapping) == Some(ProviderAdapterKind::ZenFree)
+}
+
+fn mapping_is_ollama_cloud(mapping: &ProviderMapping) -> bool {
+    mapping_adapter_kind(mapping) == Some(ProviderAdapterKind::OllamaCloud)
 }
 
 pub(crate) fn protocol_error_from_resolve(error: ResolveError) -> ProtocolError {

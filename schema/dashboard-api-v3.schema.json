@@ -3885,6 +3885,229 @@
       ],
       "type": "object"
     },
+    "OllamaCookieUpdate": {
+      "additionalProperties": false,
+      "description": "PUT `/accounts/{id}/ollama-cookie` body. A `null` (or absent) `cookie`\nclears the stored web session and resets the capability; a string is the\npasted Cookie request header validated server-side before storage.",
+      "properties": {
+        "cookie": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "expectedRevision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "processGeneration": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "expectedRevision",
+        "processGeneration"
+      ],
+      "type": "object"
+    },
+    "OllamaUsageModelRequests": {
+      "additionalProperties": false,
+      "description": "Per-model request counts inside a snapshot window.",
+      "properties": {
+        "model": {
+          "type": "string"
+        },
+        "requests_5h": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "requests_7d": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "model",
+        "requests_5h",
+        "requests_7d"
+      ],
+      "type": "object"
+    },
+    "OllamaUsageSnapshot": {
+      "additionalProperties": false,
+      "description": "Typed sanitized usage snapshot served under `OllamaUsageStatus.snapshot`.\nMirrors [`crate::ollama_usage::OllamaUsageSnapshot`]; the snake_case\ninterior is the persisted snapshot wire shape and is deliberately kept\nstable, unlike the camelCase V3 envelope.",
+      "properties": {
+        "balance": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "models": {
+          "items": {
+            "$ref": "#/$defs/OllamaUsageModelRequests"
+          },
+          "type": "array"
+        },
+        "plan": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "windows": {
+          "items": {
+            "$ref": "#/$defs/OllamaUsageWindow"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "windows",
+        "models",
+        "plan",
+        "balance"
+      ],
+      "type": "object"
+    },
+    "OllamaUsageStatus": {
+      "additionalProperties": false,
+      "description": "GET `/accounts/{id}/ollama-usage` response. The Cookie itself never\nappears: `cookieConfigured` is the only Cookie fact the API exposes, and\n`snapshot` is the sanitized usage view from the last successful scrape.",
+      "properties": {
+        "accountId": {
+          "type": "string"
+        },
+        "cookieConfigured": {
+          "type": "boolean"
+        },
+        "failureStreak": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "lastAttemptAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lastError": {
+          "description": "Sanitized failure reason from the most recent attempt (≤256 chars,\nno HTML fragments or URL query strings); `null` after a success.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lastSuccessAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "nextEligibleAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "processGeneration": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "snapshot": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OllamaUsageSnapshot"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "description": "`unconfigured` | `ok` | `unauthorized` | `failed`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "accountId",
+        "cookieConfigured",
+        "status",
+        "snapshot",
+        "lastError",
+        "lastSuccessAt",
+        "lastAttemptAt",
+        "nextEligibleAt",
+        "failureStreak",
+        "revision",
+        "processGeneration"
+      ],
+      "type": "object"
+    },
+    "OllamaUsageThrottleError": {
+      "additionalProperties": false,
+      "description": "POST `/accounts/{id}/ollama-usage/refresh` throttle response (HTTP 429):\nthe absolute instant the next manual attempt becomes eligible.",
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "nextAllowedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "nextAllowedAt"
+      ],
+      "type": "object"
+    },
+    "OllamaUsageWindow": {
+      "additionalProperties": false,
+      "description": "One usage window. `window` is `5h` or `7d`.",
+      "properties": {
+        "reset_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "used_percent": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "window": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "window",
+        "used_percent",
+        "reset_at"
+      ],
+      "type": "object"
+    },
     "PricingAdjustment": {
       "additionalProperties": false,
       "description": "One documented local adjustment on a model row.",
@@ -6615,6 +6838,24 @@
     },
     {
       "$ref": "#/$defs/CpaOAuthSessionDelete"
+    },
+    {
+      "$ref": "#/$defs/OllamaUsageStatus"
+    },
+    {
+      "$ref": "#/$defs/OllamaUsageSnapshot"
+    },
+    {
+      "$ref": "#/$defs/OllamaUsageWindow"
+    },
+    {
+      "$ref": "#/$defs/OllamaUsageModelRequests"
+    },
+    {
+      "$ref": "#/$defs/OllamaCookieUpdate"
+    },
+    {
+      "$ref": "#/$defs/OllamaUsageThrottleError"
     }
   ],
   "title": "DashboardApiV3"

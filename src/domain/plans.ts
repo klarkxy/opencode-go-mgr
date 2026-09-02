@@ -23,6 +23,7 @@ export type PlanId =
   | "command-code-goat"
   | "minimax-cn"
   | "kimi-cn"
+  | "ollama-cloud"
   | "custom-endpoint";
 
 export type PlanKind = "quota" | "free" | "api-key" | "custom";
@@ -98,6 +99,18 @@ export const PLAN_DEFINITIONS: readonly PlanDefinition[] = [
     provider_id: "kimi",
     offering_ids: ["cn"],
     label: "Kimi Code CN",
+    kind: "api-key",
+    credential_kind: "api_key",
+    quota_scope: "key",
+    singleton: false,
+    managed_registration: false,
+    legacy: false,
+  },
+  {
+    id: "ollama-cloud",
+    provider_id: "ollama",
+    offering_ids: ["cloud"],
+    label: "Ollama Cloud",
     kind: "api-key",
     credential_kind: "api_key",
     quota_scope: "key",

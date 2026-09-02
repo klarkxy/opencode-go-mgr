@@ -504,6 +504,11 @@ fn register_native(
         .unwrap();
 }
 
+#[test]
+fn dashboard_v3_schema_version_stays_at_v35() {
+    assert_eq!(ocg_core::db::CURRENT_SCHEMA_VERSION, 35);
+}
+
 #[tokio::test]
 async fn dashboard_v3_remote_browser_round_trip() {
     if std::env::var_os(REMOTE_CHILD_ENV).is_some() {
