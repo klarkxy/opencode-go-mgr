@@ -22,6 +22,7 @@ use crate::gateway::protocol::{
 };
 use crate::gateway::protocol_stream::StreamConverter;
 use crate::gateway::provider_adapter;
+use crate::gateway::routing::resolve_conversation_key;
 use crate::http_client::RouteLabel;
 use crate::kernel::pricing::PricingSnapshot;
 use crate::kernel::protocol::ApiFormat;
@@ -688,6 +689,30 @@ async fn forward_request_impl(
         {
             upstream_headers.insert(name.clone(), value.clone());
         }
+    }
+    if account.provider_id == crate::provider::OPENCODE_PROVIDER_ID
+        && !upstream_headers.contains_key("x-opencode-session")
+    {
+        let session = headers
+            .get("x-session-id")
+            .or_else(|| headers.get("x-session-affinity"))
+            .cloned()
+            .or_else(|| {
+                resolve_conversation_key(
+                    plan.client,
+                    plan.log_requested_model(),
+                    &headers,
+                    client_body,
+                )
+                .and_then(|key| format!("ocg-{key}").parse().ok())
+            })
+            .unwrap_or_else(|| {
+                trace
+                    .request_id
+                    .parse()
+                    .expect("generated request id must be a valid header value")
+            });
+        upstream_headers.insert("x-opencode-session", session);
     }
     // Match the attempt's authentication contract. The client wire protocol
     // alone is not an authentication decision. The executor constructs the

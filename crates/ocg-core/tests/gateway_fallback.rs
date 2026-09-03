@@ -2412,6 +2412,44 @@ async fn explicit_conversation_bindings_are_sticky_and_private() {
         ["key-1", "key-2", "key-1", "key-2"]
     );
     assert!(calls.iter().all(|call| call.conversation_header.is_none()));
+    let sessions = calls
+        .iter()
+        .map(|call| call.opencode_session.as_deref().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(sessions[0], sessions[2]);
+    assert_eq!(sessions[1], sessions[3]);
+    assert_ne!(sessions[0], sessions[1]);
+}
+
+#[tokio::test]
+async fn client_session_id_is_forwarded_as_the_opencode_go_session() {
+    let h = FallbackHarness::routing(
+        &[("key-1", &[ok()])],
+        &["key-1"],
+        RoutingMode::StrictPriority,
+        false,
+    )
+    .await;
+
+    let response = loopback_client()
+        .post(format!("http://127.0.0.1:{}/v1/chat/completions", h.port))
+        .header(reqwest::header::AUTHORIZATION, "Bearer gw-test")
+        .header("x-session-id", "ses_from_opencode_client")
+        .json(&serde_json::json!({
+            "model": "deepseek-v4-flash",
+            "messages": [{"role": "user", "content": "ping"}],
+            "max_tokens": 3,
+            "stream": false
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        h.calls.lock().unwrap()[0].opencode_session.as_deref(),
+        Some("ses_from_opencode_client")
+    );
 }
 
 #[tokio::test]

@@ -11,6 +11,7 @@
 - Custom 模型身份：合格 Custom 能力同时保存公开模型名与精确 `upstream_model`。`/v1/models` 只公布可路由公开名称，绝不形成第二份上游 ID 目录。发现只返回上游 ID，导入时精确写入 `public_model = upstream_model`；不剥离后缀，不合成 Alias。raw 冲突从公布列表排除，并以 `ambiguous_model_id` fail-closed。供应商 Alias 页只是既有合约与能力的只读聚合，不新增 Alias API、store、cache 或编辑面。
 - Gemini 客户端使用 `/v1beta/models/{model}:generateContent` 或 `:streamGenerateContent`（`/v1/models/...` 也接受），可以用 `x-goog-api-key` 认证；Gemini 只是一种客户端格式，Gateway 总是把请求转换成目标模型的推荐上游协议。未知模型名在 Chat / Responses / Messages / Gemini 上返回 `400`；禁止探测协议。
 - 模型协议能力硬编码在 `ocg_domain::protocol` 的 `MODEL_PROTOCOLS` 中（`ocg-core` 的 `kernel/protocol.rs` 与 `gateway/protocol.rs` 是 facade/host 转换）：`preferred` 与官方 Go 文档端点表一致，`supported` 是使用测试账号验证后检入的集合；之后的显式探测观察另行持久化。当客户端协议受支持时直接透传，否则路由到 preferred；请求路径不得探测协议（避免重复计费）。`grok-4.6`、`grok-4.5` 与 `gpt-5.6-luna` 都仅支持 Responses，因此 Chat 入口必须转换。`MODEL_PROTOCOLS` 目前仍只服务于 OpenCode Go；Zen Free 刷新得到的新 `-free` ID 若表中未知，默认物化为 Chat，且不会使用计费请求探测协议。整篇 JSON 转换内核在 `ocg-gateway` 中。
+- 每一次 OpenCode Go 推理尝试都携带 `x-opencode-session`。客户端已有值优先；否则 Gateway 依次映射 OpenCode 自定义 Provider 发送的 `x-session-id` / `x-session-affinity`、根据会话种子生成稳定且不泄露原文的摘要，只有在请求不存在可用会话种子时才使用请求 ID。这个 Provider 专用头在选定账号后才添加，Zen Free 与其他 Provider 不要求它。
 
 一次逻辑客户端请求在入口捕获 `RequestSnapshots`（`crates/ocg-core/src/gateway/executor.rs`）。fallback 迭代重读实时账号状态，不会重新捕获冻结行。没有额外的 snapshot 服务或 trait。
 

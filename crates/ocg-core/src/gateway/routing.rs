@@ -1,6 +1,5 @@
 use crate::kernel::protocol::ApiFormat;
 use axum::http::HeaderMap;
-use bytes::Bytes;
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 
@@ -15,7 +14,7 @@ pub fn resolve_conversation_key(
     client_format: ApiFormat,
     model: &str,
     headers: &HeaderMap,
-    client_body: &Bytes,
+    client_body: &[u8],
 ) -> Option<String> {
     if let Some(explicit) = explicit_conversation_id(headers) {
         return Some(namespaced_key(
@@ -224,6 +223,7 @@ fn canonicalize_json(value: &Value) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bytes::Bytes;
 
     #[test]
     fn explicit_header_is_namespaced_by_format_and_model() {

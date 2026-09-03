@@ -36,6 +36,7 @@ pub(crate) struct FakeCall {
     pub body: String,
     pub accept_encoding: Option<String>,
     pub conversation_header: Option<String>,
+    pub opencode_session: Option<String>,
     /// Verbatim inbound `Cookie` header; tests assert inference egress never
     /// carries one. Not every suite reads it, hence the allow.
     #[allow(dead_code)]
@@ -204,6 +205,7 @@ async fn fake_reply(
             body,
             accept_encoding: header(&headers, axum::http::header::ACCEPT_ENCODING),
             conversation_header: header(&headers, "x-ocg-conversation-id"),
+            opencode_session: header(&headers, "x-opencode-session"),
             cookie: header(&headers, "cookie"),
         });
 
