@@ -197,8 +197,17 @@ impl ProviderScopedPricingSnapshot {
         let cached = (cached.max(0) as f64).min(prompt);
         let cache_creation = (cache_creation.max(0) as f64).min(prompt - cached);
         let uncached = prompt - cached - cache_creation;
-        let Some(value) = select_provider_pricing_value(&self.values, model, prompt as i64, at)
-        else {
+        let preferred_time_window = if is_provider_peak_utc(&self.provider_id, at) {
+            PricingTimeWindow::Peak
+        } else {
+            PricingTimeWindow::OffPeak
+        };
+        let Some(value) = select_provider_pricing_value(
+            &self.values,
+            model,
+            prompt as i64,
+            preferred_time_window,
+        ) else {
             return PricingEstimate::unpriced(&self.revision);
         };
 
@@ -508,26 +517,67 @@ pub fn parse_goat_html(html: &str) -> Result<ProviderScopedPricingSnapshot> {
             })
             .flatten();
         let model_id = goat_reference_model_id(&display_name);
-        values.push(ProviderPricingValue::new(
-            model_id,
-            display_name,
-            input,
-            output,
-            cache_read,
-            cache_write,
-            Some(window_month),
-            allowance,
-            Some(monthly_price),
-            Some("USD".to_string()),
-            None,
-            None,
-            PricingTimeWindow::Always,
-        )?);
+        if row[0].contains("Off-peak shown") {
+            let peak_input = parse_goat_peak_money(html, &base_name, "input")?;
+            let peak_output = parse_goat_peak_money(html, &base_name, "output")?;
+            let peak_cache_read = parse_goat_peak_money(html, &base_name, "cache read")?;
+            let peak_cache_write = if cache_write.is_some() {
+                Some(parse_goat_peak_money(html, &base_name, "cache write")?)
+            } else {
+                None
+            };
+            values.push(ProviderPricingValue::new(
+                model_id.clone(),
+                display_name.clone(),
+                input,
+                output,
+                cache_read,
+                cache_write,
+                Some(window_month),
+                allowance,
+                Some(monthly_price),
+                Some("USD".to_string()),
+                None,
+                None,
+                PricingTimeWindow::OffPeak,
+            )?);
+            values.push(ProviderPricingValue::new(
+                model_id,
+                display_name,
+                Some(peak_input),
+                Some(peak_output),
+                Some(peak_cache_read),
+                peak_cache_write,
+                Some(window_month),
+                allowance,
+                Some(monthly_price),
+                Some("USD".to_string()),
+                None,
+                None,
+                PricingTimeWindow::Peak,
+            )?);
+        } else {
+            values.push(ProviderPricingValue::new(
+                model_id,
+                display_name,
+                input,
+                output,
+                cache_read,
+                cache_write,
+                Some(window_month),
+                allowance,
+                Some(monthly_price),
+                Some("USD".to_string()),
+                None,
+                None,
+                PricingTimeWindow::Always,
+            )?);
+        }
     }
-    if values.len() != included_count {
+    if seen.len() != included_count {
         bail!(
             "Command Code GOAT declared {included_count} included models but parsed {} rows",
-            values.len()
+            seen.len()
         );
     }
     let priced_models = values
@@ -611,6 +661,13 @@ fn parse_goat_money(value: &str) -> Result<Option<f64>> {
     let token = dollar_numeric_token(&value[start..])
         .ok_or_else(|| anyhow!("expected GOAT USD value, got {value}"))?;
     parse_dollar(token, false)
+}
+
+fn parse_goat_peak_money(html: &str, display_name: &str, price_kind: &str) -> Result<f64> {
+    let marker = format!(r#"aria-label="{display_name} {price_kind}: $"#);
+    parse_first_dollar_after(html, &marker).with_context(|| {
+        format!("Command Code GOAT {display_name} is missing its peak {price_kind} price")
+    })
 }
 
 fn parse_older_goat_models(plain: &str) -> HashSet<String> {
@@ -1510,7 +1567,7 @@ fn select_provider_pricing_value<'a>(
     values: &'a [ProviderPricingValue],
     model: &str,
     prompt_tokens: i64,
-    at: DateTime<Utc>,
+    preferred_time_window: PricingTimeWindow,
 ) -> Option<&'a ProviderPricingValue> {
     let requested = provider_model_identities(model);
     let exact = values
@@ -1557,7 +1614,7 @@ fn select_provider_pricing_value<'a>(
                     .is_none_or(|maximum| prompt_tokens <= maximum)
         })
         .collect::<Vec<_>>();
-    select_provider_time_window(&candidates, at)
+    select_provider_time_window(&candidates, preferred_time_window)
 }
 
 fn provider_model_identities(model: &str) -> HashSet<String> {
@@ -1579,21 +1636,16 @@ fn provider_value_identities(value: &ProviderPricingValue) -> HashSet<String> {
 
 fn select_provider_time_window<'a>(
     candidates: &[&'a ProviderPricingValue],
-    at: DateTime<Utc>,
+    preferred_time_window: PricingTimeWindow,
 ) -> Option<&'a ProviderPricingValue> {
     let scheduled = candidates
         .iter()
         .any(|entry| entry.time_window() != PricingTimeWindow::Always);
     if scheduled {
-        let preferred = if is_official_peak_utc(at) {
-            PricingTimeWindow::Peak
-        } else {
-            PricingTimeWindow::OffPeak
-        };
         return candidates
             .iter()
             .copied()
-            .find(|entry| entry.time_window() == preferred)
+            .find(|entry| entry.time_window() == preferred_time_window)
             .or_else(|| {
                 candidates
                     .iter()
@@ -1602,6 +1654,14 @@ fn select_provider_time_window<'a>(
             });
     }
     candidates.first().copied()
+}
+
+fn is_provider_peak_utc(provider_id: &str, at: DateTime<Utc>) -> bool {
+    if provider_id == COMMAND_CODE_PROVIDER_ID {
+        let minutes = at.hour() * 60 + at.minute();
+        return (60..240).contains(&minutes) || (360..600).contains(&minutes);
+    }
+    provider_id == OPENCODE_PROVIDER_ID && is_official_peak_utc(at)
 }
 
 fn is_official_peak_utc(at: DateTime<Utc>) -> bool {

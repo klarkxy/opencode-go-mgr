@@ -1,10 +1,11 @@
 use super::{
     GOAT_SOURCE_URL, ProviderCostEstimate, ProviderCostState, ProviderPricingEvidence,
     ProviderPricingSnapshot, ProviderPricingValue, ProviderScopedPricingSnapshot, embedded_seed,
-    ensure_current_adjustment_policy, ensure_seed_model_coverage, fetch_official_snapshot,
-    latest_provider_pricing_snapshot, legacy_policy_needs_multiplier_repair, parse_goat_html,
-    parse_official_html, prepare_provider_multiplier_update, provider_pricing_capability,
-    quota_multiplier, store_provider_pricing_snapshot,
+    ensure_current_adjustment_policy, ensure_seed_model_coverage, fetch_goat_pricing_snapshot,
+    fetch_official_snapshot, latest_provider_pricing_snapshot,
+    legacy_policy_needs_multiplier_repair, parse_goat_html, parse_official_html,
+    prepare_provider_multiplier_update, provider_pricing_capability, quota_multiplier,
+    store_provider_pricing_snapshot,
 };
 use chrono::{DateTime, Utc};
 
@@ -336,6 +337,88 @@ fn goat_parser_accepts_concatenated_discount_and_free_badges() {
     assert_eq!(free.raw_cost_usd, Some(0.0));
     let unknown = snapshot.estimate("not-in-the-price-table", 1_000, 100, 0, 0, Utc::now());
     assert_eq!(unknown.cost_state, "unpriced");
+}
+
+#[test]
+fn goat_parser_materializes_peak_rates_and_uses_them_every_day() {
+    let html = r#"
+        <p>GOAT plan 1 All plans 1</p>
+        <p>unlimited coding for $10/month</p>
+        <p>5-hour limit - $14 of usage</p>
+        <p>Weekly limit - $35 of usage</p>
+        <p>Monthly limit - $70 of usage</p>
+        <table>
+          <tr><th>Model</th><th>Context</th><th>Intelligence</th><th>Tok/s</th><th>Input</th><th>Output</th><th>Cache read</th><th>Cache write</th><th>Caps</th></tr>
+          <tr>
+            <td>DeepSeek V4 Flash (latest)<span>Off-peak shown (17h/day) · peak $0.44 / $1.32 01–04 &amp; 06–10 UTC</span></td>
+            <td>1M</td><td>52</td><td>129</td>
+            <td>$0.22<button aria-label="DeepSeek V4 Flash (latest) input: $0.44 during peak hours"></button></td>
+            <td>$0.66<button aria-label="DeepSeek V4 Flash (latest) output: $1.32 during peak hours"></button></td>
+            <td>$0.007<button aria-label="DeepSeek V4 Flash (latest) cache read: $0.014 during peak hours"></button></td>
+            <td>—</td><td>+1</td>
+          </tr>
+        </table>
+        <table>
+          <tr><th>Model</th><th>Input</th><th>Output</th><th>Cache Read</th><th>Cache Write</th><th>Monthly credits</th></tr>
+          <tr><td>DeepSeek V4 Flash (latest)</td><td>$0.22</td><td>$0.66</td><td>$0.007</td><td>-</td><td>$60</td></tr>
+        </table>
+    "#;
+
+    let snapshot = parse_goat_html(html).unwrap();
+    assert_eq!(snapshot.values().len(), 2);
+    let off_peak = snapshot
+        .values()
+        .iter()
+        .find(|value| value.time_window() == super::PricingTimeWindow::OffPeak)
+        .unwrap();
+    assert_eq!(off_peak.input_per_million(), Some(0.22));
+    assert_eq!(off_peak.output_per_million(), Some(0.66));
+    assert_eq!(off_peak.cache_read_per_million(), Some(0.007));
+    let peak = snapshot
+        .values()
+        .iter()
+        .find(|value| value.time_window() == super::PricingTimeWindow::Peak)
+        .unwrap();
+    assert_eq!(peak.input_per_million(), Some(0.44));
+    assert_eq!(peak.output_per_million(), Some(1.32));
+    assert_eq!(peak.cache_read_per_million(), Some(0.014));
+
+    let sunday_peak = DateTime::parse_from_rfc3339("2026-09-06T07:00:00Z")
+        .unwrap()
+        .with_timezone(&Utc);
+    let sunday_off_peak = DateTime::parse_from_rfc3339("2026-09-06T12:00:00Z")
+        .unwrap()
+        .with_timezone(&Utc);
+    assert_eq!(
+        snapshot
+            .estimate("deepseek-v4-flash", 1_000_000, 0, 1_000_000, 0, sunday_peak)
+            .raw_cost_usd,
+        Some(0.014)
+    );
+    assert_eq!(
+        snapshot
+            .estimate(
+                "deepseek-v4-flash",
+                1_000_000,
+                0,
+                1_000_000,
+                0,
+                sunday_off_peak,
+            )
+            .raw_cost_usd,
+        Some(0.007)
+    );
+
+    let missing_peak_cache = html.replace(
+        r#" aria-label="DeepSeek V4 Flash (latest) cache read: $0.014 during peak hours""#,
+        "",
+    );
+    assert!(
+        parse_goat_html(&missing_peak_cache)
+            .unwrap_err()
+            .to_string()
+            .contains("missing its peak cache read price")
+    );
 }
 
 #[test]
@@ -862,4 +945,25 @@ async fn live_official_document_still_matches_the_parser() {
         .unwrap();
     assert_eq!(snapshot.source_url, super::SOURCE_URL);
     assert!(snapshot.models.len() >= 18);
+}
+
+#[tokio::test]
+#[ignore = "requires live access to commandcode.ai"]
+async fn live_goat_document_still_materializes_peak_and_off_peak_rows() {
+    let snapshot = fetch_goat_pricing_snapshot(&crate::models::AppConfig::default())
+        .await
+        .unwrap();
+    assert_eq!(snapshot.source_url(), GOAT_SOURCE_URL);
+    assert!(
+        snapshot
+            .values()
+            .iter()
+            .any(|value| value.time_window() == super::PricingTimeWindow::Peak)
+    );
+    assert!(
+        snapshot
+            .values()
+            .iter()
+            .any(|value| value.time_window() == super::PricingTimeWindow::OffPeak)
+    );
 }

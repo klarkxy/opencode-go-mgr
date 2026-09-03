@@ -150,10 +150,12 @@ refreshes those Plans only. Refresh stays manual:
   persistent revision for later estimates.
 - Command Code GOAT shows its saved official rate snapshot from
   `https://commandcode.ai/docs/plans/goat`; subscription price and time-window
-  allowance cards are not shown. Each priced model's applied multiplier can be
-  edited and saved. The saved provider revision prices later requests; missing
-  or ambiguous rows stay unpriced. A refresh asks before replacing edited
-  multipliers. This remains separate from OpenCode Go. GOAT account cards use
+  allowance cards are not shown. Models with scheduled pricing retain the
+  official daily peak windows (01:00–04:00 and 06:00–10:00 UTC) and their
+  separate input, output, and cache-read rates. Each priced model's applied
+  multiplier can be edited and saved. The saved provider revision prices later
+  requests; missing or ambiguous rows stay unpriced. A refresh asks before
+  replacing edited multipliers. This remains separate from OpenCode Go. GOAT account cards use
   those priced OCG request logs for a local `$14 / $35 / $70` window estimate
   with manual baseline correction. It is deliberately not described as
   official usage because Command Code exposes no machine-readable usage API.
