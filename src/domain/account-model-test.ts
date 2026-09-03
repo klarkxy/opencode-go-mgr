@@ -4,6 +4,7 @@ import type {
   ProviderContractsResponse,
   ProviderProtocol,
 } from "../api/providers.ts";
+import { isDynamicCatalogEntry } from "./dynamic-provider.ts";
 import {
   findAccountScopeView,
   flattenProviderScopes,
@@ -16,18 +17,31 @@ export interface AccountTestModel {
   protocol: ProviderProtocol;
 }
 
-/** Resolve only the current account's routable models from the loaded contract snapshot. */
+/** Resolve the current account's routable models from its contract scope, or the dynamic catalog. */
 export function accountTestModels(
   account: Pick<Account, "id" | "provider_id">,
   response: ProviderContractsResponse | null | undefined,
   catalog: readonly ProviderCatalogEntry[] | null | undefined = null,
 ): AccountTestModel[] {
-  if (!response) return [];
+  const seen = new Set<string>();
+  const models = exactContractTestModels(account, response, catalog, seen)
+    ?? dynamicCatalogTestModels(account, catalog, seen);
+  return models.sort((left, right) => left.modelId.localeCompare(right.modelId, undefined, {
+    numeric: true,
+    sensitivity: "base",
+  }));
+}
+
+function exactContractTestModels(
+  account: Pick<Account, "id" | "provider_id">,
+  response: ProviderContractsResponse | null | undefined,
+  catalog: readonly ProviderCatalogEntry[] | null | undefined,
+  seen: Set<string>,
+): AccountTestModel[] | null {
+  if (!response) return null;
   const scopes = flattenProviderScopes(normalizeProviderContractsResponse(response), catalog);
   const scope = findAccountScopeView(scopes, account);
-  if (!scope) return [];
-
-  const seen = new Set<string>();
+  if (!scope) return null;
   return scope.models
     .filter((model) => model.routable)
     .flatMap((model) => {
@@ -40,11 +54,26 @@ export function accountTestModels(
         alias: model.alias.trim(),
         protocol: model.preferred_protocol,
       }];
-    })
-    .sort((left, right) => left.modelId.localeCompare(right.modelId, undefined, {
-      numeric: true,
-      sensitivity: "base",
-    }));
+    });
+}
+
+function dynamicCatalogTestModels(
+  account: Pick<Account, "id" | "provider_id">,
+  catalog: readonly ProviderCatalogEntry[] | null | undefined,
+  seen: Set<string>,
+): AccountTestModel[] {
+  const entry = catalog?.find((candidate) => (
+    candidate.provider_id === account.provider_id && isDynamicCatalogEntry(candidate)
+  ));
+  if (!entry || entry.upstream_protocols.length !== 1) return [];
+  const protocol = entry.upstream_protocols[0];
+  return entry.model_aliases.flatMap((alias) => {
+    const modelId = alias.trim();
+    const identity = modelId.toLowerCase();
+    if (!modelId || seen.has(identity)) return [];
+    seen.add(identity);
+    return [{ modelId, alias: modelId, protocol }];
+  });
 }
 
 export function filterAccountTestModels(

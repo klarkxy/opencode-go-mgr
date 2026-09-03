@@ -1037,3 +1037,163 @@ async fn custom_api_still_creates_account_owned_endpoint() {
     assert_eq!(custom.endpoint_url, "http://127.0.0.1:9");
     harness.stop();
 }
+
+async fn account_id_for_provider(harness: &V3Harness, provider_id: &str) -> String {
+    harness
+        .state
+        .db
+        .lock()
+        .list_accounts()
+        .unwrap()
+        .into_iter()
+        .find(|account| account.provider_id == provider_id)
+        .map(|account| account.id)
+        .unwrap_or_else(|| panic!("missing account for {provider_id}"))
+}
+
+async fn toggle_account(harness: &V3Harness, account_id: &str) -> (StatusCode, Value) {
+    send_json(
+        harness,
+        Method::POST,
+        &format!("/accounts/{account_id}/toggle"),
+        &cas(harness, json!({})),
+    )
+    .await
+}
+
+#[tokio::test]
+async fn keyed_dynamic_account_can_disable_and_re_enable() {
+    let harness = start_loopback("dyn-enable-keyed").await;
+    let (status, created) = send_json(
+        &harness,
+        Method::POST,
+        "/providers",
+        &cas(
+            &harness,
+            create_body(
+                "Lab",
+                "http://127.0.0.1:9",
+                "chat_completions",
+                "bearer",
+                Some("sk-lab"),
+            ),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    let provider_id = created["provider"]["id"].as_str().unwrap().to_string();
+    let account_id = account_id_for_provider(&harness, &provider_id).await;
+    let before = harness
+        .state
+        .db
+        .lock()
+        .get_account(&account_id)
+        .unwrap()
+        .unwrap();
+    assert!(before.enabled);
+    let mut revision = harness.state.settings_revision();
+
+    let (status, disabled) = toggle_account(&harness, &account_id).await;
+    assert_eq!(status, StatusCode::OK, "{disabled}");
+    assert_eq!(disabled["account"]["enabled"], false);
+    assert_eq!(harness.state.settings_revision(), revision + 1);
+    revision = harness.state.settings_revision();
+    let after_disable = harness
+        .state
+        .db
+        .lock()
+        .get_account(&account_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(after_disable.provider_id, before.provider_id);
+    assert_eq!(after_disable.credential_kind, before.credential_kind);
+    assert_eq!(after_disable.key_cipher, before.key_cipher);
+
+    let (status, enabled) = toggle_account(&harness, &account_id).await;
+    assert_eq!(status, StatusCode::OK, "{enabled}");
+    assert_eq!(enabled["account"]["enabled"], true);
+    assert_eq!(harness.state.settings_revision(), revision + 1);
+    let after_enable = harness
+        .state
+        .db
+        .lock()
+        .get_account(&account_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(after_enable.provider_id, before.provider_id);
+    assert_eq!(after_enable.credential_kind, before.credential_kind);
+    assert_eq!(after_enable.key_cipher, before.key_cipher);
+    harness.stop();
+}
+
+#[tokio::test]
+async fn dynamic_none_auth_singleton_can_disable_and_re_enable_without_a_key() {
+    let harness = start_loopback("dyn-enable-none").await;
+    let (status, created) = send_json(
+        &harness,
+        Method::POST,
+        "/providers",
+        &cas(
+            &harness,
+            create_body(
+                "OpenLab",
+                "http://127.0.0.1:9",
+                "chat_completions",
+                "none",
+                None,
+            ),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    let provider_id = created["provider"]["id"].as_str().unwrap().to_string();
+    let account_id = account_id_for_provider(&harness, &provider_id).await;
+    let stored = harness
+        .state
+        .db
+        .lock()
+        .get_account(&account_id)
+        .unwrap()
+        .unwrap();
+    assert!(stored.enabled);
+    assert!(stored.key_cipher.is_empty());
+    assert_eq!(
+        stored.credential_kind,
+        ocg_core::provider::CredentialKind::None
+    );
+    let mut revision = harness.state.settings_revision();
+
+    let (status, disabled) = toggle_account(&harness, &account_id).await;
+    assert_eq!(status, StatusCode::OK, "{disabled}");
+    assert_eq!(disabled["account"]["enabled"], false);
+    assert_eq!(harness.state.settings_revision(), revision + 1);
+    revision = harness.state.settings_revision();
+    let after_disable = harness
+        .state
+        .db
+        .lock()
+        .get_account(&account_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(after_disable.provider_id, stored.provider_id);
+    assert_eq!(after_disable.credential_kind, stored.credential_kind);
+    assert_eq!(after_disable.key_cipher, stored.key_cipher);
+    assert!(after_disable.key_cipher.is_empty());
+
+    let (status, enabled) = toggle_account(&harness, &account_id).await;
+    assert_eq!(status, StatusCode::OK, "{enabled}");
+    assert_eq!(enabled["account"]["enabled"], true);
+    assert_eq!(harness.state.settings_revision(), revision + 1);
+    let after_enable = harness
+        .state
+        .db
+        .lock()
+        .get_account(&account_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(after_enable.provider_id, stored.provider_id);
+    assert_eq!(after_enable.credential_kind, stored.credential_kind);
+    assert_eq!(after_enable.key_cipher, stored.key_cipher);
+    assert!(after_enable.key_cipher.is_empty());
+    harness.stop();
+}

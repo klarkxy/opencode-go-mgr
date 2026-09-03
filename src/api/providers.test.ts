@@ -165,56 +165,6 @@ test("Go protocol probe sends only provider, model, and protocol intent", async 
   });
 });
 
-test("Go and GOAT model refresh use the selected account on the provider route", async () => {
-  setupControlPlane(12, 42, "p1");
-  const providers: Record<string, string> = {
-    "go-account": "opencode",
-    "goat-account": "command-code",
-  };
-  const requests = installFetchMock(({ url, method }) => {
-    const accountId = Object.keys(providers).find((id) => url.endsWith(`/accounts/${id}`));
-    if (accountId) {
-      return {
-        id: accountId,
-        providerId: providers[accountId],
-        revision: 12,
-        processGeneration: 42,
-      };
-    }
-    if (url.includes("/models/refresh") && method === "POST") {
-      const providerId = url.includes("/providers/opencode/") ? "opencode" : "command-code";
-      const body = requests.at(-1)!.body!;
-      return {
-        providerId,
-        accountId: body.accountId,
-        models: ["model-one"],
-        refreshedAt: "2026-08-24T00:00:00Z",
-        sourceUrl: "https://example.test/v1/models",
-        revision: 12,
-        processGeneration: 42,
-        pricingRevision: "p1",
-      };
-    }
-    throw new Error(`unexpected request ${url}`);
-  });
-
-  await providerApi.refreshProviderModels("go-account");
-  await providerApi.refreshProviderModels("goat-account");
-
-  assert.deepEqual(requests.filter(({ url }) => url.endsWith("/models/refresh")), [
-    {
-      url: "/dashboard/api/v3/providers/opencode/models/refresh",
-      method: "POST",
-      body: { accountId: "go-account", expectedRevision: 12, processGeneration: 42 },
-    },
-    {
-      url: "/dashboard/api/v3/providers/command-code/models/refresh",
-      method: "POST",
-      body: { accountId: "goat-account", expectedRevision: 12, processGeneration: 42 },
-    },
-  ]);
-});
-
 test("unified catalog refresh sends only the selected contract scope and CAS tokens", async () => {
   setupControlPlane(12, 42, "p1");
   const requests = installFetchMock(({ url, method }) => {

@@ -45,6 +45,15 @@
           {{ t("重试") }}
         </n-button>
       </n-alert>
+      <n-alert
+        v-if="dynamicLoadError"
+        type="warning"
+        :title="t('加载供应商失败: {error}', { error: dynamicLoadError })"
+      >
+        <n-button size="small" secondary :loading="loading" @click="loadAliases({ retain: true })">
+          {{ t("重试") }}
+        </n-button>
+      </n-alert>
 
       <n-empty v-if="aliasGroups.length === 0" :description="t('暂无 Alias')" />
       <div v-else class="aliases-table-wrap">
@@ -89,9 +98,15 @@
 import { computed, onActivated, onMounted, ref } from "vue";
 import { NAlert, NButton, NEmpty, NSpin } from "naive-ui";
 import type { Account } from "../api/dashboard.ts";
-import type { ProviderCatalogEntry, ProviderContractsResponse } from "../api/providers.ts";
+import type {
+  DynamicProviderView,
+  ProviderCatalogEntry,
+  ProviderContractsResponse,
+} from "../api/providers.ts";
+import { providerApi } from "../api/providers.ts";
+import { isDynamicCatalogEntry } from "../domain/dynamic-provider.ts";
 import { flattenProviderScopes, normalizeProviderContractsResponse } from "../domain/provider-contracts.ts";
-import { providerAliasRows } from "../domain/provider-aliases.ts";
+import { mergeProviderAliasRows } from "../domain/provider-aliases.ts";
 import { t } from "../i18n/index.ts";
 import { useAccountsStore } from "../stores/accounts.ts";
 import { useProvidersStore } from "../stores/providers.ts";
@@ -103,15 +118,21 @@ const providersStore = useProvidersStore();
 const contracts = ref<ProviderContractsResponse | null>(null);
 const catalog = ref<ProviderCatalogEntry[] | null>(null);
 const accounts = ref<Account[]>([]);
+const dynamicProviders = ref<DynamicProviderView[]>([]);
 const loading = ref(false);
 const loadError = ref("");
 const accountsLoadError = ref("");
+const dynamicLoadError = ref("");
 let activatedOnce = false;
 
 const initialLoading = computed(() => loading.value && !contracts.value);
 const aliasRows = computed(() => (
   contracts.value
-    ? providerAliasRows(flattenProviderScopes(contracts.value, catalog.value), accounts.value)
+    ? mergeProviderAliasRows(
+      flattenProviderScopes(contracts.value, catalog.value),
+      accounts.value,
+      dynamicProviders.value,
+    )
     : []
 ));
 const aliasGroups = computed(() => {
@@ -130,14 +151,44 @@ const aliasGroups = computed(() => {
 async function loadAliases(options: { retain?: boolean } = {}): Promise<void> {
   if (loading.value) return;
   loading.value = true;
-  if (!options.retain) loadError.value = "";
+  if (!options.retain) {
+    loadError.value = "";
+    dynamicLoadError.value = "";
+  }
   try {
     const [contractsResult, catalogResult, accountsResult] = await Promise.allSettled([
       providersStore.loadContracts(),
       providersStore.loadCatalog(),
       accountsStore.loadPresented(),
     ]);
-    if (catalogResult.status === "fulfilled") catalog.value = catalogResult.value;
+    if (catalogResult.status === "fulfilled") {
+      catalog.value = catalogResult.value;
+      const entries = catalogResult.value.filter(isDynamicCatalogEntry);
+      if (entries.length === 0) {
+        dynamicProviders.value = [];
+        dynamicLoadError.value = "";
+      } else {
+        const details = await Promise.allSettled(
+          entries.map((entry) => providerApi.getDynamicProvider(entry.provider_id)),
+        );
+        const previous = new Map(dynamicProviders.value.map((provider) => [provider.id, provider]));
+        const next: DynamicProviderView[] = [];
+        const failures: string[] = [];
+        details.forEach((result, index) => {
+          if (result.status === "fulfilled") {
+            next.push(result.value);
+            return;
+          }
+          failures.push(dashboardErrorDetail(result.reason));
+          if (options.retain) {
+            const kept = previous.get(entries[index]?.provider_id ?? "");
+            if (kept) next.push(kept);
+          }
+        });
+        dynamicProviders.value = next;
+        dynamicLoadError.value = failures[0] ?? "";
+      }
+    }
     if (accountsResult.status === "fulfilled") {
       accounts.value = accountsResult.value;
       accountsLoadError.value = "";

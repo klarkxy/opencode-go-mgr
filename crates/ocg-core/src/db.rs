@@ -2739,45 +2739,6 @@ fn mark_required_verification_stale_on(conn: &Connection, account_id: &str) -> R
     Ok(())
 }
 
-fn persist_goat_catalog_on(
-    conn: &Connection,
-    account_id: &str,
-    models: &[String],
-    verified_at: Option<DateTime<Utc>>,
-) -> Result<()> {
-    conn.execute(
-        "DELETE FROM account_model_capabilities
-         WHERE account_id = ?1 AND source = ?2",
-        params![account_id, COMMAND_CODE_GOAT_MODELS_SOURCE],
-    )?;
-    let verified = verified_at.map(|value| value.to_rfc3339());
-    let mut seen = HashSet::new();
-    for model in models {
-        let model_id = validate_custom_model_id(model)?;
-        let key = model_id.to_ascii_lowercase();
-        if !seen.insert(key) {
-            continue;
-        }
-        let protocol = match ocg_domain::protocol::command_code_preferred_format(&model_id) {
-            Some(ocg_domain::protocol::ApiFormat::Messages) => UpstreamProtocolKind::Messages,
-            _ => UpstreamProtocolKind::ChatCompletions,
-        };
-        conn.execute(
-            "INSERT INTO account_model_capabilities
-             (account_id, model_id, upstream_model, protocol, verified_at, source)
-             VALUES (?1, ?2, ?2, ?3, ?4, ?5)",
-            params![
-                account_id,
-                model_id,
-                protocol.as_str(),
-                verified,
-                COMMAND_CODE_GOAT_MODELS_SOURCE,
-            ],
-        )?;
-    }
-    Ok(())
-}
-
 fn refresh_goat_provider_catalog_on(conn: &Connection) -> Result<()> {
     let mut stmt = conn.prepare(
         "SELECT c.model_id
@@ -2826,6 +2787,46 @@ fn refresh_goat_provider_catalog_on(conn: &Connection) -> Result<()> {
         COMMAND_CODE_GOAT_BASE_URL,
         now,
     )?;
+    Ok(())
+}
+
+#[cfg(test)]
+fn persist_goat_catalog_on(
+    conn: &Connection,
+    account_id: &str,
+    models: &[String],
+    verified_at: Option<DateTime<Utc>>,
+) -> Result<()> {
+    conn.execute(
+        "DELETE FROM account_model_capabilities
+         WHERE account_id = ?1 AND source = ?2",
+        params![account_id, COMMAND_CODE_GOAT_MODELS_SOURCE],
+    )?;
+    let verified = verified_at.map(|value| value.to_rfc3339());
+    let mut seen = HashSet::new();
+    for model in models {
+        let model_id = validate_custom_model_id(model)?;
+        let key = model_id.to_ascii_lowercase();
+        if !seen.insert(key) {
+            continue;
+        }
+        let protocol = match ocg_domain::protocol::command_code_preferred_format(&model_id) {
+            Some(ocg_domain::protocol::ApiFormat::Messages) => UpstreamProtocolKind::Messages,
+            _ => UpstreamProtocolKind::ChatCompletions,
+        };
+        conn.execute(
+            "INSERT INTO account_model_capabilities
+             (account_id, model_id, upstream_model, protocol, verified_at, source)
+             VALUES (?1, ?2, ?2, ?3, ?4, ?5)",
+            params![
+                account_id,
+                model_id,
+                protocol.as_str(),
+                verified,
+                COMMAND_CODE_GOAT_MODELS_SOURCE,
+            ],
+        )?;
+    }
     Ok(())
 }
 
@@ -6086,111 +6087,6 @@ impl Database {
             });
         }
         Ok(runtimes)
-    }
-
-    pub fn capture_goat_verification_contract(
-        &self,
-        account_id: &str,
-    ) -> Result<Option<crate::goat::GoatVerificationContract>> {
-        Ok(self.custom_verification_row_identity(account_id)?.map(
-            |(updated_at, key_cipher, _status)| crate::goat::GoatVerificationContract {
-                account_id: account_id.to_string(),
-                account_updated_at: updated_at,
-                key_cipher,
-            },
-        ))
-    }
-
-    pub fn commit_goat_verification_if_contract_matches(
-        &self,
-        contract: &crate::goat::GoatVerificationContract,
-        status: ConnectionVerificationStatus,
-        verified_at: Option<DateTime<Utc>>,
-        error: Option<&str>,
-        models: Option<&[String]>,
-    ) -> Result<bool> {
-        let tx = self.conn.unchecked_transaction()?;
-        let matches = tx.query_row(
-            "SELECT COUNT(*) FROM accounts
-                 WHERE id = ?1
-                   AND verification_status IN ('pending', 'failed')
-                   AND updated_at = ?2
-                   AND key_cipher = ?3",
-            params![
-                contract.account_id,
-                contract.account_updated_at,
-                contract.key_cipher
-            ],
-            |row| row.get::<_, i64>(0),
-        )? == 1;
-        if !matches {
-            return Ok(false);
-        }
-        if status == ConnectionVerificationStatus::Verified {
-            let models = models.ok_or_else(|| {
-                anyhow::anyhow!("verified Command Code GOAT commit requires a model snapshot")
-            })?;
-            persist_goat_catalog_on(&tx, &contract.account_id, models, verified_at)?;
-        }
-        let changed = tx.execute(
-            "UPDATE accounts
-             SET verification_status = ?2,
-                 connection_verified_at = ?3,
-                 verification_error = ?4,
-                 updated_at = ?5
-             WHERE id = ?1
-               AND verification_status IN ('pending', 'failed')
-               AND updated_at = ?6
-               AND key_cipher = ?7",
-            params![
-                contract.account_id,
-                status.as_str(),
-                verified_at.map(|value| value.to_rfc3339()),
-                error,
-                Utc::now().to_rfc3339(),
-                contract.account_updated_at,
-                contract.key_cipher,
-            ],
-        )?;
-        if changed != 1 {
-            return Ok(false);
-        }
-        if status == ConnectionVerificationStatus::Verified {
-            refresh_goat_provider_catalog_on(&tx)?;
-        }
-        tx.commit()?;
-        Ok(true)
-    }
-
-    pub fn refresh_goat_catalog_if_contract_matches(
-        &self,
-        contract: &crate::goat::GoatVerificationContract,
-        models: &[String],
-        refreshed_at: DateTime<Utc>,
-    ) -> Result<bool> {
-        let tx = self.conn.unchecked_transaction()?;
-        let matches = tx.query_row(
-            "SELECT COUNT(*) FROM accounts
-             WHERE id = ?1
-               AND provider_id = ?2
-               AND verification_status = 'verified'
-               AND updated_at = ?3
-               AND key_cipher = ?4",
-            params![
-                contract.account_id,
-                COMMAND_CODE_PROVIDER_ID,
-                contract.account_updated_at,
-                contract.key_cipher,
-            ],
-            |row| row.get::<_, i64>(0),
-        )? == 1;
-        if !matches {
-            return Ok(false);
-        }
-        persist_goat_catalog_on(&tx, &contract.account_id, models, Some(refreshed_at))?;
-        refresh_goat_provider_catalog_on(&tx)?;
-        tx.commit()?;
-        Ok(true)
     }
 
     pub fn replace_account_model_capabilities(

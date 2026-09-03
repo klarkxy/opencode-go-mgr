@@ -2,7 +2,9 @@
 
 # Gateway 行为
 
-OCG Manager 在 `127.0.0.1:9042` 只暴露一个 HTTP 入口，同时讲五种客户端协议，并把请求转给 OpenCode Go、Zen Free、Command Code GOAT、MiniMax CN、Kimi Code CN 或 Custom API 中胜出的合格账号卡——这样每个客户端都可以继续假装所有上游都说同一种方言。
+OCG Manager 在 `127.0.0.1:9042` 只暴露一个 HTTP 入口，同时讲五种客户端协议，并把请求转给 OpenCode Go、Zen Free、Command Code GOAT、MiniMax CN、Kimi Code CN、Ollama Cloud 或 Custom API 中胜出的合格账号卡——这样每个客户端都可以继续假装所有上游都说同一种方言。
+
+Ollama Cloud 是可路由的密封固定源 Plan（`https://ollama.com`）：只走 Chat Completions，Bearer。已保存或原始目录 ID 不会进入 `GET /v1/models`，也不会加入 Go Alias 注册表。实际上游 429 走通用冷却与回退。
 
 ## 端点
 

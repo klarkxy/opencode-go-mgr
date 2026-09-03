@@ -930,7 +930,9 @@ fn account_from_state(state: &CoreState, account: ModelAccount) -> Result<Accoun
             .connection_verified_at
             .map(|value| value.to_rfc3339()),
         verification_error: sanitize_persisted_error(contract.verification.verification_error),
-        plan_routable: plan.is_some_and(|plan| plan.routable),
+        plan_routable: plan.is_some_and(|plan| plan.routable)
+            || crate::dynamic::find_runtime(&state.dynamic_providers(), &account.provider_id)
+                .is_some(),
         custom_config: contract.custom_config.map(custom_config_from_model),
         model_capabilities: contract
             .model_capabilities

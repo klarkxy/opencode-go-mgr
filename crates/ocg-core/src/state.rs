@@ -1443,6 +1443,25 @@ impl crate::account_control::AccountControlHost for CoreStateInner {
         CoreStateInner::reload_provider_contracts(self)
     }
 
+    fn ensure_provider_can_enable(
+        &self,
+        provider_id: &str,
+    ) -> Result<(), crate::provider::ProviderBindingError> {
+        match crate::provider::ensure_provider_can_enable(provider_id) {
+            Ok(()) => Ok(()),
+            Err(crate::provider::ProviderBindingError::UnknownProvider { .. }) => {
+                if crate::dynamic::find_runtime(&self.dynamic_providers(), provider_id).is_some() {
+                    Ok(())
+                } else {
+                    Err(crate::provider::ProviderBindingError::UnknownProvider {
+                        provider_id: provider_id.to_string(),
+                    })
+                }
+            }
+            Err(error) => Err(error),
+        }
+    }
+
     fn create_account_with_contract(&self, account: &crate::models::Account) -> anyhow::Result<()> {
         self.db
             .lock()

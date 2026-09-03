@@ -1,7 +1,7 @@
 //! POST `/accounts/{id}/verify`: V2 verification semantics behind the V3 CAS envelope.
 //!
-//! Network work (Custom's first declared model, GOAT GET `/models`) never
-//! holds `settings_update`. Go/Zen are `NotRequired` no-ops. Debug builds may
+//! Network work (Custom's first declared model) never holds `settings_update`.
+//! Go, Zen, and Command Code are `NotRequired` no-ops. Debug builds may
 //! install a processGeneration-keyed loopback probe seam; that installer, map,
 //! and dyn dispatch are absent from release.
 
@@ -11,14 +11,12 @@ use axum::extract::{Path, State};
 use chrono::Utc;
 
 use crate::custom::{self, CustomVerificationContract, CustomVerifyFailure};
-use crate::goat::{self, GoatVerificationContract, GoatVerifyFailure};
 use crate::models::{
     Account as ModelAccount, AccountCustomConfig as ModelCustomConfig,
     AccountModelCapability as ModelCapability, AppConfig,
 };
 use crate::provider::{
-    ConnectionVerificationStatus, VerificationPolicy, is_command_code_goat, is_custom_api,
-    plan_requires_custom_config,
+    ConnectionVerificationStatus, VerificationPolicy, is_custom_api, plan_requires_custom_config,
 };
 use crate::state::CoreState;
 
@@ -147,14 +145,12 @@ pub(super) async fn verify_account(
     match prepared {
         PreparedVerify::Ready(mutation) => Ok(Json(*mutation)),
         PreparedVerify::Custom(job) => complete_custom_verification(&state, *job).await,
-        PreparedVerify::Goat(job) => complete_goat_verification(&state, *job).await,
     }
 }
 
 enum PreparedVerify {
     Ready(Box<AccountMutation>),
     Custom(Box<CustomVerificationJob>),
-    Goat(Box<GoatVerificationJob>),
 }
 
 struct CustomVerificationJob {
@@ -166,16 +162,6 @@ struct CustomVerificationJob {
     contract: CustomVerificationContract,
     custom_config: ModelCustomConfig,
     first_capability: ModelCapability,
-    api_key: String,
-}
-
-struct GoatVerificationJob {
-    expectation: MutationExpectation,
-    #[cfg(debug_assertions)]
-    process_generation: u64,
-    account: ModelAccount,
-    config: AppConfig,
-    contract: GoatVerificationContract,
     api_key: String,
 }
 
@@ -229,21 +215,6 @@ fn prepare_verify(
         let job = capture_custom_verification_job(state, account, expectation.clone())?;
         return Ok(PreparedVerify::Custom(Box::new(job)));
     }
-    if is_command_code_goat(&account.provider_id) {
-        let verification = state
-            .db
-            .lock()
-            .account_verification_state(id)
-            .map_err(V3ApiError::internal)?
-            .ok_or_else(|| V3ApiError::not_found(state))?;
-        if verification.status == ConnectionVerificationStatus::Verified {
-            return Ok(PreparedVerify::Ready(Box::new(mutation_from_state(
-                state, account,
-            )?)));
-        }
-        let job = capture_goat_verification_job(state, account, expectation.clone())?;
-        return Ok(PreparedVerify::Goat(Box::new(job)));
-    }
     Ok(PreparedVerify::Ready(Box::new(mutation_from_state(
         state, account,
     )?)))
@@ -294,38 +265,6 @@ fn capture_custom_verification_job(
         contract,
         custom_config,
         first_capability,
-        api_key,
-    })
-}
-
-fn capture_goat_verification_job(
-    state: &CoreState,
-    account: ModelAccount,
-    expectation: MutationExpectation,
-) -> Result<GoatVerificationJob, V3ApiError> {
-    if account.key_cipher.trim().is_empty() {
-        return Err(V3ApiError::invalid_request_at(
-            state,
-            "Command Code GOAT verification requires a stored Key",
-        ));
-    }
-    let contract = state
-        .db
-        .lock()
-        .capture_goat_verification_contract(&account.id)
-        .map_err(V3ApiError::internal)?
-        .ok_or_else(|| V3ApiError::not_found(state))?;
-    let api_key = state
-        .decrypt_key(&account.key_cipher)
-        .map_err(V3ApiError::internal)?;
-    let config = state.config();
-    Ok(GoatVerificationJob {
-        expectation,
-        #[cfg(debug_assertions)]
-        process_generation: state.process_generation(),
-        account,
-        config,
-        contract,
         api_key,
     })
 }
@@ -394,57 +333,4 @@ async fn run_custom_probe(job: &CustomVerificationJob) -> Result<(), CustomVerif
         )
         .await
     }
-}
-
-async fn complete_goat_verification(
-    state: &CoreState,
-    job: GoatVerificationJob,
-) -> Result<Json<AccountMutation>, V3ApiError> {
-    let result = run_goat_probe(&job).await;
-    let _settings_update = state.settings_update.lock();
-    check_expectation(state, &job.expectation)?;
-    let (status, error, models) = match result {
-        Ok(models) => (ConnectionVerificationStatus::Verified, None, Some(models)),
-        Err(failure) => (
-            ConnectionVerificationStatus::Failed,
-            Some(failure.message),
-            None,
-        ),
-    };
-    let verified_at = (status == ConnectionVerificationStatus::Verified).then(Utc::now);
-    let committed = state
-        .db
-        .lock()
-        .commit_goat_verification_if_contract_matches(
-            &job.contract,
-            status,
-            verified_at,
-            error.as_deref(),
-            models.as_deref(),
-        )
-        .map_err(V3ApiError::internal)?;
-    if !committed {
-        return Err(V3ApiError::conflict_at(
-            state,
-            goat::GOAT_VERIFICATION_CONFLICT_MESSAGE,
-        ));
-    }
-    let revision = state.bump_settings_revision();
-    let _ = state.reload_provider_contracts();
-    let account = load_model_account(state, &job.account.id)?;
-    mutation_at(state, account, revision).map(Json)
-}
-
-async fn run_goat_probe(job: &GoatVerificationJob) -> Result<Vec<String>, GoatVerifyFailure> {
-    let base_url = {
-        #[cfg(debug_assertions)]
-        {
-            goat::goat_verify_base_url(Some(job.process_generation))
-        }
-        #[cfg(not(debug_assertions))]
-        {
-            crate::provider::COMMAND_CODE_GOAT_BASE_URL.to_string()
-        }
-    };
-    goat::probe_goat_models(&job.config, &job.api_key, &base_url).await
 }

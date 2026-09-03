@@ -159,7 +159,7 @@ fn ollama_cloud_base_url_for(account: &Account) -> String {
 
 #[cfg(debug_assertions)]
 #[doc(hidden)]
-pub use crate::goat::{GoatVerifyOriginGuard, install_goat_verify_origin_for_test};
+pub use crate::goat::{GoatCatalogOriginGuard, install_goat_catalog_origin_for_test};
 
 /// RAII guard for the integration-only GOAT seam. The production adapter has
 /// no endpoint or protocol guesses: without a live guard, GOAT is unsupported.
@@ -275,12 +275,13 @@ pub(crate) fn resolve_probe_route(
     resolve_route_with_policy(account, config, plan, RoutePolicy::Probe, &[])
 }
 
-pub(crate) fn resolve_account_test_route(
+pub(crate) fn resolve_account_test_route_with_dynamics(
     account: &Account,
     config: &AppConfig,
     plan: &RequestPlan,
+    dynamics: &[crate::dynamic::DynamicProviderRuntime],
 ) -> Result<AttemptSpec, String> {
-    resolve_route_with_policy(account, config, plan, RoutePolicy::AccountTest, &[])
+    resolve_route_with_policy(account, config, plan, RoutePolicy::AccountTest, dynamics)
 }
 
 fn resolve_route_with_policy(
@@ -769,8 +770,12 @@ fn require_opencode_protocol_policy(
             Ok(())
         }
         RoutePolicy::AccountTest | RoutePolicy::Production { contracts: None } => {
+            let opencode_ok = matches!(
+                descriptor.kind,
+                ProviderAdapterKind::OpenCodeGo | ProviderAdapterKind::ZenFree
+            ) && opencode_supports_upstream(&plan.model, plan.upstream);
             let statically_ok = static_verified.contains(&protocol)
-                || opencode_supports_upstream(&plan.model, plan.upstream)
+                || opencode_ok
                 || (descriptor.kind == ProviderAdapterKind::CommandCodeGoat
                     && command_code_supports_upstream(&plan.model, plan.upstream))
                 || (descriptor.kind == ProviderAdapterKind::OllamaCloud

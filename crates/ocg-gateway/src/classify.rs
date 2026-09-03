@@ -155,7 +155,7 @@ pub fn provider_error_policy(provider_id: &str) -> ProviderErrorPolicy {
             } else {
                 Auth401Policy::RotatePersistAuthError
             },
-            rate_limit_429: RateLimit429Policy::GoWindow,
+            rate_limit_429: RateLimit429Policy::GenericFiveMinute,
         },
     }
 }

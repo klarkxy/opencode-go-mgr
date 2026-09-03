@@ -16,7 +16,7 @@ use ocg_core::dashboard_v3::{
     AccountMutation, AccountVerificationStatus, ERROR_INVALID_JSON, ERROR_INVALID_REQUEST,
     ERROR_MISSING_EXPECTED_REVISION, ERROR_NOT_FOUND, ERROR_REVISION_CONFLICT, ERROR_UNAUTHORIZED,
 };
-use ocg_core::gateway::provider_adapter::install_goat_verify_origin_for_test;
+use ocg_core::gateway::provider_adapter::install_goat_catalog_origin_for_test;
 use ocg_core::models::ProxyMode;
 use ocg_core::provider::{
     COMMAND_CODE_PROVIDER_ID, CUSTOM_PROVIDER_ID, OPENCODE_PROVIDER_ID, ZEN_FREE_ACCOUNT_ID,
@@ -690,9 +690,11 @@ async fn goat_verify_is_not_applicable_and_never_fetches_the_public_catalog() {
     let harness = start_loopback("verify-goat-not-required").await;
     force_direct_proxy(&harness);
     let origin = start_origin(StatusCode::UNAUTHORIZED, LEAKY_401_BODY, Duration::ZERO).await;
-    let _guard =
-        install_goat_verify_origin_for_test(harness.state.process_generation(), origin.url.clone())
-            .unwrap();
+    let _guard = install_goat_catalog_origin_for_test(
+        harness.state.process_generation(),
+        origin.url.clone(),
+    )
+    .unwrap();
     let id = create_goat_account(&harness).await;
     let before = harness.state.settings_revision();
 
@@ -793,7 +795,7 @@ async fn provider_model_refresh_uses_go_account_and_public_command_catalog() {
     );
 
     let goat_origin = start_origin(StatusCode::OK, GOAT_MODELS_BODY, Duration::ZERO).await;
-    let _guard = install_goat_verify_origin_for_test(
+    let _guard = install_goat_catalog_origin_for_test(
         harness.state.process_generation(),
         goat_origin.url.clone(),
     )
@@ -828,9 +830,11 @@ async fn provider_model_refresh_uses_go_account_and_public_command_catalog() {
         Duration::ZERO,
     )
     .await;
-    let _failed_guard =
-        install_goat_verify_origin_for_test(harness.state.process_generation(), failed.url.clone())
-            .unwrap();
+    let _failed_guard = install_goat_catalog_origin_for_test(
+        harness.state.process_generation(),
+        failed.url.clone(),
+    )
+    .unwrap();
     let revision_before_failure = harness.state.settings_revision();
     let (status, failure) = send_json(
         &harness,
@@ -920,6 +924,96 @@ async fn unified_catalog_refresh_selects_an_eligible_account_and_defaults_new_mo
 }
 
 #[tokio::test]
+async fn command_code_contract_refresh_defaults_new_rows_off_and_legacy_route_stays_wire_compatible()
+ {
+    let harness = start_loopback("command-code-contract-catalog-refresh").await;
+    force_direct_proxy(&harness);
+    let origin = start_origin(
+        StatusCode::OK,
+        r#"{"object":"list","data":[{"id":"deepseek/deepseek-v4-flash"},{"id":"future-command-model"}]}"#,
+        Duration::ZERO,
+    )
+    .await;
+    let _guard = install_goat_catalog_origin_for_test(
+        harness.state.process_generation(),
+        origin.url.clone(),
+    )
+    .unwrap();
+    let _goat_id = create_goat_account(&harness).await;
+
+    let before = harness.state.settings_revision();
+    let (status, contracts) = send_json(
+        &harness,
+        Method::POST,
+        &format!("/provider-contracts/provider/{COMMAND_CODE_PROVIDER_ID}/catalog/refresh"),
+        &cas(&harness, json!({})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{contracts}");
+    assert_eq!(harness.state.settings_revision(), before + 1);
+    assert_eq!(origin.call_count(), 1);
+    assert!(origin.calls.lock().unwrap()[0].authorization.is_none());
+    assert_eq!(origin.calls.lock().unwrap()[0].path, "/provider/v1/models");
+
+    let command = contracts["providers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|provider| provider["providerId"] == COMMAND_CODE_PROVIDER_ID)
+        .expect("Command Code provider contract");
+    assert_eq!(command["catalog"]["source"], "command_code_get_models");
+    assert_eq!(
+        command["catalog"]["models"],
+        json!(["deepseek/deepseek-v4-flash", "future-command-model"])
+    );
+    let discovered = command["models"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|model| model["modelId"] == "future-command-model")
+        .expect("newly discovered Command Code row stays visible");
+    assert_eq!(discovered["routable"], false);
+    assert_eq!(
+        discovered["protocols"]["chat_completions"]["override"],
+        "force_off"
+    );
+    assert_eq!(
+        discovered["protocols"]["chat_completions"]["enabled"],
+        false
+    );
+
+    let (status, legacy) = send_json(
+        &harness,
+        Method::POST,
+        &format!("/providers/{COMMAND_CODE_PROVIDER_ID}/models/refresh"),
+        &cas(&harness, json!({})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{legacy}");
+    assert_eq!(legacy["providerId"], COMMAND_CODE_PROVIDER_ID);
+    assert_eq!(legacy["accountId"], Value::Null);
+    assert_eq!(
+        legacy["models"],
+        json!(["deepseek/deepseek-v4-flash", "future-command-model"])
+    );
+    assert_eq!(
+        legacy["sourceUrl"],
+        format!("{}/provider/v1/models", origin.url)
+    );
+    assert!(
+        legacy["refreshedAt"]
+            .as_str()
+            .is_some_and(|value| !value.is_empty())
+    );
+    assert_eq!(legacy["revision"], harness.state.settings_revision());
+    assert_eq!(
+        legacy["processGeneration"],
+        harness.state.process_generation()
+    );
+    harness.stop();
+}
+
+#[tokio::test]
 async fn go_model_refresh_filters_zen_free_models_before_persisting() {
     let harness = start_loopback("go-refresh-free-filter").await;
     force_direct_proxy(&harness);
@@ -973,9 +1067,11 @@ async fn goat_verify_does_not_turn_public_catalog_errors_into_key_failures() {
         Duration::ZERO,
     )
     .await;
-    let _guard =
-        install_goat_verify_origin_for_test(harness.state.process_generation(), origin.url.clone())
-            .unwrap();
+    let _guard = install_goat_catalog_origin_for_test(
+        harness.state.process_generation(),
+        origin.url.clone(),
+    )
+    .unwrap();
     let id = create_goat_account(&harness).await;
     let before = harness.state.settings_revision();
 

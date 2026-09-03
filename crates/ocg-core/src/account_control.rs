@@ -38,6 +38,11 @@ pub trait AccountControlHost: Sync {
     fn recover_browser_profiles_for_account(&self, account_id: &str) -> anyhow::Result<()>;
     fn data_dir(&self) -> PathBuf;
     fn reload_provider_contracts(&self) -> anyhow::Result<()>;
+    /// Builtin enablement first; otherwise current dynamic snapshot membership.
+    fn ensure_provider_can_enable(
+        &self,
+        provider_id: &str,
+    ) -> Result<(), crate::provider::ProviderBindingError>;
     fn create_account_with_contract(&self, account: &Account) -> anyhow::Result<()>;
     fn update_account(&self, id: &str, update: &AccountUpdate) -> anyhow::Result<()>;
     fn get_account(&self, id: &str) -> anyhow::Result<Option<Account>>;
@@ -82,6 +87,12 @@ where
     }
     fn reload_provider_contracts(&self) -> anyhow::Result<()> {
         self.deref().reload_provider_contracts()
+    }
+    fn ensure_provider_can_enable(
+        &self,
+        provider_id: &str,
+    ) -> Result<(), crate::provider::ProviderBindingError> {
+        self.deref().ensure_provider_can_enable(provider_id)
     }
     fn create_account_with_contract(&self, account: &Account) -> anyhow::Result<()> {
         self.deref().create_account_with_contract(account)
@@ -253,7 +264,15 @@ pub(crate) fn set_account_enabled_locked(
             ZEN_FREE_MUTATION_MESSAGE.into(),
         ));
     }
-    if enabled && (!account.setup_step.is_ready() || account.key_cipher.is_empty()) {
+    if enabled && !account.setup_step.is_ready() {
+        return Err(AccountControlError::Conflict(
+            SETUP_INCOMPLETE_MESSAGE.into(),
+        ));
+    }
+    if enabled
+        && account.credential_kind == crate::provider::CredentialKind::ApiKey
+        && account.key_cipher.is_empty()
+    {
         return Err(AccountControlError::Conflict(
             SETUP_INCOMPLETE_MESSAGE.into(),
         ));
@@ -353,14 +372,16 @@ pub(crate) fn ensure_account_can_enable(
     host: &impl AccountControlHost,
     account: &Account,
 ) -> Result<(), AccountControlError> {
-    crate::provider::ensure_provider_can_enable(&account.provider_id)
+    host.ensure_provider_can_enable(&account.provider_id)
         .map_err(|error| AccountControlError::Conflict(error.to_string()))?;
-    let plan = crate::provider::builtin_provider(&account.provider_id)
-        .ok_or_else(|| AccountControlError::Invalid("unknown provider offering".into()))?;
+    let Some(plan) = crate::provider::builtin_provider(&account.provider_id) else {
+        return Ok(());
+    };
     // Verification blocks enablement only for Plans whose composed card
     // descriptor gates on it (GOAT). Custom keeps `VerificationPolicy::Required`
     // for status tracking, but its card flips the gate off, so a pending Custom
-    // account may be enabled without verifying first.
+    // account may be enabled without verifying first. Dynamic snapshot members
+    // have no builtin card and skip this gate.
     let verification_gates_enablement = plan.verification_policy == VerificationPolicy::Required
         && crate::provider::ProviderRegistry::get(&account.provider_id)
             .is_some_and(|descriptor| descriptor.card_actions.enable_requires_verification);
@@ -563,6 +584,54 @@ mod tests {
         assert!(
             matches!(zen, AccountControlError::Invalid(message) if message == ZEN_FREE_MUTATION_MESSAGE)
         );
+
+        drop(state);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn provider_enable_validation_accepts_dynamic_snapshot_and_rejects_unknown() {
+        let (state, dir) = temp_state("dyn-enable");
+        let unknown = state.ensure_provider_can_enable("no-such-provider");
+        assert!(matches!(
+            unknown,
+            Err(crate::provider::ProviderBindingError::UnknownProvider { .. })
+        ));
+
+        let now = Utc::now();
+        let provider_id = uuid::Uuid::new_v4().to_string();
+        let runtime = crate::dynamic::DynamicProviderRuntime {
+            id: provider_id.clone(),
+            name: "Lab".into(),
+            endpoint_url: "http://127.0.0.1:9".into(),
+            upstream_protocol: crate::provider::UpstreamProtocolKind::ChatCompletions,
+            auth_kind: ocg_domain::dynamic::DynamicAuthKind::None,
+            mappings: vec![ocg_domain::dynamic::DynamicModelMapping {
+                public_model: "lab-opus".into(),
+                upstream_model: "vendor/opus".into(),
+            }],
+            created_at: now,
+            updated_at: now,
+        };
+        let mut account = custom_pending(&state, "dyn-none");
+        account.provider_id = provider_id.clone();
+        account.credential_kind = crate::provider::CredentialKind::None;
+        account.key_cipher = String::new();
+        account.enabled = true;
+        state
+            .db
+            .lock()
+            .create_dynamic_provider(&runtime, &account)
+            .unwrap();
+        state.reload_dynamic_providers().unwrap();
+        state
+            .ensure_provider_can_enable(&provider_id)
+            .expect("current dynamic snapshot members may be enabled");
+
+        let disabled = set_account_enabled(&state, "dyn-none", false).unwrap();
+        assert!(!disabled.enabled);
+        let enabled = set_account_enabled(&state, "dyn-none", true).unwrap();
+        assert!(enabled.enabled);
 
         drop(state);
         let _ = std::fs::remove_dir_all(dir);

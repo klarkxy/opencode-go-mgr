@@ -89,8 +89,6 @@ import type {
   ProviderCatalog,
   ProviderContracts,
   ProviderModelCapability,
-  ProviderModels,
-  ProviderModelsRefreshUpdate,
   ProviderPricing,
   ProviderPricingRefresh,
   ProviderPricingRefreshUpdate,
@@ -770,14 +768,6 @@ export const dashboardV3 = {
     }),
   getProviderModelCapabilities: () =>
     requestV3<ProviderModelCapability[]>("/providers/model-capabilities"),
-  refreshProviderModels: (
-    providerId: string,
-    accountId: WithoutExpectation<ProviderModelsRefreshUpdate>["accountId"],
-    expectation: MutationExpectation,
-  ) => requestV3<ProviderModels>(`/providers/${encode(providerId)}/models/refresh`, {
-    method: "POST",
-    body: withExpectation({ accountId } satisfies WithoutExpectation<ProviderModelsRefreshUpdate>, expectation),
-  }),
   getZenFreeSettings: () => requestV3<ZenFreeSettings>("/providers/zen-free"),
   patchZenFreeSettings: (enabled: boolean, expectation: MutationExpectation) =>
     requestV3<ZenFreeSettings>("/providers/zen-free", {

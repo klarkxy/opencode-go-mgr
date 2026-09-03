@@ -6,10 +6,13 @@ use chrono::{Duration, Utc};
 use ocg_core::crypto::{KeyCipher, StaticKeyCipher};
 use ocg_core::db::{Database, ForwardLogQueryOptions};
 use ocg_core::gateway;
-use ocg_core::models::{AccountUpdate, AppConfig, ProxyMode, RoutingMode};
+use ocg_core::models::{
+    Account, AccountSetupStep, AccountType, AccountUpdate, AppConfig, ProxyMode, RoutingMode,
+};
 use ocg_core::provider::{
     COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_ALIAS, COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM,
-    COMMAND_CODE_PROVIDER_ID, OPENCODE_PROVIDER_ID, ZEN_FREE_ACCOUNT_ID,
+    COMMAND_CODE_PROVIDER_ID, CPA_ACCOUNT_ID, CPA_ACCOUNT_NAME, CPA_PROVIDER_ID, CredentialKind,
+    OPENCODE_PROVIDER_ID, QuotaScope, ZEN_FREE_ACCOUNT_ID,
 };
 use ocg_core::state::CoreStateInner;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -2213,6 +2216,128 @@ async fn mixed_goat_cooldown_and_sticky_state_are_independent() {
     );
 }
 
+async fn v3_post(
+    port: u16,
+    path: &str,
+    body: serde_json::Value,
+) -> (StatusCode, serde_json::Value) {
+    let response = loopback_client()
+        .post(format!("http://127.0.0.1:{port}/dashboard/api/v3{path}"))
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+    let status = response.status();
+    let parsed = response.json().await.unwrap_or(serde_json::Value::Null);
+    (status, parsed)
+}
+
+fn v3_cas(state: &CoreStateInner, patch: serde_json::Value) -> serde_json::Value {
+    let mut body = patch.as_object().cloned().unwrap_or_default();
+    body.insert(
+        "expectedRevision".into(),
+        serde_json::json!(state.settings_revision()),
+    );
+    body.insert(
+        "processGeneration".into(),
+        serde_json::json!(state.process_generation()),
+    );
+    serde_json::Value::Object(body)
+}
+
+#[tokio::test]
+async fn dynamic_429_uses_generic_cooldown_skips_go_windows_and_falls_through() {
+    let p =
+        PreparedFallback::go(&[("dyn-first", &[limited()]), ("dyn-second", &[ok()])], &[]).await;
+    let origin = p.base_url.clone();
+    let h = p.bind().await;
+    let (status, created) = v3_post(
+        h.port,
+        "/providers",
+        v3_cas(
+            &h.state,
+            serde_json::json!({
+                "name": "Lab",
+                "endpointUrl": origin,
+                "upstreamProtocol": "chat_completions",
+                "authKind": "bearer",
+                "key": "dyn-first",
+                "models": [{
+                    "publicModel": "lab-opus",
+                    "upstreamModel": "vendor/opus"
+                }]
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    let provider_id = created["provider"]["id"].as_str().unwrap().to_string();
+    let first_id = h
+        .state
+        .db
+        .lock()
+        .list_accounts()
+        .unwrap()
+        .into_iter()
+        .find(|account| account.provider_id == provider_id)
+        .map(|account| account.id)
+        .expect("dynamic provider creates a first account");
+    let (status, second) = v3_post(
+        h.port,
+        "/accounts",
+        v3_cas(
+            &h.state,
+            serde_json::json!({
+                "name": "second",
+                "providerId": provider_id,
+                "key": "dyn-second"
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{second}");
+    let second_id = second["account"]["id"].as_str().unwrap().to_string();
+
+    let (status, body) = h.protocol("/v1/chat/completions", "lab-opus").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(h.call_keys(), ["dyn-first", "dyn-second"]);
+    assert!(
+        h.calls
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|call| call.path == "/v1/chat/completions")
+    );
+    assert!(
+        h.calls
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|call| call.body.contains("vendor/opus")),
+        "{:?}",
+        h.calls.lock().unwrap()
+    );
+    let first = h.account(&first_id);
+    let second = h.account(&second_id);
+    assert!(first.cooldown_until.is_some());
+    assert!(first.cooldown_generic_until.is_some());
+    assert!(first.cooldown_5h_until.is_none());
+    assert!(first.cooldown_week_until.is_none());
+    assert!(first.cooldown_month_until.is_none());
+    assert!(second.cooldown_until.is_none());
+    let sync = h
+        .state
+        .db
+        .lock()
+        .account_usage_sync_state(&first_id)
+        .unwrap();
+    assert!(
+        sync.as_ref()
+            .is_none_or(|state| state.next_eligible_at.is_none()),
+        "dynamic 429 must not schedule OpenCode Go usage sync: {sync:?}"
+    );
+}
+
 #[tokio::test]
 async fn shared_alias_respects_account_order_and_can_prefer_go() {
     let (h, _) = start_goat(&[("open-key", &[ok()])], &[], false, true).await;
@@ -3274,4 +3399,82 @@ async fn explicit_probe_can_add_ceiling_protocol_and_failure_does_not() {
             .any(|call| call.path == "/v1/chat/completions" && call.body.contains("grok-4.5")),
         "probed Chat must become the selected production path: {recorded:?}"
     );
+}
+
+#[tokio::test]
+async fn cpa_fake_upstream_production_forwarding_uses_bearer_and_bypasses_global_proxy() {
+    let replies = script(&[("cpa-inference-key", &[ok()])]);
+    let (base_url, calls, stop_mock) = start_fake_upstream(replies).await;
+    let (state, dir) = build_state(base_url.clone(), &[]);
+    let now = Utc::now();
+    let account = Account {
+        id: CPA_ACCOUNT_ID.to_string(),
+        provider_id: CPA_PROVIDER_ID.to_string(),
+        credential_kind: CredentialKind::ApiKey,
+        quota_scope: QuotaScope::Key,
+        name: CPA_ACCOUNT_NAME.to_string(),
+        username: None,
+        password_cipher: None,
+        key_cipher: state.encrypt_key("cpa-inference-key").unwrap(),
+        enabled: true,
+        account_type: AccountType::Key,
+        setup_step: AccountSetupStep::Ready,
+        referral_code: None,
+        purchase_date: String::new(),
+        expires_on: String::new(),
+        cooldown_until: None,
+        cooldown_generic_until: None,
+        cooldown_5h_until: None,
+        cooldown_week_until: None,
+        cooldown_month_until: None,
+        cooldown_free_until: None,
+        last_error: None,
+        auth_error: None,
+        notes: None,
+        created_at: now,
+        updated_at: now,
+    };
+    let management = state.encrypt_key("cpa-management-key").unwrap();
+    state
+        .db
+        .lock()
+        .upsert_cpa_integration(&account, &base_url, &management)
+        .unwrap();
+    state
+        .activate_cpa_model_catalog(vec!["cpa-forward-model".into()], &base_url, now)
+        .unwrap();
+    let mut config = state.config();
+    config.proxy_mode = ProxyMode::Manual;
+    config.proxy_url = "http://127.0.0.1:1".into();
+    state.set_config(config).unwrap();
+
+    let h = FallbackHarness::from_parts(state, dir, calls, Some(stop_mock), None).await;
+    let (status, body) = h
+        .protocol("/v1/chat/completions", "cpa-forward-model")
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let captured = h.calls.lock().unwrap().clone();
+    assert_eq!(captured.len(), 1);
+    assert_eq!(captured[0].path, "/v1/chat/completions");
+    assert_eq!(
+        captured[0].authorization.as_deref(),
+        Some("Bearer cpa-inference-key")
+    );
+    assert!(
+        captured[0].body.contains("\"cpa-forward-model\""),
+        "CPA must forward the exact catalog model: {}",
+        captured[0].body
+    );
+    let logs = h.logs();
+    assert!(
+        logs.iter().any(|log| {
+            log.provider_id.as_deref() == Some(CPA_PROVIDER_ID)
+                && log.route_account_id.as_deref() == Some(CPA_ACCOUNT_ID)
+                && log.model == "cpa-forward-model"
+                && log.http_status == Some(200)
+        }),
+        "CPA attribution missing: {logs:?}"
+    );
+    h.stop();
 }

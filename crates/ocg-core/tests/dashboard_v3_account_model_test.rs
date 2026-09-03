@@ -291,3 +291,242 @@ async fn custom_model_test_uses_the_declared_protocol_and_route_without_secrets(
     assert_eq!(calls[0].x_api_key, None);
     harness.stop();
 }
+
+fn dynamic_create_body(
+    name: &str,
+    endpoint: &str,
+    protocol: &str,
+    auth: &str,
+    key: Option<&str>,
+    public_model: &str,
+    upstream_model: &str,
+) -> Value {
+    let mut body = json!({
+        "name": name,
+        "endpointUrl": endpoint,
+        "upstreamProtocol": protocol,
+        "authKind": auth,
+        "models": [{
+            "publicModel": public_model,
+            "upstreamModel": upstream_model
+        }]
+    });
+    if let Some(key) = key {
+        body["key"] = json!(key);
+    }
+    body
+}
+
+async fn account_id_for_provider(harness: &V3Harness, provider_id: &str) -> String {
+    harness
+        .state
+        .db
+        .lock()
+        .list_accounts()
+        .unwrap()
+        .into_iter()
+        .find(|account| account.provider_id == provider_id)
+        .map(|account| account.id)
+        .unwrap_or_else(|| panic!("missing account for {provider_id}"))
+}
+
+struct DynamicExactCase {
+    label: &'static str,
+    protocol: &'static str,
+    auth: &'static str,
+    key: Option<&'static str>,
+    sibling_key: Option<&'static str>,
+    expected_path: &'static str,
+    expected_authorization: Option<&'static str>,
+    expected_x_api_key: Option<&'static str>,
+}
+
+#[tokio::test]
+async fn dynamic_exact_account_tests_cover_bearer_x_api_key_and_none() {
+    let cases = [
+        DynamicExactCase {
+            label: "account-model-test-dyn-bearer",
+            protocol: "chat_completions",
+            auth: "bearer",
+            key: Some("sk-dyn-bearer"),
+            sibling_key: Some("sk-dyn-sibling"),
+            expected_path: "/v1/chat/completions",
+            expected_authorization: Some("Bearer sk-dyn-bearer"),
+            expected_x_api_key: None,
+        },
+        DynamicExactCase {
+            label: "account-model-test-dyn-x-api-key",
+            protocol: "messages",
+            auth: "x-api-key",
+            key: Some("sk-dyn-x"),
+            sibling_key: None,
+            expected_path: "/v1/messages",
+            expected_authorization: None,
+            expected_x_api_key: Some("sk-dyn-x"),
+        },
+        DynamicExactCase {
+            label: "account-model-test-dyn-none",
+            protocol: "responses",
+            auth: "none",
+            key: None,
+            sibling_key: None,
+            expected_path: "/v1/responses",
+            expected_authorization: None,
+            expected_x_api_key: None,
+        },
+    ];
+    for case in cases {
+        let harness = start_loopback(case.label).await;
+        let origin = start_origin().await;
+        let mut config = harness.state.config();
+        config.proxy_mode = ProxyMode::Direct;
+        config.non_stream_timeout_secs = 5;
+        harness.state.set_config(config).unwrap();
+        let (status, created) = send_json(
+            &harness,
+            Method::POST,
+            "/providers",
+            cas(
+                &harness,
+                dynamic_create_body(
+                    case.label,
+                    &origin.url,
+                    case.protocol,
+                    case.auth,
+                    case.key,
+                    "lab-opus",
+                    "vendor/opus",
+                ),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{} {created}", case.label);
+        let provider_id = created["provider"]["id"].as_str().unwrap().to_string();
+        let account = account_id_for_provider(&harness, &provider_id).await;
+        if let Some(sibling_key) = case.sibling_key {
+            let (status, sibling) = send_json(
+                &harness,
+                Method::POST,
+                "/accounts",
+                cas(
+                    &harness,
+                    json!({
+                        "name": "sibling",
+                        "providerId": provider_id,
+                        "key": sibling_key
+                    }),
+                ),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{} {sibling}", case.label);
+        }
+        let (disabled_status, disabled) = send_json(
+            &harness,
+            Method::PATCH,
+            &format!("/accounts/{account}"),
+            cas(&harness, json!({"enabled": false})),
+        )
+        .await;
+        assert_eq!(disabled_status, StatusCode::OK, "{} {disabled}", case.label);
+        harness
+            .state
+            .db
+            .lock()
+            .set_account_cooldown(
+                &account,
+                Some(Utc::now() + chrono::Duration::hours(1)),
+                Some("pre-existing cooldown"),
+            )
+            .unwrap();
+        let before_revision = harness.state.settings_revision();
+        let before = harness
+            .state
+            .db
+            .lock()
+            .get_account(&account)
+            .unwrap()
+            .unwrap();
+        assert!(!before.enabled);
+        assert!(before.cooldown_until.is_some());
+
+        let (status, body) = send_json(
+            &harness,
+            Method::POST,
+            &format!("/accounts/{account}/model-tests"),
+            json!({"modelId":"lab-opus"}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{} {body}", case.label);
+        assert_eq!(body["accountId"], account);
+        assert_eq!(body["modelId"], "lab-opus");
+        assert_eq!(body["protocol"], case.protocol);
+        assert_eq!(body["success"], true);
+        assert_eq!(body["httpStatus"], 200);
+        if let Some(key) = case.key {
+            assert!(!body.to_string().contains(key), "{} {body}", case.label);
+        }
+        assert_eq!(harness.state.settings_revision(), before_revision);
+        let after = harness
+            .state
+            .db
+            .lock()
+            .get_account(&account)
+            .unwrap()
+            .unwrap();
+        assert!(!after.enabled);
+        assert_eq!(after.enabled, before.enabled);
+        assert_eq!(after.cooldown_until, before.cooldown_until);
+        assert_eq!(after.auth_error, before.auth_error);
+        let calls = origin.calls.lock().unwrap();
+        assert_eq!(calls.len(), 1, "{} {calls:?}", case.label);
+        assert_eq!(calls[0].path, case.expected_path);
+        assert_eq!(calls[0].body["model"], "vendor/opus");
+        assert_eq!(
+            calls[0].authorization.as_deref(),
+            case.expected_authorization
+        );
+        assert_eq!(calls[0].x_api_key.as_deref(), case.expected_x_api_key);
+        harness.stop();
+    }
+}
+
+#[tokio::test]
+async fn dynamic_unknown_model_fails_before_outbound() {
+    let harness = start_loopback("account-model-test-dyn-unknown").await;
+    let origin = start_origin().await;
+    let mut config = harness.state.config();
+    config.proxy_mode = ProxyMode::Direct;
+    harness.state.set_config(config).unwrap();
+    let (status, created) = send_json(
+        &harness,
+        Method::POST,
+        "/providers",
+        cas(
+            &harness,
+            dynamic_create_body(
+                "Unknown",
+                &origin.url,
+                "chat_completions",
+                "bearer",
+                Some("sk-dyn-unknown"),
+                "lab-opus",
+                "vendor/opus",
+            ),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    let provider_id = created["provider"]["id"].as_str().unwrap().to_string();
+    let account = account_id_for_provider(&harness, &provider_id).await;
+    let (status, body) = send_json(
+        &harness,
+        Method::POST,
+        &format!("/accounts/{account}/model-tests"),
+        json!({"modelId":"not-a-current-model"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["code"], "invalidRequest");
+    assert!(origin.calls.lock().unwrap().is_empty());
+    harness.stop();
+}

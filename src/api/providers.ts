@@ -12,7 +12,6 @@ import type {
   ProviderContracts as V3ProviderContracts,
   ProviderPricing as V3ProviderPricing,
   ProviderPricingSnapshot as V3ProviderPricingSnapshot,
-  ProviderModels as V3ProviderModels,
   ProviderUsage as V3ProviderUsage,
   ProtocolOverrideState as V3ProtocolOverrideState,
   ProtocolProbeResponse as V3ProtocolProbeResponse,
@@ -328,7 +327,7 @@ export interface CustomCatalogRefreshResponse {
   declared_capabilities_unchanged: boolean;
 }
 
-export type ProviderModelsRefreshResponse = ZenFreeModelsResponse | CustomCatalogRefreshResponse | V3ProviderModels;
+export type ProviderModelsRefreshResponse = ZenFreeModelsResponse | CustomCatalogRefreshResponse;
 
 export function isCustomCatalogRefreshResponse(
   value: ProviderModelsRefreshResponse,
@@ -720,22 +719,6 @@ export const providerApi = {
       source: "discovered",
       declared_capabilities_unchanged: true,
     } satisfies CustomCatalogRefreshResponse;
-  },
-  refreshProviderModels: async (accountId: string) => {
-    const account = await dashboardV3.getAccount(accountId);
-    if (account.providerId === "custom") {
-      return providerApi.getProviderModels(accountId);
-    }
-    const control = useControlPlaneStore();
-    if (!control.hasTokens()) await control.refresh();
-    if (account.providerId === "opencode-zen-free") {
-      return presentZenModels(await control.runMutation((expectation) => dashboardV3.refreshZenFreeModels(expectation)));
-    }
-    return control.runMutation((expectation) => dashboardV3.refreshProviderModels(
-      account.providerId,
-      accountId,
-      expectation,
-    ));
   },
   refreshContractCatalog: async (scopeKind: ContractScopeKind, scopeId: string) => {
     const control = useControlPlaneStore();

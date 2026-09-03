@@ -151,6 +151,42 @@ fn go_zen_free_and_generic_429_policies() {
 }
 
 #[test]
+fn unknown_and_dynamic_shaped_429_use_generic_five_minute() {
+    for provider_id in [
+        "unknown-provider",
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    ] {
+        assert_eq!(
+            classify(429, provider_id, false, false),
+            ProviderErrorClass::RateLimited {
+                policy: RateLimitPolicy::GenericFiveMinute
+            },
+            "{provider_id}"
+        );
+        assert_eq!(
+            classify(429, provider_id, true, false),
+            ProviderErrorClass::RateLimited {
+                policy: RateLimitPolicy::GenericFiveMinute
+            },
+            "{provider_id}"
+        );
+        assert!(!schedule_go_usage_sync(classify(
+            429,
+            provider_id,
+            false,
+            false
+        )));
+    }
+    assert_eq!(
+        classify(429, OPENCODE_PROVIDER_ID, false, false),
+        ProviderErrorClass::RateLimited {
+            policy: RateLimitPolicy::GoWindow
+        }
+    );
+}
+
+#[test]
 fn generic_429_wins_over_free_channel_and_zen_go_channel_parses_windows() {
     assert_eq!(
         classify(429, CUSTOM_PROVIDER_ID, true, false),
