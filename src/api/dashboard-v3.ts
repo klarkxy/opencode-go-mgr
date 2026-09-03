@@ -82,7 +82,6 @@ import type {
   ModelProtocolOverridesUpdate,
   MutationAck,
   MutationExpectation,
-  OllamaUsageStatus,
   PricingMultipliersUpdate,
   PricingSnapshot,
   ProtocolProbeRequest,
@@ -720,18 +719,6 @@ export const dashboardV3 = {
     requestV3<ProviderUsage>(`/accounts/${encode(id)}/provider-usage`, {
       method: "POST",
       body: mutation(expectation),
-    }),
-  getOllamaUsage: (id: string) =>
-    requestV3<OllamaUsageStatus>(`/accounts/${encode(id)}/ollama-usage`),
-  refreshOllamaUsage: (id: string, expectation: MutationExpectation) =>
-    requestV3<OllamaUsageStatus>(`/accounts/${encode(id)}/ollama-usage/refresh`, {
-      method: "POST",
-      body: mutation(expectation),
-    }),
-  setOllamaCookie: (id: string, cookie: string | null, expectation: MutationExpectation) =>
-    requestV3<OllamaUsageStatus>(`/accounts/${encode(id)}/ollama-cookie`, {
-      method: "PUT",
-      body: withExpectation({ cookie }, expectation),
     }),
 
   // --- managed browser ---

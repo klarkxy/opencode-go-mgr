@@ -271,7 +271,9 @@ impl RequestPricingSnapshot {
         if account.provider_id == crate::provider::OPENCODE_PROVIDER_ID {
             return Self::OpenCode(go);
         }
-        if !crate::provider::is_command_code_goat(&account.provider_id) {
+        if !crate::provider::is_command_code_goat(&account.provider_id)
+            && account.provider_id != crate::provider::OLLAMA_PROVIDER_ID
+        {
             return Self::Unpriced;
         }
         let loaded = latest_provider_pricing_snapshot(&state.db.lock(), &account.provider_id);

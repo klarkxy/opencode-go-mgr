@@ -36,7 +36,10 @@ changes the quota-debit multiplier; it does not make a model or provider routabl
   summary shows total tokens (input + output). Quota use is estimated from the
   selected provider's verified pricing snapshot: OpenCode Go uses its active
   snapshot, while Command Code GOAT uses its separately refreshed model prices
-  and multipliers. Existing rows are not retroactively repriced. Registered
+  and multipliers. Ollama Cloud prices from the manual `https://ollama.com/pricing`
+  snapshot with quota multiplier `1.0`; those priced rows feed one monthly
+  USD-credits window and may exceed the soft Pro/Max/Team limit without changing
+  routing. Existing rows are not retroactively repriced. Registered
   Zen free models (`big-pickle`, `mimo-v2.5-free`, and other ids on the Zen
   allowlist) record tokens with `cost_state=free` and do not enter Go quota
   totals. Go models whose names contain `free` (currently `ox-alpha-free`) stay

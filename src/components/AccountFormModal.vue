@@ -97,34 +97,17 @@
         </n-form-item>
 
         <n-form-item
-          v-if="isOllamaPlan"
-          path="ollamaCookie"
-          :label="t('网页会话 Cookie（可选）')"
-          :validation-status="ollamaCookieIssue ? 'error' : undefined"
+          v-if="hasField('ollama_billing_tier')"
+          path="ollamaBillingTier"
+          :label="t('计费档位')"
         >
-          <n-input
-            v-model:value="form.ollamaCookie"
-            type="textarea"
-            :autosize="{ minRows: 2, maxRows: 4 }"
-            :placeholder="t('粘贴浏览器 Cookie 请求头，如 session=...; theme=...；留空保持不变')"
-            :input-props="{ 'aria-label': t('网页会话 Cookie（可选）') }"
-          >
-            <template #suffix>
-              <n-button
-                v-if="isEdit"
-                text
-                size="tiny"
-                type="warning"
-                :title="t('清除已保存的网页会话 Cookie，用量状态一并归零')"
-                @click="onClearOllamaCookie"
-              >
-                {{ t('清除') }}
-              </n-button>
-            </template>
-          </n-input>
-          <template v-if="ollamaCookieIssue" #feedback>
-            <span role="alert">{{ ollamaCookieIssue }}</span>
-          </template>
+          <n-select
+            v-model:value="form.ollamaBillingTier"
+            :options="ollamaBillingOptions"
+            :placeholder="t('选择计费档位')"
+            :aria-label="t('计费档位')"
+          />
+          <p class="field-hint">{{ t("新建须选择 Pro / Max / Team 并填写购买日期；未配置的既有账号仍可路由。") }}</p>
         </n-form-item>
 
         <n-form-item
@@ -332,10 +315,7 @@ export type AccountFormPayload = {
     upstream_model: string;
     protocol: AccountProtocol;
   }>;
-  /** Ollama Cloud only; pasted web-session Cookie request header. Edits write
-   * it through the dedicated cookie route; creates attach it after the account
-   * exists (the route is account-scoped). `""` clears the stored Cookie. */
-  ollama_cookie?: string | null;
+  ollama_billing_tier?: "pro" | "max" | "team";
 };
 
 type FormModel = {
@@ -347,7 +327,7 @@ type FormModel = {
   endpointUrl: string;
   upstreamProtocol: AccountProtocol | null;
   modelCapabilities: EditableModelCapability[];
-  ollamaCookie: string;
+  ollamaBillingTier: "pro" | "max" | "team" | null;
 };
 
 type EditableModelCapability = AccountCreateCapability & { row_id: number };
@@ -387,11 +367,6 @@ useLocalizedModalCloseLabel(toRef(props, "show"), "account-modal");
 
 const formRef = ref<FormInst | null>(null);
 const form = ref<FormModel>(blankForm());
-// One-shot flag: the next save clears the stored web-session Cookie
-// (payload.ollama_cookie = "") instead of leaving it unchanged. Clicking the
-// clear button also empties the input so a freshly pasted value cannot be
-// submitted by accident.
-const clearOllamaCookieField = ref(false);
 const nameWasEdited = ref(false);
 const formError = ref("");
 const discoveringModels = ref(false);
@@ -421,39 +396,12 @@ const effectivePlan = computed<PlanDefinition | null>(() => {
 
 const isCustomPlan = computed(() => effectivePlan.value?.id === "custom-endpoint");
 const isOllamaPlan = computed(() => effectivePlan.value?.id === "ollama-cloud");
-
-/** The clear action empties the field immediately: the save branch must never
- * let a freshly pasted value win over an explicit clear request. */
-function onClearOllamaCookie() {
-  form.value.ollamaCookie = "";
-  clearOllamaCookieField.value = true;
-}
-
-/** Mirrors the server-side Cookie header contract for inline feedback. */
-const ollamaCookieIssue = computed(() => {
-  if (!isOllamaPlan.value) return "";
-  const raw = form.value.ollamaCookie.trim();
-  if (!raw) return "";
-  if (raw.length > 16 * 1024) return t("Cookie 超过 16KB 上限");
-  const seen = new Set<string>();
-  for (const part of raw.split(";")) {
-    const pair = part.trim();
-    if (!pair) continue;
-    const eq = pair.indexOf("=");
-    if (eq <= 0 || eq === pair.length - 1) {
-      return t("请粘贴 Cookie 请求头（name=value 形式），而不是 Set-Cookie 响应头");
-    }
-    const name = pair.slice(0, eq).trim();
-    const value = pair.slice(eq + 1).trim();
-    if (value.includes('"') || value.includes(",") || value.includes(";")) {
-      return t("请粘贴 Cookie 请求头（name=value 形式），而不是 Set-Cookie 响应头");
-    }
-    const key = name.toLowerCase();
-    if (seen.has(key)) return t("请粘贴 Cookie 请求头（name=value 形式），而不是 Set-Cookie 响应头");
-    seen.add(key);
-  }
-  return "";
-});
+const ollamaBillingOptions = [
+  { value: "pro", label: "Pro · $60" },
+  { value: "max", label: "Max · $300" },
+  { value: "team", label: "Team · $1000" },
+];
+const ollamaPaidTier = computed(() => form.value.ollamaBillingTier !== null);
 const isDynamicPlan = computed(() => effectivePlan.value?.id === "dynamic-http");
 
 const catalogEntry = computed<ProviderCatalogEntry | undefined>(() => {
@@ -482,7 +430,9 @@ const keyPlaceholder = computed(() => {
   return "sk-...";
 });
 
-const purchaseDateRequired = computed(() => fieldRequired("purchase_date"));
+const purchaseDateRequired = computed(() => (
+  fieldRequired("purchase_date") || (isOllamaPlan.value && ollamaPaidTier.value)
+));
 const isPurchaseDateToday = computed(() => (
   form.value.purchaseDate !== null
   && localDateString(form.value.purchaseDate) === localDateString()
@@ -521,7 +471,7 @@ const rules = computed<FormRules>(() => {
     },
   };
 
-  if (fieldRequired("purchase_date")) {
+  if (purchaseDateRequired.value) {
     base.purchaseDate = [
       {
         required: true,
@@ -538,6 +488,14 @@ const rules = computed<FormRules>(() => {
         trigger: ["change", "blur"],
       },
     ];
+  }
+
+  if (hasField("ollama_billing_tier")) {
+    base.ollamaBillingTier = {
+      required: true,
+      message: t("选择计费档位"),
+      trigger: ["change", "blur"],
+    };
   }
 
   if (hasField("key") && !isEdit.value) {
@@ -584,7 +542,6 @@ watch(() => props.show, (show) => {
   if (show) {
     form.value = props.account ? formFromAccount(props.account) : blankForm();
     nameWasEdited.value = isEdit.value;
-    clearOllamaCookieField.value = false;
     formRef.value?.restoreValidation();
     formError.value = "";
     discoveryError.value = "";
@@ -648,7 +605,7 @@ function blankForm(): FormModel {
     endpointUrl: "",
     upstreamProtocol: "chat_completions",
     modelCapabilities: [],
-    ollamaCookie: "",
+    ollamaBillingTier: null,
   };
 }
 
@@ -669,7 +626,7 @@ function formFromAccount(account: Account): FormModel {
     endpointUrl: account.custom_config?.endpoint_url ?? "",
     upstreamProtocol: account.custom_config?.upstream_protocol ?? "chat_completions",
     modelCapabilities,
-    ollamaCookie: "",
+    ollamaBillingTier: account.ollama_billing_tier ?? null,
   };
 }
 
@@ -782,14 +739,8 @@ async function handleSave() {
         protocol: form.value.upstreamProtocol ?? "chat_completions",
       }));
     }
-    if (isOllamaPlan.value) {
-      if (ollamaCookieIssue.value) return;
-      // An explicit clear wins over whatever the (now emptied) input held.
-      if (clearOllamaCookieField.value) {
-        payload.ollama_cookie = "";
-      } else if (form.value.ollamaCookie.trim()) {
-        payload.ollama_cookie = form.value.ollamaCookie.trim();
-      }
+    if (hasField("ollama_billing_tier") && form.value.ollamaBillingTier) {
+      payload.ollama_billing_tier = form.value.ollamaBillingTier;
     }
     emit("save", payload);
     return;
@@ -807,10 +758,6 @@ async function handleSave() {
     key: form.value.key,
     notes: form.value.notes,
   };
-  if (ollamaCookieIssue.value) {
-    formError.value = ollamaCookieIssue.value;
-    return;
-  }
   if (hasField("purchase_date")) {
     values.purchase_date = form.value.purchaseDate === null
       ? undefined
@@ -828,15 +775,9 @@ async function handleSave() {
   }
 
   try {
-    // The cookie route is account-scoped, so a create-time Cookie rides along
-    // on the payload and Accounts.vue writes it right after the account exists.
-    const payload: AccountInput & { ollama_cookie?: string } = buildCreateAccountPayload(
-      plan,
-      values,
-    );
-    const cookie = form.value.ollamaCookie.trim();
-    if (isOllamaPlan.value && cookie) {
-      payload.ollama_cookie = cookie;
+    const payload = buildCreateAccountPayload(plan, values);
+    if (hasField("ollama_billing_tier") && form.value.ollamaBillingTier) {
+      payload.ollama_billing_tier = form.value.ollamaBillingTier;
     }
     emit("save", payload);
   } catch (error) {

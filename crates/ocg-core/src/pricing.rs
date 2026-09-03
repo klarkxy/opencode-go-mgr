@@ -10,7 +10,8 @@ use std::time::Duration;
 
 use crate::db::Database;
 use crate::kernel::ids::{
-    COMMAND_CODE_PROVIDER_ID, OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID, is_free_model,
+    COMMAND_CODE_PROVIDER_ID, OLLAMA_CLOUD_PRICING_URL, OLLAMA_PROVIDER_ID, OPENCODE_PROVIDER_ID,
+    OPENCODE_ZEN_FREE_PROVIDER_ID, is_free_model,
 };
 
 pub use crate::kernel::ids::normalize_model_name;
@@ -25,6 +26,8 @@ pub use crate::kernel::pricing::{
 const SOURCE_HOST: &str = "opencode.ai";
 pub const GOAT_SOURCE_URL: &str = "https://commandcode.ai/docs/plans/goat";
 const GOAT_SOURCE_HOST: &str = "commandcode.ai";
+pub const OLLAMA_SOURCE_URL: &str = OLLAMA_CLOUD_PRICING_URL;
+const OLLAMA_SOURCE_HOST: &str = "ollama.com";
 const MAX_DOCUMENT_BYTES: usize = 2 * 1024 * 1024;
 const ADJUSTMENT_POLICY_VERSION: &str = "local-v4";
 
@@ -207,6 +210,7 @@ impl ProviderScopedPricingSnapshot {
             model,
             prompt as i64,
             preferred_time_window,
+            &self.provider_id,
         ) else {
             return PricingEstimate::unpriced(&self.revision);
         };
@@ -354,6 +358,9 @@ pub async fn fetch_provider_pricing_manual(
         COMMAND_CODE_PROVIDER_ID => fetch_goat_pricing_snapshot(config)
             .await
             .map_err(|_| ProviderPricingRefreshError::FetchFailed),
+        OLLAMA_PROVIDER_ID => fetch_ollama_pricing_snapshot(config)
+            .await
+            .map_err(|_| ProviderPricingRefreshError::FetchFailed),
         OPENCODE_ZEN_FREE_PROVIDER_ID => Err(ProviderPricingRefreshError::NotApplicable),
         _ => Err(ProviderPricingRefreshError::UnknownProvider),
     }
@@ -362,50 +369,84 @@ pub async fn fetch_provider_pricing_manual(
 pub async fn fetch_goat_pricing_snapshot(
     config: &crate::models::AppConfig,
 ) -> Result<ProviderScopedPricingSnapshot> {
+    let html = fetch_approved_host_html(
+        config,
+        GOAT_SOURCE_URL,
+        GOAT_SOURCE_HOST,
+        "Command Code GOAT pricing",
+    )
+    .await?;
+    parse_goat_html(&html)
+}
+
+pub async fn fetch_ollama_pricing_snapshot(
+    config: &crate::models::AppConfig,
+) -> Result<ProviderScopedPricingSnapshot> {
+    let html = fetch_approved_host_html(
+        config,
+        OLLAMA_SOURCE_URL,
+        OLLAMA_SOURCE_HOST,
+        "Ollama Cloud pricing",
+    )
+    .await?;
+    parse_ollama_html(&html)
+}
+
+async fn fetch_approved_host_html(
+    config: &crate::models::AppConfig,
+    url: &str,
+    host: &'static str,
+    label: &'static str,
+) -> Result<String> {
     let client = crate::http_client::configured_builder(config)?
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(20))
-        .redirect(Policy::custom(same_goat_source_redirect))
+        .redirect(Policy::custom(move |attempt: Attempt<'_>| {
+            same_approved_host_redirect(attempt, host, label)
+        }))
         .build()
-        .context("build Command Code GOAT pricing client")?;
+        .with_context(|| format!("build {label} client"))?;
     let response = client
-        .get(GOAT_SOURCE_URL)
+        .get(url)
         .send()
         .await
-        .context("fetch Command Code GOAT pricing page")?
+        .with_context(|| format!("fetch {label} page"))?
         .error_for_status()
-        .context("Command Code GOAT pricing page returned an error")?;
+        .with_context(|| format!("{label} page returned an error"))?;
     if response
         .content_length()
         .is_some_and(|length| length > MAX_DOCUMENT_BYTES as u64)
     {
-        bail!("Command Code GOAT pricing page exceeds 2 MiB");
+        bail!("{label} page exceeds 2 MiB");
     }
     let mut bytes = Vec::new();
     let mut stream = response.bytes_stream();
     while let Some(chunk) = stream.next().await {
-        let chunk = chunk.context("read Command Code GOAT pricing page")?;
+        let chunk = chunk.with_context(|| format!("read {label} page"))?;
         if bytes.len() + chunk.len() > MAX_DOCUMENT_BYTES {
-            bail!("Command Code GOAT pricing page exceeds 2 MiB");
+            bail!("{label} page exceeds 2 MiB");
         }
         bytes.extend_from_slice(&chunk);
     }
-    let html = String::from_utf8(bytes).context("Command Code GOAT pricing page is not UTF-8")?;
-    parse_goat_html(&html)
+    String::from_utf8(bytes).with_context(|| format!("{label} page is not UTF-8"))
 }
 
-fn same_goat_source_redirect(attempt: Attempt<'_>) -> reqwest::redirect::Action {
+fn same_approved_host_redirect(
+    attempt: Attempt<'_>,
+    host: &str,
+    label: &str,
+) -> reqwest::redirect::Action {
     if attempt.previous().len() >= 5 {
-        return attempt.error("too many Command Code GOAT pricing redirects");
+        return attempt.error(format!("too many {label} redirects"));
     }
     let url = attempt.url();
     if url.scheme() == "https"
-        && url.host_str() == Some(GOAT_SOURCE_HOST)
+        && url.host_str() == Some(host)
         && url.port_or_known_default() == Some(443)
     {
         attempt.follow()
     } else {
-        attempt.error("Command Code GOAT pricing redirect left the approved HTTPS host")
+        attempt.error(format!("{label} redirect left the approved HTTPS host"))
     }
 }
 
@@ -605,6 +646,78 @@ pub fn parse_goat_html(html: &str) -> Result<ProviderScopedPricingSnapshot> {
         ProviderPricingEvidence::Verified,
         values,
     )
+}
+
+pub fn parse_ollama_html(html: &str) -> Result<ProviderScopedPricingSnapshot> {
+    let tables = extract_tables(html)?;
+    let rates = tables
+        .iter()
+        .find(|table| has_headers(table, &["model", "input", "cached input", "output"]))
+        .ok_or_else(|| {
+            let headers = tables
+                .iter()
+                .filter_map(|table| table.first())
+                .map(|row| row.join(" | "))
+                .collect::<Vec<_>>()
+                .join("; ");
+            anyhow!("Ollama Cloud model pricing table was not found; headers: {headers}")
+        })?;
+    let mut values = Vec::new();
+    let mut seen = HashSet::new();
+    for row in rates.iter().skip(1) {
+        if row.len() != 4 {
+            bail!("Ollama Cloud model pricing table contains an incomplete row");
+        }
+        let model_id = row[0].trim().to_string();
+        if model_id.is_empty() || !seen.insert(canonical_display_name(&model_id)) {
+            bail!("Ollama Cloud model pricing table contains an invalid or duplicate model");
+        }
+        let input = parse_ollama_money(&row[1])?;
+        let cached = parse_ollama_money(&row[2])?;
+        let output = parse_ollama_money(&row[3])?;
+        values.push(
+            ProviderPricingValue::new(
+                model_id.clone(),
+                model_id,
+                Some(input),
+                Some(output),
+                Some(cached),
+                None,
+                None,
+                None,
+                None,
+                Some("USD".to_string()),
+                None,
+                None,
+                PricingTimeWindow::Always,
+            )?
+            .with_quota_multiplier(1.0)?,
+        );
+    }
+    if values.is_empty() {
+        bail!("Ollama Cloud model pricing table is empty");
+    }
+    values.sort_by(|left, right| left.model_id().cmp(right.model_id()));
+    let content_hash = format!("{:x}", Sha256::digest(html.as_bytes()));
+    let revision = format!(
+        "ollama-{}",
+        content_hash.chars().take(16).collect::<String>()
+    );
+    ProviderScopedPricingSnapshot::new(
+        OLLAMA_PROVIDER_ID,
+        revision,
+        Utc::now().to_rfc3339(),
+        None,
+        OLLAMA_SOURCE_URL,
+        content_hash,
+        ProviderPricingEvidence::Verified,
+        values,
+    )
+}
+
+fn parse_ollama_money(value: &str) -> Result<f64> {
+    parse_dollar(value.trim(), false)?
+        .ok_or_else(|| anyhow!("Ollama Cloud pricing cell is missing a USD value: {value}"))
 }
 
 fn parse_count_before(plain: &str, marker: &str) -> Result<usize> {
@@ -1568,6 +1681,7 @@ fn select_provider_pricing_value<'a>(
     model: &str,
     prompt_tokens: i64,
     preferred_time_window: PricingTimeWindow,
+    provider_id: &str,
 ) -> Option<&'a ProviderPricingValue> {
     let requested = provider_model_identities(model);
     let exact = values
@@ -1578,7 +1692,11 @@ fn select_provider_pricing_value<'a>(
                 .any(|id| requested.contains(id))
         })
         .collect::<Vec<_>>();
-    let matched = if exact.is_empty() {
+    let matched = if !exact.is_empty() {
+        exact
+    } else if provider_id == OLLAMA_PROVIDER_ID {
+        ollama_runtime_tag_matches(values, model)
+    } else {
         let suffix = values
             .iter()
             .filter(|value| {
@@ -1600,8 +1718,6 @@ fn select_provider_pricing_value<'a>(
             return None;
         }
         suffix
-    } else {
-        exact
     };
     let candidates = matched
         .into_iter()
@@ -1615,6 +1731,32 @@ fn select_provider_pricing_value<'a>(
         })
         .collect::<Vec<_>>();
     select_provider_time_window(&candidates, preferred_time_window)
+}
+
+fn ollama_runtime_tag_matches<'a>(
+    values: &'a [ProviderPricingValue],
+    model: &str,
+) -> Vec<&'a ProviderPricingValue> {
+    let Some((stem, tag)) = model.rsplit_once(':') else {
+        return Vec::new();
+    };
+    if stem.is_empty() || tag.is_empty() {
+        return Vec::new();
+    }
+    let requested = provider_model_identities(stem);
+    let matched = values
+        .iter()
+        .filter(|value| {
+            provider_value_identities(value)
+                .iter()
+                .any(|id| requested.contains(id))
+        })
+        .collect::<Vec<_>>();
+    if matched.len() == 1 {
+        matched
+    } else {
+        Vec::new()
+    }
 }
 
 fn provider_model_identities(model: &str) -> HashSet<String> {

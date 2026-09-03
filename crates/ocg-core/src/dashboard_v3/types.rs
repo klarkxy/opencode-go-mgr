@@ -212,12 +212,7 @@ pub const CATALOG_TYPE_NAMES: &[&str] = &[
     "DynamicProviderDiscoverResponse",
     "DynamicProviderTestRequest",
     "DynamicProviderTestResponse",
-    "OllamaUsageStatus",
-    "OllamaUsageSnapshot",
-    "OllamaUsageWindow",
-    "OllamaUsageModelRequests",
-    "OllamaCookieUpdate",
-    "OllamaUsageThrottleError",
+    "OllamaBillingTier",
 ];
 
 pub const ERROR_UNAUTHORIZED: &str = "unauthorized";
@@ -780,6 +775,8 @@ pub struct Account {
     pub plan_routable: bool,
     pub custom_config: Option<AccountCustomConfig>,
     pub model_capabilities: Vec<AccountModelCapability>,
+    #[serde(default)]
+    pub ollama_billing_tier: Option<OllamaBillingTier>,
 }
 
 /// GET `/accounts` and PUT `/accounts/order` envelope.
@@ -950,6 +947,8 @@ pub struct AccountCreate {
     pub custom_config: Option<AccountCustomConfigWrite>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub model_capabilities: Vec<AccountModelCapabilityWrite>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ollama_billing_tier: Option<OllamaBillingTier>,
 }
 
 /// POST `/accounts/managed` body. CAS tokens and `name` are required.
@@ -991,6 +990,8 @@ pub struct AccountUpdate {
     pub purchase_date: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ollama_billing_tier: Option<OllamaBillingTier>,
 }
 
 /// PUT `/accounts/order` body. CAS tokens and the complete id set are required.
@@ -2660,84 +2661,36 @@ pub struct UsageRefreshThrottleError {
     pub next_allowed_at: String,
 }
 
-/// GET `/accounts/{id}/ollama-usage` response. The Cookie itself never
-/// appears: `cookieConfigured` is the only Cookie fact the API exposes, and
-/// `snapshot` is the sanitized usage view from the last successful scrape.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-#[schemars(rename_all = "camelCase", deny_unknown_fields)]
-pub struct OllamaUsageStatus {
-    pub account_id: String,
-    pub cookie_configured: bool,
-    /// `unconfigured` | `ok` | `unauthorized` | `failed`.
-    pub status: String,
-    pub snapshot: Option<OllamaUsageSnapshot>,
-    /// Sanitized failure reason from the most recent attempt (≤256 chars,
-    /// no HTML fragments or URL query strings); `null` after a success.
-    pub last_error: Option<String>,
-    pub last_success_at: Option<String>,
-    pub last_attempt_at: Option<String>,
-    pub next_eligible_at: Option<String>,
-    pub failure_streak: i64,
-    pub revision: u64,
-    pub process_generation: u64,
+/// Paid Ollama Cloud billing profile. Wire values are exactly `pro`, `max`,
+/// and `team`. Absence of a stored row (migrated/unconfigured) and non-Ollama
+/// accounts serialize the account field as `null`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[schemars(rename_all = "snake_case")]
+pub enum OllamaBillingTier {
+    Pro,
+    Max,
+    Team,
 }
 
-/// Typed sanitized usage snapshot served under `OllamaUsageStatus.snapshot`.
-/// Mirrors [`crate::ollama_usage::OllamaUsageSnapshot`]; the snake_case
-/// interior is the persisted snapshot wire shape and is deliberately kept
-/// stable, unlike the camelCase V3 envelope.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-#[schemars(deny_unknown_fields)]
-pub struct OllamaUsageSnapshot {
-    pub windows: Vec<OllamaUsageWindow>,
-    pub models: Vec<OllamaUsageModelRequests>,
-    pub plan: Option<String>,
-    pub balance: Option<String>,
+impl From<crate::provider::OllamaBillingTier> for OllamaBillingTier {
+    fn from(tier: crate::provider::OllamaBillingTier) -> Self {
+        match tier {
+            crate::provider::OllamaBillingTier::Pro => Self::Pro,
+            crate::provider::OllamaBillingTier::Max => Self::Max,
+            crate::provider::OllamaBillingTier::Team => Self::Team,
+        }
+    }
 }
 
-/// One usage window. `window` is `5h` or `7d`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-#[schemars(deny_unknown_fields)]
-pub struct OllamaUsageWindow {
-    pub window: String,
-    pub used_percent: Option<f64>,
-    pub reset_at: Option<String>,
-}
-
-/// Per-model request counts inside a snapshot window.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-#[schemars(deny_unknown_fields)]
-pub struct OllamaUsageModelRequests {
-    pub model: String,
-    pub requests_5h: Option<u64>,
-    pub requests_7d: Option<u64>,
-}
-
-/// PUT `/accounts/{id}/ollama-cookie` body. A `null` (or absent) `cookie`
-/// clears the stored web session and resets the capability; a string is the
-/// pasted Cookie request header validated server-side before storage.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-#[schemars(rename_all = "camelCase", deny_unknown_fields)]
-pub struct OllamaCookieUpdate {
-    #[serde(flatten)]
-    pub expectation: MutationExpectation,
-    pub cookie: Option<String>,
-}
-
-/// POST `/accounts/{id}/ollama-usage/refresh` throttle response (HTTP 429):
-/// the absolute instant the next manual attempt becomes eligible.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-#[schemars(rename_all = "camelCase", deny_unknown_fields)]
-pub struct OllamaUsageThrottleError {
-    pub code: String,
-    pub message: String,
-    pub next_allowed_at: String,
+impl From<OllamaBillingTier> for crate::provider::OllamaBillingTier {
+    fn from(tier: OllamaBillingTier) -> Self {
+        match tier {
+            OllamaBillingTier::Pro => Self::Pro,
+            OllamaBillingTier::Max => Self::Max,
+            OllamaBillingTier::Team => Self::Team,
+        }
+    }
 }
 
 /// Secret-free singleton configuration for the local CPA external integration.
@@ -3282,8 +3235,7 @@ pub fn contract_schema() -> Value {
     include_type::<DesktopUpdate>(&mut serialize);
     include_type::<UsageRefresh>(&mut serialize);
     include_type::<UsageRefreshThrottleError>(&mut serialize);
-    include_type::<OllamaUsageStatus>(&mut serialize);
-    include_type::<OllamaUsageThrottleError>(&mut serialize);
+    include_type::<OllamaBillingTier>(&mut serialize);
     include_type::<ApplicationConnectorAction>(&mut serialize);
     include_type::<ApplicationConnectorStatus>(&mut serialize);
     include_type::<ApplicationConnectorChange>(&mut serialize);
@@ -3371,7 +3323,6 @@ pub fn contract_schema() -> Value {
     include_type::<DynamicProviderUpdate>(&mut deserialize);
     include_type::<DynamicProviderDiscoverRequest>(&mut deserialize);
     include_type::<DynamicProviderTestRequest>(&mut deserialize);
-    include_type::<OllamaCookieUpdate>(&mut deserialize);
     for (name, schema) in deserialize.take_definitions(true) {
         defs.entry(name).or_insert(schema);
     }

@@ -26,9 +26,8 @@ pub const OLLAMA_CLOUD_BASE_URL: &str = "https://ollama.com";
 pub const OLLAMA_CLOUD_CHAT_COMPLETIONS_PATH: &str = "/v1/chat/completions";
 /// Public `GET /models` discovery path used for Provider catalog refresh.
 pub const OLLAMA_CLOUD_MODELS_PATH: &str = "/v1/models";
-/// Web settings page scraped (opt-in, account Cookie) for usage windows.
-/// This is a page URL, never an inference or JSON usage API endpoint.
-pub const OLLAMA_CLOUD_SETTINGS_URL: &str = "https://ollama.com/settings";
+/// Official per-token price table. Manual-only refresh; never a usage API.
+pub const OLLAMA_CLOUD_PRICING_URL: &str = "https://ollama.com/pricing";
 
 /// Client-facing Alias. Go still owns the published kebab alias; GOAT maps it
 /// internally to the slash raw ID and stays non-routeable.
@@ -160,10 +159,10 @@ mod tests {
         assert_eq!(OLLAMA_CLOUD_BASE_URL, "https://ollama.com");
         assert_eq!(OLLAMA_CLOUD_CHAT_COMPLETIONS_PATH, "/v1/chat/completions");
         assert_eq!(OLLAMA_CLOUD_MODELS_PATH, "/v1/models");
-        assert_eq!(OLLAMA_CLOUD_SETTINGS_URL, "https://ollama.com/settings");
-        // Both constants share the host today; keeping them independent means
-        // moving the settings page can never silently move the API base.
-        assert!(OLLAMA_CLOUD_SETTINGS_URL.starts_with(OLLAMA_CLOUD_BASE_URL));
-        assert_ne!(OLLAMA_CLOUD_SETTINGS_URL, OLLAMA_CLOUD_BASE_URL);
+        assert_eq!(OLLAMA_CLOUD_PRICING_URL, "https://ollama.com/pricing");
+        // Pricing is a separate official page; keep it independent of the API
+        // origin so a docs-host move cannot silently retarget inference.
+        assert!(OLLAMA_CLOUD_PRICING_URL.starts_with(OLLAMA_CLOUD_BASE_URL));
+        assert_ne!(OLLAMA_CLOUD_PRICING_URL, OLLAMA_CLOUD_BASE_URL);
     }
 }

@@ -85,6 +85,7 @@ export interface Account {
   plan_routable: boolean;
   custom_config?: AccountCustomConfig | null;
   model_capabilities: AccountModelCapability[];
+  ollama_billing_tier?: "pro" | "max" | "team" | null;
 }
 
 export interface AccountCustomConfigInput {
@@ -113,6 +114,7 @@ export interface AccountInput {
   notes?: string;
   custom_config?: AccountCustomConfigInput;
   model_capabilities?: AccountModelCapabilityInput[];
+  ollama_billing_tier?: "pro" | "max" | "team";
   /** Page-local stale value is ignored; the controlPlane store owns CAS. */
   expected_revision?: number;
 }
@@ -125,6 +127,7 @@ export interface AccountUpdate {
   enabled?: boolean;
   purchase_date?: string;
   notes?: string;
+  ollama_billing_tier?: "pro" | "max" | "team";
   /** Page-local stale value is ignored; the controlPlane store owns CAS. */
   expected_revision?: number;
 }
@@ -492,6 +495,7 @@ export function presentAccount(value: V3Account): Account {
       source: capability.source,
       upstream_model: capability.upstreamModel,
     })),
+    ollama_billing_tier: value.ollamaBillingTier ?? null,
   };
 }
 
@@ -514,6 +518,7 @@ export function accountCreateInput(value: AccountInput): Omit<V3AccountCreate, "
       source: capability.source,
       upstreamModel: capability.upstream_model,
     })),
+    ollamaBillingTier: value.ollama_billing_tier,
   };
 }
 
@@ -526,6 +531,7 @@ export function accountUpdateInput(value: AccountUpdate): Omit<V3AccountUpdate, 
     enabled: value.enabled,
     purchaseDate: value.purchase_date,
     notes: value.notes,
+    ollamaBillingTier: value.ollama_billing_tier,
   };
 }
 

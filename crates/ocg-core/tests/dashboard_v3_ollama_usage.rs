@@ -1,101 +1,25 @@
-//! Dashboard V3 integration regressions for the Ollama Cloud Cookie usage
-//! capability: Cookie validation/storage, the bounded manual refresh, the
-//! 30s throttle, the cooldown isolation contract,
-//! lifecycle (clear/disable/delete), and the sanitized API/export surface.
+//! Dashboard V3 Ollama Cloud billing, monthly soft-credit usage, and removal
+//! of the unreleased Cookie scrape path.
 
-use axum::Router;
-use axum::http::StatusCode;
-use axum::routing::get;
 use chrono::Utc;
-use ocg_core::models::{Account, AccountType};
-use ocg_core::provider::OLLAMA_PROVIDER_ID;
+use ocg_core::crypto::{KeyCipher, StaticKeyCipher};
+use ocg_core::models::{Account, AccountType, ForwardLog};
+use ocg_core::provider::{OLLAMA_PROVIDER_ID, OllamaBillingTier};
 use reqwest::Method;
 use serde_json::{Value, json};
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::fs;
 
 #[path = "fixtures/dashboard_v3/harness.rs"]
 mod harness;
 
 use harness::{V3Harness, start_loopback};
 
-struct SettingsOrigin {
-    url: String,
-    calls: Arc<Mutex<Vec<RecordedCall>>>,
-    _stop: tokio::sync::oneshot::Sender<()>,
-}
-
-#[derive(Clone, Debug)]
-struct RecordedCall {
-    path: String,
-    cookie: Option<String>,
-    authorization: Option<String>,
-}
-
-async fn start_settings_origin(status: StatusCode, body: &'static str) -> SettingsOrigin {
-    let calls = Arc::new(Mutex::new(Vec::new()));
-    let calls_for_handler = calls.clone();
-    let app = Router::new().fallback(get(
-        move |uri: axum::http::Uri, headers: axum::http::HeaderMap| {
-            let calls = calls_for_handler.clone();
-            async move {
-                calls.lock().unwrap().push(RecordedCall {
-                    path: uri.path().to_string(),
-                    cookie: headers
-                        .get(axum::http::header::COOKIE)
-                        .and_then(|value| value.to_str().ok())
-                        .map(str::to_string),
-                    authorization: headers
-                        .get(axum::http::header::AUTHORIZATION)
-                        .and_then(|value| value.to_str().ok())
-                        .map(str::to_string),
-                });
-                (
-                    status,
-                    [(axum::http::header::CONTENT_TYPE, "text/html")],
-                    body,
-                )
-            }
-        },
-    ));
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let (stop, shutdown) = tokio::sync::oneshot::channel();
-    tokio::spawn(async move {
-        axum::serve(listener, app)
-            .with_graceful_shutdown(async move {
-                let _ = shutdown.await;
-            })
-            .await
-            .ok();
-    });
-    SettingsOrigin {
-        url: format!("http://{addr}"),
-        calls,
-        _stop: stop,
-    }
-}
-
-const SETTINGS_PAGE: &str = concat!(
-    r#"<html><body><span>Plan: Maker</span><span>Balance: $3.20</span>"#,
-    r#"<div data-usage-track="5h" data-time="2026-09-01T00:00:00Z" data-used-percent="42"></div>"#,
-    r#"<div data-usage-track="7d" data-used-percent="12.5"></div>"#,
-    r#"<div data-model="gpt-oss:120b" data-requests="12" data-usage-window="5h"></div>"#,
-    r#"<div data-model="gpt-oss:120b" data-requests="340" data-time="7d"></div>"#,
-    r#"</body></html>"#,
-);
-
-const LOGIN_PAGE: &str =
-    r#"<html><body><form action="/login">Sign in to continue</form></body></html>"#;
-
-const BROKEN_PAGE: &str = r#"<html><body>no anchors at all</body></html>"#;
-
 async fn send_json(
     harness: &V3Harness,
     method: Method,
     path: &str,
     body: Value,
-) -> (StatusCode, Value) {
+) -> (axum::http::StatusCode, Value) {
     let response = harness
         .client
         .request(method, format!("{}{}", harness.v3_base, path))
@@ -128,6 +52,7 @@ fn cas(harness: &V3Harness, patch: Value) -> Value {
 
 fn base_ollama_account(id: &str) -> Account {
     let now = Utc::now();
+    let cipher = StaticKeyCipher::new("v3-contract");
     Account {
         id: id.into(),
         provider_id: OLLAMA_PROVIDER_ID.into(),
@@ -136,7 +61,7 @@ fn base_ollama_account(id: &str) -> Account {
         name: id.into(),
         username: None,
         password_cipher: None,
-        key_cipher: String::new(),
+        key_cipher: cipher.encrypt("ollama-key").unwrap(),
         enabled: true,
         account_type: AccountType::Key,
         setup_step: ocg_core::models::AccountSetupStep::Ready,
@@ -157,448 +82,322 @@ fn base_ollama_account(id: &str) -> Account {
     }
 }
 
-/// The offering admits persisted enablement; disabled-account gating is
-/// exercised separately by `ollama_usage_refresh_requires_enabled_account_and_configured_cookie`.
+#[tokio::test]
+async fn ollama_cookie_routes_are_gone_and_unconfigured_accounts_stay_routeable() {
+    let harness = start_loopback("ollama-cookie-gone").await;
+    let account = base_ollama_account("ollama-unconfigured-1");
+    harness.state.db.lock().create_account(&account).unwrap();
+
+    let (status, _) = send_json(
+        &harness,
+        Method::GET,
+        "/accounts/ollama-unconfigured-1/ollama-usage",
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::NOT_FOUND);
+
+    let (status, body) = send_json(
+        &harness,
+        Method::GET,
+        "/accounts/ollama-unconfigured-1",
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert!(body["ollamaBillingTier"].is_null(), "{body}");
+    assert_eq!(body["enabled"], true);
+
+    let (status, usage) = send_json(
+        &harness,
+        Method::GET,
+        "/accounts/ollama-unconfigured-1/provider-usage",
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(usage["quotaWindows"].as_array().unwrap().len(), 0);
+}
 
 #[tokio::test]
-async fn ollama_cookie_roundtrip_validates_rejects_set_cookie_and_never_echoes() {
-    let harness = start_loopback("ollama-cookie").await;
-    let account = base_ollama_account("ollama-cookie-1");
+async fn ollama_paid_tier_requires_purchase_date_and_publishes_month_credits() {
+    let harness = start_loopback("ollama-paid-month").await;
+    let account = base_ollama_account("ollama-pro-1");
     harness.state.db.lock().create_account(&account).unwrap();
 
     let (status, body) = send_json(
         &harness,
-        Method::PUT,
-        "/accounts/ollama-cookie-1/ollama-cookie",
+        Method::POST,
+        "/accounts",
         cas(
             &harness,
-            json!({ "cookie": "session=abc; Path=/; HttpOnly" }),
+            json!({
+                "providerId": "ollama",
+                "name": "ollama-missing-tier",
+                "key": "ollama-key-missing-tier",
+                "purchaseDate": "2026-09-01"
+            }),
         ),
     )
     .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
-    assert!(
-        body["message"]
-            .as_str()
-            .is_some_and(|message| message.contains("Set-Cookie")),
-        "{body}"
-    );
+    assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
+    assert!(body.to_string().contains("billing tier"), "{body}");
 
     let (status, body) = send_json(
         &harness,
-        Method::PUT,
-        "/accounts/ollama-cookie-1/ollama-cookie",
-        cas(&harness, json!({ "cookie": "session=abc; theme=dark" })),
+        Method::POST,
+        "/accounts",
+        cas(
+            &harness,
+            json!({
+                "providerId": "ollama",
+                "name": "ollama-pro-create",
+                "key": "ollama-key-create",
+                "ollamaBillingTier": "pro"
+            }),
+        ),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "{body}");
-    assert!(body["cookieConfigured"].as_bool().unwrap());
-    assert_eq!(body["status"], "unconfigured");
-    let encoded = serde_json::to_string(&body).unwrap();
-    assert!(
-        !encoded.contains("session=abc"),
-        "the API never echoes the Cookie plaintext: {encoded}"
-    );
+    assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
+    assert!(body.to_string().contains("purchase_date"), "{body}");
 
-    // Clearing returns the capability to the unconfigured state.
     let (status, body) = send_json(
         &harness,
-        Method::PUT,
-        "/accounts/ollama-cookie-1/ollama-cookie",
-        cas(&harness, json!({ "cookie": null })),
+        Method::POST,
+        "/accounts",
+        cas(
+            &harness,
+            json!({
+                "providerId": "ollama",
+                "name": "ollama-pro-create",
+                "key": "ollama-key-create",
+                "ollamaBillingTier": "pro",
+                "purchaseDate": "2026-09-01"
+            }),
+        ),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "{body}");
-    assert!(!body["cookieConfigured"].as_bool().unwrap());
-    assert!(
+    assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+    assert_eq!(body["account"]["ollamaBillingTier"], "pro");
+
+    let (status, body) = send_json(
+        &harness,
+        Method::POST,
+        "/accounts",
+        cas(
+            &harness,
+            json!({
+                "providerId": "ollama",
+                "name": "ollama-free-rejected",
+                "key": "ollama-key-free",
+                "ollamaBillingTier": "free",
+                "purchaseDate": "2026-09-01"
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::BAD_REQUEST, "{body}");
+
+    let (status, body) = send_json(
+        &harness,
+        Method::PATCH,
+        "/accounts/ollama-pro-1",
+        cas(
+            &harness,
+            json!({
+                "ollamaBillingTier": "pro",
+                "purchaseDate": "2026-09-01"
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(body["account"]["ollamaBillingTier"], "pro");
+    assert_eq!(
         harness
             .state
             .db
             .lock()
-            .ollama_cloud_usage_state("ollama-cookie-1")
-            .unwrap()
-            .is_none(),
-        "the state row is removed with the Cookie"
+            .ollama_cloud_billing_tier("ollama-pro-1")
+            .unwrap(),
+        Some(OllamaBillingTier::Pro)
     );
 
-    // Non-Ollama accounts are rejected outright.
-    let (status, _body) = send_json(
-        &harness,
-        Method::PUT,
-        "/accounts/00000000-0000-0000-0000-000000000002/ollama-cookie",
-        cas(&harness, json!({ "cookie": "a=1" })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST);
-
-    harness.stop();
-}
-
-#[tokio::test]
-async fn ollama_usage_refresh_scrapes_sanitizes_and_throttles() {
-    let harness = start_loopback("ollama-refresh").await;
-    let account = base_ollama_account("ollama-refresh-1");
-    harness.state.db.lock().create_account(&account).unwrap();
-    let origin = start_settings_origin(StatusCode::OK, SETTINGS_PAGE).await;
-    let _guard = ocg_core::goat::install_ollama_models_origin_for_test(
-        harness.state.process_generation(),
-        origin.url.clone(),
-    )
-    .unwrap();
-
-    let (status, body) = send_json(
-        &harness,
-        Method::PUT,
-        "/accounts/ollama-refresh-1/ollama-cookie",
-        cas(&harness, json!({ "cookie": "session=abc; theme=dark" })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{body}");
-
-    let (status, body) = send_json(
-        &harness,
-        Method::POST,
-        "/accounts/ollama-refresh-1/ollama-usage/refresh",
-        cas(&harness, json!({})),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["status"], "ok");
-    assert_eq!(body["snapshot"]["plan"], "Maker");
-    assert_eq!(body["snapshot"]["balance"], "$3.20");
-    assert_eq!(body["snapshot"]["windows"][0]["window"], "5h");
-    assert_eq!(body["snapshot"]["windows"][0]["used_percent"], 42.0);
-    assert_eq!(body["snapshot"]["models"][0]["model"], "gpt-oss:120b");
-    let encoded = serde_json::to_string(&body).unwrap();
-    assert!(
-        !encoded.contains("session=abc")
-            && !encoded.contains("data-usage")
-            && !encoded.contains('<'),
-        "the response is free of Cookie plaintext and HTML: {encoded}"
-    );
-
-    // The scrape carried only the account Cookie: no Authorization, exact path.
-    // Clone-and-drop the guard: clippy forbids holding a std MutexGuard
-    // across the awaits inside the surrounding async test.
-    let calls: Vec<RecordedCall> = origin.calls.lock().unwrap().clone();
-    assert_eq!(calls.len(), 1);
-    assert_eq!(calls[0].path, "/settings");
-    assert_eq!(calls[0].cookie.as_deref(), Some("session=abc; theme=dark"));
-    assert!(
-        calls[0].authorization.is_none(),
-        "no dashboard or upstream API key may ride the scrape"
-    );
-
-    // 30-second manual throttle (successes count) surfaces as 429 with the
-    // absolute retry instant.
-    let (status, body) = send_json(
-        &harness,
-        Method::POST,
-        "/accounts/ollama-refresh-1/ollama-usage/refresh",
-        cas(&harness, json!({})),
-    )
-    .await;
-    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS, "{body}");
-    assert_eq!(body["code"], "throttled");
-    assert!(body["nextAllowedAt"].as_str().is_some());
-    let cooldowns_unchanged = harness
+    harness
         .state
         .db
         .lock()
-        .get_account("ollama-refresh-1")
-        .unwrap()
+        .log_forward(&ForwardLog {
+            id: 0,
+            timestamp: Utc::now(),
+            model: "glm-5.3-flash".into(),
+            account_id: "ollama-pro-1".into(),
+            account_name: "ollama-pro-1".into(),
+            route_account_id: Some("ollama-pro-1".into()),
+            provider_id: Some(OLLAMA_PROVIDER_ID.into()),
+            credential_account_id: Some("ollama-pro-1".into()),
+            client_key_id: None,
+            client_key_name: None,
+            status: "success".into(),
+            http_status: Some(200),
+            route: "proxy".into(),
+            prompt_tokens: 10,
+            completion_tokens: 20,
+            cached_tokens: 0,
+            cache_creation_tokens: 0,
+            cost: Some(12.5),
+            raw_cost_usd: Some(12.5),
+            quota_debit: Some(12.5),
+            effective_paid_cost_usd: None,
+            pricing_revision_id: Some("ollama-test".into()),
+            quota_multiplier: Some(1.0),
+            local_adjustment_multiplier: Some(1.0),
+            service_tier: None,
+            cost_state: "priced".into(),
+            error_message: None,
+            request_id: Some("req-1".into()),
+            attempt: Some(1),
+            error_source: None,
+            error_stage: None,
+            duration_ms: Some(5),
+            diagnostic: None,
+        })
         .unwrap();
-    assert!(cooldowns_unchanged.cooldown_until.is_none());
-    assert!(cooldowns_unchanged.cooldown_generic_until.is_none());
-    assert!(cooldowns_unchanged.cooldown_5h_until.is_none());
-    assert!(
-        cooldowns_unchanged.last_error.is_none() && cooldowns_unchanged.auth_error.is_none(),
-        "usage paths never write inference cooldown or account error state"
-    );
 
-    // A later read still serves the last successful snapshot.
-    let (status, body) = send_json(
+    let (status, usage) = send_json(
         &harness,
         Method::GET,
-        "/accounts/ollama-refresh-1/ollama-usage",
+        "/accounts/ollama-pro-1/provider-usage",
         json!({}),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["status"], "ok");
-    assert_eq!(body["snapshot"]["plan"], "Maker");
+    assert_eq!(status, axum::http::StatusCode::OK);
+    let windows = usage["quotaWindows"].as_array().unwrap();
+    assert_eq!(windows.len(), 1);
+    assert_eq!(windows[0]["windowKind"], "month");
+    assert_eq!(windows[0]["unit"], "usd_credits");
+    assert_eq!(windows[0]["limitValue"], 60.0);
 
-    harness.stop();
-}
-
-#[tokio::test]
-async fn ollama_usage_failures_keep_the_last_snapshot_and_throttle() {
-    let harness = start_loopback("ollama-failure").await;
-    let account = base_ollama_account("ollama-failure-1");
-    harness.state.db.lock().create_account(&account).unwrap();
-
-    // Seed a successful snapshot directly, then fail twice.
-    let now = Utc::now();
-    let cipher = harness.state.encrypt_key("session=abc").unwrap();
-    {
-        let db = harness.state.db.lock();
-        db.set_ollama_cloud_cookie("ollama-failure-1", &cipher)
-            .unwrap();
-        db.commit_ollama_cloud_usage_success(
-            "ollama-failure-1",
-            r#"{"windows":[{"window":"5h","used_percent":10.0,"reset_at":null}],"models":[],"plan":"Maker","balance":null}"#,
-            now - chrono::Duration::hours(2),
-            Some(now - chrono::Duration::hours(2)),
-        )
-        .unwrap();
-    }
-    harness.state.reload_provider_contracts().unwrap();
-
-    let broken = start_settings_origin(StatusCode::OK, BROKEN_PAGE).await;
-    let _guard = ocg_core::goat::install_ollama_models_origin_for_test(
-        harness.state.process_generation(),
-        broken.url.clone(),
-    )
-    .unwrap();
-    let (status, body) = send_json(
-        &harness,
-        Method::POST,
-        "/accounts/ollama-failure-1/ollama-usage/refresh",
-        cas(&harness, json!({})),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["status"], "failed");
-    // The failed attempt must not clear the last successful snapshot.
-    assert_eq!(
-        body["snapshot"]["windows"][0]["used_percent"], 10.0,
-        "failures preserve the last successful snapshot"
-    );
-    assert_eq!(body["failureStreak"], 1);
-    let next_eligible = body["nextEligibleAt"].as_str().unwrap().to_string();
-    let eligible = chrono::DateTime::parse_from_rfc3339(&next_eligible)
-        .unwrap()
-        .with_timezone(&Utc);
-    let wait = (eligible - Utc::now()).num_seconds();
-    assert!(
-        (25..=35).contains(&wait),
-        "first failure keeps the 30-second manual window, got {wait}s"
-    );
-    // The failure left no cooldown on the account.
-    let account_after = harness
-        .state
-        .db
-        .lock()
-        .get_account("ollama-failure-1")
-        .unwrap()
-        .unwrap();
-    assert!(account_after.cooldown_until.is_none());
-    assert!(account_after.enabled);
-
-    // Unauthorized pages flip the status without touching the snapshot.
-    let login = start_settings_origin(StatusCode::OK, LOGIN_PAGE).await;
-    let _login_guard = ocg_core::goat::install_ollama_models_origin_for_test(
-        harness.state.process_generation(),
-        login.url.clone(),
-    )
-    .unwrap();
-    // Expire the last-attempt throttle so the next scrape can run.
-    {
-        let db = harness.state.db.lock();
-        db.record_ollama_cloud_usage_failure(
-            "ollama-failure-1",
-            "failed",
-            None,
-            now - chrono::Duration::hours(1),
-            None,
-            1,
-        )
-        .unwrap();
-    }
-    let (status, body) = send_json(
-        &harness,
-        Method::POST,
-        "/accounts/ollama-failure-1/ollama-usage/refresh",
-        cas(&harness, json!({})),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["status"], "unauthorized");
-    assert!(
-        body["snapshot"]["windows"][0]["used_percent"] == 10.0,
-        "unauthorized also preserves the snapshot"
-    );
-
-    harness.stop();
-}
-
-#[tokio::test]
-async fn ollama_usage_redirect_is_a_failure_that_throttles() {
-    let harness = start_loopback("ollama-redirect").await;
-    let account = base_ollama_account("ollama-redirect-1");
-    harness.state.db.lock().create_account(&account).unwrap();
-    // 302 Found: the scrape must treat any redirect as a failure and never
-    // follow it (spec: 重定向视为失败).
-    let origin = start_settings_origin(StatusCode::FOUND, LOGIN_PAGE).await;
-    let _guard = ocg_core::goat::install_ollama_models_origin_for_test(
-        harness.state.process_generation(),
-        origin.url.clone(),
-    )
-    .unwrap();
-    let cipher = harness.state.encrypt_key("session=abc").unwrap();
     harness
         .state
         .db
         .lock()
-        .set_ollama_cloud_cookie("ollama-redirect-1", &cipher)
+        .log_forward(&ForwardLog {
+            id: 0,
+            timestamp: Utc::now(),
+            model: "glm-5.3-flash".into(),
+            account_id: "ollama-pro-1".into(),
+            account_name: "ollama-pro-1".into(),
+            route_account_id: Some("ollama-pro-1".into()),
+            provider_id: Some(OLLAMA_PROVIDER_ID.into()),
+            credential_account_id: Some("ollama-pro-1".into()),
+            client_key_id: None,
+            client_key_name: None,
+            status: "success".into(),
+            http_status: Some(200),
+            route: "proxy".into(),
+            prompt_tokens: 10,
+            completion_tokens: 20,
+            cached_tokens: 0,
+            cache_creation_tokens: 0,
+            cost: Some(70.0),
+            raw_cost_usd: Some(70.0),
+            quota_debit: Some(70.0),
+            effective_paid_cost_usd: None,
+            pricing_revision_id: Some("ollama-test".into()),
+            quota_multiplier: Some(1.0),
+            local_adjustment_multiplier: Some(1.0),
+            service_tier: None,
+            cost_state: "priced".into(),
+            error_message: None,
+            request_id: Some("req-over".into()),
+            attempt: Some(1),
+            error_source: None,
+            error_stage: None,
+            duration_ms: Some(5),
+            diagnostic: None,
+        })
         .unwrap();
-    let (status, body) = send_json(
+    let (status, usage) = send_json(
         &harness,
-        Method::POST,
-        "/accounts/ollama-redirect-1/ollama-usage/refresh",
-        cas(&harness, json!({})),
+        Method::GET,
+        "/accounts/ollama-pro-1/provider-usage",
+        json!({}),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["status"], "failed");
-    assert_eq!(body["failureStreak"], 1);
-    // The redirect must not have been followed: still exactly one call.
-    assert_eq!(origin.calls.lock().unwrap().len(), 1);
-    let next_eligible = body["nextEligibleAt"].as_str().unwrap().to_string();
-    let eligible = chrono::DateTime::parse_from_rfc3339(&next_eligible)
-        .unwrap()
-        .with_timezone(&Utc);
-    let wait = (eligible - Utc::now()).num_seconds();
+    assert_eq!(status, axum::http::StatusCode::OK);
+    let used = usage["quotaWindows"][0]["used"].as_f64().unwrap();
     assert!(
-        (25..=35).contains(&wait),
-        "the redirect failure keeps the 30-second manual window, got {wait}s"
+        used > 60.0,
+        "soft quota must expose true used above the limit, got {used}"
     );
-    // The sanitized reason is persisted and served without URLs or HTML.
-    let last_error = body["lastError"].as_str().unwrap_or("");
-    assert!(
-        !last_error.contains('?') && !last_error.contains('<'),
-        "{last_error}"
-    );
-    let account_after = harness
-        .state
-        .db
-        .lock()
-        .get_account("ollama-redirect-1")
-        .unwrap()
-        .unwrap();
-    assert!(
-        account_after.cooldown_until.is_none(),
-        "no inference cooldown"
-    );
-    assert!(account_after.enabled, "routing eligibility untouched");
+    let (status, account_usage) = send_json(
+        &harness,
+        Method::GET,
+        "/accounts/ollama-pro-1/usage",
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert!(account_usage["windowMonth"].as_f64().unwrap() > 60.0);
 
-    harness.stop();
+    let (status, body) = send_json(
+        &harness,
+        Method::PATCH,
+        "/accounts/ollama-pro-1",
+        cas(&harness, json!({ "name": "ollama-pro-renamed" })),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+    assert_eq!(body["account"]["ollamaBillingTier"], "pro");
 }
 
 #[tokio::test]
-async fn ollama_usage_refresh_requires_enabled_account_and_configured_cookie() {
-    let harness = start_loopback("ollama-gates").await;
-    let mut disabled = base_ollama_account("ollama-gate-1");
-    disabled.enabled = false;
-    harness.state.db.lock().create_account(&disabled).unwrap();
-
-    let (status, body) = send_json(
-        &harness,
-        Method::POST,
-        "/accounts/ollama-gate-1/ollama-usage/refresh",
-        cas(&harness, json!({})),
-    )
-    .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
-    assert!(
-        body["message"]
-            .as_str()
-            .is_some_and(|message| message.contains("Cookie")),
-        "an unconfigured Cookie is rejected before any outbound call: {body}"
-    );
-
-    let cipher = harness.state.encrypt_key("session=abc").unwrap();
+async fn ollama_billing_is_carried_in_export_payloads() {
+    let harness = start_loopback("ollama-export-billing").await;
+    let mut account = base_ollama_account("ollama-export-1");
+    account.purchase_date = "2026-08-01".into();
+    harness.state.db.lock().create_account(&account).unwrap();
     harness
         .state
         .db
         .lock()
-        .set_ollama_cloud_cookie("ollama-gate-1", &cipher)
+        .set_ollama_cloud_billing_tier("ollama-export-1", Some(OllamaBillingTier::Max))
         .unwrap();
-    let (status, body) = send_json(
-        &harness,
-        Method::POST,
-        "/accounts/ollama-gate-1/ollama-usage/refresh",
-        cas(&harness, json!({})),
-    )
-    .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
-    assert!(
-        body["message"]
-            .as_str()
-            .is_some_and(|message| message.contains("disabled")),
-        "a disabled account keeps the usage entry unavailable: {body}"
-    );
-
-    harness.stop();
-}
-
-#[tokio::test]
-async fn ollama_usage_and_cookies_stay_out_of_export_payloads() {
-    let harness = start_loopback("ollama-export").await;
-    let account = base_ollama_account("ollama-export-1");
-    harness.state.db.lock().create_account(&account).unwrap();
-    // Export decrypts every account credential; give the draft a Key via
-    // the same loopback SQLite poke the GOAT fixtures use.
-    let conn_key = rusqlite::Connection::open(harness.dir.join("data.sqlite")).unwrap();
-    conn_key.busy_timeout(Duration::from_millis(5_000)).unwrap();
-    let key_cipher = harness.state.encrypt_key("sk-export-test").unwrap();
-    conn_key
-        .execute(
-            "UPDATE accounts SET key_cipher = ?2 WHERE id = ?1",
-            rusqlite::params!["ollama-export-1", key_cipher],
-        )
-        .unwrap();
-    let cipher = harness.state.encrypt_key("session=supersecret").unwrap();
-    {
-        let db = harness.state.db.lock();
-        db.set_ollama_cloud_cookie("ollama-export-1", &cipher)
-            .unwrap();
-        db.commit_ollama_cloud_usage_success(
-            "ollama-export-1",
-            r#"{"windows":[{"window":"7d","used_percent":3.0,"reset_at":null}],"models":[],"plan":"Maker","balance":"$1"}"#,
-            Utc::now(),
-            Some(Utc::now()),
-        )
-        .unwrap();
-    }
 
     let (status, body) = send_json(
         &harness,
         Method::POST,
         "/accounts/transfer/export",
-        json!({ "bundlePassword": "export-passphrase-1" }),
+        json!({ "bundlePassword": "correct horse battery" }),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "{body}");
-    let encoded = serde_json::to_string(&body).unwrap();
-    assert!(
-        !encoded.contains("supersecret"),
-        "the encrypted export bundle never carries the Cookie plaintext"
-    );
-    assert!(
-        !encoded.contains("usage_state") && !encoded.contains("usageState"),
-        "the export payload structure stays unchanged"
-    );
-    // The row itself survives locally; only the payload omits it.
-    assert!(
-        harness
-            .state
-            .db
-            .lock()
-            .ollama_cloud_usage_state("ollama-export-1")
-            .unwrap()
-            .is_some()
-    );
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert!(body["bundle"].as_str().unwrap().len() > 20);
+}
 
-    harness.stop();
+#[tokio::test]
+async fn ollama_omit_update_preserves_null_billing() {
+    let harness = start_loopback("ollama-omit-billing").await;
+    let account = base_ollama_account("ollama-omit-1");
+    harness.state.db.lock().create_account(&account).unwrap();
+    let (status, body) = send_json(
+        &harness,
+        Method::PATCH,
+        "/accounts/ollama-omit-1",
+        cas(&harness, json!({ "name": "still-unconfigured" })),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+    assert!(body["account"]["ollamaBillingTier"].is_null(), "{body}");
+    let (status, usage) = send_json(
+        &harness,
+        Method::GET,
+        "/accounts/ollama-omit-1/provider-usage",
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(usage["quotaWindows"].as_array().unwrap().len(), 0);
+    let _ = fs::remove_dir_all(&harness.dir);
 }

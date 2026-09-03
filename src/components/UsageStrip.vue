@@ -4,8 +4,11 @@
       <div v-for="limit in limits" :key="limit.key" class="usage-segment">
         <div class="usage-meta">
           <span>{{ limit.label }}</span>
-          <strong v-if="editing">
+          <strong>
             {{ formatCost(usage[limit.key]) }} / {{ formatCost(limit.limit) }}
+            <template v-if="usage[limit.key] > limit.limit">
+              · {{ t("超出 {amount}", { amount: formatCost(usage[limit.key] - limit.limit) }) }}
+            </template>
           </strong>
         </div>
         <n-progress
@@ -109,7 +112,7 @@ function formatWindowRemaining(key: UsageKey): string {
 
 .usage-strip-body {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 12px;
 }
 

@@ -16,9 +16,9 @@ use chrono::Utc;
 use crate::kernel::pricing as kernel_pricing;
 use crate::pricing::{
     OfficialPricingRefresh, PricingRefreshConfirmPolicy, evaluate_official_pricing_refresh,
-    fetch_goat_pricing_snapshot, fetch_official_snapshot, latest_provider_pricing_snapshot,
-    merge_current_provider_multipliers, prepare_multiplier_update,
-    prepare_provider_multiplier_update, provider_multiplier_deltas,
+    fetch_goat_pricing_snapshot, fetch_official_snapshot, fetch_ollama_pricing_snapshot,
+    latest_provider_pricing_snapshot, merge_current_provider_multipliers,
+    prepare_multiplier_update, prepare_provider_multiplier_update, provider_multiplier_deltas,
     provider_pricing_semantically_equal, stamp_pricing_activation, store_provider_pricing_snapshot,
 };
 use crate::provider::ProviderRegistry;
@@ -137,7 +137,14 @@ pub(super) async fn refresh_provider_pricing(
             Ok(Json(provider_refresh_from_go(refreshed)))
         }
         crate::provider::COMMAND_CODE_PROVIDER_ID => {
-            refresh_goat_pricing(&state, update).await.map(Json)
+            refresh_html_provider_pricing(&state, crate::provider::COMMAND_CODE_PROVIDER_ID, update)
+                .await
+                .map(Json)
+        }
+        crate::provider::OLLAMA_PROVIDER_ID => {
+            refresh_html_provider_pricing(&state, crate::provider::OLLAMA_PROVIDER_ID, update)
+                .await
+                .map(Json)
         }
         _ => Err(V3ApiError::invalid_request_at(
             &state,
@@ -310,6 +317,18 @@ async fn fetch_configured_goat_snapshot(
     fetch_goat_pricing_snapshot(&config).await
 }
 
+async fn fetch_configured_ollama_snapshot(
+    state: &CoreState,
+) -> crate::Result<crate::pricing::ProviderScopedPricingSnapshot> {
+    #[cfg(debug_assertions)]
+    if official_pricing_fetch::has_override(state) {
+        let go = official_pricing_fetch::fetch(state).await;
+        return synthetic_ollama_snapshot_for_tests(go.as_ref());
+    }
+    let config = state.config();
+    fetch_ollama_pricing_snapshot(&config).await
+}
+
 #[cfg(debug_assertions)]
 fn synthetic_goat_snapshot_for_tests(
     go: Result<&kernel_pricing::PricingSnapshot, &anyhow::Error>,
@@ -346,8 +365,46 @@ fn synthetic_goat_snapshot_for_tests(
     )
 }
 
-async fn refresh_goat_pricing(
+#[cfg(debug_assertions)]
+fn synthetic_ollama_snapshot_for_tests(
+    go: Result<&kernel_pricing::PricingSnapshot, &anyhow::Error>,
+) -> crate::Result<crate::pricing::ProviderScopedPricingSnapshot> {
+    let go = go.map_err(|error| anyhow::anyhow!(error.to_string()))?;
+    let first = go
+        .models
+        .first()
+        .ok_or_else(|| anyhow::anyhow!("test Go pricing snapshot has no models"))?;
+    let value = crate::pricing::ProviderPricingValue::new(
+        first.model_id.clone(),
+        first.display_name.clone(),
+        Some(first.input),
+        Some(first.output),
+        Some(first.cache_read),
+        None,
+        None,
+        None,
+        None,
+        Some("USD".to_string()),
+        first.min_input_tokens,
+        first.max_input_tokens,
+        first.time_window,
+    )?
+    .with_quota_multiplier(1.0)?;
+    crate::pricing::ProviderScopedPricingSnapshot::new(
+        crate::provider::OLLAMA_PROVIDER_ID,
+        format!("test-ollama-{}", go.content_hash),
+        Utc::now().to_rfc3339(),
+        None,
+        crate::pricing::OLLAMA_SOURCE_URL,
+        go.content_hash.clone(),
+        crate::pricing::ProviderPricingEvidence::Verified,
+        vec![value],
+    )
+}
+
+async fn refresh_html_provider_pricing(
     state: &CoreState,
+    provider_id: &str,
     update: ProviderPricingRefreshUpdate,
 ) -> Result<ProviderPricingRefresh, V3ApiError> {
     let Ok(_refresh) = state.pricing_refresh.try_lock() else {
@@ -358,35 +415,41 @@ async fn refresh_goat_pricing(
     };
     {
         let _settings_update = state.settings_update.lock();
-        check_provider_pricing_expectation(
-            state,
-            crate::provider::COMMAND_CODE_PROVIDER_ID,
-            &update,
-        )?;
+        check_provider_pricing_expectation(state, provider_id, &update)?;
     }
 
-    let fetched = fetch_configured_goat_snapshot(state).await;
+    let fetched = match provider_id {
+        crate::provider::COMMAND_CODE_PROVIDER_ID => fetch_configured_goat_snapshot(state).await,
+        crate::provider::OLLAMA_PROVIDER_ID => fetch_configured_ollama_snapshot(state).await,
+        _ => {
+            return Err(V3ApiError::invalid_request_at(
+                state,
+                "provider does not support pricing refresh",
+            ));
+        }
+    };
+    let label = if provider_id == crate::provider::OLLAMA_PROVIDER_ID {
+        "Ollama Cloud"
+    } else {
+        "Command Code GOAT"
+    };
 
     let _settings_update = state.settings_update.lock();
-    check_provider_pricing_expectation(state, crate::provider::COMMAND_CODE_PROVIDER_ID, &update)?;
-    let current_revision =
-        current_provider_pricing_revision(state, crate::provider::COMMAND_CODE_PROVIDER_ID)?;
-    let active = latest_provider_pricing_snapshot(
-        &state.db.lock(),
-        crate::provider::COMMAND_CODE_PROVIDER_ID,
-    )
-    .map_err(V3ApiError::internal)?;
+    check_provider_pricing_expectation(state, provider_id, &update)?;
+    let current_revision = current_provider_pricing_revision(state, provider_id)?;
+    let active = latest_provider_pricing_snapshot(&state.db.lock(), provider_id)
+        .map_err(V3ApiError::internal)?;
     match fetched {
         Err(error) => {
             let error = error.to_string();
             audit_pricing(
                 state,
                 "warn",
-                &format!("Command Code GOAT pricing refresh failed: {error}"),
+                &format!("{label} pricing refresh failed: {error}"),
             );
             Ok(provider_refresh_result(
                 state,
-                crate::provider::COMMAND_CODE_PROVIDER_ID,
+                provider_id,
                 PricingRefreshStatus::FailedNoChange,
                 Vec::new(),
                 None,
@@ -408,7 +471,7 @@ async fn refresh_goat_pricing(
             {
                 return Ok(provider_refresh_result(
                     state,
-                    crate::provider::COMMAND_CODE_PROVIDER_ID,
+                    provider_id,
                     PricingRefreshStatus::NeedsConfirmation,
                     map_changes(multiplier_changes),
                     Some(official_content_hash),
@@ -427,7 +490,7 @@ async fn refresh_goat_pricing(
             {
                 return Ok(provider_refresh_result(
                     state,
-                    crate::provider::COMMAND_CODE_PROVIDER_ID,
+                    provider_id,
                     PricingRefreshStatus::Unchanged,
                     map_changes(multiplier_changes),
                     None,
@@ -441,14 +504,11 @@ async fn refresh_goat_pricing(
             audit_pricing(
                 state,
                 "info",
-                &format!(
-                    "activated Command Code GOAT provider pricing {}",
-                    snapshot.revision()
-                ),
+                &format!("activated {label} provider pricing {}", snapshot.revision()),
             );
             Ok(provider_refresh_result(
                 state,
-                crate::provider::COMMAND_CODE_PROVIDER_ID,
+                provider_id,
                 PricingRefreshStatus::Success,
                 map_changes(multiplier_changes),
                 None,

@@ -174,12 +174,7 @@ export type DashboardApiV3 =
   | DynamicProviderDiscoverResponse
   | DynamicProviderTestRequest
   | DynamicProviderTestResponse
-  | OllamaUsageStatus
-  | OllamaUsageSnapshot
-  | OllamaUsageWindow
-  | OllamaUsageModelRequests
-  | OllamaCookieUpdate
-  | OllamaUsageThrottleError;
+  | OllamaBillingTier;
 /**
  * Which listed models take the list-mode exception leg.
  */
@@ -204,6 +199,12 @@ export type AccountCredentialKind = "api_key" | "none";
  * Custom/upstream protocol. Wire values match V2 snake_case.
  */
 export type AccountUpstreamProtocol = "chat_completions" | "responses" | "messages";
+/**
+ * Paid Ollama Cloud billing profile. Wire values are exactly `pro`, `max`,
+ * and `team`. Absence of a stored row (migrated/unconfigured) and non-Ollama
+ * accounts serialize the account field as `null`.
+ */
+export type OllamaBillingTier = "pro" | "max" | "team";
 /**
  * Wire identity matching V2 `key` / `egress-ip`.
  */
@@ -462,6 +463,7 @@ export interface Account {
   modelCapabilities: AccountModelCapability[];
   name: string;
   notes: string | null;
+  ollamaBillingTier: OllamaBillingTier | null;
   planRoutable: boolean;
   processGeneration: number;
   providerId: string;
@@ -523,6 +525,7 @@ export interface AccountCreate {
   modelCapabilities?: AccountModelCapabilityWrite[];
   name: string;
   notes?: string | null;
+  ollamaBillingTier?: OllamaBillingTier | null;
   password?: string | null;
   processGeneration: number;
   providerId?: string | null;
@@ -589,6 +592,7 @@ export interface AccountUpdate {
   key?: string | null;
   name?: string | null;
   notes?: string | null;
+  ollamaBillingTier?: OllamaBillingTier | null;
   password?: string | null;
   processGeneration: number;
   purchaseDate?: string | null;
@@ -2118,76 +2122,4 @@ export interface DynamicProviderTestResponse {
   ok: boolean;
   processGeneration: number;
   revision: number;
-}
-/**
- * GET `/accounts/{id}/ollama-usage` response. The Cookie itself never
- * appears: `cookieConfigured` is the only Cookie fact the API exposes, and
- * `snapshot` is the sanitized usage view from the last successful scrape.
- */
-export interface OllamaUsageStatus {
-  accountId: string;
-  cookieConfigured: boolean;
-  failureStreak: number;
-  lastAttemptAt: string | null;
-  /**
-   * Sanitized failure reason from the most recent attempt (≤256 chars,
-   * no HTML fragments or URL query strings); `null` after a success.
-   */
-  lastError: string | null;
-  lastSuccessAt: string | null;
-  nextEligibleAt: string | null;
-  processGeneration: number;
-  revision: number;
-  snapshot: OllamaUsageSnapshot | null;
-  /**
-   * `unconfigured` | `ok` | `unauthorized` | `failed`.
-   */
-  status: string;
-}
-/**
- * Typed sanitized usage snapshot served under `OllamaUsageStatus.snapshot`.
- * Mirrors [`crate::ollama_usage::OllamaUsageSnapshot`]; the snake_case
- * interior is the persisted snapshot wire shape and is deliberately kept
- * stable, unlike the camelCase V3 envelope.
- */
-export interface OllamaUsageSnapshot {
-  balance: string | null;
-  models: OllamaUsageModelRequests[];
-  plan: string | null;
-  windows: OllamaUsageWindow[];
-}
-/**
- * Per-model request counts inside a snapshot window.
- */
-export interface OllamaUsageModelRequests {
-  model: string;
-  requests_5h: number | null;
-  requests_7d: number | null;
-}
-/**
- * One usage window. `window` is `5h` or `7d`.
- */
-export interface OllamaUsageWindow {
-  reset_at: string | null;
-  used_percent: number | null;
-  window: string;
-}
-/**
- * PUT `/accounts/{id}/ollama-cookie` body. A `null` (or absent) `cookie`
- * clears the stored web session and resets the capability; a string is the
- * pasted Cookie request header validated server-side before storage.
- */
-export interface OllamaCookieUpdate {
-  cookie?: string | null;
-  expectedRevision: number;
-  processGeneration: number;
-}
-/**
- * POST `/accounts/{id}/ollama-usage/refresh` throttle response (HTTP 429):
- * the absolute instant the next manual attempt becomes eligible.
- */
-export interface OllamaUsageThrottleError {
-  code: string;
-  message: string;
-  nextAllowedAt: string;
 }

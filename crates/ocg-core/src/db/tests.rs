@@ -5331,6 +5331,7 @@ fn account_migration_batch_is_atomic_and_preserves_order() {
             capabilities: Vec::new(),
             verification_status: ConnectionVerificationStatus::NotRequired,
             connection_verified_at: None,
+            ollama_billing_tier: None,
         },
         AccountImportRecord {
             account: custom,
@@ -5346,6 +5347,7 @@ fn account_migration_batch_is_atomic_and_preserves_order() {
             }],
             verification_status: ConnectionVerificationStatus::Pending,
             connection_verified_at: None,
+            ollama_billing_tier: None,
         },
     ];
     db.conn
@@ -7761,6 +7763,187 @@ fn dynamic_provider_patch_fault_rolls_back_mappings_and_runtime_state() {
     assert_eq!(loaded.mappings[0].upstream_model, "vendor/opus");
     let account = db.get_account(&first.id).unwrap().unwrap();
     assert_eq!(account.auth_error.as_deref(), Some("stale"));
+    drop(db);
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn v36_to_v37_discards_cookie_usage_state_and_keeps_account_keys() {
+    let dir = temp_data_dir("v36-v37-ollama-billing");
+    let db = open_with_host_cipher(dir.clone()).unwrap();
+    let mut ollama = account("ollama-v36");
+    ollama.provider_id = OLLAMA_PROVIDER_ID.to_string();
+    ollama.key_cipher = fixture_account_key_cipher();
+    db.create_account(&ollama).unwrap();
+    let key_before = db.get_account("ollama-v36").unwrap().unwrap().key_cipher;
+    drop(db);
+
+    let conn = Connection::open(dir.join("data.sqlite")).unwrap();
+    conn.execute_batch(
+        "DROP TABLE IF EXISTS ollama_cloud_billing;
+         CREATE TABLE IF NOT EXISTS ollama_cloud_usage_state (
+            account_id TEXT PRIMARY KEY,
+            cookie_cipher TEXT,
+            status TEXT NOT NULL DEFAULT 'unconfigured',
+            snapshot TEXT,
+            last_error TEXT,
+            last_success_at TEXT,
+            last_attempt_at TEXT,
+            next_eligible_at TEXT,
+            failure_streak INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+         );
+         INSERT INTO ollama_cloud_usage_state (account_id, cookie_cipher, status, snapshot)
+         VALUES ('ollama-v36', 'obsolete-cookie', 'ok', '{\"windows\":[]}');
+         DELETE FROM schema_version;
+         INSERT INTO schema_version (version) VALUES (36);",
+    )
+    .unwrap();
+    drop(conn);
+
+    let migrated = open_with_host_cipher(dir.clone()).unwrap();
+    assert_eq!(migrated.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
+    assert!(!table_exists(&migrated.conn, "ollama_cloud_usage_state").unwrap());
+    assert!(table_exists(&migrated.conn, "ollama_cloud_billing").unwrap());
+    let loaded = migrated.get_account("ollama-v36").unwrap().unwrap();
+    assert_eq!(loaded.key_cipher, key_before);
+    assert_eq!(
+        migrated.ollama_cloud_billing_tier("ollama-v36").unwrap(),
+        None
+    );
+    drop(migrated);
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn ollama_billing_tier_round_trip_and_cascade() {
+    let dir = temp_data_dir("ollama-billing-roundtrip");
+    let mut db = Database::open(dir.clone()).unwrap();
+    let mut ollama = account("ollama-bill");
+    ollama.provider_id = OLLAMA_PROVIDER_ID.to_string();
+    ollama.purchase_date = "2026-08-01".into();
+    db.create_account(&ollama).unwrap();
+    db.set_ollama_cloud_billing_tier("ollama-bill", Some(OllamaBillingTier::Pro))
+        .unwrap();
+    assert_eq!(
+        db.ollama_cloud_billing_tier("ollama-bill").unwrap(),
+        Some(OllamaBillingTier::Pro)
+    );
+    db.set_ollama_cloud_billing_tier("ollama-bill", None)
+        .unwrap();
+    assert_eq!(db.ollama_cloud_billing_tier("ollama-bill").unwrap(), None);
+    db.set_ollama_cloud_billing_tier("ollama-bill", Some(OllamaBillingTier::Team))
+        .unwrap();
+    db.delete_account("ollama-bill").unwrap();
+    assert_eq!(db.ollama_cloud_billing_tier("ollama-bill").unwrap(), None);
+    drop(db);
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn ollama_tier_change_clears_month_offset_same_tier_preserves() {
+    let dir = temp_data_dir("ollama-tier-offset");
+    let db = Database::open(dir.clone()).unwrap();
+    let mut ollama = account("ollama-offset");
+    ollama.provider_id = OLLAMA_PROVIDER_ID.to_string();
+    ollama.purchase_date = "2026-08-01".into();
+    db.create_account(&ollama).unwrap();
+    db.set_ollama_cloud_billing_tier("ollama-offset", Some(OllamaBillingTier::Pro))
+        .unwrap();
+    db.conn
+        .execute(
+            "UPDATE accounts SET usage_month_window_cost_offset = 12.5 WHERE id = ?1",
+            ["ollama-offset"],
+        )
+        .unwrap();
+    db.set_ollama_cloud_billing_tier("ollama-offset", Some(OllamaBillingTier::Pro))
+        .unwrap();
+    let offset: f64 = db
+        .conn
+        .query_row(
+            "SELECT usage_month_window_cost_offset FROM accounts WHERE id = ?1",
+            ["ollama-offset"],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(offset, 12.5);
+    db.set_ollama_cloud_billing_tier("ollama-offset", Some(OllamaBillingTier::Max))
+        .unwrap();
+    let offset: f64 = db
+        .conn
+        .query_row(
+            "SELECT usage_month_window_cost_offset FROM accounts WHERE id = ?1",
+            ["ollama-offset"],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(offset, 0.0);
+    assert_eq!(db.list_forward_logs(10).unwrap().len(), 0);
+    drop(db);
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn ollama_month_window_is_half_open_and_exposes_overage() {
+    use chrono::TimeZone;
+    let dir = temp_data_dir("ollama-month-bounds");
+    let db = Database::open(dir.clone()).unwrap();
+    let mut ollama = account("ollama-month");
+    ollama.provider_id = OLLAMA_PROVIDER_ID.to_string();
+    ollama.purchase_date = "2026-08-01".into();
+    db.create_account(&ollama).unwrap();
+    db.set_ollama_cloud_billing_tier("ollama-month", Some(OllamaBillingTier::Pro))
+        .unwrap();
+
+    let start_naive = chrono::NaiveDate::from_ymd_opt(2026, 8, 1)
+        .unwrap()
+        .and_hms_opt(0, 0, 0)
+        .unwrap();
+    let start = chrono::Local
+        .from_local_datetime(&start_naive)
+        .single()
+        .unwrap()
+        .with_timezone(&Utc);
+    let expires = purchase_expires_on("2026-08-01").unwrap();
+    let end_naive = chrono::NaiveDate::parse_from_str(&expires, "%Y-%m-%d")
+        .unwrap()
+        .and_hms_opt(0, 0, 0)
+        .unwrap();
+    let end = chrono::Local
+        .from_local_datetime(&end_naive)
+        .single()
+        .unwrap()
+        .with_timezone(&Utc);
+
+    let mut before = forward_log("ollama-month", "success", 5.0);
+    before.cost_state = "priced".into();
+    before.timestamp = start - chrono::Duration::hours(1);
+    db.log_forward(&before).unwrap();
+
+    let mut inside = forward_log("ollama-month", "success", 80.0);
+    inside.cost_state = "priced".into();
+    inside.timestamp = start + chrono::Duration::days(1);
+    db.log_forward(&inside).unwrap();
+
+    let mut at_end = forward_log("ollama-month", "success", 9.0);
+    at_end.cost_state = "priced".into();
+    at_end.timestamp = end;
+    db.log_forward(&at_end).unwrap();
+
+    let mut after = forward_log("ollama-month", "success", 11.0);
+    after.cost_state = "priced".into();
+    after.timestamp = end + chrono::Duration::hours(1);
+    db.log_forward(&after).unwrap();
+
+    let windows = db
+        .live_ollama_month_quota_window("ollama-month", 60.0)
+        .unwrap();
+    assert_eq!(windows.len(), 1);
+    assert_eq!(windows[0].used, 80.0);
+    assert_eq!(windows[0].limit_value, Some(60.0));
+    let (used, reset) = db.ollama_month_usage("ollama-month").unwrap();
+    assert_eq!(used, 80.0);
+    assert_eq!(reset, Some(end));
     drop(db);
     fs::remove_dir_all(dir).unwrap();
 }

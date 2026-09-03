@@ -55,10 +55,55 @@ pub const KIMI_CN_MODEL_SOURCE: &str = "kimi_cn_get_models";
 pub const MAX_KIMI_CN_MODELS_CATALOG: usize = 1_000;
 
 /// Ollama Cloud surface constants live in [`crate::ids`] next to the provider
-/// identity because the Cookie usage page URL is not an API endpoint. The
-/// model source below feeds the Provider catalog refresh evidence rows.
+/// identity. The model source below feeds Provider catalog refresh evidence.
 pub const OLLAMA_CLOUD_MODEL_SOURCE: &str = "ollama_cloud_get_models";
 pub const MAX_OLLAMA_CLOUD_MODELS_CATALOG: usize = 1_000;
+
+/// Account-scoped Ollama Cloud billing profile. Credits are USD per billing
+/// month. Absence of a stored row is unconfigured, not a Free tier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OllamaBillingTier {
+    Pro,
+    Max,
+    Team,
+}
+
+impl OllamaBillingTier {
+    pub const PRO_MONTHLY_CREDITS: f64 = 60.0;
+    pub const MAX_MONTHLY_CREDITS: f64 = 300.0;
+    pub const TEAM_MONTHLY_CREDITS: f64 = 1000.0;
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Pro => "pro",
+            Self::Max => "max",
+            Self::Team => "team",
+        }
+    }
+
+    pub fn parse(value: &str) -> Result<Self, String> {
+        match value.trim() {
+            "pro" => Ok(Self::Pro),
+            "max" => Ok(Self::Max),
+            "team" => Ok(Self::Team),
+            other => Err(format!("unknown Ollama billing tier `{other}`")),
+        }
+    }
+
+    /// Soft monthly USD-credit limit for the paid profile.
+    pub fn monthly_credit_limit(self) -> f64 {
+        match self {
+            Self::Pro => Self::PRO_MONTHLY_CREDITS,
+            Self::Max => Self::MAX_MONTHLY_CREDITS,
+            Self::Team => Self::TEAM_MONTHLY_CREDITS,
+        }
+    }
+
+    pub fn requires_purchase_date(self) -> bool {
+        true
+    }
+}
 
 /// Models included by the GOAT subscription page. These are the default-on
 /// rows in the Provider model/protocol matrix. Models discovered beyond this
@@ -282,6 +327,12 @@ const PURCHASE_DATE_FIELD: PlanFormField = PlanFormField {
     required: false,
     immutable_after_create: false,
 };
+const OLLAMA_PURCHASE_DATE_FIELD: PlanFormField = PlanFormField {
+    id: "purchase_date",
+    kind: "date",
+    required: true,
+    immutable_after_create: false,
+};
 const NOTES_FIELD: PlanFormField = PlanFormField {
     id: "notes",
     kind: "text",
@@ -296,6 +347,12 @@ const ENDPOINT_URL_FIELD: PlanFormField = PlanFormField {
 };
 const PROTOCOL_FIELD: PlanFormField = PlanFormField {
     id: "upstream_protocol",
+    kind: "select",
+    required: true,
+    immutable_after_create: false,
+};
+const OLLAMA_BILLING_TIER_FIELD: PlanFormField = PlanFormField {
+    id: "ollama_billing_tier",
     kind: "select",
     required: true,
     immutable_after_create: false,
@@ -315,7 +372,13 @@ const MINIMAX_CN_FORM_FIELDS: [PlanFormField; 4] =
     [NAME_FIELD, KEY_FIELD, PURCHASE_DATE_FIELD, NOTES_FIELD];
 const KIMI_CN_FORM_FIELDS: [PlanFormField; 4] =
     [NAME_FIELD, KEY_FIELD, PURCHASE_DATE_FIELD, NOTES_FIELD];
-const OLLAMA_CLOUD_FORM_FIELDS: [PlanFormField; 3] = [NAME_FIELD, KEY_FIELD, NOTES_FIELD];
+const OLLAMA_CLOUD_FORM_FIELDS: [PlanFormField; 5] = [
+    NAME_FIELD,
+    KEY_FIELD,
+    OLLAMA_BILLING_TIER_FIELD,
+    OLLAMA_PURCHASE_DATE_FIELD,
+    NOTES_FIELD,
+];
 const CUSTOM_FORM_FIELDS: [PlanFormField; 6] = [
     NAME_FIELD,
     KEY_FIELD,
@@ -491,10 +554,10 @@ pub const BUILTIN_PROVIDERS: [BuiltinProvider; 8] = [
         verification_runtime_availability: "not_applicable",
         routable: true,
         managed_registration: false,
-        pricing_availability: "unpriced",
+        pricing_availability: "available",
         usage_availability: "local_state",
-        manual_usage_calibration: false,
-        quota_unit: "request",
+        manual_usage_calibration: true,
+        quota_unit: "usd_credits",
         model_source: OLLAMA_CLOUD_MODEL_SOURCE,
         key_prefix: None,
         auth_schemes: &BEARER_AUTH,
@@ -1276,7 +1339,7 @@ fn ollama_cloud_capabilities(plan: BuiltinProvider) -> ProviderCapabilities {
             authoritative_for_quota: false,
             affects_inference_eligibility: false,
             publishes_capability: true,
-            manual_calibration: false,
+            manual_calibration: true,
             egress_ip_shared_cooldown_window: false,
         },
         pricing: catalog_pricing(plan),
@@ -1286,8 +1349,8 @@ fn ollama_cloud_capabilities(plan: BuiltinProvider) -> ProviderCapabilities {
             managed_registration: false,
             fetch_zen_models: false,
             discover_models: false,
-            usage_refresh: true,
-            manual_usage_calibration: false,
+            usage_refresh: false,
+            manual_usage_calibration: true,
             connection_verify: CardVerifyAction::NotApplicable,
             protocol_and_auth_immutable_after_create: false,
             protocol_probe: false,

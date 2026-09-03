@@ -1165,7 +1165,7 @@ test("account form rejects whitespace-only required credentials", async () => {
 
   assert.match(accountForm, /name:\s*\{\s*required: true,\s*whitespace: true,/);
   assert.match(accountForm, /hasField\("key"\) && !isEdit\.value/);
-  assert.match(accountForm, /if \(fieldRequired\("purchase_date"\)\)/);
+  assert.match(accountForm, /if \(purchaseDateRequired\.value\)/);
 });
 
 test("account notes live in the edit-account form, not on cards", async () => {

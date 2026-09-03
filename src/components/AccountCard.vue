@@ -145,7 +145,7 @@
           </n-tooltip>
         </div>
 
-        <div v-if="(isGo || isOfficialCn || isOllamaCloud) && accountIsReady(account)" class="account-action account-action--secondary">
+        <div v-if="(isGo || isOfficialCn) && accountIsReady(account)" class="account-action account-action--secondary">
           <n-tooltip trigger="hover">
             <template #trigger>
               <n-button
@@ -154,13 +154,13 @@
                 size="small"
                 :aria-label="t('刷新额度')"
                 :loading="usageRefreshLoading"
-                :disabled="ollamaRefreshBlocked || (!isOfficialCn && !isOllamaCloud && isUsageRefreshBlocked(account, now)) || usageLoading || (!isOllamaCloud && !!usageLoadError)"
+                :disabled="(!isOfficialCn && isUsageRefreshBlocked(account, now)) || usageLoading || !!usageLoadError"
                 @click="emit('refresh-usage')"
               >
                 <template #icon><n-icon :component="ReloadOutlined" /></template>
               </n-button>
             </template>
-            {{ isOfficialCn || isOllamaCloud ? t("刷新额度") : usageRefreshTooltip(account, now) }}
+            {{ isOfficialCn ? t("刷新额度") : usageRefreshTooltip(account, now) }}
           </n-tooltip>
         </div>
 
@@ -263,6 +263,9 @@
     <div v-else-if="isDraft" class="provider-unconfigured" role="status">
       <p>{{ draftDescription }}</p>
     </div>
+    <div v-else-if="isOllamaCloud && ollamaNeedsBilling" class="provider-unconfigured" role="status">
+      <p>{{ t("请配置 Ollama 计费档位以显示本月额度") }}</p>
+    </div>
     <div v-else-if="manualUsageCalibration" class="manual-usage-block">
       <div v-if="usageLoadError" class="usage-load-error" role="alert">
         <span>{{ t("用量加载失败") }}</span>
@@ -330,15 +333,7 @@
       </div>
       <ProviderQuotaSummary v-else :usage="providerUsage" :now="now" />
     </div>
-    <div v-else-if="isOllamaCloud" class="official-plan-usage">
-      <div v-if="usageLoadError" class="usage-load-error" role="alert">
-        <span>{{ t("用量加载失败") }}</span>
-        <n-button text size="tiny" type="primary" :loading="usageLoading" @click="emit('reload-usage')">
-          {{ t("重试") }}
-        </n-button>
-      </div>
-      <OllamaQuotaSummary v-else :usage="ollamaUsage" :now="now" />
-    </div>
+
 
   </n-card>
 </template>
@@ -365,7 +360,6 @@ import {
 } from "@vicons/antd";
 import type { Account, UsageWindow } from "../api/dashboard";
 import type {
-  OllamaUsageResponse,
   ProviderCatalogEntry,
   ProviderUsageResponse,
 } from "../api/providers.ts";
@@ -385,7 +379,6 @@ import {
   usageSyncCaption,
 } from "../domain/account-display.ts";
 import type { AccountMenuOption } from "../domain/account-display.ts";
-import { isOllamaUsageRefreshBlocked } from "../domain/ollama-usage.ts";
 import {
   isCpaIntegrationAccount,
   isOllamaCloudAccount,
@@ -399,7 +392,6 @@ import type { AccountUsageEdits, UsageLimitView } from "../domain/useAccountUsag
 import { t } from "../i18n/index.ts";
 import AccountUsageEditor from "./AccountUsageEditor.vue";
 import UsageStrip from "./UsageStrip.vue";
-import OllamaQuotaSummary from "./OllamaQuotaSummary.vue";
 import ProviderQuotaSummary from "./ProviderQuotaSummary.vue";
 
 const props = defineProps<{
@@ -407,7 +399,6 @@ const props = defineProps<{
   catalog: readonly ProviderCatalogEntry[] | null;
   usage: UsageWindow;
   providerUsage: ProviderUsageResponse | null;
-  ollamaUsage: OllamaUsageResponse | null;
   limits: UsageLimitView[];
   edits: AccountUsageEdits | undefined;
   now: number;
@@ -444,9 +435,7 @@ const isGo = computed(() => props.account.provider_id === "opencode");
 const isCustom = computed(() => isCustomApiAccount(props.account));
 const isOfficialCn = computed(() => isOfficialCnPlanAccount(props.account));
 const isOllamaCloud = computed(() => isOllamaCloudAccount(props.account));
-const ollamaRefreshBlocked = computed(() => (
-  isOllamaCloud.value && isOllamaUsageRefreshBlocked(props.ollamaUsage, props.now)
-));
+const ollamaNeedsBilling = computed(() => !props.account.ollama_billing_tier);
 const hasValidityPeriod = computed(() => (
   accountIsReady(props.account)
   && !isCustom.value

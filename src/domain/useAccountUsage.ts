@@ -5,7 +5,6 @@ import { DashboardRequestError, dashboardApi } from "../api/dashboard";
 import type { Account, PricingLimits, UsageWindow } from "../api/dashboard";
 import { providerApi } from "../api/providers.ts";
 import type {
-  OllamaUsageResponse,
   ProviderQuotaWindow,
   ProviderUsageResponse,
 } from "../api/providers.ts";
@@ -32,7 +31,6 @@ import {
 import { t } from "../i18n/index.ts";
 import { dashboardErrorDetail } from "../utils/errors.ts";
 import { mapWithConcurrency } from "../utils/async.ts";
-import { isOllamaUsageRefreshBlocked } from "./ollama-usage.ts";
 
 export type AccountUsageEdits = Record<UsageKey, UsageEditState>;
 
@@ -41,9 +39,10 @@ export type UsageLimitView = { key: UsageKey; label: string; limit: number };
 /**
  * Quota window state for the account list: OpenCode Go pricing limits,
  * per-account usage snapshots, the manual calibration drafts, and the
- * official-usage refresh flow (including 429 throttle handling). GOAT has no
- * machine-readable usage endpoint, so its windows project locally priced OCG
- * request logs and allow an explicit manual correction.
+ * official-usage refresh flow (including 429 throttle handling). GOAT and
+ * paid Ollama Cloud have no machine-readable usage endpoint, so their
+ * windows project locally priced OCG request logs and allow an explicit
+ * manual correction. Ollama accounts without a billing row skip the meter.
  */
 export function useAccountUsage(accounts: Ref<Account[]>, now: Ref<number>) {
   const message = useMessage();
@@ -93,7 +92,6 @@ export function useAccountUsage(accounts: Ref<Account[]>, now: Ref<number>) {
 
   const usageMap = ref<Record<string, UsageWindow>>({});
   const providerUsageMap = ref<Record<string, ProviderUsageResponse>>({});
-  const ollamaUsageMap = ref<Record<string, OllamaUsageResponse>>({});
   const usageEdits = ref<Record<string, AccountUsageEdits>>({});
   const usageLoading = ref<Record<string, boolean>>({});
   const usageLoadErrors = ref<Record<string, string | null>>({});
@@ -268,23 +266,12 @@ export function useAccountUsage(accounts: Ref<Account[]>, now: Ref<number>) {
     if (
       usageRefreshLoading.value[accountId]
       || usageLoading.value[accountId]
-      || (isOllamaCloudAccount(account)
-        && isOllamaUsageRefreshBlocked(ollamaUsageMap.value[accountId], now.value))
-      || (!isOfficialCnPlanAccount(account) && !isOllamaCloudAccount(account) && isUsageRefreshBlocked(account))
+      || (!isOfficialCnPlanAccount(account) && isUsageRefreshBlocked(account))
     ) {
       return;
     }
     usageRefreshLoading.value = { ...usageRefreshLoading.value, [accountId]: true };
     try {
-      if (isOllamaCloudAccount(account)) {
-        const result = await providerApi.refreshOllamaUsage(accountId);
-        ollamaUsageMap.value = { ...ollamaUsageMap.value, [accountId]: result };
-        // The manual refresh is also the recovery path for a failed initial
-        // GET: a fresh status heals the card without another list reload.
-        usageLoadErrors.value = { ...usageLoadErrors.value, [accountId]: null };
-        message.success(t("成功"));
-        return;
-      }
       if (isOfficialCnPlanAccount(account)) {
         const result = await providerApi.refreshProviderUsage(accountId);
         providerUsageMap.value = { ...providerUsageMap.value, [accountId]: result };
@@ -303,17 +290,7 @@ export function useAccountUsage(accounts: Ref<Account[]>, now: Ref<number>) {
       if (error instanceof DashboardRequestError && error.status === 429) {
         const nextAllowed = error.nextAllowedAt;
         if (nextAllowed) {
-          if (isOllamaCloudAccount(account)) {
-            const current = ollamaUsageMap.value[accountId];
-            if (current) {
-              ollamaUsageMap.value = {
-                ...ollamaUsageMap.value,
-                [accountId]: { ...current, next_eligible_at: nextAllowed },
-              };
-            }
-          } else {
-            patchAccountUsageSync(accountId, { usage_sync_next_allowed_at: nextAllowed });
-          }
+          patchAccountUsageSync(accountId, { usage_sync_next_allowed_at: nextAllowed });
         }
         const seconds = error.retryAfterSeconds;
         message.warning(
@@ -350,9 +327,22 @@ export function useAccountUsage(accounts: Ref<Account[]>, now: Ref<number>) {
     try {
       const account = accounts.value.find(({ id }) => id === accountId);
       if (account && isOllamaCloudAccount(account)) {
-        const ollamaUsage = await providerApi.getOllamaUsage(accountId);
-        ollamaUsageMap.value = { ...ollamaUsageMap.value, [accountId]: ollamaUsage };
-        usageMap.value[accountId] = blankUsage(accountId);
+        const providerUsage = await providerApi.getProviderUsage(accountId);
+        providerUsageMap.value = { ...providerUsageMap.value, [accountId]: providerUsage };
+        providerUsageLimits.value = {
+          ...providerUsageLimits.value,
+          [accountId]: limitsFromProviderWindows(providerUsage.quota_windows),
+        };
+        const paid = account.ollama_billing_tier === "pro"
+          || account.ollama_billing_tier === "max"
+          || account.ollama_billing_tier === "team";
+        if (paid) {
+          const usage = await dashboardApi.getAccountUsage(accountId);
+          usageMap.value[accountId] = usage;
+          syncUsageEdits(accountId, usage);
+        } else {
+          usageMap.value[accountId] = blankUsage(accountId);
+        }
         return;
       }
       if (account && isOfficialCnPlanAccount(account)) {
@@ -402,7 +392,6 @@ export function useAccountUsage(accounts: Ref<Account[]>, now: Ref<number>) {
     usageLimitsFor,
     usageMap,
     providerUsageMap,
-    ollamaUsageMap,
     usageEdits,
     usageLoading,
     usageLoadErrors,

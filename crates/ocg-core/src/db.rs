@@ -63,6 +63,7 @@ pub struct AccountImportRecord {
     pub capabilities: Vec<AccountModelCapabilityInput>,
     pub verification_status: ConnectionVerificationStatus,
     pub connection_verified_at: Option<DateTime<Utc>>,
+    pub ollama_billing_tier: Option<OllamaBillingTier>,
 }
 
 /// One fully validated, portable node-state snapshot. Stable IDs merge into an
@@ -108,7 +109,7 @@ pub const PRE_V3_BACKUP_FILE_PREFIX: &str = "data.sqlite.pre-v3.";
 /// database is rewritten to provider-only identity in v35.
 pub const PRE_V35_BACKUP_FILE_PREFIX: &str = "data.sqlite.pre-v35.";
 /// Highest schema this binary can open or migrate. Newer databases fail closed.
-pub const CURRENT_SCHEMA_VERSION: i32 = 36;
+pub const CURRENT_SCHEMA_VERSION: i32 = 37;
 /// Canonical source schema for the v35 provider-identity rewrite.
 pub const V34_SCHEMA_VERSION: i32 = 34;
 /// Historical v34 offering IDs. Used only by v1–v34 SQL and the v35 preflight
@@ -2230,6 +2231,32 @@ fn migrate_to_v36(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// v37: drop the unreleased Cookie-usage scrape table and add the account
+/// billing-tier side table. Existing Ollama accounts stay routeable with no
+/// row (unconfigured). Account Keys and logs are untouched.
+fn migrate_to_v37(conn: &Connection) -> Result<()> {
+    let version = schema_version_on(conn)?;
+    if version >= 37 {
+        return Ok(());
+    }
+    anyhow::ensure!(
+        version == 36,
+        "v37 requires a canonical schema v36 source, found {version}"
+    );
+    let tx = conn.unchecked_transaction()?;
+    tx.execute_batch(
+        "DROP TABLE IF EXISTS ollama_cloud_usage_state;
+        CREATE TABLE IF NOT EXISTS ollama_cloud_billing (
+            account_id TEXT PRIMARY KEY,
+            billing_tier TEXT NOT NULL CHECK (billing_tier IN ('pro', 'max', 'team')),
+            FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+        );
+        INSERT OR REPLACE INTO schema_version (version) VALUES (37);",
+    )?;
+    tx.commit()?;
+    Ok(())
+}
+
 #[cfg(test)]
 pub(crate) mod dynamic_provider_fault {
     use std::cell::Cell;
@@ -2433,6 +2460,7 @@ fn insert_import_account_on(conn: &Connection, record: &AccountImportRecord) -> 
         persist_account_model_capabilities_on(conn, &account.id, &record.capabilities)?;
     }
     restore_import_verification_on(conn, record)?;
+    persist_ollama_billing_on(conn, record)?;
     Ok(())
 }
 
@@ -2563,7 +2591,24 @@ fn merge_import_account_on(conn: &Connection, record: &AccountImportRecord) -> R
     // edits. A validated node snapshot is different: it carries the source
     // verification state as part of the portable account definition.
     restore_import_verification_on(conn, record)?;
+    persist_ollama_billing_on(conn, record)?;
     Ok(())
+}
+
+fn persist_ollama_billing_on(conn: &Connection, record: &AccountImportRecord) -> Result<()> {
+    let is_ollama = record.account.provider_id == OLLAMA_PROVIDER_ID;
+    if let Some(tier) = record.ollama_billing_tier {
+        anyhow::ensure!(
+            is_ollama,
+            "Ollama billing tier is only valid for Ollama Cloud accounts"
+        );
+        if tier.requires_purchase_date() && record.account.purchase_date.trim().is_empty() {
+            anyhow::bail!("a configured Ollama paid tier requires purchase_date");
+        }
+    } else if !is_ollama {
+        return Ok(());
+    }
+    set_ollama_cloud_billing_tier_on(conn, &record.account.id, record.ollama_billing_tier)
 }
 
 fn persist_account_custom_config_on(
@@ -3007,6 +3052,7 @@ impl Database {
         migrate_to_v34(&db.conn)?;
         migrate_to_v35(&db.conn, &db_path, is_fresh)?;
         migrate_to_v36(&db.conn)?;
+        migrate_to_v37(&db.conn)?;
         ensure_dynamic_provider_tables(&db.conn)?;
         Ok(db)
     }
@@ -6140,152 +6186,18 @@ impl Database {
         Ok(map)
     }
 
-    /// Ollama Cloud Cookie + usage state for one account, if configured.
-    pub fn ollama_cloud_usage_state(
-        &self,
-        account_id: &str,
-    ) -> Result<Option<OllamaCloudUsageState>> {
-        self.conn
-            .query_row(
-                "SELECT account_id, cookie_cipher IS NOT NULL, status, snapshot, last_error,
-                        last_success_at, last_attempt_at, next_eligible_at,
-                        failure_streak
-                 FROM ollama_cloud_usage_state WHERE account_id = ?1",
-                [account_id],
-                ollama_cloud_usage_state_from_row,
-            )
-            .optional()
-            .map_err(Into::into)
+    /// Configured Ollama Cloud billing tier, if the account has a side-table row.
+    pub fn ollama_cloud_billing_tier(&self, account_id: &str) -> Result<Option<OllamaBillingTier>> {
+        ollama_cloud_billing_tier_on(&self.conn, account_id)
     }
 
-    /// Store the obfuscated web-session Cookie. Configuring (or replacing) a
-    /// Cookie resets the whole capability: the previous snapshot no longer
-    /// describes the new session.
-    pub fn set_ollama_cloud_cookie(&self, account_id: &str, cookie_cipher: &str) -> Result<()> {
+    pub fn set_ollama_cloud_billing_tier(
+        &self,
+        account_id: &str,
+        tier: Option<OllamaBillingTier>,
+    ) -> Result<()> {
         anyhow::ensure!(self.get_account(account_id)?.is_some(), "account not found");
-        self.conn
-            .execute(
-                "INSERT INTO ollama_cloud_usage_state
-                     (account_id, cookie_cipher, status, snapshot, failure_streak)
-                 VALUES (?1, ?2, 'unconfigured', NULL, 0)
-                 ON CONFLICT(account_id) DO UPDATE SET
-                     cookie_cipher = excluded.cookie_cipher,
-                     status = 'unconfigured',
-                     snapshot = NULL,
-                     last_error = NULL,
-                     last_success_at = NULL,
-                     last_attempt_at = NULL,
-                     next_eligible_at = NULL,
-                     failure_streak = 0",
-                params![account_id, cookie_cipher],
-            )
-            .map(|_| ())?;
-        Ok(())
-    }
-
-    /// Clearing the Cookie returns the capability to the unconfigured state;
-    /// the row, snapshot, and refresh metadata go with it.
-    pub fn clear_ollama_cloud_cookie(&self, account_id: &str) -> Result<()> {
-        self.conn
-            .execute(
-                "DELETE FROM ollama_cloud_usage_state WHERE account_id = ?1",
-                [account_id],
-            )
-            .map(|_| ())?;
-        Ok(())
-    }
-
-    /// The obfuscated Cookie ciphertext, resolved through the Host cipher by
-    /// the caller. Never exposed through any API response.
-    pub fn ollama_cloud_cookie_cipher(&self, account_id: &str) -> Result<Option<String>> {
-        let cipher: Option<String> = self
-            .conn
-            .query_row(
-                "SELECT cookie_cipher FROM ollama_cloud_usage_state WHERE account_id = ?1",
-                [account_id],
-                |row| row.get(0),
-            )
-            .optional()?
-            .flatten();
-        Ok(cipher)
-    }
-
-    /// CAS guard for the manual refresh: the stored Cookie must match the
-    /// snapshot the caller decrypted, otherwise the account changed mid-flight.
-    pub fn ollama_cloud_usage_state_for_cookie(
-        &self,
-        account_id: &str,
-        cookie_cipher: &str,
-    ) -> Result<Option<OllamaCloudUsageState>> {
-        self.conn
-            .query_row(
-                "SELECT account_id, cookie_cipher IS NOT NULL, status, snapshot, last_error,
-                        last_success_at, last_attempt_at, next_eligible_at,
-                        failure_streak
-                 FROM ollama_cloud_usage_state
-                 WHERE account_id = ?1 AND cookie_cipher = ?2",
-                params![account_id, cookie_cipher],
-                ollama_cloud_usage_state_from_row,
-            )
-            .optional()
-            .map_err(Into::into)
-    }
-
-    /// Record a successful scrape. `snapshot_json` is the sanitized snapshot
-    /// (no HTML, no Cookie, no session fields); failure columns reset.
-    pub fn commit_ollama_cloud_usage_success(
-        &self,
-        account_id: &str,
-        snapshot_json: &str,
-        now: DateTime<Utc>,
-        next_eligible_at: Option<DateTime<Utc>>,
-    ) -> Result<()> {
-        self.conn
-            .execute(
-                "UPDATE ollama_cloud_usage_state
-                 SET status = 'ok', snapshot = ?2, last_error = NULL,
-                     last_success_at = ?3, last_attempt_at = ?3,
-                     next_eligible_at = ?4, failure_streak = 0
-                 WHERE account_id = ?1",
-                params![
-                    account_id,
-                    snapshot_json,
-                    now.to_rfc3339(),
-                    next_eligible_at.map(|at| at.to_rfc3339())
-                ],
-            )
-            .map(|_| ())?;
-        Ok(())
-    }
-
-    /// Record a failed (or unauthorized) attempt. Only status/attempt metadata
-    /// move; the last successful snapshot stays intact.
-    pub fn record_ollama_cloud_usage_failure(
-        &self,
-        account_id: &str,
-        status: &str,
-        last_error: Option<&str>,
-        now: DateTime<Utc>,
-        next_eligible_at: Option<DateTime<Utc>>,
-        failure_streak: i64,
-    ) -> Result<()> {
-        self.conn
-            .execute(
-                "UPDATE ollama_cloud_usage_state
-                 SET status = ?2, last_error = ?3, last_attempt_at = ?4,
-                     next_eligible_at = ?5, failure_streak = ?6
-                 WHERE account_id = ?1",
-                params![
-                    account_id,
-                    status,
-                    last_error,
-                    now.to_rfc3339(),
-                    next_eligible_at.map(|at| at.to_rfc3339()),
-                    failure_streak
-                ],
-            )
-            .map(|_| ())?;
-        Ok(())
+        set_ollama_cloud_billing_tier_on(&self.conn, account_id, tier)
     }
 
     pub fn upsert_quota_window(&self, window: &QuotaWindow) -> Result<()> {
@@ -7950,6 +7862,84 @@ impl Database {
         self.live_fixed_quota_windows(account_id, limits, source, None)
     }
 
+    /// One monthly USD-credit window from locally priced request logs plus
+    /// calibration. Used credit is not clamped to the soft limit. 5h/week
+    /// windows are not published.
+    pub fn live_ollama_month_quota_window(
+        &self,
+        account_id: &str,
+        month_limit: f64,
+    ) -> Result<Vec<QuotaWindow>> {
+        let now = Utc::now();
+        let (offset, purchase_date): (f64, String) = self.conn.query_row(
+            "SELECT usage_month_window_cost_offset, recharge_date FROM accounts WHERE id = ?1",
+            [account_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        let (used, resets_at) =
+            compute_ollama_month_window(&self.conn, account_id, &purchase_date, offset)?;
+        Ok(vec![QuotaWindow {
+            account_id: account_id.to_string(),
+            window_kind: QUOTA_WINDOW_MONTH.to_string(),
+            used,
+            limit_value: Some(month_limit),
+            started_at: month_window_start_utc(&purchase_date).ok(),
+            resets_at,
+            calibration_offset: offset,
+            unit: "usd_credits".to_string(),
+            source: "ollama-cloud-local".to_string(),
+            observed_at: None,
+            updated_at: now,
+        }])
+    }
+
+    /// Unclamped Ollama month used credit and reset instant.
+    pub fn ollama_month_usage(&self, account_id: &str) -> Result<(f64, Option<DateTime<Utc>>)> {
+        let Some((offset, purchase_date)) = self
+            .conn
+            .query_row(
+                "SELECT usage_month_window_cost_offset, recharge_date FROM accounts WHERE id = ?1",
+                [account_id],
+                |row| Ok((row.get::<_, f64>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()?
+        else {
+            return Ok((0.0, None));
+        };
+        compute_ollama_month_window(&self.conn, account_id, &purchase_date, offset)
+    }
+
+    pub fn calibrate_ollama_month_usage(
+        &self,
+        account_id: &str,
+        percent: f64,
+        limit: f64,
+        now: DateTime<Utc>,
+    ) -> Result<bool> {
+        let purchase_date: String = match self
+            .conn
+            .query_row(
+                "SELECT recharge_date FROM accounts WHERE id = ?1",
+                [account_id],
+                |row| row.get(0),
+            )
+            .optional()?
+        {
+            Some(value) => value,
+            None => return Ok(false),
+        };
+        let actual_cost = sum_ollama_month_cost_on(&self.conn, account_id, &purchase_date)?;
+        let offset = limit * percent / 100.0 - actual_cost;
+        let changed = self.conn.execute(
+            "UPDATE accounts
+             SET usage_month_window_cost_offset = ?2,
+                 updated_at = ?3
+             WHERE id = ?1",
+            params![account_id, offset, now.to_rfc3339()],
+        )?;
+        Ok(changed > 0)
+    }
+
     fn live_fixed_quota_windows(
         &self,
         account_id: &str,
@@ -8325,6 +8315,65 @@ fn compute_fixed_window(
             }
         }
     }
+}
+
+/// Ollama month window: `[purchase_date 00:00 local, next-month-same-day 00:00 local)`.
+/// Used credit is `offset + cost` and is not clamped to the soft limit.
+fn compute_ollama_month_window(
+    conn: &Connection,
+    account_id: &str,
+    purchase_date: &str,
+    offset: f64,
+) -> Result<(f64, Option<DateTime<Utc>>)> {
+    if purchase_date.trim().is_empty() {
+        return Ok((0.0, None));
+    }
+    let (start, end) = ollama_month_bounds(purchase_date)?;
+    let cost = sum_priced_cost_between(conn, account_id, start, end)?;
+    Ok((offset + cost, Some(end)))
+}
+
+fn ollama_month_bounds(purchase_date: &str) -> Result<(DateTime<Utc>, DateTime<Utc>)> {
+    let start = month_window_start_utc(purchase_date)?;
+    let expires = purchase_expires_on(purchase_date)?;
+    let end_naive = NaiveDate::parse_from_str(&expires, "%Y-%m-%d")?
+        .and_hms_opt(0, 0, 0)
+        .unwrap();
+    let end = Local
+        .from_local_datetime(&end_naive)
+        .single()
+        .ok_or_else(|| anyhow::anyhow!("ambiguous local datetime for expires_on"))?
+        .with_timezone(&Utc);
+    Ok((start, end))
+}
+
+fn sum_ollama_month_cost_on(
+    conn: &Connection,
+    account_id: &str,
+    purchase_date: &str,
+) -> Result<f64> {
+    if purchase_date.trim().is_empty() {
+        return Ok(0.0);
+    }
+    let (start, end) = ollama_month_bounds(purchase_date)?;
+    sum_priced_cost_between(conn, account_id, start, end)
+}
+
+fn sum_priced_cost_between(
+    conn: &Connection,
+    account_id: &str,
+    start: DateTime<Utc>,
+    end: DateTime<Utc>,
+) -> Result<f64> {
+    Ok(conn.query_row(
+        "SELECT COALESCE(SUM(cost), 0) FROM forward_logs
+         WHERE account_id = ?1
+           AND cost_state IN ('priced', 'legacy_estimate')
+           AND timestamp >= ?2
+           AND timestamp < ?3",
+        params![account_id, start.to_rfc3339(), end.to_rfc3339()],
+        |row| row.get(0),
+    )?)
 }
 
 /// 月窗口：从 `purchase_date 00:00 本地时区` 累计到 `purchase_expires_on(purchase_date) 00:00 本地时区`，不重置。
@@ -8732,20 +8781,54 @@ fn custom_verification_contract_still_matches_on(
     Ok(current == contract.capabilities)
 }
 
-fn ollama_cloud_usage_state_from_row(row: &Row<'_>) -> rusqlite::Result<OllamaCloudUsageState> {
-    let parse_stamp =
-        |value: Option<String>| value.filter(|text| !text.is_empty()).map(parse_datetime);
-    Ok(OllamaCloudUsageState {
-        account_id: row.get(0)?,
-        cookie_configured: row.get(1)?,
-        status: row.get(2)?,
-        snapshot: row.get(3)?,
-        last_error: row.get(4)?,
-        last_success_at: parse_stamp(row.get(5)?),
-        last_attempt_at: parse_stamp(row.get(6)?),
-        next_eligible_at: parse_stamp(row.get(7)?),
-        failure_streak: row.get(8)?,
-    })
+fn ollama_cloud_billing_tier_on(
+    conn: &Connection,
+    account_id: &str,
+) -> Result<Option<OllamaBillingTier>> {
+    let value: Option<String> = conn
+        .query_row(
+            "SELECT billing_tier FROM ollama_cloud_billing WHERE account_id = ?1",
+            [account_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    match value {
+        Some(tier) => OllamaBillingTier::parse(&tier)
+            .map(Some)
+            .map_err(|error| anyhow::anyhow!(error)),
+        None => Ok(None),
+    }
+}
+
+fn set_ollama_cloud_billing_tier_on(
+    conn: &Connection,
+    account_id: &str,
+    tier: Option<OllamaBillingTier>,
+) -> Result<()> {
+    let current = ollama_cloud_billing_tier_on(conn, account_id)?;
+    match tier {
+        None => {
+            conn.execute(
+                "DELETE FROM ollama_cloud_billing WHERE account_id = ?1",
+                [account_id],
+            )?;
+        }
+        Some(tier) => {
+            conn.execute(
+                "INSERT INTO ollama_cloud_billing (account_id, billing_tier)
+                 VALUES (?1, ?2)
+                 ON CONFLICT(account_id) DO UPDATE SET billing_tier = excluded.billing_tier",
+                params![account_id, tier.as_str()],
+            )?;
+        }
+    }
+    if current != tier {
+        conn.execute(
+            "UPDATE accounts SET usage_month_window_cost_offset = 0 WHERE id = ?1",
+            [account_id],
+        )?;
+    }
+    Ok(())
 }
 
 fn account_custom_config_from_row(row: &Row<'_>) -> rusqlite::Result<AccountCustomConfig> {

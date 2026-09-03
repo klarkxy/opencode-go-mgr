@@ -12,8 +12,8 @@ use ocg_core::crypto::{KeyCipher, StaticKeyCipher};
 use ocg_core::db::Database;
 use ocg_core::gateway;
 use ocg_core::gateway::provider_adapter::install_ollama_cloud_loopback_route_for_test;
-use ocg_core::models::{Account, ProxyMode, RoutingMode};
-use ocg_core::provider::OLLAMA_PROVIDER_ID;
+use ocg_core::models::{Account, ForwardLog, ProxyMode, RoutingMode};
+use ocg_core::provider::{OLLAMA_PROVIDER_ID, OllamaBillingTier};
 use ocg_core::provider_contracts::ContractScope;
 use ocg_core::state::{CoreStateInner, GatewayHandle};
 use serde_json::{Value, json};
@@ -486,6 +486,80 @@ async fn ollama_catalog_does_not_add_v1_models_entries() {
         .unwrap();
     assert_eq!(flash["owned_by"], ocg_core::provider::OPENCODE_PROVIDER_ID);
     assert!(calls.lock().unwrap().is_empty());
+
+    stop(state, dir, gateway_handle, stop_mock);
+}
+
+#[tokio::test]
+async fn ollama_soft_quota_overage_does_not_skip_selection() {
+    let replies = HashMap::from([(
+        OLLAMA_KEY.to_string(),
+        VecDeque::from([FakeReply {
+            status: 200,
+            body: OLLAMA_SUCCESS_BODY,
+        }]),
+    )]);
+    let (base_url, calls, stop_mock) = start_fake_upstream(replies).await;
+    let (state, dir) = build_state(base_url.clone());
+    persist_ollama_catalog(&state, &["gpt-oss:120b"]);
+    let mut account = base_account(&state, "ollama-overage", OLLAMA_KEY);
+    account.purchase_date = "2026-09-01".into();
+    state.db.lock().create_account(&account).unwrap();
+    state
+        .db
+        .lock()
+        .set_ollama_cloud_billing_tier("ollama-overage", Some(OllamaBillingTier::Pro))
+        .unwrap();
+    state
+        .db
+        .lock()
+        .log_forward(&ForwardLog {
+            id: 0,
+            timestamp: Utc::now(),
+            model: "gpt-oss:120b".into(),
+            account_id: "ollama-overage".into(),
+            account_name: "ollama-overage".into(),
+            route_account_id: Some("ollama-overage".into()),
+            provider_id: Some(OLLAMA_PROVIDER_ID.into()),
+            credential_account_id: Some("ollama-overage".into()),
+            client_key_id: None,
+            client_key_name: None,
+            status: "success".into(),
+            http_status: Some(200),
+            route: "direct".into(),
+            prompt_tokens: 10,
+            completion_tokens: 2,
+            cached_tokens: 0,
+            cache_creation_tokens: 0,
+            cost: Some(80.0),
+            raw_cost_usd: Some(80.0),
+            quota_debit: Some(80.0),
+            effective_paid_cost_usd: None,
+            pricing_revision_id: Some("ollama-test".into()),
+            quota_multiplier: Some(1.0),
+            local_adjustment_multiplier: Some(1.0),
+            service_tier: None,
+            cost_state: "priced".into(),
+            error_message: None,
+            request_id: Some("overage".into()),
+            attempt: Some(1),
+            error_source: None,
+            error_stage: None,
+            duration_ms: Some(5),
+            diagnostic: None,
+        })
+        .unwrap();
+    let _route = install_ollama_cloud_loopback_route_for_test("ollama-overage", base_url).unwrap();
+    let (port, gateway_handle) = start_gateway(state.clone()).await;
+
+    let (status, _body, _text) =
+        chat_call(port, &quirk_request("gpt-oss:120b"), false, false).await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "meter fullness must not skip Ollama selection"
+    );
+    assert_eq!(calls.lock().unwrap().len(), 1);
 
     stop(state, dir, gateway_handle, stop_mock);
 }

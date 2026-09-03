@@ -12,7 +12,7 @@ User guides live under `docs/user/` (landing: `docs/USER.md` / `docs/USER.zh-CN.
 - Dashboard navigation has eight fixed core views in this order: Dashboard / Access Keys / Accounts / Providers / Aliases / Applications / Logs / Settings. A divider below Settings starts the optional **Extensions** group; CPA is its local-only entry. `browser` is a managed-session overlay page. Access credentials are shown as **Key** (never “Gateway Key”); the design system is governed by `DESIGN.md` + `src/theme.ts`.
 - One default port `127.0.0.1:9042` (composition root `crates/ocg-core/src/host_router.rs`) merges inference entrypoints (OpenAI Chat Completions / Responses, Anthropic Messages, Gemini `generateContent`, Claude Desktop aliases), Dashboard V3, V2 REST tombstones, preserved V2 auth + browser WebSocket, and `/dashboard` static assets.
 - Dashboard V3 control-plane writes require CAS (`expectedRevision` / `processGeneration`); the frozen contract is `schema/dashboard-api-v3.schema.json`. Tombstoned V2 REST returns `410` after auth; never add handlers there.
-- Access credentials are SQLite `access_keys` rows (current schema v35); plaintext leaves the process only via the session-protected `GET /dashboard/api/v3/connection`. Persistence details: `docs/maintainer/storage-migration.md`.
+- Access credentials are SQLite `access_keys` rows (current schema v37); plaintext leaves the process only via the session-protected `GET /dashboard/api/v3/connection`. Persistence details: `docs/maintainer/storage-migration.md`.
 - Desktop: Tauri v2 tray app; Host capabilities are registered into `CoreState`, never as `#[tauri::command]`. No remote sync or Admin API; each node is managed by its own dashboard.
 - Sources of truth: protocol tables `ocg-domain/src/protocol.rs`, capability table `src/views/application-guides.ts`, aliases `ocg-gateway/src/alias.rs`, Plan catalog `ocg-domain/src/provider.rs`. USER guides mirror them; do not pad the README with those tables.
 
@@ -39,7 +39,7 @@ User guides live under `docs/user/` (landing: `docs/USER.md` / `docs/USER.zh-CN.
 - `crates/ocg-core/src/http_client.rs`: maps `AppConfig` to `ocg_infra::http`.
 - `crates/ocg-core/src/go_usage.rs`: official Go usage client (`/zen/go/v1/usage`).
 - `crates/ocg-core/src/usage_sync.rs`: adaptive official usage sync. Background loop starts/stops with `CoreState` (spawned on Gateway start, exits when CoreState drops).
-- `crates/ocg-core/src/db.rs`: SQLite schema, migrations, queries; `CURRENT_SCHEMA_VERSION = 35`.
+- `crates/ocg-core/src/db.rs`: SQLite schema, migrations, queries; `CURRENT_SCHEMA_VERSION = 37`.
 - `crates/ocg-core/src/models.rs`: shared serde types and `AppConfig` (includes `DEFAULT_OPENCODE_INVITE_URL`).
 - `crates/ocg-core/src/pricing.rs` + `kernel/pricing.rs`: OpenCode Go price snapshot, multipliers, and quota estimation.
 - `crates/ocg-cli/src/main.rs`: CLI `serve`, `key`, `status` (writes Database directly, does not go through dashboard CAS).

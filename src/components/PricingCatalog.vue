@@ -54,7 +54,7 @@
             <p v-else>{{ t(pricingDisplay(group).messageKey) }}</p>
           </div>
           <div
-            v-if="group.content.kind === 'opencode-go' || group.content.kind === 'goat-reference'"
+            v-if="group.content.kind === 'opencode-go' || group.content.kind === 'goat-reference' || group.content.kind === 'ollama-reference'"
             class="pricing-actions"
           >
             <n-button
@@ -120,8 +120,14 @@
           :disabled="refreshing"
           @save-multiplier="(modelId, multiplier) => saveProviderMultiplier(group, modelId, multiplier)"
         />
+        <ProviderPricingReference
+          v-else-if="group.content.kind === 'ollama-reference'"
+          kind="ollama"
+          :snapshot="group.content.snapshot"
+          :disabled="refreshing"
+        />
         <n-alert
-          v-if="group.content.kind === 'goat-reference' && refreshError"
+          v-if="(group.content.kind === 'goat-reference' || group.content.kind === 'ollama-reference') && refreshError"
           type="warning"
           :title="t('刷新额度价格表失败: {error}', { error: refreshError })"
         />
@@ -254,6 +260,9 @@ function pricingSourceUrl(group: PlanPricingGroup): string {
   if (group.content.kind === "opencode-go") return snapshot.value?.source_url ?? "";
   if (group.content.kind === "goat-reference") {
     return group.content.snapshot?.source_url ?? GOAT_PRICING_REFERENCE.sourceUrl;
+  }
+  if (group.content.kind === "ollama-reference") {
+    return group.content.snapshot?.source_url ?? "https://ollama.com/pricing";
   }
   return "";
 }

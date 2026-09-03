@@ -67,6 +67,13 @@ Every gateway draws a line somewhere. This page is that line — a running list 
   [Accounts](accounts.md); it is unpriced, has no official usage path, and its
   catalog, protocol, and pricing controls live on **Providers** as isolated
   `CustomEndpoint` scopes.
+- Ollama Cloud monthly USD-credits usage is a soft estimate from locally priced
+  logs. Used credit may exceed the Pro `$60` / Max `$300` / Team `$1000`
+  limit; the dashboard clamps the bar at 100% and shows overage. Meter fullness
+  never writes cooldown, disables the account, or changes routing. New Ollama
+  accounts require an explicit Pro/Max/Team tier and purchase date. Migrated
+  accounts with no billing row stay routeable without a meter. Actual upstream
+  `429` still uses the generic cooldown/fallback path.
 - Unknown model names return `400` on every supported client format. Clients
   should send published aliases or eligible Custom IDs from authenticated
   `GET /v1/models` that currently have an effective enabled protocol.

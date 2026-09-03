@@ -103,7 +103,6 @@
           :catalog="providerCatalog"
           :usage="getUsage(account.id)"
           :provider-usage="providerUsageMap[account.id] ?? null"
-          :ollama-usage="ollamaUsageMap[account.id] ?? null"
           :limits="usageLimitsFor(account)"
           :edits="usageEdits[account.id]"
           :now="now"
@@ -378,7 +377,6 @@ const {
   usageLimitsFor,
   usageMap,
   providerUsageMap,
-  ollamaUsageMap,
   usageEdits,
   usageLoading,
   usageLoadErrors,
@@ -794,7 +792,6 @@ function removeAccountState(id: string): void {
   accounts.value = accounts.value.filter((item) => item.id !== id);
   delete usageMap.value[id];
   delete providerUsageMap.value[id];
-  delete ollamaUsageMap.value[id];
   delete usageEdits.value[id];
   delete usageLoading.value[id];
   delete usageLoadErrors.value[id];
@@ -944,6 +941,9 @@ async function onFormSave(payload: AccountInput | AccountFormPayload) {
       notes: payload.notes ?? "",
     };
     if (payload.key !== undefined) update.key = payload.key;
+    if (payload.ollama_billing_tier !== undefined) {
+      update.ollama_billing_tier = payload.ollama_billing_tier;
+    }
     busy.value = true;
     try {
       const saved = await runWithFreshSettingsRevision((revision) => dashboardApi.updateAccount(editing.id, {
@@ -951,28 +951,11 @@ async function onFormSave(payload: AccountInput | AccountFormPayload) {
         expected_revision: revision,
       }));
       replaceAccount(saved);
-      const ollamaCookie = (payload as AccountFormPayload).ollama_cookie;
-      let cookieFailure: unknown = null;
-      if (isOllamaCloudAccount(saved) && ollamaCookie !== undefined) {
-        try {
-          await providerApi.setOllamaCookie(saved.id, ollamaCookie ?? null);
-        } catch (cookieError) {
-          cookieFailure = cookieError;
-        }
-      }
       // purchase_date defines the monthly usage window and changing it clears
       // the persisted calibration offset, so the local usage snapshot must be
       // refreshed before the edited account is shown again.
       if (accountHasUsageDisplay(saved)) await loadAccountUsage(saved.id);
       message.success(t("账号已更新"));
-      if (cookieFailure !== null) {
-        // The account fields were committed before the separate Cookie write.
-        // Keep the modal and its Cookie draft open so retrying is explicit.
-        message.error(t("保存失败: {error}", {
-          error: `Cookie: ${dashboardErrorDetail(cookieFailure)}`,
-        }));
-        return;
-      }
       showModal.value = false;
     } catch (e) {
       if (await recoverAccountMutationConflict(e)) return;
@@ -981,17 +964,8 @@ async function onFormSave(payload: AccountInput | AccountFormPayload) {
       busy.value = false;
     }
   } else {
-    // Preserve every catalog-gated create field (Custom config and
-    // capabilities) rather than rebuilding a legacy-only DTO. The optional
-    // create-time Ollama Cookie rides on the form payload but persists through
-    // its own account-scoped route right after the account exists — never as
-    // part of the AccountCreate body.
-    const formPayload = payload as AccountFormPayload;
-    const createCookie = typeof formPayload.ollama_cookie === "string"
-      ? formPayload.ollama_cookie.trim()
-      : "";
-    const { ollama_cookie: _ollamaCookie, ...input } = {
-      ...(payload as AccountInput & { ollama_cookie?: string }),
+    const input = {
+      ...(payload as AccountInput),
       key: payload.key || "",
     };
     busy.value = true;
@@ -1002,23 +976,8 @@ async function onFormSave(payload: AccountInput | AccountFormPayload) {
       }));
       addAccount(created);
       settingsRevision.value = created.revision ?? settingsRevision.value;
-      let cookieFailure: unknown = null;
-      if (isOllamaCloudAccount(created) && createCookie) {
-        try {
-          await providerApi.setOllamaCookie(created.id, createCookie);
-        } catch (cookieError) {
-          cookieFailure = cookieError;
-        }
-      }
       message.success(t("账号已添加"));
-      if (cookieFailure !== null) {
-        // The account exists; only the optional Cookie write failed. Report it
-        // after the success toast so the two are not contradictory.
-        message.error(t("保存失败: {error}", {
-          error: `Cookie: ${dashboardErrorDetail(cookieFailure)}`,
-        }));
-      }
-      // Go uses official usage; GOAT projects locally priced OCG request logs.
+      // Go uses official usage; GOAT and Ollama project locally priced OCG request logs.
       if (accountHasUsageDisplay(created) && accountIsReady(created)) {
         await loadAccountUsage(created.id);
       }

@@ -661,6 +661,7 @@ fn account_from_state(state: &CoreState, account: ModelAccount) -> Result<Accoun
             .into_iter()
             .map(capability_from_model)
             .collect(),
+        ollama_billing_tier: None,
     })
 }
 

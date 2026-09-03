@@ -182,7 +182,7 @@ test("keeps account cards compact with metadata tags and popover calibration", a
   );
   const stripBody = strip.slice(
     strip.indexOf('class="usage-strip-body" role="group"'),
-    strip.indexOf("</template>"),
+    strip.indexOf("<script"),
   );
 
   assert.ok(header.indexOf("accountStatusLabel(account, now)") < header.indexOf('v-if="hasValidityPeriod"'));
@@ -202,7 +202,11 @@ test("keeps account cards compact with metadata tags and popover calibration", a
   assert.ok(card.indexOf("<n-popover") < card.indexOf("<n-dropdown"));
   assert.match(editor, /class="usage-editor-popover"[\s\S]*?class="usage-resets-row"/);
   assert.match(usage, /async function focusUsageEditor\(accountId: string\)[\s\S]*?requestAnimationFrame[\s\S]*?\.n-input-number input[\s\S]*?\.focus\(\)/);
-  assert.match(card, /v-if="\(isGo \|\| isOfficialCn || isOllamaCloud\) && accountIsReady\(account\)"[\s\S]*?刷新额度/);
+  assert.match(card, /v-if="\(isGo \|\| isOfficialCn\) && accountIsReady\(account\)"[\s\S]*?刷新额度/);
+  assert.doesNotMatch(
+    card,
+    /isOllamaCloud && accountIsReady\(account\)"[\s\S]*?刷新额度/,
+  );
   assert.doesNotMatch(
     card,
     /accountIsReady\(account\) && account\.account_type === 'managed'/,
@@ -221,10 +225,11 @@ test("keeps account cards compact with metadata tags and popover calibration", a
   assert.doesNotMatch(stripBody, /usage-strip-title|\{\{ t\("用量"\) \}\}/);
   assert.match(stripBody, /class="usage-strip-body" role="group" :aria-label="t\('用量'\)"/);
   assert.match(stripBody, /<n-progress[\s\S]*?:percentage="usageProgressPercentage\(/);
+  assert.match(stripBody, /usage\[limit\.key\] > limit\.limit[\s\S]*超出 \{amount\}/);
   assert.doesNotMatch(stripBody, /<n-input-number|<n-slider|class="usage-resets-row"/);
   assert.match(
     strip,
-    /\.usage-strip\s*\{\s*min-width:\s*0;\s*\}\s*\.usage-strip-body\s*\{[\s\S]*?grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/,
+    /\.usage-strip\s*\{\s*min-width:\s*0;\s*\}\s*\.usage-strip-body\s*\{[\s\S]*?grid-template-columns:\s*repeat\(auto-fit,\s*minmax\(180px,\s*1fr\)\)/,
   );
   assert.match(strip, /@media \(max-width: 900px\) \{\s*\.usage-strip-body\s*\{\s*grid-template-columns: 1fr;/);
   assert.doesNotMatch(card, /class="account-lifecycle"|\.account-lifecycle\s*\{/);
@@ -238,6 +243,7 @@ test("normalizes manually entered percentages to the supported range and precisi
   assert.equal(normalizeUsagePercent(42.56), 42.6);
   assert.equal(normalizeUsagePercent(101), 100);
   assert.equal(usagePercentFromCost(6, 12), 50);
+  assert.equal(usagePercentFromCost(180, 100), 100);
 });
 
 test("accounts page surfaces official sync last-success and retry state beyond button loading", async () => {
@@ -254,7 +260,7 @@ test("accounts page surfaces official sync last-success and retry state beyond b
   assert.match(display, /上次官方同步: \{time\}/);
   assert.match(display, /尚未官方同步/);
   assert.match(display, /刷新额度冷却中，请于 \{time\} 后重试/);
-  assert.match(card, /!isOllamaCloud && isUsageRefreshBlocked\(account, now\)/);
+  assert.match(card, /\(!isOfficialCn && isUsageRefreshBlocked\(account, now\)\)/);
 });
 
 test("usage refresh preserves dirty drafts unless a real 429 reset that window", () => {

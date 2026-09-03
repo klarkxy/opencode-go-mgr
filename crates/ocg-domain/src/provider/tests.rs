@@ -194,6 +194,7 @@ fn catalog_hardcodes_providers_and_keeps_unverified_providers_unroutable() {
         COMMAND_CODE_PROVIDER_ID,
         MINIMAX_PROVIDER_ID,
         KIMI_PROVIDER_ID,
+        OLLAMA_PROVIDER_ID,
     ] {
         let plan = builtin_provider(provider_id).unwrap();
         assert!(
@@ -209,6 +210,40 @@ fn catalog_hardcodes_providers_and_keeps_unverified_providers_unroutable() {
             .iter()
             .any(|field| field.id == "purchase_date")
     );
+}
+
+#[test]
+fn ollama_cloud_exposes_priced_local_month_credits_and_billing_form() {
+    let plan = builtin_provider(OLLAMA_PROVIDER_ID).unwrap();
+    assert_eq!(plan.pricing_availability, "available");
+    assert_eq!(plan.usage_availability, "local_state");
+    assert!(plan.manual_usage_calibration);
+    assert_eq!(plan.quota_unit, "usd_credits");
+    assert!(
+        plan.form_fields
+            .iter()
+            .any(|field| field.id == "ollama_billing_tier" && field.required)
+    );
+    assert!(
+        plan.form_fields
+            .iter()
+            .any(|field| field.id == "purchase_date" && field.required)
+    );
+    let capabilities = ProviderRegistry::get(OLLAMA_PROVIDER_ID).unwrap();
+    assert!(!capabilities.card_actions.usage_refresh);
+    assert!(capabilities.card_actions.manual_usage_calibration);
+    assert!(capabilities.usage.manual_calibration);
+    assert_eq!(OllamaBillingTier::Pro.monthly_credit_limit(), 60.0);
+    assert_eq!(OllamaBillingTier::Max.monthly_credit_limit(), 300.0);
+    assert_eq!(OllamaBillingTier::Team.monthly_credit_limit(), 1000.0);
+    assert!(OllamaBillingTier::Pro.requires_purchase_date());
+    assert_eq!(
+        OllamaBillingTier::parse("pro").unwrap(),
+        OllamaBillingTier::Pro
+    );
+    assert!(OllamaBillingTier::parse("free").is_err());
+    assert!(OllamaBillingTier::parse("unconfigured").is_err());
+    assert!(OllamaBillingTier::parse("starter").is_err());
 }
 
 #[test]
@@ -515,7 +550,9 @@ fn adapter_descriptors_preserve_current_capability_decisions() {
     assert_eq!(ollama.protocol_probe.fallback_priority, &CHAT_PROTOCOLS);
     assert_eq!(ollama.usage.contract, UsageContractKind::LocalState);
     assert!(ollama.usage.publishes_capability);
-    assert!(ollama.card_actions.usage_refresh);
+    assert!(ollama.usage.manual_calibration);
+    assert!(!ollama.card_actions.usage_refresh);
+    assert!(ollama.card_actions.manual_usage_calibration);
     assert!(ollama.card_actions.catalog_refresh);
     assert!(ollama.card_actions.persisted_enable_allowed);
     assert!(!ollama.card_actions.protocol_probe);

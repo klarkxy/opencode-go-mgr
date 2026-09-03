@@ -119,6 +119,8 @@ struct PortableAccount {
     connection_verified_at: Option<String>,
     custom_config: Option<PortableCustomConfig>,
     model_capabilities: Vec<PortableModelCapability>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    ollama_billing_tier: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -235,6 +237,7 @@ impl Zeroize for PortableAccount {
         self.connection_verified_at.zeroize();
         self.custom_config.zeroize();
         self.model_capabilities.zeroize();
+        self.ollama_billing_tier.zeroize();
     }
 }
 
@@ -341,6 +344,7 @@ struct ValidatedAccount {
     connection_verified_at: Option<DateTime<Utc>>,
     custom_config: Option<AccountCustomConfigInput>,
     capabilities: Vec<AccountModelCapabilityInput>,
+    ollama_billing_tier: Option<crate::provider::OllamaBillingTier>,
 }
 
 #[derive(Debug)]
@@ -560,6 +564,7 @@ async fn import_accounts_inner(
             capabilities: account.capabilities.clone(),
             verification_status: account.verification_status,
             connection_verified_at: account.connection_verified_at,
+            ollama_billing_tier: account.ollama_billing_tier,
         });
         items.push(preview_item(
             &account,
@@ -669,7 +674,13 @@ fn export_payload(state: &CoreState) -> Result<(PortablePayload, u64, u64), Tran
                 let contract = db
                     .load_account_contract(&account.id)
                     .map_err(|_| TransferError::Internal)?;
-                Ok((account, contract))
+                let ollama_billing = if account.provider_id == crate::provider::OLLAMA_PROVIDER_ID {
+                    db.ollama_cloud_billing_tier(&account.id)
+                        .map_err(|_| TransferError::Internal)?
+                } else {
+                    None
+                };
+                Ok((account, contract, ollama_billing))
             })
             .collect::<Result<Vec<_>, TransferError>>()?;
         let sub_keys = db
@@ -684,7 +695,7 @@ fn export_payload(state: &CoreState) -> Result<(PortablePayload, u64, u64), Tran
     let mut account_order = Vec::new();
     let mut skipped = 0_u64;
     let mut zen_enabled = false;
-    for (account, contract) in snapshots {
+    for (account, contract, ollama_billing) in snapshots {
         if account.id == crate::provider::CPA_ACCOUNT_ID {
             continue;
         }
@@ -757,6 +768,7 @@ fn export_payload(state: &CoreState) -> Result<(PortablePayload, u64, u64), Tran
                 .map(|value| value.to_rfc3339()),
             custom_config,
             model_capabilities,
+            ollama_billing_tier: ollama_billing.map(|tier| tier.as_str().to_string()),
         });
     }
     if accounts.len() > MAX_ACCOUNTS {
@@ -1083,6 +1095,30 @@ fn validate_payload(payload: PortablePayload) -> Result<ValidatedMigration, Tran
                 TransferError::Invalid(format!("{} has an invalid purchase date", prefix()))
             })?
         };
+        let ollama_billing_tier = match account.ollama_billing_tier.as_deref() {
+            None | Some("") => None,
+            Some(value) => {
+                if account.provider_id != crate::provider::OLLAMA_PROVIDER_ID {
+                    return Err(TransferError::Invalid(format!(
+                        "{} has an Ollama billing tier on a non-Ollama account",
+                        prefix()
+                    )));
+                }
+                let tier = crate::provider::OllamaBillingTier::parse(value).map_err(|_| {
+                    TransferError::Invalid(format!(
+                        "{} has an invalid Ollama billing tier",
+                        prefix()
+                    ))
+                })?;
+                if tier.requires_purchase_date() && purchase_date.is_empty() {
+                    return Err(TransferError::Invalid(format!(
+                        "{} is a paid Ollama tier and requires a purchase date",
+                        prefix()
+                    )));
+                }
+                Some(tier)
+            }
+        };
         let notes = match account.notes.as_deref() {
             Some(value) if value.chars().count() > MAX_NOTES_CHARS => {
                 return Err(TransferError::Invalid(format!(
@@ -1259,6 +1295,7 @@ fn validate_payload(payload: PortablePayload) -> Result<ValidatedMigration, Tran
             connection_verified_at,
             custom_config,
             capabilities,
+            ollama_billing_tier,
         });
     }
     let node = payload
@@ -1702,6 +1739,7 @@ mod tests {
             connection_verified_at: None,
             custom_config: None,
             model_capabilities: Vec::new(),
+            ollama_billing_tier: None,
         }
     }
 
@@ -1738,6 +1776,7 @@ mod tests {
                 upstream_protocol: "chat_completions".to_string(),
             }),
             model_capabilities: Vec::new(),
+            ollama_billing_tier: None,
         }
     }
 
@@ -1893,6 +1932,7 @@ mod tests {
             connection_verified_at: None,
             custom_config: None,
             model_capabilities: Vec::new(),
+            ollama_billing_tier: None,
         });
         let bundle = encrypt_payload(&payload, "correct horse battery").unwrap();
         assert!(matches!(

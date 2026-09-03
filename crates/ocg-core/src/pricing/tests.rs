@@ -1,16 +1,16 @@
 use super::{
-    GOAT_SOURCE_URL, ProviderCostEstimate, ProviderCostState, ProviderPricingEvidence,
-    ProviderPricingSnapshot, ProviderPricingValue, ProviderScopedPricingSnapshot, embedded_seed,
-    ensure_current_adjustment_policy, ensure_seed_model_coverage, fetch_goat_pricing_snapshot,
-    fetch_official_snapshot, latest_provider_pricing_snapshot,
-    legacy_policy_needs_multiplier_repair, parse_goat_html, parse_official_html,
-    prepare_provider_multiplier_update, provider_pricing_capability, quota_multiplier,
-    store_provider_pricing_snapshot,
+    GOAT_SOURCE_URL, OLLAMA_SOURCE_URL, ProviderCostEstimate, ProviderCostState,
+    ProviderPricingEvidence, ProviderPricingSnapshot, ProviderPricingValue,
+    ProviderScopedPricingSnapshot, embedded_seed, ensure_current_adjustment_policy,
+    ensure_seed_model_coverage, fetch_goat_pricing_snapshot, fetch_official_snapshot,
+    latest_provider_pricing_snapshot, legacy_policy_needs_multiplier_repair, parse_goat_html,
+    parse_official_html, parse_ollama_html, prepare_provider_multiplier_update,
+    provider_pricing_capability, quota_multiplier, store_provider_pricing_snapshot,
 };
 use chrono::{DateTime, Utc};
 
 use crate::db::Database;
-use crate::provider::COMMAND_CODE_PROVIDER_ID;
+use crate::provider::{COMMAND_CODE_PROVIDER_ID, OLLAMA_PROVIDER_ID};
 
 #[test]
 fn seed_coverage_backfills_missing_models_and_prices_them() {
@@ -966,4 +966,106 @@ async fn live_goat_document_still_materializes_peak_and_off_peak_rows() {
             .iter()
             .any(|value| value.time_window() == super::PricingTimeWindow::OffPeak)
     );
+}
+
+const OLLAMA_PRICING_HTML: &str = r#"
+<table>
+  <tr><th>Model</th><th>Input</th><th>Cached input</th><th>Output</th></tr>
+  <tr><td>glm-5.3-flash</td><td>$0.15</td><td>$0.03</td><td>$0.50</td></tr>
+  <tr><td>gpt-oss:20b</td><td>$0.07</td><td>$0.035</td><td>$0.30</td></tr>
+  <tr><td>gpt-oss:120b</td><td>$0.15</td><td>$0.014</td><td>$0.60</td></tr>
+</table>
+"#;
+
+#[test]
+fn ollama_parser_reads_official_table_and_pins_multiplier_to_one() {
+    let snapshot = parse_ollama_html(OLLAMA_PRICING_HTML).unwrap();
+    assert_eq!(snapshot.provider_id(), OLLAMA_PROVIDER_ID);
+    assert_eq!(snapshot.source_url(), OLLAMA_SOURCE_URL);
+    assert_eq!(snapshot.values().len(), 3);
+    let flash = snapshot
+        .values()
+        .iter()
+        .find(|value| value.model_id() == "glm-5.3-flash")
+        .unwrap();
+    assert_eq!(flash.input_per_million(), Some(0.15));
+    assert_eq!(flash.cache_read_per_million(), Some(0.03));
+    assert_eq!(flash.output_per_million(), Some(0.50));
+    assert_eq!(flash.cache_write_per_million(), None);
+    assert_eq!(flash.quota_multiplier(), Some(1.0));
+    assert_eq!(flash.paid_plan_price(), None);
+}
+
+#[test]
+fn ollama_estimate_matches_runtime_tags_and_uses_cached_price_only_when_reported() {
+    let snapshot = parse_ollama_html(OLLAMA_PRICING_HTML).unwrap();
+    let at = DateTime::parse_from_rfc3339("2026-09-01T00:00:00Z")
+        .unwrap()
+        .with_timezone(&Utc);
+    let exact = snapshot.estimate("glm-5.3-flash", 1_000_000, 1_000_000, 0, 0, at);
+    assert_eq!(exact.cost_state, "priced");
+    assert_eq!(exact.raw_cost_usd, Some(0.15 + 0.50));
+    assert_eq!(exact.quota_debit, exact.raw_cost_usd);
+    assert_eq!(exact.cost, exact.raw_cost_usd);
+    assert_eq!(exact.effective_paid_cost_usd, None);
+    assert_eq!(exact.quota_multiplier, Some(1.0));
+
+    let tagged = snapshot.estimate("glm-5.3-flash:cloud", 1_000_000, 0, 0, 0, at);
+    assert_eq!(tagged.raw_cost_usd, Some(0.15));
+    let dated = snapshot.estimate("glm-5.3-flash:0915", 1_000_000, 0, 0, 0, at);
+    assert_eq!(dated.raw_cost_usd, Some(0.15));
+
+    let cached = snapshot.estimate("glm-5.3-flash", 1_000_000, 0, 400_000, 0, at);
+    assert_eq!(cached.raw_cost_usd, Some(0.15 * 0.6 + 0.03 * 0.4));
+
+    let cache_create = snapshot.estimate("glm-5.3-flash", 1_000_000, 0, 0, 200_000, at);
+    assert_eq!(cache_create.raw_cost_usd, Some(0.15));
+
+    assert_eq!(
+        snapshot.estimate("gpt-oss", 1_000, 0, 0, 0, at).cost_state,
+        "unpriced"
+    );
+    assert_eq!(
+        snapshot
+            .estimate("unknown-model:cloud", 1_000, 0, 0, 0, at)
+            .cost_state,
+        "unpriced"
+    );
+    let oss = snapshot.estimate("gpt-oss:20b:cloud", 1_000_000, 0, 0, 0, at);
+    assert_eq!(oss.raw_cost_usd, Some(0.07));
+}
+
+#[test]
+fn ollama_parser_rejects_missing_empty_duplicate_and_incomplete_tables() {
+    assert!(parse_ollama_html("<html><body>no table</body></html>").is_err());
+    assert!(
+        parse_ollama_html(
+            r#"<table><tr><th>Model</th><th>Input</th><th>Cached input</th><th>Output</th></tr></table>"#
+        )
+        .is_err()
+    );
+    assert!(
+        parse_ollama_html(
+            r#"<table><tr><th>Model</th><th>Input</th><th>Cached input</th><th>Output</th></tr>
+           <tr><td>duplicate</td><td>$0.1</td><td>$0.05</td><td>$0.2</td></tr>
+           <tr><td>duplicate</td><td>$0.1</td><td>$0.05</td><td>$0.2</td></tr></table>"#
+        )
+        .is_err()
+    );
+    assert!(
+        parse_ollama_html(
+            r#"<table><tr><th>Model</th><th>Input</th><th>Cached input</th><th>Output</th></tr>
+           <tr><td>only-one</td><td>$0.1</td></tr></table>"#
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn ollama_manual_pricing_refresh_uses_the_verified_official_source() {
+    let capability = provider_pricing_capability(OLLAMA_PROVIDER_ID).unwrap();
+    assert_eq!(capability.evidence, ProviderPricingEvidence::Verified);
+    assert!(!capability.experimental);
+    assert_eq!(capability.source_url, Some(OLLAMA_SOURCE_URL));
+    assert!(capability.manual_refresh_available);
 }

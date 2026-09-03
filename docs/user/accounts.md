@@ -23,7 +23,13 @@ expose one singleton account and reject a second. Command Code exposes no machin
 endpoint, so GOAT cards show a clearly labelled local estimate: priced OCG
 request logs accumulate against the public `$14 / $35 / $70` windows. Traffic
 outside OCG and unpriced rows are not included; manual calibration can correct
-the displayed baseline.
+the displayed baseline. Ollama Cloud likewise has no official usage API in
+this product: paid cards (Pro / Max / Team) show one monthly USD-Credits
+window from locally priced request logs against `$60 / $300 / $1000`. The
+meter is a soft estimate — used credit may exceed the limit, the bar clamps
+at 100%, and fullness never writes cooldown or changes routing. New accounts
+must choose Pro, Max, or Team plus a purchase date. Existing accounts with
+no billing row stay unconfigured until edited and remain routeable.
 
 The Adapter Registry is sealed. Built-in Provider families are:
 
@@ -34,7 +40,7 @@ The Adapter Registry is sealed. Built-in Provider families are:
 | Command Code GOAT | `command-code` | Yes | Public Provider catalog; GOAT preset models default on, additional models default off in the Providers matrix; no account-level GOAT/All or Max mode |
 | MiniMax CN Token Plan | `minimax` | Yes | Dedicated `sk-cp` Key; fixed official Chat and Messages routes, authenticated model directory, and manual official Token Plan usage refresh |
 | Kimi Code CN | `kimi` | Yes | Dedicated Kimi Code Key; fixed official Chat and Messages routes, authenticated model directory, and manual official weekly/rate-window usage refresh |
-| Ollama Cloud | `ollama` | Yes | Fixed-origin Chat Completions only (`https://ollama.com`, Bearer); public keyless catalog refresh; optional account web-session Cookie for a manual usage scrape of `https://ollama.com/settings`; unpriced |
+| Ollama Cloud | `ollama` | Yes | Fixed-origin Chat Completions only (`https://ollama.com`, Bearer); public keyless catalog refresh; account billing tier (Pro $60 / Max $300 / Team $1000 USD Credits per billing month) plus purchase date; local monthly soft-credit estimate from official per-request usage and the manual `https://ollama.com/pricing` table; unconfigured existing accounts stay routeable with no meter |
 | Custom API | `custom` | Yes | Trusted-administrator destination; one API URL, one account-wide upstream protocol, and public-name → upstream-ID mappings per account; common base URLs are completed automatically; new accounts default on; eligible public names appear on `/v1/models`; unpriced/unknown cost, no quota debit |
 
 ## Move a node configuration

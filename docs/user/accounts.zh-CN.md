@@ -9,7 +9,7 @@ Free 按出口 IP 共享额度与冷却，Custom API 不做供应商额度核算
 / 冷却状态。账号卡刻意不展示供应商合约与协议细节。本地目录、协议探测、按模型协议覆盖、用户定义供应商的 Endpoint/协议/映射，以及范围内价格都在
 **供应商** 页，不在这里。用户定义供应商账号只保存 Key（鉴权需要时）、备注、启停和运行时状态。Custom API 是例外：该账号仍拥有 Endpoint、协议和模型映射。无鉴权用户定义供应商只暴露一张单例账号，并拒绝第二张。Command Code 没有可机读的账号用量端点，因此 GOAT 卡片显示的是明确标注的本地估算：
 OCG 内已定价请求日志按公开的 `$14 / $35 / $70` 三个窗口累计。其他客户端流量与未定价日志不会计入，
-可通过手工校准修正显示基线。
+可通过手工校准修正显示基线。Ollama Cloud 同样没有官方用量 API：付费档（Pro / Max / Team）把 OCG 内已定价请求日志投影到每月 `$60 / $300 / $1000` USD Credits 软额度；实际已用可以超过软上限，进度条只把显示钳在 100%，满了也不会写冷却或改变路由。新建账号必须选择 Pro / Max / Team 并填写购买日期。既有无计费行的账号保持未配置且仍可路由，直到编辑档位。
 
 适配器注册表是静态密封的。内置 Provider 家族如下：
 
@@ -20,7 +20,7 @@ OCG 内已定价请求日志按公开的 `$14 / $35 / $70` 三个窗口累计。
 | Command Code GOAT | `command-code` | 是 | 使用公开的供应商目录；GOAT 预设模型默认开启，额外模型在供应商矩阵中默认关闭；没有账号级 GOAT/全部或 Max 模式 |
 | MiniMax CN Token Plan | `minimax` | 是 | 使用独立 `sk-cp` Key；固定官方 Chat 与 Messages 路由、鉴权模型目录与手工官方 Token Plan 用量刷新 |
 | Kimi Code CN | `kimi` | 是 | 使用独立 Kimi Code Key；固定官方 Chat 与 Messages 路由、鉴权模型目录与手工官方周额度/限频窗口刷新 |
-| Ollama Cloud | `ollama` | 是 | 固定源、仅 Chat Completions（`https://ollama.com`，Bearer）；公开无鉴权目录刷新；账号级可选网页会话 Cookie，用于手动抓取 `https://ollama.com/settings` 用量页；unpriced |
+| Ollama Cloud | `ollama` | 是 | 固定源、仅 Chat Completions（`https://ollama.com`，Bearer）；公开无鉴权目录刷新；账号计费档位（Pro $60 / Max $300 / Team $1000 每月 USD Credits）及购买日期；按官方每请求用量与手动刷新的 `https://ollama.com/pricing` 表做本月软额度估算；未配置档位的既有账号仍可路由且无进度条 |
 | Custom API | `custom` | 是 | 受信管理员目的地；每张账号卡保存一个 API 地址、一个账号级上游协议，以及多条公开名称 → 上游 ID 映射；常见基址会自动补全；新建账号默认启用；合格公开名称会出现在 `/v1/models`；费用 unpriced/unknown，不扣额度 |
 
 ## 在节点之间迁移配置

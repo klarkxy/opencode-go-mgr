@@ -381,6 +381,7 @@ fn account_response_emits_nulls_and_never_carries_secrets() {
         plan_routable: true,
         custom_config: None,
         model_capabilities: Vec::new(),
+        ollama_billing_tier: None,
     };
     let value = serde_json::to_value(&account).unwrap();
     let object = value.as_object().unwrap();
@@ -1039,7 +1040,8 @@ fn catalog_type_names_keep_accounts_prefix_and_register_provider_dtos() {
             "verificationError",
             "planRoutable",
             "customConfig",
-            "modelCapabilities"
+            "modelCapabilities",
+            "ollamaBillingTier"
         ])
     );
 }
@@ -1800,14 +1802,7 @@ const DYNAMIC_PROVIDER_CATALOG_TYPES: &[&str] = &[
     "DynamicProviderTestRequest",
     "DynamicProviderTestResponse",
 ];
-const OLLAMA_USAGE_CATALOG_TYPES: &[&str] = &[
-    "OllamaUsageStatus",
-    "OllamaUsageSnapshot",
-    "OllamaUsageWindow",
-    "OllamaUsageModelRequests",
-    "OllamaCookieUpdate",
-    "OllamaUsageThrottleError",
-];
+const OLLAMA_USAGE_CATALOG_TYPES: &[&str] = &["OllamaBillingTier"];
 
 #[test]
 fn catalog_type_names_append_pricing_dtos_after_the_provider_prefix() {
