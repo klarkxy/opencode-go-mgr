@@ -67,8 +67,17 @@ impl CpaRuntimeProcessHost for WindowsCpaRuntimeHost {
         let Some(session) = self.session.lock().take() else {
             return Ok(());
         };
-        *self.last_logs.lock() = session.stop();
-        Ok(())
+        let snapshot = session.logs();
+        match session.stop() {
+            Ok(logs) => {
+                *self.last_logs.lock() = logs;
+                Ok(())
+            }
+            Err(error) => {
+                *self.last_logs.lock() = snapshot;
+                Err(error)
+            }
+        }
     }
 
     fn owned_running(&self) -> bool {
@@ -131,22 +140,60 @@ impl OwnedSession {
         }
     }
 
-    fn stop(mut self) -> CpaRuntimeLogTail {
-        self.job.terminate();
-        unsafe {
-            windows_sys::Win32::System::Threading::WaitForSingleObject(self.process.0, 5_000);
+    fn stop(mut self) -> Result<CpaRuntimeLogTail, CpaRuntimeError> {
+        let terminated = self.job.terminate();
+        let terminate_error = std::io::Error::last_os_error();
+        let wait_result = unsafe {
+            windows_sys::Win32::System::Threading::WaitForSingleObject(self.process.0, 5_000)
+        };
+        let wait_error = std::io::Error::last_os_error();
+        match decide_owned_stop(terminated, wait_result) {
+            OwnedStopDecision::JoinReaders => {
+                for reader in self.readers.drain(..) {
+                    let _ = reader.join();
+                }
+                Ok(self.logs())
+            }
+            OwnedStopDecision::TerminateFailed => Err(CpaRuntimeError::Failed(format!(
+                "failed to terminate owned CPA: {terminate_error}"
+            ))),
+            OwnedStopDecision::WaitTimedOut => Err(CpaRuntimeError::Failed(
+                "owned CPA did not exit within 5 seconds".into(),
+            )),
+            OwnedStopDecision::WaitFailed => Err(CpaRuntimeError::Failed(format!(
+                "failed to wait for owned CPA: {wait_error}"
+            ))),
         }
-        for reader in self.readers.drain(..) {
-            let _ = reader.join();
-        }
-        self.logs()
+    }
+}
+
+#[cfg(windows)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OwnedStopDecision {
+    JoinReaders,
+    TerminateFailed,
+    WaitTimedOut,
+    WaitFailed,
+}
+
+#[cfg(windows)]
+fn decide_owned_stop(terminated: bool, wait_result: u32) -> OwnedStopDecision {
+    use windows_sys::Win32::Foundation::{WAIT_OBJECT_0, WAIT_TIMEOUT};
+    if !terminated {
+        OwnedStopDecision::TerminateFailed
+    } else if wait_result == WAIT_OBJECT_0 {
+        OwnedStopDecision::JoinReaders
+    } else if wait_result == WAIT_TIMEOUT {
+        OwnedStopDecision::WaitTimedOut
+    } else {
+        OwnedStopDecision::WaitFailed
     }
 }
 
 #[cfg(windows)]
 impl Drop for OwnedSession {
     fn drop(&mut self) {
-        self.job.terminate();
+        let _ = self.job.terminate();
     }
 }
 
@@ -262,7 +309,7 @@ fn spawn_process(
     let stdout_reader = spawn_reader(stdout_read, stdout.clone(), secrets.clone());
     let stderr_reader = spawn_reader(stderr_read, stderr.clone(), secrets.clone());
     if unsafe { ResumeThread(thread.0) } == u32::MAX {
-        job.terminate();
+        let _ = job.terminate();
         wait_for_process(&process);
         return Err(CpaRuntimeError::Failed(format!(
             "failed to resume CPA: {}",
@@ -529,10 +576,8 @@ impl JobObject {
         Ok(())
     }
 
-    fn terminate(&self) {
-        unsafe {
-            windows_sys::Win32::System::JobObjects::TerminateJobObject(self.0, 1);
-        }
+    fn terminate(&self) -> bool {
+        unsafe { windows_sys::Win32::System::JobObjects::TerminateJobObject(self.0, 1) != 0 }
     }
 }
 

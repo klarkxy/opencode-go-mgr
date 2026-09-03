@@ -11,7 +11,7 @@
     { "id": "core", "type": "backend", "label": "ocg-core :9042", "sublabel": "单一进程 / one process", "pos": [260, 270], "size": [170, 72] },
     { "id": "dashboard", "type": "frontend", "label": "Dashboard V3", "sublabel": "控制面 / control plane", "pos": [480, 100], "size": [170, 72] },
     { "id": "clients", "type": "external", "label": "AI Clients", "sublabel": "Key + Alias / model", "pos": [480, 420], "size": [170, 72] },
-    { "id": "sqlite", "type": "database", "label": "SQLite schema v35", "sublabel": "状态与日志 / state + logs", "pos": [720, 100], "size": [180, 72] },
+    { "id": "sqlite", "type": "database", "label": "SQLite schema v37", "sublabel": "状态与日志 / state + logs", "pos": [720, 100], "size": [180, 72] },
     { "id": "gateway", "type": "backend", "label": "Gateway execution", "sublabel": "解析、选择、转换 / resolve + select + convert", "pos": [710, 420], "size": [190, 72] },
     { "id": "account", "type": "security", "label": "Provider Account", "sublabel": "账号凭据 / account credential", "pos": [940, 420], "size": [150, 72] },
     { "id": "upstream", "type": "cloud", "label": "Upstream API", "sublabel": "选定上游 / selected upstream", "pos": [940, 560], "size": [150, 72] }

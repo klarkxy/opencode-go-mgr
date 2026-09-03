@@ -89,6 +89,31 @@ async fn chat_completion(harness: &V3Harness, model: &str) -> (StatusCode, Strin
     (response.status(), response.text().await.unwrap())
 }
 
+async fn listed_gateway_model_ids(harness: &V3Harness) -> Vec<String> {
+    let models = harness
+        .client
+        .get(format!(
+            "http://127.0.0.1:{}/v1/models",
+            harness.handle.port
+        ))
+        .header(
+            reqwest::header::AUTHORIZATION,
+            format!("Bearer {}", harness.state.config().gateway_key),
+        )
+        .send()
+        .await
+        .unwrap()
+        .json::<Value>()
+        .await
+        .unwrap();
+    models["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|item| item["id"].as_str().map(str::to_string))
+        .collect()
+}
+
 #[tokio::test]
 async fn create_patch_delete_and_cas_conflict() {
     let harness = start_loopback("dyn-cas").await;
@@ -352,6 +377,86 @@ async fn raw_ambiguity_makes_zero_outbound_requests() {
     let parsed: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
     assert_eq!(parsed["error"]["type"], "ambiguous_model_id", "{body}");
     assert!(calls.lock().expect("fake call log").is_empty());
+    let ids = listed_gateway_model_ids(&harness).await;
+    assert!(
+        !ids.iter().any(|id| id == "shared/raw"),
+        "ambiguous raw id must stay unpublished: {ids:?}"
+    );
+    harness.stop();
+}
+
+#[tokio::test]
+async fn raw_shaped_public_models_are_listed_under_public_name_only() {
+    let mut replies = HashMap::new();
+    replies.insert(
+        "sk-lab".to_string(),
+        VecDeque::from([FakeReply {
+            status: 200,
+            body: CHAT_OK,
+        }]),
+    );
+    let (upstream, calls, _stop) = start_fake_upstream(replies).await;
+    let harness = start_loopback("dyn-raw-public").await;
+    let mut config = harness.state.config();
+    config.proxy_mode = ProxyMode::Direct;
+    harness.state.set_config(config).unwrap();
+    let (status, created) = send_json(
+        &harness,
+        Method::POST,
+        "/providers",
+        &cas(
+            &harness,
+            json!({
+                "name": "RawLab",
+                "endpointUrl": format!("{upstream}/v1"),
+                "upstreamProtocol": "chat_completions",
+                "authKind": "bearer",
+                "key": "sk-lab",
+                "models": [
+                    {"publicModel": "org/same", "upstreamModel": "org/same"},
+                    {"publicModel": "org/public", "upstreamModel": "vendor/real"},
+                    {"publicModel": "lab_model", "upstreamModel": "vendor/lab"},
+                    {"publicModel": "lab model", "upstreamModel": "vendor/space"}
+                ]
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+
+    let ids = listed_gateway_model_ids(&harness).await;
+    for public in ["org/same", "org/public", "lab_model", "lab model"] {
+        assert_eq!(
+            ids.iter().filter(|id| **id == public).count(),
+            1,
+            "{public} missing or duplicated in {ids:?}"
+        );
+    }
+    for leaked in ["vendor/real", "vendor/lab", "vendor/space"] {
+        assert!(
+            !ids.iter().any(|id| id == leaked),
+            "differing upstream leaked into /v1/models: {leaked} in {ids:?}"
+        );
+    }
+
+    let (status, body) = chat_completion(&harness, "org/public").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let outbound = calls.lock().expect("fake call log");
+    assert_eq!(outbound.len(), 1, "{outbound:?}");
+    assert!(
+        outbound[0].body.contains("\"model\":\"vendor/real\""),
+        "public!=upstream must forward the exact upstream id: {}",
+        outbound[0].body
+    );
+    assert!(
+        !outbound[0].body.contains("\"model\":\"org/public\""),
+        "public name must not replace the upstream id: {}",
+        outbound[0].body
+    );
+    drop(outbound);
+
+    let (status, same_body) = chat_completion(&harness, "org/same").await;
+    assert_eq!(status, StatusCode::OK, "{same_body}");
     harness.stop();
 }
 
@@ -686,6 +791,99 @@ async fn none_to_keyed_requires_replacement_key() {
         .find(|account| account.provider_id == provider_id)
         .unwrap();
     assert!(!account.key_cipher.is_empty());
+    harness.stop();
+}
+
+#[tokio::test]
+async fn keyed_provider_update_rejects_key_and_does_not_fan_out() {
+    let harness = start_loopback("dyn-no-key-fanout").await;
+    let (status, created) = send_json(
+        &harness,
+        Method::POST,
+        "/providers",
+        &cas(
+            &harness,
+            create_body(
+                "Keys",
+                "http://127.0.0.1:9",
+                "chat_completions",
+                "bearer",
+                Some("sk-first"),
+            ),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    let provider_id = created["provider"]["id"].as_str().unwrap().to_string();
+    let (status, second) = send_json(
+        &harness,
+        Method::POST,
+        "/accounts",
+        &cas(
+            &harness,
+            json!({
+                "name": "second",
+                "providerId": provider_id,
+                "key": "sk-second"
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{second}");
+    let before = harness
+        .state
+        .db
+        .lock()
+        .list_accounts()
+        .unwrap()
+        .into_iter()
+        .filter(|account| account.provider_id == provider_id)
+        .map(|account| (account.id, account.key_cipher))
+        .collect::<Vec<_>>();
+    assert_eq!(before.len(), 2);
+    let revision = harness.state.settings_revision();
+    let (status, rejected) = send_json(
+        &harness,
+        Method::PATCH,
+        &format!("/providers/{provider_id}"),
+        &cas(
+            &harness,
+            json!({
+                "name": "Keys",
+                "endpointUrl": "http://127.0.0.1:9",
+                "upstreamProtocol": "chat_completions",
+                "authKind": "bearer",
+                "key": "sk-fanout",
+                "models": [{"publicModel": "lab-opus", "upstreamModel": "vendor/opus"}]
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{rejected}");
+    assert!(
+        rejected["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("Accounts"),
+        "{rejected}"
+    );
+    assert_eq!(harness.state.settings_revision(), revision);
+    let after = harness
+        .state
+        .db
+        .lock()
+        .list_accounts()
+        .unwrap()
+        .into_iter()
+        .filter(|account| account.provider_id == provider_id)
+        .map(|account| (account.id, account.key_cipher))
+        .collect::<Vec<_>>();
+    assert_eq!(after, before);
+    let first = harness.state.decrypt_key(&before[0].1).unwrap();
+    let second_key = harness.state.decrypt_key(&before[1].1).unwrap();
+    assert_ne!(first, second_key);
+    assert!(first == "sk-first" || second_key == "sk-first");
+    assert!(first == "sk-second" || second_key == "sk-second");
     harness.stop();
 }
 

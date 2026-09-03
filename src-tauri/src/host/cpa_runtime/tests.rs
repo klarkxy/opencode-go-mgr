@@ -58,7 +58,49 @@ fn owned_cmd_process_is_job_contained_and_stoppable() {
     )
     .expect("cmd ping should start");
     assert!(session.is_running());
-    let _ = session.stop();
+    session
+        .stop()
+        .expect("owned cmd should exit after TerminateJobObject");
+}
+
+#[cfg(windows)]
+#[test]
+fn owned_stop_joins_readers_after_confirmed_exit() {
+    use windows_sys::Win32::Foundation::WAIT_OBJECT_0;
+    assert_eq!(
+        decide_owned_stop(true, WAIT_OBJECT_0),
+        OwnedStopDecision::JoinReaders
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn owned_stop_detaches_when_terminate_fails() {
+    use windows_sys::Win32::Foundation::WAIT_OBJECT_0;
+    assert_eq!(
+        decide_owned_stop(false, WAIT_OBJECT_0),
+        OwnedStopDecision::TerminateFailed
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn owned_stop_detaches_when_wait_times_out() {
+    use windows_sys::Win32::Foundation::WAIT_TIMEOUT;
+    assert_eq!(
+        decide_owned_stop(true, WAIT_TIMEOUT),
+        OwnedStopDecision::WaitTimedOut
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn owned_stop_detaches_when_wait_fails() {
+    use windows_sys::Win32::Foundation::WAIT_FAILED;
+    assert_eq!(
+        decide_owned_stop(true, WAIT_FAILED),
+        OwnedStopDecision::WaitFailed
+    );
 }
 
 #[cfg(windows)]

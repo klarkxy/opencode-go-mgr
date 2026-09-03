@@ -332,11 +332,35 @@ fn published_alias_models_response(state: &CoreState) -> axum::response::Respons
             }));
         }
     }
+    for catalog in &extra {
+        for (public_model, _upstream_model) in &catalog.mappings {
+            if published_model_ids_contain(&data, public_model) {
+                continue;
+            }
+            if !model_has_enabled_protocol(public_model, catalogs, &contracts, &dynamics) {
+                continue;
+            }
+            data.push(serde_json::json!({
+                "id": public_model,
+                "object": "model",
+                "created": 0,
+                "owned_by": catalog.provider_id
+            }));
+        }
+    }
     axum::Json(serde_json::json!({
         "object": "list",
         "data": data
     }))
     .into_response()
+}
+
+fn published_model_ids_contain(data: &[serde_json::Value], id: &str) -> bool {
+    data.iter().any(|item| {
+        item.get("id")
+            .and_then(|value| value.as_str())
+            .is_some_and(|existing| crate::custom::custom_model_id_matches(existing, id))
+    })
 }
 
 fn published_alias_has_enabled_protocol(

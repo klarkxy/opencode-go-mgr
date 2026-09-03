@@ -7768,6 +7768,126 @@ fn dynamic_provider_patch_fault_rolls_back_mappings_and_runtime_state() {
 }
 
 #[test]
+fn replace_dynamic_provider_refuses_to_fan_out_a_replacement_key() {
+    let dir = temp_data_dir("dyn-no-fanout");
+    let db = open_with_host_cipher(dir.clone()).unwrap();
+    let now = Utc::now();
+    let provider_id = uuid::Uuid::new_v4().to_string();
+    let runtime = crate::dynamic::DynamicProviderRuntime {
+        id: provider_id.clone(),
+        name: "Fanout".into(),
+        endpoint_url: "http://127.0.0.1:9".into(),
+        upstream_protocol: crate::provider::UpstreamProtocolKind::ChatCompletions,
+        auth_kind: ocg_domain::dynamic::DynamicAuthKind::Bearer,
+        mappings: vec![ocg_domain::dynamic::DynamicModelMapping {
+            public_model: "lab-opus".into(),
+            upstream_model: "vendor/opus".into(),
+        }],
+        created_at: now,
+        updated_at: now,
+    };
+    let mut first = account("dyn-fanout-1");
+    first.provider_id = provider_id.clone();
+    first.key_cipher = fixture_account_key_cipher();
+    db.create_dynamic_provider(&runtime, &first).unwrap();
+    let mut second = account("dyn-fanout-2");
+    second.provider_id = provider_id.clone();
+    second.key_cipher = test_host_cipher().encrypt("sk-second").unwrap();
+    db.create_account(&second).unwrap();
+
+    let error = db
+        .replace_dynamic_provider(&runtime, false, false, Some("cipher-new"))
+        .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("replacement Key can only be written to the singleton account"),
+        "{error}"
+    );
+    let first_loaded = db.get_account(&first.id).unwrap().unwrap();
+    let second_loaded = db.get_account(&second.id).unwrap().unwrap();
+    assert_eq!(first_loaded.key_cipher, first.key_cipher);
+    assert_eq!(second_loaded.key_cipher, second.key_cipher);
+    drop(db);
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn imported_dynamic_auth_change_rejects_destination_only_accounts() {
+    let dir = temp_data_dir("dyn-import-auth-conflict");
+    let db = open_with_host_cipher(dir.clone()).unwrap();
+    let now = Utc::now();
+    let provider_id = uuid::Uuid::new_v4().to_string();
+    let mut runtime = crate::dynamic::DynamicProviderRuntime {
+        id: provider_id.clone(),
+        name: "Auth conflict".into(),
+        endpoint_url: "http://127.0.0.1:9".into(),
+        upstream_protocol: crate::provider::UpstreamProtocolKind::ChatCompletions,
+        auth_kind: ocg_domain::dynamic::DynamicAuthKind::None,
+        mappings: vec![ocg_domain::dynamic::DynamicModelMapping {
+            public_model: "lab-opus".into(),
+            upstream_model: "vendor/opus".into(),
+        }],
+        created_at: now,
+        updated_at: now,
+    };
+    let mut destination_only = account("dyn-destination-only");
+    destination_only.provider_id = provider_id.clone();
+    destination_only.credential_kind = CredentialKind::None;
+    destination_only.key_cipher.clear();
+    db.create_dynamic_provider(&runtime, &destination_only)
+        .unwrap();
+
+    runtime.auth_kind = ocg_domain::dynamic::DynamicAuthKind::Bearer;
+    let error = upsert_imported_dynamic_provider_on(&db.conn, &runtime, &HashSet::new())
+        .expect_err("destination-only account must block an auth-boundary change");
+    assert!(
+        error.to_string().contains("destination-only accounts"),
+        "{error}"
+    );
+    assert_eq!(
+        db.get_dynamic_provider(&provider_id)
+            .unwrap()
+            .unwrap()
+            .auth_kind,
+        ocg_domain::dynamic::DynamicAuthKind::None
+    );
+
+    drop(db);
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn ollama_billing_create_failure_rolls_back_the_account_row() {
+    let dir = temp_data_dir("ollama-billing-atomic");
+    let db = open_with_host_cipher(dir.clone()).unwrap();
+    let mut ollama = account("ollama-atomic");
+    ollama.provider_id = OLLAMA_PROVIDER_ID.to_string();
+    ollama.key_cipher = fixture_account_key_cipher();
+    ollama.purchase_date = "2026-08-01".into();
+    db.conn
+        .execute_batch(
+            "CREATE TRIGGER fail_ollama_billing
+                 BEFORE INSERT ON ollama_cloud_billing
+                 BEGIN
+                     SELECT RAISE(ABORT, 'forced ollama billing failure');
+                 END;",
+        )
+        .unwrap();
+    let error = db
+        .create_account_with_contract_and_billing(&ollama, None, &[], Some(OllamaBillingTier::Pro))
+        .expect_err("billing failure should abort the create");
+    assert!(
+        error.to_string().contains("forced ollama billing failure"),
+        "{error}"
+    );
+    assert!(db.get_account("ollama-atomic").unwrap().is_none());
+    assert_eq!(db.ollama_cloud_billing_tier("ollama-atomic").unwrap(), None);
+    drop(db);
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn v36_to_v37_discards_cookie_usage_state_and_keeps_account_keys() {
     let dir = temp_data_dir("v36-v37-ollama-billing");
     let db = open_with_host_cipher(dir.clone()).unwrap();

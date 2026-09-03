@@ -1147,6 +1147,103 @@ fn extra_catalogs_aggregate_public_aliases_and_fail_closed_on_raw_ambiguity() {
     assert_eq!(err.code(), Some(AMBIGUOUS_MODEL_ID));
 }
 
+#[test]
+fn extra_catalogs_keep_raw_shaped_public_to_upstream_mapping() {
+    let extra = ExtraProviderCatalog {
+        provider_id: "11111111-1111-4111-8111-111111111111".into(),
+        mappings: vec![
+            ("org/same".into(), "org/same".into()),
+            ("org/public".into(), "vendor/real".into()),
+            ("lab_model".into(), "vendor/lab".into()),
+            ("lab model".into(), "vendor/space".into()),
+            ("glm-5.2".into(), "vendor/glm".into()),
+        ],
+    };
+    let catalogs = RuntimeCatalogs {
+        extra: std::slice::from_ref(&extra),
+        ..RuntimeCatalogs::default()
+    };
+
+    match resolve_with_runtime_catalogs("org/same", catalogs).unwrap() {
+        ResolvedModel::PinnedRaw { mapping, .. } => {
+            assert_eq!(mapping.provider_id, extra.provider_id);
+            assert_eq!(mapping.upstream_model, "org/same");
+            assert!(mapping.routeable);
+        }
+        other => panic!("raw public==upstream must pin, got {other:?}"),
+    }
+    let public_mappings = match resolve_with_runtime_catalogs("org/public", catalogs).unwrap() {
+        ResolvedModel::Alias { mappings, .. } => mappings,
+        ResolvedModel::PinnedRaw { mapping, .. } => vec![mapping],
+    };
+    assert_eq!(public_mappings.len(), 1);
+    assert_eq!(public_mappings[0].provider_id, extra.provider_id);
+    assert_eq!(public_mappings[0].upstream_model, "vendor/real");
+    let underscore_upstream = match resolve_with_runtime_catalogs("lab_model", catalogs).unwrap() {
+        ResolvedModel::Alias { mappings, .. } => mappings[0].upstream_model.clone(),
+        ResolvedModel::PinnedRaw { mapping, .. } => mapping.upstream_model,
+    };
+    assert_eq!(underscore_upstream, "vendor/lab");
+    let space_upstream = match resolve_with_runtime_catalogs("lab model", catalogs).unwrap() {
+        ResolvedModel::Alias { mappings, .. } => mappings[0].upstream_model.clone(),
+        ResolvedModel::PinnedRaw { mapping, .. } => mapping.upstream_model,
+    };
+    assert_eq!(space_upstream, "vendor/space");
+
+    let published = published_routeable_aliases_with_runtime_catalogs(catalogs);
+    assert!(
+        published
+            .iter()
+            .any(|item| item.alias == "glm-5.2" && item.owned_by == OPENCODE_PROVIDER_ID),
+        "dynamic public names must not steal code-owned aliases: {published:?}"
+    );
+    for leaked in [
+        "org/same",
+        "org/public",
+        "vendor/real",
+        "lab_model",
+        "lab model",
+    ] {
+        assert!(
+            !published.iter().any(|item| item.alias == leaked),
+            "raw-shaped extra ids stay outside the Alias-only list: {leaked}"
+        );
+    }
+
+    match resolve_with_runtime_catalogs("glm-5.2", catalogs).unwrap() {
+        ResolvedModel::Alias { mappings, .. } => {
+            assert!(mappings.iter().any(ProviderMapping::is_opencode_go));
+            assert!(mappings.iter().any(|mapping| {
+                mapping.provider_id == extra.provider_id && mapping.upstream_model == "vendor/glm"
+            }));
+        }
+        other => panic!("code-owned alias must keep Go and join extra, got {other:?}"),
+    }
+}
+
+#[test]
+fn extra_catalog_raw_public_conflicts_stay_ambiguous() {
+    let one = ExtraProviderCatalog {
+        provider_id: "11111111-1111-4111-8111-111111111111".into(),
+        mappings: vec![("shared/raw".into(), "shared/raw".into())],
+    };
+    let two = ExtraProviderCatalog {
+        provider_id: "22222222-2222-4222-8222-222222222222".into(),
+        mappings: vec![("shared/raw".into(), "shared/raw".into())],
+    };
+    let catalogs = RuntimeCatalogs {
+        extra: &[one, two],
+        ..RuntimeCatalogs::default()
+    };
+    let err = resolve_with_runtime_catalogs("shared/raw", catalogs).unwrap_err();
+    assert_eq!(err.code(), Some(AMBIGUOUS_MODEL_ID));
+    assert!(
+        !published_routeable_aliases_with_runtime_catalogs(catalogs)
+            .iter()
+            .any(|item| item.alias == "shared/raw")
+    );
+}
+
 fn resolve_ollama(
     requested: &str,
     ollama: &[&str],

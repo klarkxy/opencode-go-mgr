@@ -359,12 +359,13 @@ fn create_account_locked(
     )?;
     {
         let db = state.db.lock();
-        db.create_account_with_contract(&account, custom_config.as_ref(), &model_capabilities)
-            .map_err(|error| map_account_write_error(state, error))?;
-        if plan.provider_id == crate::provider::OLLAMA_PROVIDER_ID {
-            db.set_ollama_cloud_billing_tier(&id, ollama_billing)
-                .map_err(V3ApiError::internal)?;
-        }
+        db.create_account_with_contract_and_billing(
+            &account,
+            custom_config.as_ref(),
+            &model_capabilities,
+            ollama_billing,
+        )
+        .map_err(|error| map_account_write_error(state, error))?;
         let _ = db.log_gateway(
             "info",
             "account",

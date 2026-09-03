@@ -103,6 +103,20 @@ test("edit from none to keyed requires an explicit replacement Key", () => {
   assert.equal(body.key, "sk-now");
 });
 
+test("ordinary keyed edit omits a discover/test Key while create still sends it", () => {
+  const draft = emptyDynamicProviderDraft();
+  draft.name = "Lab";
+  draft.endpoint_url = "http://127.0.0.1:9";
+  draft.auth_kind = "bearer";
+  draft.models = [{ public_model: "lab-opus", upstream_model: "vendor/opus" }];
+  draft.key = "sk-probe";
+  const update = buildDynamicProviderUpdateBody(draft, "bearer");
+  assert.equal("key" in update, false);
+  assert.equal(update.key, undefined);
+  const created = buildDynamicProviderCreateBody(draft);
+  assert.equal(created.key, "sk-probe");
+});
+
 test("sanitization drops the write-only Key from draft and response-shaped records", () => {
   const draft = emptyDynamicProviderDraft();
   draft.key = "sk-secret";

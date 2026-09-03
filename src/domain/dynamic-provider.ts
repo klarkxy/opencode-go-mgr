@@ -228,7 +228,11 @@ export function buildDynamicProviderUpdateBody(
       upstreamModel: mapping.upstream_model,
     })),
   };
-  if (draft.key.trim()) body.key = draft.key.trim();
+  const sendReplacementKey =
+    previousAuthKind === "none" && dynamicAuthRequiresKey(draft.auth_kind);
+  if (sendReplacementKey && draft.key.trim()) {
+    body.key = draft.key.trim();
+  }
   return body;
 }
 

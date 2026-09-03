@@ -21,11 +21,11 @@
 5. **测试模型** 可选。先确认警告：真实测试会消耗上游额度或产生费用。
 6. 保存。写入是一次原子 `POST /providers`，不要求探测成功。
 
-编辑通过 `PATCH /providers/{id}` 整份替换供应商配置。供应商 id 不可变。从无鉴权改为需要 Key 时必须显式填写替换 Key。只有先删除全部引用账号后才能删除供应商；不会级联删除。
+编辑通过 `PATCH /providers/{id}` 整份替换供应商配置。供应商 id 不可变。从无鉴权改为需要 Key 时必须显式填写替换 Key，并且只写到那张单例账号。已经带 Key 的供应商会拒绝供应商更新里的 Key；请在 **账号** 页轮换 Key。只有先删除全部引用账号后才能删除供应商；不会级联删除。
 
 供应商所有字段留在 **供应商** 页。账号 **Key**、启停、顺序、备注、冷却和测试留在 **账号** 页。用户定义供应商始终未定价：没有官方用量、额度估算或价格行。请求日志仍会归因供应商、账号和模型。
 
-备份使用只含 `providerId` 的 payload V4。Schema v35 保存 `dynamic_providers` 与 `dynamic_provider_models`。
+备份使用只含 `providerId` 的 payload V4，并包含每一份已保存的用户定义供应商定义。Schema v35 保存 `dynamic_providers` 与 `dynamic_provider_models`。
 
 ## 立即接入兼容上游
 

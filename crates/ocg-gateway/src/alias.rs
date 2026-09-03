@@ -300,11 +300,13 @@ fn insert_extra_catalogs(registry: &mut Registry, extras: &[ExtraProviderCatalog
         for (public_model, upstream_model) in &extra.mappings {
             let provider_mapping = mapping(&extra.provider_id, upstream_model, true);
             insert_raw_mapping(registry, provider_mapping.clone());
-            if !looks_raw_shaped(public_model) {
-                insert_mapping(registry, public_model, provider_mapping);
-            } else {
-                insert_raw_mapping(registry, mapping(&extra.provider_id, public_model, true));
+            if looks_raw_shaped(public_model) {
+                // Raw-shaped public names stay exact request pins. A differing
+                // upstream is preserved on the mapping and never published as a
+                // second catalog id; overlay resolves the public name.
+                continue;
             }
+            insert_mapping(registry, public_model, provider_mapping);
         }
     }
 }
@@ -815,7 +817,8 @@ fn overlay_one_extra(
     resolved: ResolvedModel,
     extra: &ExtraProviderCatalog,
 ) -> Result<ResolvedModel, ResolveError> {
-    let Some((public_model, upstream_model)) = extra_public_hit(extra, resolved.requested()) else {
+    let Some((_public_model, upstream_model)) = extra_public_hit(extra, resolved.requested())
+    else {
         return Ok(resolved);
     };
     let replacement = extra_mapping(extra, upstream_model);
@@ -833,7 +836,6 @@ fn overlay_one_extra(
             } else {
                 mappings.push(replacement);
             }
-            let _ = public_model;
             Ok(ResolvedModel::Alias {
                 requested,
                 alias,
@@ -841,14 +843,17 @@ fn overlay_one_extra(
             })
         }
         ResolvedModel::PinnedRaw { requested, mapping }
-            if !mapping.provider_id.eq_ignore_ascii_case(&extra.provider_id) =>
+            if mapping.provider_id.eq_ignore_ascii_case(&extra.provider_id) =>
         {
-            Err(ResolveError::Ambiguous {
+            Ok(ResolvedModel::PinnedRaw {
                 requested,
-                mappings: vec![mapping, replacement],
+                mapping: replacement,
             })
         }
-        other => Ok(other),
+        ResolvedModel::PinnedRaw { requested, mapping } => Err(ResolveError::Ambiguous {
+            requested,
+            mappings: vec![mapping, replacement],
+        }),
     }
 }
 

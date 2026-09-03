@@ -36,7 +36,8 @@ const CLIENT_ROOT_URL_ENV: &str = "OCG_CLIENT_ROOT_URL";
 
 // Note: Mutex lock ordering is (1) settings_update, (2) db, (3) config,
 // (4) http_client, (5) gateway, (6) pricing, (7) zen_free_models,
-// (8) cpa_models, (9) provider_contracts, (10) routing, (11) credential_snapshot.
+// (8) cpa_models, (9) provider_contracts, (10) dynamic_providers, (11) routing,
+// (12) credential_snapshot.
 // The CPA runtime status mutex is never held while acquiring another sync lock.
 // `activate_zen_free_model_catalog` acquires db → http_client →
 // zen_free_models → provider_contracts, then drops those before
@@ -126,6 +127,7 @@ pub(crate) struct ImportedNodeRuntime {
     http_client: crate::http_client::ForwardRouteSet,
     zen_free_models: crate::kernel::zen::ZenFreeModelCatalog,
     provider_contracts: crate::provider_contracts::EffectiveContractSet,
+    dynamic_providers: Vec<crate::dynamic::DynamicProviderRuntime>,
     credentials: crate::gateway_keys::CredentialSnapshot,
 }
 
@@ -597,11 +599,13 @@ impl CoreStateInner {
             &provider_models,
         )?;
         let credentials = crate::gateway_keys::build_credential_snapshot(db, &config.gateway_key)?;
+        let dynamic_providers = db.list_dynamic_providers()?;
         Ok(ImportedNodeRuntime {
             config,
             http_client: route_set,
             zen_free_models: zen,
             provider_contracts: contracts,
+            dynamic_providers,
             credentials,
         })
     }
@@ -613,8 +617,20 @@ impl CoreStateInner {
         *self.http_client.lock() = Arc::new(runtime.http_client);
         *self.zen_free_models.write() = Arc::new(runtime.zen_free_models);
         *self.provider_contracts.write() = Arc::new(runtime.provider_contracts);
+        *self.dynamic_providers.write() = Arc::new(runtime.dynamic_providers);
         self.routing.reset();
         *self.credential_snapshot.write() = runtime.credentials;
+        self.settings_revision.fetch_add(1, Ordering::AcqRel);
+    }
+
+    /// Install a dynamic Provider snapshot built before the matching SQLite
+    /// commit. Assignment and the revision bump cannot fail.
+    pub(crate) fn install_dynamic_providers_snapshot(
+        &self,
+        providers: Vec<crate::dynamic::DynamicProviderRuntime>,
+    ) {
+        *self.dynamic_providers.write() = Arc::new(providers);
+        self.routing.reset();
         self.settings_revision.fetch_add(1, Ordering::AcqRel);
     }
 

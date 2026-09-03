@@ -79,6 +79,7 @@ pub struct NodeImportRecord {
     pub zen_free_enabled: bool,
     pub zen_catalog: crate::kernel::zen::ZenFreeModelCatalog,
     pub provider_contracts: PersistedContracts,
+    pub dynamic_providers: Vec<DynamicProviderRuntime>,
 }
 
 /// Settings key holding the forward-log client-key backfill watermark
@@ -2117,6 +2118,76 @@ fn insert_dynamic_provider_on(conn: &Connection, runtime: &DynamicProviderRuntim
     insert_dynamic_provider_models_on(conn, &runtime.id, &runtime.mappings)
 }
 
+fn count_accounts_for_provider_on(conn: &Connection, provider_id: &str) -> Result<i64> {
+    conn.query_row(
+        "SELECT COUNT(*) FROM accounts WHERE lower(provider_id) = lower(?1)",
+        [provider_id],
+        |row| row.get(0),
+    )
+    .map_err(Into::into)
+}
+
+fn upsert_imported_dynamic_provider_on(
+    conn: &Connection,
+    runtime: &DynamicProviderRuntime,
+    imported_account_ids: &HashSet<String>,
+) -> Result<()> {
+    anyhow::ensure!(
+        builtin_provider(&runtime.id).is_none(),
+        "dynamic provider id collides with a built-in provider"
+    );
+    if let Some(existing) = get_dynamic_provider_on(conn, &runtime.id)? {
+        if existing.auth_kind.requires_key() != runtime.auth_kind.requires_key() {
+            let mut statement =
+                conn.prepare("SELECT id FROM accounts WHERE lower(provider_id) = lower(?1)")?;
+            let existing_ids =
+                statement.query_map([&existing.id], |row| row.get::<_, String>(0))?;
+            for account_id in existing_ids {
+                let account_id = account_id?;
+                anyhow::ensure!(
+                    imported_account_ids.contains(&account_id.to_ascii_lowercase()),
+                    "cannot change dynamic provider auth while destination-only accounts still reference it"
+                );
+            }
+        }
+        conn.execute(
+            "UPDATE dynamic_providers
+             SET name = ?1, endpoint_url = ?2, upstream_protocol = ?3, auth_kind = ?4, updated_at = ?5
+             WHERE id = ?6",
+            params![
+                runtime.name,
+                runtime.endpoint_url,
+                runtime.upstream_protocol.as_str(),
+                runtime.auth_kind.as_str(),
+                runtime.updated_at.to_rfc3339(),
+                existing.id,
+            ],
+        )?;
+        conn.execute(
+            "DELETE FROM dynamic_provider_models WHERE provider_id = ?1",
+            [&existing.id],
+        )?;
+        insert_dynamic_provider_models_on(conn, &existing.id, &runtime.mappings)
+    } else {
+        insert_dynamic_provider_on(conn, runtime)
+    }
+}
+
+fn ensure_dynamic_singleton_accounts_on(conn: &Connection) -> Result<()> {
+    for runtime in list_dynamic_providers_on(conn)? {
+        if !runtime.auth_kind.is_singleton() {
+            continue;
+        }
+        let count = count_accounts_for_provider_on(conn, &runtime.id)?;
+        anyhow::ensure!(
+            count <= 1,
+            "no-auth provider `{}` requires a singleton account",
+            runtime.id
+        );
+    }
+    Ok(())
+}
+
 fn insert_dynamic_provider_models_on(
     conn: &Connection,
     provider_id: &str,
@@ -2410,43 +2481,8 @@ fn insert_account_row(
 }
 
 fn insert_import_account_on(conn: &Connection, record: &AccountImportRecord) -> Result<()> {
+    validate_import_account_on(conn, record)?;
     let account = &record.account;
-    anyhow::ensure!(
-        account.id != ZEN_FREE_ACCOUNT_ID,
-        "Zen Free is database-owned and cannot be imported"
-    );
-    account.validate_provider_binding()?;
-    ensure_enabled_provider_is_routable(&account.provider_id, account.enabled)?;
-    let plan = builtin_provider(&account.provider_id)
-        .ok_or_else(|| anyhow::anyhow!("unknown provider offering"))?;
-    let verification_gates_enablement = plan.verification_policy == VerificationPolicy::Required
-        && ProviderRegistry::get(&account.provider_id)
-            .is_some_and(|descriptor| descriptor.card_actions.enable_requires_verification);
-    anyhow::ensure!(
-        !account.enabled
-            || !verification_gates_enablement
-            || record.verification_status.allows_enablement(),
-        "an enabled imported account must retain an enabling verification state"
-    );
-    if plan_requires_custom_config(plan) {
-        anyhow::ensure!(
-            record.custom_config.is_some(),
-            "Custom API accounts require a complete endpoint"
-        );
-        anyhow::ensure!(
-            !record.capabilities.is_empty(),
-            "Custom API accounts require at least one model capability"
-        );
-    } else {
-        anyhow::ensure!(
-            record.custom_config.is_none(),
-            "custom config is only available for Custom API accounts"
-        );
-        anyhow::ensure!(
-            record.capabilities.is_empty(),
-            "model capabilities are only available for Custom API accounts"
-        );
-    }
     let purchase_date = if account.purchase_date.trim().is_empty() {
         local_today()
     } else {
@@ -2461,6 +2497,65 @@ fn insert_import_account_on(conn: &Connection, record: &AccountImportRecord) -> 
     }
     restore_import_verification_on(conn, record)?;
     persist_ollama_billing_on(conn, record)?;
+    Ok(())
+}
+
+fn validate_import_account_on(conn: &Connection, record: &AccountImportRecord) -> Result<()> {
+    let account = &record.account;
+    anyhow::ensure!(
+        account.id != ZEN_FREE_ACCOUNT_ID,
+        "Zen Free is database-owned and cannot be imported"
+    );
+    if let Some(plan) = builtin_provider(&account.provider_id) {
+        account.validate_provider_binding()?;
+        ensure_enabled_provider_is_routable(&account.provider_id, account.enabled)?;
+        let verification_gates_enablement = plan.verification_policy
+            == VerificationPolicy::Required
+            && ProviderRegistry::get(&account.provider_id)
+                .is_some_and(|descriptor| descriptor.card_actions.enable_requires_verification);
+        anyhow::ensure!(
+            !account.enabled
+                || !verification_gates_enablement
+                || record.verification_status.allows_enablement(),
+            "an enabled imported account must retain an enabling verification state"
+        );
+        if plan_requires_custom_config(plan) {
+            anyhow::ensure!(
+                record.custom_config.is_some(),
+                "Custom API accounts require a complete endpoint"
+            );
+            anyhow::ensure!(
+                !record.capabilities.is_empty(),
+                "Custom API accounts require at least one model capability"
+            );
+        } else {
+            anyhow::ensure!(
+                record.custom_config.is_none(),
+                "custom config is only available for Custom API accounts"
+            );
+            anyhow::ensure!(
+                record.capabilities.is_empty(),
+                "model capabilities are only available for Custom API accounts"
+            );
+        }
+        return Ok(());
+    }
+    let runtime = get_dynamic_provider_on(conn, &account.provider_id)?
+        .ok_or_else(|| anyhow::anyhow!("unknown provider `{}`", account.provider_id))?;
+    anyhow::ensure!(
+        account.credential_kind == runtime.auth_kind.credential_kind()
+            && account.quota_scope == runtime.auth_kind.quota_scope(),
+        "provider binding does not match `{}`",
+        account.provider_id
+    );
+    anyhow::ensure!(
+        record.custom_config.is_none(),
+        "custom config is only available for Custom API accounts"
+    );
+    anyhow::ensure!(
+        record.capabilities.is_empty(),
+        "model capabilities are only available for Custom API accounts"
+    );
     Ok(())
 }
 
@@ -2492,39 +2587,8 @@ fn merge_import_account_on(conn: &Connection, record: &AccountImportRecord) -> R
     {
         return insert_import_account_on(conn, record);
     }
+    validate_import_account_on(conn, record)?;
     let account = &record.account;
-    account.validate_provider_binding()?;
-    ensure_enabled_provider_is_routable(&account.provider_id, account.enabled)?;
-    let plan = builtin_provider(&account.provider_id)
-        .ok_or_else(|| anyhow::anyhow!("unknown provider offering"))?;
-    let verification_gates_enablement = plan.verification_policy == VerificationPolicy::Required
-        && ProviderRegistry::get(&account.provider_id)
-            .is_some_and(|descriptor| descriptor.card_actions.enable_requires_verification);
-    anyhow::ensure!(
-        !account.enabled
-            || !verification_gates_enablement
-            || record.verification_status.allows_enablement(),
-        "an enabled imported account must retain an enabling verification state"
-    );
-    if plan_requires_custom_config(plan) {
-        anyhow::ensure!(
-            record.custom_config.is_some(),
-            "Custom API accounts require a complete endpoint"
-        );
-        anyhow::ensure!(
-            !record.capabilities.is_empty(),
-            "Custom API accounts require at least one model capability"
-        );
-    } else {
-        anyhow::ensure!(
-            record.custom_config.is_none(),
-            "custom config is only available for Custom API accounts"
-        );
-        anyhow::ensure!(
-            record.capabilities.is_empty(),
-            "model capabilities are only available for Custom API accounts"
-        );
-    }
     let purchase_date = if account.purchase_date.trim().is_empty() {
         local_today()
     } else {
@@ -4839,6 +4903,18 @@ impl Database {
         custom_config: Option<&AccountCustomConfigInput>,
         capabilities: &[AccountModelCapabilityInput],
     ) -> Result<()> {
+        self.create_account_with_contract_and_billing(account, custom_config, capabilities, None)
+    }
+
+    /// Same as [`Self::create_account_with_contract`], writing Ollama billing in
+    /// the same SQLite transaction when the account is an Ollama Cloud row.
+    pub fn create_account_with_contract_and_billing(
+        &self,
+        account: &Account,
+        custom_config: Option<&AccountCustomConfigInput>,
+        capabilities: &[AccountModelCapabilityInput],
+        ollama_billing: Option<OllamaBillingTier>,
+    ) -> Result<()> {
         anyhow::ensure!(
             account.id != ZEN_FREE_ACCOUNT_ID,
             "Zen Free is database-owned and cannot be created through the generic account API"
@@ -4865,6 +4941,15 @@ impl Database {
                 "model capabilities are only available for Custom API accounts"
             );
         }
+        if let Some(tier) = ollama_billing {
+            anyhow::ensure!(
+                account.provider_id == OLLAMA_PROVIDER_ID,
+                "Ollama billing tier is only valid for Ollama Cloud accounts"
+            );
+            if tier.requires_purchase_date() && account.purchase_date.trim().is_empty() {
+                anyhow::bail!("a configured Ollama paid tier requires purchase_date");
+            }
+        }
         let purchase_date = if account.purchase_date.trim().is_empty() {
             local_today()
         } else {
@@ -4878,6 +4963,9 @@ impl Database {
         }
         if !capabilities.is_empty() {
             persist_account_model_capabilities_on(&tx, &account.id, capabilities)?;
+        }
+        if account.provider_id == OLLAMA_PROVIDER_ID || ollama_billing.is_some() {
+            set_ollama_cloud_billing_tier_on(&tx, &account.id, ollama_billing)?;
         }
         tx.commit()?;
         Ok(())
@@ -4895,20 +4983,14 @@ impl Database {
     }
 
     pub fn count_accounts_for_provider(&self, provider_id: &str) -> Result<i64> {
-        self.conn
-            .query_row(
-                "SELECT COUNT(*) FROM accounts WHERE lower(provider_id) = lower(?1)",
-                [provider_id],
-                |row| row.get(0),
-            )
-            .map_err(Into::into)
+        count_accounts_for_provider_on(&self.conn, provider_id)
     }
 
     pub fn create_dynamic_provider(
         &self,
         runtime: &DynamicProviderRuntime,
         first_account: &Account,
-    ) -> Result<()> {
+    ) -> Result<Vec<DynamicProviderRuntime>> {
         let tx = self.conn.unchecked_transaction()?;
         insert_dynamic_provider_on(&tx, runtime)?;
         dynamic_tx_fault("after_provider_insert")?;
@@ -4924,8 +5006,9 @@ impl Database {
             ConnectionVerificationStatus::NotRequired,
         )?;
         dynamic_tx_fault("after_account_insert")?;
+        let snapshot = list_dynamic_providers_on(&tx)?;
         tx.commit()?;
-        Ok(())
+        Ok(snapshot)
     }
 
     pub fn replace_dynamic_provider(
@@ -4934,7 +5017,7 @@ impl Database {
         clear_runtime_state: bool,
         clear_keys: bool,
         replacement_key_cipher: Option<&str>,
-    ) -> Result<()> {
+    ) -> Result<Vec<DynamicProviderRuntime>> {
         let tx = self.conn.unchecked_transaction()?;
         let existing = get_dynamic_provider_on(&tx, &runtime.id)?
             .ok_or_else(|| anyhow::anyhow!("unknown provider `{}`", runtime.id))?;
@@ -4985,6 +5068,11 @@ impl Database {
                 ],
             )?;
         } else if let Some(key_cipher) = replacement_key_cipher {
+            let count = count_accounts_for_provider_on(&tx, &existing.id)?;
+            anyhow::ensure!(
+                count == 1,
+                "replacement Key can only be written to the singleton account"
+            );
             tx.execute(
                 "UPDATE accounts SET key_cipher = ?1, credential_kind = ?2, quota_scope = ?3, updated_at = ?4
                  WHERE lower(provider_id) = lower(?5)",
@@ -5008,11 +5096,15 @@ impl Database {
                 ],
             )?;
         }
+        let snapshot = list_dynamic_providers_on(&tx)?;
         tx.commit()?;
-        Ok(())
+        Ok(snapshot)
     }
 
-    pub fn delete_dynamic_provider(&self, provider_id: &str) -> Result<()> {
+    pub fn delete_dynamic_provider(
+        &self,
+        provider_id: &str,
+    ) -> Result<Vec<DynamicProviderRuntime>> {
         let tx = self.conn.unchecked_transaction()?;
         let existing = get_dynamic_provider_on(&tx, provider_id)?
             .ok_or_else(|| anyhow::anyhow!("unknown provider `{provider_id}`"))?;
@@ -5033,8 +5125,9 @@ impl Database {
             "DELETE FROM dynamic_providers WHERE id = ?1",
             [&existing.id],
         )?;
+        let snapshot = list_dynamic_providers_on(&tx)?;
         tx.commit()?;
-        Ok(())
+        Ok(snapshot)
     }
 
     /// Insert every migrated account and its Custom contract in one SQLite
@@ -5067,6 +5160,14 @@ impl Database {
             for id in rows {
                 ordered_ids.push(id?);
             }
+        }
+        let imported_account_ids = record
+            .accounts
+            .iter()
+            .map(|record| record.account.id.to_ascii_lowercase())
+            .collect::<HashSet<_>>();
+        for runtime in &record.dynamic_providers {
+            upsert_imported_dynamic_provider_on(&tx, runtime, &imported_account_ids)?;
         }
         for account in &record.accounts {
             merge_import_account_on(&tx, account)?;
@@ -5221,6 +5322,7 @@ impl Database {
             }
         }
 
+        ensure_dynamic_singleton_accounts_on(&tx)?;
         sqlite_foreign_key_check(&tx)?;
         // The callback reads through this same SQLite connection, so it sees
         // the uncommitted merged rows. Every fallible runtime construction

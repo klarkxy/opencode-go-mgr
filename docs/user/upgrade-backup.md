@@ -9,9 +9,9 @@ and verify them against the release's `SHA256SUMS`:
 on macOS, or `sha256sum <file>` on Linux. Backups, restores, and removal are
 the kind of operations that are boring right up until they aren't.
 
-## Database Migration And Access Keys (Schema v35)
+## Database Migration And Access Keys (Schema v37)
 
-The database schema is **v35**; historical databases migrate in place on
+The database schema is **v37**; historical databases migrate in place on
 startup. Upgrading from a single-key version keeps your existing credential
 as the **primary key** (fixed id
 `00000000-0000-0000-0000-000000000001`), so clients keep authenticating
@@ -24,7 +24,7 @@ rewrite copies the primary Key and every `sub_gateway_keys` row into
 `access_keys`, drops `sub_gateway_keys`, and drops the legacy
 `accounts.usage_sync_*` columns. Before any v27 write the database receives a
 sibling snapshot `data.sqlite.pre-v3.<timestamp>.bak` plus a SHA-256 sidecar.
-A fresh empty data directory creates schema v35 directly and skips the
+A fresh empty data directory creates schema v37 directly and skips the
 snapshot. That snapshot is a v26 rollback point, not a substitute for a
 complete backup; verify the sidecar before restoring it, and restore it only
 onto a v26-capable binary or to retry a v27 open that never committed. Never
@@ -61,7 +61,12 @@ v35 collapses Provider/Plan identity to `provider_id` only after a fail-closed
 preflight of known v34 pairs, and stores typed user-defined Providers in
 `dynamic_providers` / `dynamic_provider_models`. Non-empty v34 libraries also
 write `data.sqlite.pre-v35.<timestamp>.bak`. Node backups export payload V4
-with `providerId` only.
+with `providerId` only, including saved user-defined Provider definitions.
+Older payload V1–V3 backups are rejected with an explicit unsupported-version
+error; that is not a wrong password or a damaged file.
+
+v36 briefly added the unreleased Ollama Cookie-usage state. v37 removes that
+table and adds account-scoped Ollama Cloud billing tiers (Free/Pro/Max/Team).
 
 ## Backup
 

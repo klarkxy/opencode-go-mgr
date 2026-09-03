@@ -21,11 +21,11 @@ The **Adapter Registry** stays static and sealed. User-defined Providers are typ
 5. **Test model** is optional. Confirm the warning first: a real test can consume upstream quota or incur charges.
 6. Save. The write is one atomic `POST /providers` and does not require a successful probe.
 
-Edit replaces the whole Provider configuration through `PATCH /providers/{id}`. The Provider id is immutable. Changing no-auth to keyed auth requires an explicit replacement Key. Delete is allowed only after every referencing account is removed; there is no cascade.
+Edit replaces the whole Provider configuration through `PATCH /providers/{id}`. The Provider id is immutable. Changing no-auth to keyed auth requires an explicit replacement Key, written only to that singleton account. An already-keyed Provider rejects any Key on the Provider update; rotate Keys on **Accounts**. Delete is allowed only after every referencing account is removed; there is no cascade.
 
 Provider-owned fields stay on **Providers**. Account **Key**, enablement, order, notes, cooldown, and tests stay on **Accounts**. User-defined Providers are always unpriced: no official usage, quota estimate, or pricing rows. Request logs still attribute provider, account, and model.
 
-Backups use payload V4 with `providerId` only. Schema v35 stores `dynamic_providers` and `dynamic_provider_models`.
+Backups use payload V4 with `providerId` only and include every saved user-defined Provider definition. Schema v35 stores `dynamic_providers` and `dynamic_provider_models`.
 
 ## Connect a compatible upstream now
 
