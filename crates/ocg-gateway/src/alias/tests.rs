@@ -1,5 +1,199 @@
 use super::*;
 
+const NO_IDS: &[String] = &[];
+
+fn catalogs<'a>(
+    go: &'a [String],
+    zen_free: &'a [String],
+    custom: &'a [String],
+    command_code: &'a [String],
+    minimax: &'a [String],
+    kimi: &'a [String],
+) -> RuntimeCatalogs<'a> {
+    RuntimeCatalogs {
+        go,
+        zen_free,
+        custom,
+        command_code,
+        minimax,
+        kimi,
+        cpa: NO_IDS,
+        ollama: NO_IDS,
+        ollama_pinned: NO_IDS,
+        extra: &[],
+    }
+}
+
+fn resolve_with_custom(
+    requested: &str,
+    custom_model_ids: &[String],
+) -> Result<ResolvedModel, ResolveError> {
+    resolve_with_runtime_catalogs(
+        requested,
+        catalogs(NO_IDS, NO_IDS, custom_model_ids, NO_IDS, NO_IDS, NO_IDS),
+    )
+}
+
+fn resolve_with_provider_models(
+    requested: &str,
+    zen_free_models: &[String],
+    custom_model_ids: &[String],
+) -> Result<ResolvedModel, ResolveError> {
+    resolve_with_runtime_catalogs(
+        requested,
+        catalogs(
+            NO_IDS,
+            zen_free_models,
+            custom_model_ids,
+            NO_IDS,
+            NO_IDS,
+            NO_IDS,
+        ),
+    )
+}
+
+fn resolve_with_catalogs(
+    requested: &str,
+    zen_free_models: &[String],
+    custom_model_ids: &[String],
+    goat_model_ids: &[String],
+) -> Result<ResolvedModel, ResolveError> {
+    resolve_with_runtime_catalogs(
+        requested,
+        catalogs(
+            NO_IDS,
+            zen_free_models,
+            custom_model_ids,
+            goat_model_ids,
+            NO_IDS,
+            NO_IDS,
+        ),
+    )
+}
+
+fn resolve_with_all_catalogs(
+    requested: &str,
+    go_model_ids: &[String],
+    zen_free_models: &[String],
+    custom_model_ids: &[String],
+    goat_model_ids: &[String],
+) -> Result<ResolvedModel, ResolveError> {
+    resolve_with_runtime_catalogs(
+        requested,
+        catalogs(
+            go_model_ids,
+            zen_free_models,
+            custom_model_ids,
+            goat_model_ids,
+            NO_IDS,
+            NO_IDS,
+        ),
+    )
+}
+
+fn resolve_with_extended_catalogs(
+    requested: &str,
+    go_model_ids: &[String],
+    zen_free_models: &[String],
+    custom_model_ids: &[String],
+    goat_model_ids: &[String],
+    minimax_model_ids: &[String],
+    kimi_model_ids: &[String],
+) -> Result<ResolvedModel, ResolveError> {
+    resolve_with_runtime_catalogs(
+        requested,
+        catalogs(
+            go_model_ids,
+            zen_free_models,
+            custom_model_ids,
+            goat_model_ids,
+            minimax_model_ids,
+            kimi_model_ids,
+        ),
+    )
+}
+
+fn published_routeable_aliases_with_zen(zen_free_models: &[String]) -> Vec<PublishedAlias> {
+    published_routeable_aliases_with_runtime_catalogs(catalogs(
+        NO_IDS,
+        zen_free_models,
+        NO_IDS,
+        NO_IDS,
+        NO_IDS,
+        NO_IDS,
+    ))
+}
+
+fn published_routeable_aliases_with_catalogs(
+    zen_free_models: &[String],
+    goat_model_ids: &[String],
+) -> Vec<PublishedAlias> {
+    published_routeable_aliases_with_runtime_catalogs(catalogs(
+        NO_IDS,
+        zen_free_models,
+        NO_IDS,
+        goat_model_ids,
+        NO_IDS,
+        NO_IDS,
+    ))
+}
+
+fn published_routeable_aliases_with_all_catalogs(
+    go_model_ids: &[String],
+    zen_free_models: &[String],
+    goat_model_ids: &[String],
+) -> Vec<PublishedAlias> {
+    published_routeable_aliases_with_runtime_catalogs(catalogs(
+        go_model_ids,
+        zen_free_models,
+        NO_IDS,
+        goat_model_ids,
+        NO_IDS,
+        NO_IDS,
+    ))
+}
+
+fn published_routeable_aliases_with_extended_catalogs(
+    go_model_ids: &[String],
+    zen_free_models: &[String],
+    goat_model_ids: &[String],
+    minimax_model_ids: &[String],
+    kimi_model_ids: &[String],
+) -> Vec<PublishedAlias> {
+    published_routeable_aliases_with_runtime_catalogs(catalogs(
+        go_model_ids,
+        zen_free_models,
+        NO_IDS,
+        goat_model_ids,
+        minimax_model_ids,
+        kimi_model_ids,
+    ))
+}
+
+fn routeable_aliases_for_with_extended_catalogs(
+    provider_id: &str,
+    zen_free_models: &[String],
+    goat_model_ids: &[String],
+    minimax_model_ids: &[String],
+    kimi_model_ids: &[String],
+) -> Vec<String> {
+    routeable_aliases_for_with_runtime_catalogs(
+        provider_id,
+        catalogs(
+            NO_IDS,
+            zen_free_models,
+            NO_IDS,
+            goat_model_ids,
+            minimax_model_ids,
+            kimi_model_ids,
+        ),
+    )
+}
+
+fn is_published_alias(name: &str) -> bool {
+    matches!(resolve(name), Ok(ResolvedModel::Alias { .. }))
+}
+
 fn seeded_free_models() -> Vec<String> {
     ZenFreeModelCatalog::default().models
 }
@@ -1034,9 +1228,6 @@ fn cpa_catalog_joins_code_owned_aliases_and_keeps_raw_ids_exact_and_fail_closed(
             other => panic!("CPA unknown catalog id must remain raw, got {other:?}"),
         }
     }
-    assert_eq!(canonical_alias_for_cpa_model("GLM-5.2"), "glm-5.2");
-    assert_eq!(canonical_alias_for_cpa_model("vendor/cpa-raw"), "");
-
     let published = published_routeable_aliases_with_runtime_catalogs(catalogs);
     assert!(published.iter().any(|item| item.alias == "glm-5.2"));
     assert!(!published.iter().any(|item| item.alias == "cpa-raw-model"));

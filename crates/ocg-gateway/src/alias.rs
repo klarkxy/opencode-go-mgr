@@ -611,134 +611,6 @@ pub fn resolve(requested: &str) -> Result<ResolvedModel, ResolveError> {
     resolve_in(registry(), requested)
 }
 
-/// Resolve against the builtin registry, then overlay eligible Custom
-/// capability IDs. Published aliases keep their Go/Zen mappings and gain
-/// compatible Custom candidates. Distinct provider raw-ID conflicts stay
-/// [`ResolveError::Ambiguous`]. Unknown names resolve from Custom only.
-pub fn resolve_with_custom(
-    requested: &str,
-    custom_model_ids: &[String],
-) -> Result<ResolvedModel, ResolveError> {
-    let custom_alias = custom_model_ids
-        .iter()
-        .find(|id| custom_model_id_matches(id, requested))
-        .cloned();
-    let custom_hit = custom_alias.is_some();
-    match resolve(requested) {
-        Ok(ResolvedModel::Alias {
-            requested,
-            alias,
-            mut mappings,
-        }) => {
-            if custom_hit && !mappings.iter().any(|mapping| mapping.is_custom_api()) {
-                mappings.push(custom_mapping(&alias));
-            }
-            Ok(ResolvedModel::Alias {
-                requested,
-                alias,
-                mappings,
-            })
-        }
-        Ok(ResolvedModel::PinnedRaw { requested, mapping }) => {
-            if custom_hit && !mapping.is_custom_api() {
-                return Err(ResolveError::Ambiguous {
-                    requested,
-                    mappings: vec![mapping, custom_mapping(CUSTOM_DYNAMIC_UPSTREAM)],
-                });
-            }
-            Ok(ResolvedModel::PinnedRaw { requested, mapping })
-        }
-        Err(ResolveError::Unknown { requested }) if custom_hit => Ok(ResolvedModel::Alias {
-            requested,
-            alias: custom_alias.expect("custom alias exists when custom_hit is true"),
-            mappings: vec![custom_mapping(CUSTOM_DYNAMIC_UPSTREAM)],
-        }),
-        other => other,
-    }
-}
-
-/// Resolve against the current persisted Zen Free catalog and eligible Custom
-/// capabilities. Zen mappings are rebuilt from the small bounded snapshot so a
-/// successful manual refresh takes effect without restarting the Gateway.
-pub fn resolve_with_provider_models(
-    requested: &str,
-    zen_free_models: &[String],
-    custom_model_ids: &[String],
-) -> Result<ResolvedModel, ResolveError> {
-    resolve_with_catalogs(requested, zen_free_models, custom_model_ids, &[])
-}
-
-/// Resolve against Zen, Custom, and eligible Command Code GOAT catalog IDs.
-/// GOAT overlays never create or steal an Alias, but a verified GOAT mapping
-/// may join a name authorized by the original Go table. Other exact catalog IDs
-/// pin to GOAT without entering the Alias namespace.
-/// Overlapping raw IDs stay [`ResolveError::Ambiguous`].
-pub fn resolve_with_catalogs(
-    requested: &str,
-    zen_free_models: &[String],
-    custom_model_ids: &[String],
-    goat_model_ids: &[String],
-) -> Result<ResolvedModel, ResolveError> {
-    resolve_with_all_catalogs(
-        requested,
-        &[],
-        zen_free_models,
-        custom_model_ids,
-        goat_model_ids,
-    )
-}
-
-/// Resolve against the persisted OpenCode Go and Zen catalogs plus eligible
-/// Custom and GOAT account catalogs. Refreshed catalogs may add exact raw pins
-/// or activate only code-owned aliases.
-pub fn resolve_with_all_catalogs(
-    requested: &str,
-    go_model_ids: &[String],
-    zen_free_models: &[String],
-    custom_model_ids: &[String],
-    goat_model_ids: &[String],
-) -> Result<ResolvedModel, ResolveError> {
-    resolve_with_extended_catalogs(
-        requested,
-        go_model_ids,
-        zen_free_models,
-        custom_model_ids,
-        goat_model_ids,
-        &[],
-        &[],
-    )
-}
-
-/// Extended sealed-provider overlay used by the host. Existing public helpers
-/// keep their stable signatures while MiniMax/Kimi catalogs participate in
-/// raw-ID ambiguity and may join aliases authorized by the Go table or their
-/// own sealed adapter maps.
-pub fn resolve_with_extended_catalogs(
-    requested: &str,
-    go_model_ids: &[String],
-    zen_free_models: &[String],
-    custom_model_ids: &[String],
-    goat_model_ids: &[String],
-    minimax_model_ids: &[String],
-    kimi_model_ids: &[String],
-) -> Result<ResolvedModel, ResolveError> {
-    resolve_with_runtime_catalogs(
-        requested,
-        RuntimeCatalogs {
-            go: go_model_ids,
-            zen_free: zen_free_models,
-            custom: custom_model_ids,
-            command_code: goat_model_ids,
-            minimax: minimax_model_ids,
-            kimi: kimi_model_ids,
-            cpa: &[],
-            ollama: &[],
-            ollama_pinned: &[],
-            extra: &[],
-        },
-    )
-}
-
 /// Resolve one client model against all runtime catalog inputs.
 ///
 /// Catalog rows may activate code-owned aliases or exact raw pins, but they do
@@ -1220,55 +1092,6 @@ pub fn published_routeable_aliases() -> Vec<PublishedAlias> {
     published_routeable_in(registry())
 }
 
-pub fn published_routeable_aliases_with_zen(zen_free_models: &[String]) -> Vec<PublishedAlias> {
-    published_routeable_in(&build_registry(zen_free_models))
-}
-
-/// Routeable aliases authorized by the original OpenCode Go table and sealed
-/// Provider adapter maps. Refreshed catalogs may add mappings and raw pins, but never
-/// publish names outside those code-owned maps.
-pub fn published_routeable_aliases_with_catalogs(
-    zen_free_models: &[String],
-    goat_model_ids: &[String],
-) -> Vec<PublishedAlias> {
-    published_routeable_aliases_with_all_catalogs(&[], zen_free_models, goat_model_ids)
-}
-
-pub fn published_routeable_aliases_with_all_catalogs(
-    go_model_ids: &[String],
-    zen_free_models: &[String],
-    goat_model_ids: &[String],
-) -> Vec<PublishedAlias> {
-    published_routeable_aliases_with_extended_catalogs(
-        go_model_ids,
-        zen_free_models,
-        goat_model_ids,
-        &[],
-        &[],
-    )
-}
-
-pub fn published_routeable_aliases_with_extended_catalogs(
-    go_model_ids: &[String],
-    zen_free_models: &[String],
-    goat_model_ids: &[String],
-    minimax_model_ids: &[String],
-    kimi_model_ids: &[String],
-) -> Vec<PublishedAlias> {
-    published_routeable_aliases_with_runtime_catalogs(RuntimeCatalogs {
-        go: go_model_ids,
-        zen_free: zen_free_models,
-        custom: &[],
-        command_code: goat_model_ids,
-        minimax: minimax_model_ids,
-        kimi: kimi_model_ids,
-        cpa: &[],
-        ollama: &[],
-        ollama_pinned: &[],
-        extra: &[],
-    })
-}
-
 /// Published code-owned aliases after applying all runtime catalogs. Exact
 /// raw-only rows remain outside this Alias-only list.
 pub fn published_routeable_aliases_with_runtime_catalogs(
@@ -1430,12 +1253,6 @@ pub fn canonical_alias_for_provider_model(
     String::new()
 }
 
-/// Canonical client Alias for a CPA catalog row, if and only if the row is
-/// already a code-owned alias. Other CPA rows are exact raw pins.
-pub fn canonical_alias_for_cpa_model(upstream_model: &str) -> String {
-    code_owned_alias(registry(), upstream_model).unwrap_or_default()
-}
-
 fn published_routeable_in(registry: &Registry) -> Vec<PublishedAlias> {
     registry
         .aliases
@@ -1475,37 +1292,6 @@ fn routeable_aliases_for_in(registry: &Registry, provider_id: &str) -> Vec<Strin
         .collect()
 }
 
-pub fn routeable_aliases_for_with_zen(
-    provider_id: &str,
-    zen_free_models: &[String],
-) -> Vec<String> {
-    routeable_aliases_for_in(&build_registry(zen_free_models), provider_id)
-}
-
-pub fn routeable_aliases_for_with_extended_catalogs(
-    provider_id: &str,
-    zen_free_models: &[String],
-    goat_model_ids: &[String],
-    minimax_model_ids: &[String],
-    kimi_model_ids: &[String],
-) -> Vec<String> {
-    routeable_aliases_for_with_runtime_catalogs(
-        provider_id,
-        RuntimeCatalogs {
-            go: &[],
-            zen_free: zen_free_models,
-            custom: &[],
-            command_code: goat_model_ids,
-            minimax: minimax_model_ids,
-            kimi: kimi_model_ids,
-            cpa: &[],
-            ollama: &[],
-            ollama_pinned: &[],
-            extra: &[],
-        },
-    )
-}
-
 /// Routeable aliases for one sealed provider after applying all runtime
 /// catalogs.
 pub fn routeable_aliases_for_with_runtime_catalogs(
@@ -1513,10 +1299,6 @@ pub fn routeable_aliases_for_with_runtime_catalogs(
     catalogs: RuntimeCatalogs<'_>,
 ) -> Vec<String> {
     routeable_aliases_for_in(&build_runtime_registry(catalogs), provider_id)
-}
-
-pub fn is_published_alias(name: &str) -> bool {
-    matches!(resolve(name), Ok(ResolvedModel::Alias { .. }))
 }
 
 #[cfg(test)]

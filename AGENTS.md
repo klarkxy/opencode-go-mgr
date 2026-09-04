@@ -23,7 +23,7 @@ User guides live under `docs/user/` (landing: `docs/USER.md` / `docs/USER.zh-CN.
 - `crates/ocg-core/src/dashboard_v3/dynamic_providers.rs`: V3 create/update/delete/discover/test for user-defined Providers.
 - `crates/ocg-domain/src/protocol.rs`: `MODEL_PROTOCOLS` and client/upstream protocol identities.
 - `crates/ocg-domain/src/ids.rs`: `PRIMARY_KEY_ID` and Plan/account identity constants.
-- `crates/ocg-gateway/src/alias.rs`: client Alias registry and raw-ID resolution (`ocg-core` `alias.rs` is the facade; it re-exports `resolve_with_catalogs`, `resolve_with_all_catalogs`, and `published_routeable_aliases_with_all_catalogs`).
+- `crates/ocg-gateway/src/alias.rs`: client Alias registry and raw-ID resolution (`ocg-core` `alias.rs` is the facade; it re-exports `resolve_with_runtime_catalogs` and `published_routeable_aliases_with_runtime_catalogs`).
 - `crates/ocg-gateway/src/protocol.rs` / `selector.rs`: no-I/O whole-document conversion and selector state machines.
 - `crates/ocg-infra/src/http.rs`: `ForwardRouteSet`, default + exception segments, `client_for` routing.
 - `crates/ocg-infra/src/crypto.rs`: Key obfuscation implementation (`ocg-core` `crypto.rs` is the facade).
