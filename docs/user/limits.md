@@ -41,11 +41,11 @@ Every gateway draws a line somewhere. This page is that line — a running list 
 - Browser onboarding provides only manual page interaction; it does not
   register Google accounts, solve verification challenges, pay, scrape
   pages, or extract keys automatically.
-- The installed Windows desktop dashboard can start OCG Manager in the tray
-  when the user logs in. Development builds, macOS, Linux, CLI, and Docker do
-  not expose that dashboard `auto_start` switch. Docker Compose separately
-  uses `restart: unless-stopped`, so its service can restart with the Docker
-  daemon.
+- The installed Windows x64, macOS, and Linux x64 desktop dashboards can start
+  OCG Manager in the tray when the user logs in. Development builds, CLI, and
+  Docker do not expose that dashboard `auto_start` switch. Docker Compose
+  separately uses `restart: unless-stopped`, so its service can restart with
+  the Docker daemon.
 - The macOS desktop dashboard can hide the Dock icon while retaining the
   menu-bar icon. Windows, Linux, CLI, and Docker do not expose the
   `show_dock_icon` switch.

@@ -23,10 +23,10 @@ list views stay fingerprinted.
 
 Use one of these local deployments:
 
-- **Installed Windows x64 desktop:** OCG can download the official Windows x64
-  CPA release, keep it under the OCG data directory, and start it as an
-  OCG-owned child. Start is manual; the child stops when OCG exits. OCG never
-  stops a CPA process it did not start.
+- **Installed Windows x64, macOS, or Linux x64 desktop:** OCG can download the
+  official CLIProxyAPI asset for that OS and CPU, keep it under the OCG data
+  directory, and start it as an OCG-owned child. Start is manual; the child
+  stops when OCG exits. OCG never stops a CPA process it did not start.
 - **Desktop or CLI:** run CPA on the same machine and configure a loopback URL
   such as `http://127.0.0.1:8317`.
 - **Docker:** enable the optional Compose sibling described in
@@ -39,7 +39,8 @@ reuse an OCG Manager Key as either CPA key.
 
 ### Connect and operate
 
-1. On installed Windows x64 desktop, install or start the managed CPA runtime
+1. On installed Windows x64, macOS, or Linux x64 desktop, install or start the
+   managed CPA runtime
    from **Extensions → CPA**, or install and start CPA yourself on loopback
    and save its **Management Key** and **Inference Key**. The managed runtime
    generates those keys. Extra direct-client keys are shown fingerprinted, and

@@ -4,10 +4,10 @@
 
 ## Known Debt
 
-- Auto-start is capability-gated: only Windows release/installed Tauri
-  processes inject the registry sync hook. Development builds, the CLI,
-  Docker, macOS, and Linux dashboards do not expose the switch. Dock
-  visibility is macOS Tauri only.
+- Auto-start is capability-gated: Windows x64, macOS, and Linux x64
+  release/installed Tauri processes inject the login-start sync hook.
+  Development builds, the CLI, and Docker dashboards do not expose the
+  switch. Dock visibility is macOS Tauri only.
 - Existing generated Tauri schema files are noisy in diffs; avoid touching
   them unless the Tauri config actually changed.
 - Streaming cost is exact only when upstream emits usage chunks. Chat streams

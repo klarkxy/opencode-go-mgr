@@ -10,7 +10,7 @@
 
 - **Web** —— `pnpm run contract:v3:check`、`pnpm run typecheck`、`pnpm run test:web`（只跑 `src/**/*.test.ts`）、Vite 生产构建、`DESIGN.md` lint，以及 `docker compose -f compose.example.yaml config --quiet`。发版工具测试有意单独放在 `pnpm run test:tooling`。
 - **Rust** —— `cargo fmt`、锁定依赖的 workspace 测试与 Clippy。桌面 crate 被排除（`--exclude ocg-manager`）：只有它需要 WebKit 头文件和占位 `dist/index.html`，而 Windows job 已经覆盖它，所以这个 leg 不安装任何系统包。`src-tauri` 的 Linux 编译覆盖由 release 构建矩阵承担。
-- **Windows Tauri** —— 对 `ocg-manager` 跑 `cargo test --lib`/`clippy`，用占位 `dist/index.html` 满足 tauri-build。这是质量门中唯一编译桌面 crate 的 job，同时覆盖 Windows 专属自动启动，不装 pnpm 也不跑 Vite。
+- **Windows Tauri** —— 对 `ocg-manager` 跑 `cargo test --lib`/`clippy`，用占位 `dist/index.html` 满足 tauri-build。这是质量门中唯一编译桌面 crate 的 job，同时覆盖 Windows 登录自启注册表同步，不装 pnpm 也不跑 Vite。
 
 兼容的运行共享 Node/pnpm 和 Rust 构建缓存。PR 只恢复 Rust 缓存，不写回；非 PR
 失败时仍会写回 Rust 缓存，方便后续修复复用编译结果。

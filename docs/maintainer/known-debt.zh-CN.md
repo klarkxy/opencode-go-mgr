@@ -4,7 +4,7 @@
 
 ## 已知缺口
 
-- `auto_start` 受能力门控：只有 Windows release / 已安装的 Tauri 进程注入注册表同步钩子。开发构建、CLI、Docker、macOS、Linux 面板不暴露该开关。Dock 可见性仅 macOS Tauri。
+- `auto_start` 受能力门控：Windows x64、macOS 和 Linux x64 的 release / 已安装 Tauri 进程注入登录自启同步钩子。开发构建、CLI、Docker 面板不暴露该开关。Dock 可见性仅 macOS Tauri。
 - 生成的 Tauri schema 文件会让 diff 变吵；只在 Tauri 配置确实改动时才需要修改它们。
 - 流式用量仅在上游发出 usage chunk 时精确；Chat 流式请求会设置 `stream_options.include_usage`。没有 chunk 时 Go 行记为 `success_no_usage`； Zen 无 usage 的成功仍为 `success` / `free`。
 - 旧 `profiles/<account_id>` WebView Profile 不会迁移到外部 Chromium；升级后首次需要重新登录。旧路径只保留用于重置/删除时的安全清理，跨引擎无法直接复用。

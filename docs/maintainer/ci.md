@@ -21,8 +21,8 @@ three jobs run in parallel, and Windows does not rebuild the dashboard:
   `src-tauri` lives in the release build matrix.
 - **Windows Tauri** — `cargo test -p ocg-manager --lib` / `clippy` against a
   stub `dist/index.html`. This is the only quality job that compiles the
-  desktop crate; it also covers Windows-only auto-start without pnpm or
-  Vite.
+  desktop crate; it also covers Windows auto-start registry sync without pnpm
+  or Vite.
 
 Node/pnpm and Rust build caches are shared across compatible runs. Pull
 requests restore the Rust cache but do not write it; failed non-PR runs still

@@ -122,8 +122,8 @@ The **Settings** view holds the gateway's persistent configuration:
   your own link before a real signup. Creating a managed draft can also edit
   and write this value back.
 - **Downstream Access Root** — see [Connection Center](dashboard.md#connection-center).
-- **Auto-start on login** — only the installed Windows desktop build exposes
-  this switch. Development builds, the CLI, Docker, macOS, and Linux
+- **Auto-start on login** — installed Windows x64, macOS, and Linux x64
+  desktop builds expose this switch. Development builds, the CLI, and Docker
   dashboards hide it.
 - **Dock icon** — only the macOS desktop build exposes this switch. Turning
   it off keeps the menu-bar icon available. Windows, Linux, CLI, and Docker

@@ -16,9 +16,9 @@
   obfuscation, URL validation, cooldown writes, SSE pass-through, and the
   ConnectionInfo secret boundary are not simplification candidates.
 - **Do not add remote sync.** Each node is managed through its own dashboard.
-- **Capability-gate `auto_start` and `show_dock_icon`.** Only the Windows
-  release/installed Tauri process injects the registry sync hook; Dock is macOS
-  Tauri only.
+- **Capability-gate `auto_start` and `show_dock_icon`.** Windows x64, macOS,
+  and Linux x64 release/installed Tauri processes inject the login-start sync
+  hook; Dock is macOS Tauri only.
 - **Local Alias lists stay local.** Authenticated `GET /v1/models` and dashboard
   `application-models` must not grow request-time upstream discovery. The
   explicit Zen Free refresh on Providers is the only directory-fetch exception

@@ -101,7 +101,7 @@ GUI 数据目录：Windows `%USERPROFILE%\.ocg-mgr` 或 macOS/Linux `~/.ocg-mgr`
 | --- | --- | --- | --- |
 | **Gateway 监听器**（`GatewayLifecycle`） | `start_gateway` / `bind` | `stop`（只发信号）或 `stop_and_wait`（CLI） | TCP 绑定、面板信任、转发日志回填、HTTP 服务。重绑感知槽位（同端口先停后绑，新端口先绑）。不启动也不取消进程级 worker。 |
 | **控制面 worker**（`ControlPlaneWorkers`） | 由 `start_gateway` 调用 `ensure_started`（每个 `CoreState` 一次） | 无 —— 拥有该 `CoreState` 被 drop 时退出 | 官方用量对账。没有公开 cancel API。监听器停止不会杀死它。 |
-| **桌面能力** | Tauri setup：自启（仅 Windows release/已安装）、Dock（macOS）、升级 starter | 进程退出 | 不是 WebView command。CLI/Docker 不注册 hook。HTTP 设置表单仍按能力门控 `auto_start` 与 `show_dock_icon`。 |
+| **桌面能力** | Tauri setup：自启（Windows x64 / macOS / Linux x64 release/已安装）、Dock（macOS）、升级 starter | 进程退出 | 不是 WebView command。CLI/Docker 不注册 hook。HTTP 设置表单仍按能力门控 `auto_start` 与 `show_dock_icon`。 |
 | **浏览器运行时** | 桌面原生 hook；Docker 远程 worker | 账号切换 / Profile 重置 / 进程退出 | 原生浏览器与 Sidecar 是同一 `BrowserRuntime` 槽的不同宿主。 |
 
 Tauri `src/lib.rs`：启动用 `start_gateway`（监听器 + 用量 worker）；退出用 `host::gateway::stop_listener`（只停监听器）。设置端口变更经 `GatewayLifecycle` / `settings_host_effects` 重绑，并用配置指纹做补偿；并发失败的端口写入不会覆盖成功的超时写入。

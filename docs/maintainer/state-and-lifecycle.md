@@ -243,7 +243,7 @@ Keep these four classes separate. Do not cancel one from another.
 | --- | --- | --- | --- |
 | **Gateway listener** (`GatewayLifecycle`) | `start_gateway` / `bind` | `stop` (signal-only) or `stop_and_wait` (CLI) | TCP bind, dashboard trust, forward-log backfill, HTTP server. Rebind is slot-aware (same-port stop-then-bind, new-port bind-first). Does not start or cancel process-level workers. |
 | **Control-plane workers** (`ControlPlaneWorkers`) | `ensure_started` from `start_gateway` (once per `CoreState`) | none — exits when the owning `CoreState` is dropped | Official usage reconciler. No public cancel API. Listener stop must not kill it. |
-| **Desktop capabilities** | Tauri setup: auto-start (Windows release/installed only), Dock (macOS), updater starter | process exit | Not WebView commands. CLI/Docker leave hooks unset. `auto_start` and `show_dock_icon` stay capability-gated on the HTTP settings form. |
+| **Desktop capabilities** | Tauri setup: auto-start (Windows x64 / macOS / Linux x64 release/installed), Dock (macOS), updater starter | process exit | Not WebView commands. CLI/Docker leave hooks unset. `auto_start` and `show_dock_icon` stay capability-gated on the HTTP settings form. |
 | **Browser runtime** | Native hooks on desktop; remote worker in Docker | account switch / profile reset / process exit | Native Browser vs sidecar are different hosts of the same `BrowserRuntime` slot. |
 
 Tauri `src/lib.rs`: start uses `start_gateway` (listener + usage workers);
