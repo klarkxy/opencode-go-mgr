@@ -75,7 +75,6 @@ import type {
   ForwardLogs,
   GatewayLogQuery,
   GatewayLogs,
-  GatewayStatus,
   InstallUpdate,
   KeyCreate,
   KeyUpdate,
@@ -246,11 +245,6 @@ export function goneGuidance(): string {
 export function isRevisionConflict(error: unknown): error is DashboardConflictError {
   return error instanceof DashboardConflictError
     || (error instanceof DashboardRequestError && error.status === 409 && error.code === "revisionConflict");
-}
-
-export function isGone(error: unknown): error is DashboardGoneError {
-  return error instanceof DashboardGoneError
-    || (error instanceof DashboardRequestError && error.status === 410);
 }
 
 export function v3ApiBase(): string {
@@ -823,7 +817,6 @@ export const dashboardV3 = {
     }),
 
   // --- observability (read-only, page-local state) ---
-  getGatewayStatus: () => requestV3<GatewayStatus>("/gateway/status"),
   getApplicationModels: () => requestV3<ApplicationModels>("/application-models"),
   getDashboardSummary: () => requestV3<DashboardSummary>("/dashboard/summary"),
   getDailyTokensByModel: (days?: number) =>

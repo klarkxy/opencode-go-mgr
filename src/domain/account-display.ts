@@ -120,11 +120,12 @@ export function accountExpiryTagType(account: Pick<Account, "expires_on">, now =
 
 export function accountExpiryLabel(account: Pick<Account, "expires_on">, now = Date.now()): string {
   const days = accountExpiryDays(account, now);
+  if (!Number.isFinite(days)) return t("未设置");
   if (days === 1) return t("剩 1 天");
   if (days > 0) return t("剩 {days} 天", { days });
   if (days === 0) return t("今天到期");
   if (days === -1) return t("已到期 1 天");
-  return t("已到期 {days} 天", { days: Number.isFinite(days) ? Math.abs(days) : 0 });
+  return t("已到期 {days} 天", { days: Math.abs(days) });
 }
 
 export function cooldownDetails(

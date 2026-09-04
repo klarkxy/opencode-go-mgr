@@ -50,10 +50,6 @@ export const ZEN_FREE_OFFERING: ProviderOffering = ALL_PROVIDER_OFFERINGS.find((
   offering.provider_id === ZEN_FREE_PROVIDER_ID
 ))!;
 
-export const PROVIDER_OFFERINGS: readonly ProviderOffering[] = ALL_PROVIDER_OFFERINGS.filter(
-  (offering) => offering !== ZEN_FREE_OFFERING,
-);
-
 export function isZenFreeAccount(
   account: Pick<Account, "id" | "provider_id">,
 ): boolean {
@@ -89,11 +85,4 @@ export function isOllamaCloudAccount(
 
 export function findProviderOffering(providerId: string): ProviderOffering | undefined {
   return ALL_PROVIDER_OFFERINGS.find((offering) => offering.provider_id === providerId);
-}
-
-export function providerOfferingLabel(
-  account: Pick<Account, "provider_id">,
-): string {
-  return findProviderOffering(account.provider_id)?.label
-    ?? account.provider_id;
 }

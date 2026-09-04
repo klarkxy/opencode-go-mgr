@@ -18,7 +18,6 @@ import {
   reconcileConnectionDrafts,
   resolveConnectionUrls,
   restoreMaskedConnectionKey,
-  writeConnectionValue,
 } from "./dashboard-connection.ts";
 
 test("connection draft context changes only when copied connection values change", () => {
@@ -47,15 +46,10 @@ test("connection draft context changes only when copied connection values change
   );
 });
 
-test("connection helpers mask display values and copy the complete value", async () => {
+test("connection helpers mask display values and copy the complete value", () => {
   assert.equal(maskConnectionKey(""), "未设置");
   assert.equal(maskConnectionKey("tinykey"), "ti…ey");
   assert.equal(maskConnectionKey("ocg-1234567890"), "ocg-…7890");
-
-  let copied = "";
-  await writeConnectionValue(async (value) => { copied = value; }, "ocg-secret-value");
-  assert.equal(copied, "ocg-secret-value");
-  await assert.rejects(() => writeConnectionValue(undefined, "value"), /剪贴板/);
 
   const specialKey = "ocg-$&-$$-$'-$`-tail";
   assert.equal(

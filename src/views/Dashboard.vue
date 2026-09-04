@@ -281,7 +281,7 @@ import { CHART_PALETTE } from "../theme";
 import { t } from "../i18n/index.ts";
 import { formatNumber, formatTokens, useClipboard } from "../utils/format.ts";
 import { userFacingError } from "../utils/errors.ts";
-import { daysUntilDate } from "../domain/account-lifecycle.ts";
+import { accountExpiryLabel } from "../domain/account-display.ts";
 import { maskConnectionKey, resolveConnectionUrls } from "./dashboard-connection";
 import { buildNeedsAttention } from "./dashboard-attention.ts";
 import type { AttentionItem, AttentionReason } from "./dashboard-attention.ts";
@@ -412,7 +412,7 @@ function attentionLabel(item: AttentionItem): string {
     case "expired": {
       const account = attentionAccount(item);
       return account
-        ? accountExpiryLabel(account)
+        ? accountExpiryLabel(account, lifecycleNow.value)
         : t("已到期 {days} 天", { days: 0 });
     }
     case "cooling":
@@ -438,20 +438,6 @@ function attentionTagType(
 
 function attentionItemAriaLabel(item: AttentionItem): string {
   return `${item.accountName} · ${attentionLabel(item)}`;
-}
-
-function accountExpiryDays(account: Account): number {
-  return daysUntilDate(account.expires_on, lifecycleNow.value);
-}
-
-function accountExpiryLabel(account: Account): string {
-  const days = accountExpiryDays(account);
-  if (!Number.isFinite(days)) return t("未设置");
-  if (days === 1) return t("剩 1 天");
-  if (days > 0) return t("剩 {days} 天", { days });
-  if (days === 0) return t("今天到期");
-  if (days === -1) return t("已到期 1 天");
-  return t("已到期 {days} 天", { days: Math.abs(days) });
 }
 
 async function copyConnection(target: ConnectionTarget, value: string, label: string) {

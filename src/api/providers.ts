@@ -630,23 +630,8 @@ export const providerApi = {
       }, expectation)
     )));
   },
-  getGoPricing: async (): Promise<PricingSnapshot> => {
-    const result = await dashboardV3.getProviderPricing("opencode");
-    if (!result.snapshot) throw new Error("OpenCode Go pricing is not available");
-    return presentPricing(result.snapshot);
-  },
   getZenFreeSettings: async (): Promise<ZenFreeSettings> => dashboardV3.getZenFreeSettings(),
   getZenFreeModels: async (): Promise<ZenFreeModelsResponse> => presentZenModels(await dashboardV3.getZenFreeModels()),
-  setZenFreeEnabled: async (enabled: boolean): Promise<ZenFreeSettings> => {
-    const control = useControlPlaneStore();
-    if (!control.hasTokens()) await control.refresh();
-    try {
-      return await control.runMutation((expectation) => dashboardV3.patchZenFreeSettings(enabled, expectation));
-    } catch (cause) {
-      if (isRevisionConflict(cause)) await dashboardV3.getZenFreeSettings();
-      throw cause;
-    }
-  },
   refreshZenFreeModels: async (): Promise<ZenFreeModelsResponse> => {
     const control = useControlPlaneStore();
     if (!control.hasTokens()) await control.refresh();

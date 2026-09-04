@@ -122,12 +122,3 @@ function isInsecureHttp(rootUrl: string): boolean {
     || /^127(?:\.\d{1,3}){3}$/.test(hostname);
   return !loopback;
 }
-
-export async function writeConnectionValue(
-  writeText: ((value: string) => Promise<void>) | undefined,
-  value: string,
-): Promise<void> {
-  if (!value) throw new Error(t("没有可复制的内容"));
-  if (!writeText) throw new Error(t("当前环境不支持剪贴板"));
-  await writeText(value);
-}

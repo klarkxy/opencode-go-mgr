@@ -3,7 +3,6 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import type { PricingModel } from "../api/dashboard.ts";
 import {
-  buildPricingOfferingSections,
   buildPricingTableRows,
   formatPricingMultiplier,
   formatPricingRate,
@@ -211,18 +210,6 @@ test("pricing catalog keeps refresh explicit and exposes accessible grouped mult
   assert.doesNotMatch(catalog, /plan\.id !== "command-code-goat"/);
 });
 
-test("legacy provider sections expose the GOAT pricing table", () => {
-  const sections = buildPricingOfferingSections(null);
-  assert.deepEqual(
-    sections.map(({ provider_id, presentation }) => (
-      `${provider_id}:${presentation}`
-    )),
-    [
-      "opencode:table",
-      "command-code:table",
-      "opencode-zen-free:free",
-    ],
-  );
-});
+
 
 

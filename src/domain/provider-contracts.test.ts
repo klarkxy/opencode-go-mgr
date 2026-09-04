@@ -9,7 +9,6 @@ import type {
   ProviderProtocol,
 } from "../api/providers.ts";
 import {
-  accountContractSummary,
   applyModelContractToResponse,
   catalogRefreshSupported,
   enabledProtocols,
@@ -17,13 +16,9 @@ import {
   flattenProviderScopes,
   isSafeSourceUrl,
   normalizeProviderContractsResponse,
-  parseProviderScopeKey,
   protocolDisplayName,
-  protocolEvidenceStatus,
-  protocolProbeSupported,
   providerScopeKey,
   selectProviderScope,
-  uniqueProtocols,
   type ProviderModelContract,
 } from "./provider-contracts.ts";
 
@@ -215,11 +210,6 @@ function account(overrides: Partial<Account> = {}): Account {
 
 test("scope keys round-trip and accounts match backend-owned exact scopes", () => {
   assert.equal(providerScopeKey("provider", "command-code"), "provider:command-code");
-  assert.deepEqual(parseProviderScopeKey("custom_endpoint:abc"), {
-    scope_kind: "custom_endpoint",
-    scope_id: "abc",
-  });
-  assert.equal(parseProviderScopeKey("nope"), null);
   const scopes = flattenProviderScopes(normalizeProviderContractsResponse(contracts()));
   assert.equal(findAccountScopeView(scopes, account())?.scope_id, "opencode");
   assert.equal(findAccountScopeView(scopes, account({
@@ -297,115 +287,15 @@ test("normalization preserves a provider model alias alongside its raw id", () =
   assert.equal(model?.model_id, "upstream-model-2026");
 });
 
-test("account summaries use contract facts for protocol availability and unroutable reasons", () => {
-  const closed = contracts({
-    providers: [providerGroup({
-      models: [modelContract("gpt-5.6-luna")],
-      catalog_routable: false,
-      production_inference: false,
-      disabled_reasons: ["no enabled upstream protocol is available for this model"],
-    })],
-  });
-  const summary = accountContractSummary(account(), closed);
-  assert.ok(summary);
-  assert.equal(summary.scope_kind, "provider");
-  assert.equal(summary.scope_id, "opencode");
-  assert.equal(summary.allProtocolsDisabled, true);
-  assert.deepEqual(summary.enabledProtocols, []);
-
-  const unroutable = accountContractSummary(account(), contracts({
-    providers: [providerGroup({
-      catalog_routable: false,
-      production_inference: false,
-      disabled_reasons: ["catalog is empty"],
-    })],
-  }));
-  assert.ok(unroutable);
-  assert.equal(unroutable.unroutable, true);
-  assert.deepEqual(unroutable.disabledReasons, ["catalog is empty"]);
-  assert.deepEqual(unroutable.enabledProtocols, ["chat_completions", "responses"]);
-
-  const custom = accountContractSummary(account({
-    id: "custom-1",
-    name: "Home Lab",
-    provider_id: "custom",
-  }), contracts());
-  assert.ok(custom);
-  assert.equal(custom.scope_kind, "custom_endpoint");
-  assert.equal(custom.label, "Home Lab");
-});
-
-test("a missing contract snapshot is not an empty-protocol summary and last-good remains", () => {
-  const acc = account();
-  assert.equal(accountContractSummary(acc, null), null);
-  assert.equal(accountContractSummary(acc, undefined), null);
-
-  const lastGood = contracts();
-  const summary = accountContractSummary(acc, lastGood);
-  assert.ok(summary);
-  assert.notDeepEqual(summary.enabledProtocols, []);
-  assert.deepEqual(
-    accountContractSummary(acc, lastGood)?.enabledProtocols,
-    summary.enabledProtocols,
-  );
-});
-
-test("protocol evidence maps probe and preset states without color-only meaning", () => {
-  assert.equal(protocolEvidenceStatus("messages", undefined), "unsupported");
-  assert.equal(protocolEvidenceStatus("chat_completions", {
-    protocol: "chat_completions",
-    available: true,
-    enabled: true,
-    source: "static",
-    verified_at: null,
-    observed_at: null,
-    last_probe_result: null,
-    last_probe_at: null,
-    last_probe_error: null,
-    override: "auto",
-  }), "static");
-  assert.equal(protocolEvidenceStatus("chat_completions", {
-    protocol: "chat_completions",
-    available: true,
-    enabled: true,
-    source: "probe_confirmed",
-    verified_at: "2026-08-22T00:00:00Z",
-    observed_at: "2026-08-22T00:00:00Z",
-    last_probe_result: "success",
-    last_probe_at: "2026-08-22T00:00:00Z",
-    last_probe_error: null,
-    override: "auto",
-  }), "probe_confirmed");
-  assert.equal(protocolEvidenceStatus("chat_completions", {
-    protocol: "chat_completions",
-    available: true,
-    enabled: false,
-    source: "probe_observed",
-    verified_at: null,
-    observed_at: "2026-08-22T00:00:00Z",
-    last_probe_result: "failure",
-    last_probe_at: "2026-08-22T00:00:00Z",
-    last_probe_error: "upstream 500",
-    override: "auto",
-  }), "probe_failure");
-});
-
 test("refresh and probe capability follow card/catalog facts, not raw provider ids", () => {
   const go = flattenProviderScopes(normalizeProviderContractsResponse(contracts()))[0]!;
   const custom = flattenProviderScopes(normalizeProviderContractsResponse(contracts()))[1]!;
   assert.equal(catalogRefreshSupported(go), true);
-  assert.equal(protocolProbeSupported(go), true);
   assert.equal(catalogRefreshSupported(custom), false);
-  assert.equal(protocolProbeSupported(custom), true);
   assert.deepEqual(enabledProtocols(custom), ["chat_completions"]);
 });
 
-test("unique protocols drop duplicates and unknown values before a probe payload", () => {
-  assert.deepEqual(uniqueProtocols(["responses", "responses", "chat_completions", "messages"]), [
-    "responses",
-    "chat_completions",
-    "messages",
-  ]);
+test("protocol display names stay stable for the three upstream wires", () => {
   assert.equal(protocolDisplayName("chat_completions"), "Chat Completions");
 });
 

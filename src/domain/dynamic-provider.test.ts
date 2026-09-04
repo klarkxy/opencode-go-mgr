@@ -6,12 +6,9 @@ import {
   buildDynamicProviderUpdateBody,
   dynamicAuthRequiresKey,
   dynamicProviderActionNeedsConfirm,
-  dynamicProviderFormEnterAction,
   emptyDynamicProviderDraft,
   isDynamicCatalogEntry,
   normalizeDynamicMappings,
-  omitSecretFromRecord,
-  providerSourceLabel,
   sanitizeDynamicProviderDraft,
   validateDynamicProviderDraft,
 } from "./dynamic-provider.ts";
@@ -44,8 +41,7 @@ function entry(extra: Partial<ProviderCatalogEntry> = {}): ProviderCatalogEntry 
 }
 
 test("source labels distinguish built-in catalog rows from user-defined Providers", () => {
-  assert.equal(providerSourceLabel(entry()), "builtin");
-  assert.equal(providerSourceLabel(entry({ model_source: "dynamic_provider" })), "user-defined");
+  assert.equal(isDynamicCatalogEntry(entry()), false);
   assert.equal(isDynamicCatalogEntry(entry({ model_source: "dynamic_provider" })), true);
 });
 
@@ -121,7 +117,6 @@ test("sanitization drops the write-only Key from draft and response-shaped recor
   const draft = emptyDynamicProviderDraft();
   draft.key = "sk-secret";
   assert.equal(sanitizeDynamicProviderDraft(draft).key, "");
-  assert.deepEqual(omitSecretFromRecord({ name: "Lab", key: "sk-secret", apiKey: "x" }), { name: "Lab" });
 });
 
 test("save does not require discovery or a prior model test", () => {
@@ -137,7 +132,6 @@ test("save does not require discovery or a prior model test", () => {
 });
 
 test("paid tests and deletes require confirmation; Enter submits save", () => {
-  assert.equal(dynamicProviderFormEnterAction(), "save");
   assert.equal(dynamicProviderActionNeedsConfirm("test"), true);
   assert.equal(dynamicProviderActionNeedsConfirm("delete"), true);
   assert.equal(dynamicProviderActionNeedsConfirm("save"), false);

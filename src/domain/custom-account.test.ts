@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   CUSTOM_ENDPOINT_URL_ISSUE_KEYS,
-  customAccountNeedsVerification,
   customEndpointUrlIssue,
   customApiUrlPlaceholder,
   customApiUrlSupportsModelDiscovery,
@@ -11,7 +10,6 @@ import {
   normalizeCustomCapabilities,
   CustomCapabilityError,
 } from "./custom-account.ts";
-import type { Account } from "../api/dashboard.ts";
 
 test("trusted Endpoint validation permits LAN, localhost, and HTTP", () => {
   for (const endpoint of [
@@ -74,11 +72,4 @@ test("public models are case-insensitively unique while upstream IDs are reusabl
   );
 });
 
-test("verification state only applies to Custom accounts", () => {
-  const account = { provider_id: "custom", verification_status: "pending" } as Pick<
-    Account,
-    "provider_id" | "verification_status"
-  >;
-  assert.ok(customAccountNeedsVerification(account));
-  assert.ok(!customAccountNeedsVerification({ ...account, verification_status: "verified" }));
-});
+

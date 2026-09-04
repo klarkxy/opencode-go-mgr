@@ -1,6 +1,4 @@
 /** Static official references. They are display-only and never debit local quota. */
-export const PRICING_REFERENCE_CHECKED_AT = "2026-08-24";
-
 export type GoatOfficialRate = number | "free" | null;
 
 export interface GoatOfficialPricingRow {

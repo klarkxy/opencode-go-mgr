@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { Account } from "../api/dashboard.ts";
 import {
+  accountExpiryLabel,
   accountMenuOptions,
   accountRoutingDraftDescription,
   accountRoutingDraftLabel,
@@ -45,6 +46,10 @@ function draftAccount(overrides: Partial<Account> = {}): Account {
     ...overrides,
   };
 }
+
+test("missing expiry date is unlabeled rather than zero days overdue", () => {
+  assert.equal(accountExpiryLabel(draftAccount({ expires_on: "" })), "未设置");
+});
 
 test("unroutable account drafts use verification status rather than provider-specific branches", () => {
   const base = { setup_step: "ready" as const, plan_routable: false };

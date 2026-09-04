@@ -38,7 +38,7 @@ export const useSettingsStore = defineStore("settings", () => {
     return load();
   }
 
-  async function put(update: AppConfig): Promise<void> {
+  async function putPresented(update: AppConfig): Promise<AppConfig> {
     try {
       await dashboardApi.updateSettings(update);
       await load();
@@ -46,10 +46,6 @@ export const useSettingsStore = defineStore("settings", () => {
       if (isRevisionConflict(cause)) await load();
       throw cause;
     }
-  }
-
-  async function putPresented(update: AppConfig): Promise<AppConfig> {
-    await put(update);
     if (!settings.value) throw new Error("settings reload returned no resource");
     return settings.value;
   }
@@ -71,24 +67,14 @@ export const useSettingsStore = defineStore("settings", () => {
     }
   }
 
-  function reset(): void {
-    settings.value = null;
-    claudeDesktop.value = null;
-    loading.value = false;
-    error.value = "";
-  }
-
   return {
     settings: computed(() => settings.value),
     claudeDesktop: computed(() => claudeDesktop.value),
     loading: computed(() => loading.value),
     error: computed(() => error.value),
-    load,
     loadPresented,
-    put,
     putPresented,
     loadClaudeDesktop,
     putClaudeDesktop,
-    reset,
   };
 });

@@ -1,10 +1,4 @@
 import type { PricingAdjustment, PricingModel } from "../api/dashboard";
-import type { ProviderCatalogEntry } from "../api/providers.ts";
-import {
-  DEFAULT_PROVIDER_ID,
-  ZEN_FREE_OFFERING,
-  findProviderOffering,
-} from "./account-providers.ts";
 
 export interface FormattedPricingRate {
   label: string;
@@ -259,47 +253,4 @@ export function buildPricingTableRows(
     ));
   }
   return rows;
-}
-
-/**
- * How a provider is presented on the pricing page: paid model tables for
- * OpenCode Go and GOAT, or the Zen Free zero-cost semantics block.
- */
-export type PricingOfferingPresentation = "table" | "unpriced" | "free";
-
-export interface PricingOfferingSection {
-  provider_id: string;
-  label: string;
-  presentation: PricingOfferingPresentation;
-  /** True when the fetched provider catalog lists this provider. */
-  listed: boolean;
-}
-
-/**
- * Groups the pricing page into the three known providers in a stable order.
- * Catalog entries only augment labels/listed flags; when the catalog is
- * missing or empty the built-in registry keeps every section renderable.
- */
-export function buildPricingOfferingSections(
-  catalog: readonly ProviderCatalogEntry[] | null | undefined,
-): PricingOfferingSection[] {
-  const known: Array<{ provider_id: string; presentation: PricingOfferingPresentation }> = [
-    { provider_id: DEFAULT_PROVIDER_ID, presentation: "table" },
-    { provider_id: "command-code", presentation: "table" },
-    {
-      provider_id: ZEN_FREE_OFFERING.provider_id,
-      presentation: "free",
-    },
-  ];
-  return known.flatMap(({ provider_id, presentation }) => {
-    const fallback = findProviderOffering(provider_id);
-    if (!fallback) return [];
-    const entry = catalog?.find((item) => item.provider_id === provider_id);
-    return [{
-      provider_id,
-      label: fallback.label,
-      presentation,
-      listed: Boolean(entry),
-    }];
-  });
 }

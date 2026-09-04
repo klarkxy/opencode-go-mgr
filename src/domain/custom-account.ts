@@ -268,10 +268,3 @@ export async function executeCustomAccountEdit(
 ): Promise<void> {
   await applyCustomAccountEditPlan(planCustomAccountEdit(account, input), writers);
 }
-
-export function customAccountNeedsVerification(
-  account: Pick<Account, "provider_id" | "verification_status">,
-): boolean {
-  return isCustomApiAccount(account)
-    && (account.verification_status === "pending" || account.verification_status === "failed");
-}

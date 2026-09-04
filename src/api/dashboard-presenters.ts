@@ -437,12 +437,6 @@ export interface DailyModelTokens {
   tokens: number;
 }
 
-export interface DashboardAuthStatus {
-  local: boolean;
-  initialized: boolean;
-  authenticated: boolean;
-}
-
 export function presentAccount(value: V3Account): Account {
   return {
     id: value.id,

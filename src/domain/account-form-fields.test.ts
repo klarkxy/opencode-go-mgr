@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { ProviderCatalogEntry } from "../api/providers.ts";
 import {
-  accountFormFieldIsImmutable,
   resolveAccountFormFields,
 } from "./account-form-fields.ts";
 import { OPENCODE_GO_PLAN, type PlanDefinition } from "./plans.ts";
@@ -66,15 +65,4 @@ test("dynamic Provider account fields are name/Key/notes and never Endpoint or m
   assert.deepEqual(resolveAccountFormFields(nonePlan, undefined).map((field) => field.id), ["name", "notes"]);
 });
 
-test("catalog immutable fields lock only while editing", () => {
-  const field = {
-    id: "upstream_protocol",
-    kind: "select",
-    required: true,
-    immutable_after_create: true,
-  } as const;
-  assert.equal(accountFormFieldIsImmutable(field, true), true);
-  assert.equal(accountFormFieldIsImmutable(field, false), false);
-  assert.equal(accountFormFieldIsImmutable({ ...field, immutable_after_create: false }, true), false);
-  assert.equal(accountFormFieldIsImmutable(undefined, true), false);
-});
+

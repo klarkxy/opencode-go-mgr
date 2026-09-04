@@ -3,58 +3,10 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import type { Account } from "../api/dashboard.ts";
 import { accountStatusLabel } from "../domain/account-display.ts";
-import { buildPricingOfferingSections } from "../domain/pricing-view.ts";
 import {
   ZEN_FREE_ACCOUNT_ID,
   ZEN_FREE_OFFERING,
 } from "../domain/account-providers.ts";
-import type { ProviderCatalogEntry } from "../api/providers.ts";
-
-const catalogEntry = (
-  provider_id: string,
-): ProviderCatalogEntry => ({
-  provider_id,
-  credential_kind: "api_key",
-  quota_scope: "key",
-  singleton: false,
-  display_name: provider_id,
-  display_family: provider_id,
-  creation_availability: "available",
-  verification_policy: "not_required",
-  verification_runtime_availability: "optional",
-  routable: true,
-  managed_registration: provider_id === "opencode",
-  pricing_availability: "available",
-  usage_availability: "available",
-  manual_usage_calibration: false,
-  quota_unit: "usd",
-  model_source: "test",
-  auth_schemes: ["bearer"],
-  upstream_protocols: ["chat_completions"],
-  form_fields: [],
-  model_aliases: [],
-});
-
-test("catalog entries augment listed flags without inventing sections", () => {
-  const sections = buildPricingOfferingSections([
-    catalogEntry("opencode"),
-    catalogEntry("opencode-zen-free"),
-    catalogEntry("unknown-provider"),
-  ]);
-
-  assert.equal(sections.length, 3);
-  assert.equal(sections[0]?.label, "OpenCode Go");
-  assert.equal(sections[0]?.listed, true);
-  assert.equal(sections[1]?.listed, false);
-  assert.equal(sections[2]?.label, "Zen Free");
-  assert.equal(sections[2]?.listed, true);
-});
-
-test("pricing sections treat an empty catalog as no listings", () => {
-  const sections = buildPricingOfferingSections([]);
-  assert.equal(sections.length, 3);
-  assert.ok(sections.every(({ listed }) => !listed));
-});
 
 test("non-Zen accounts keep the legacy toggle endpoint", () => {
   const accounts = readFileSync(new URL("./Accounts.vue", import.meta.url), "utf8");

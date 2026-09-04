@@ -39,11 +39,3 @@ export function resolveAccountFormFields(
   }
   return fields;
 }
-
-/** Catalog-owned edit lock; creation always remains interactive. */
-export function accountFormFieldIsImmutable(
-  field: ProviderCatalogFormField | undefined,
-  isEdit: boolean,
-): boolean {
-  return isEdit && field?.immutable_after_create === true;
-}
