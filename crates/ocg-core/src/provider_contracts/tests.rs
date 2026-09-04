@@ -541,7 +541,7 @@ fn custom_discovery_does_not_become_routable_without_declaration() {
 
 #[test]
 fn custom_declared_protocol_is_preferred_and_other_clients_fall_back_to_it() {
-    let declared = vec![("declared-model".to_string(), UpstreamProtocolKind::Messages)];
+    let declared = [("declared-model".to_string(), UpstreamProtocolKind::Messages)];
     let runtime = CustomAccountRuntime {
         account_id: "custom-single".into(),
         enabled: true,

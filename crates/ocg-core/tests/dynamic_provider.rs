@@ -441,19 +441,20 @@ async fn raw_shaped_public_models_are_listed_under_public_name_only() {
 
     let (status, body) = chat_completion(&harness, "org/public").await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    let outbound = calls.lock().expect("fake call log");
-    assert_eq!(outbound.len(), 1, "{outbound:?}");
-    assert!(
-        outbound[0].body.contains("\"model\":\"vendor/real\""),
-        "public!=upstream must forward the exact upstream id: {}",
-        outbound[0].body
-    );
-    assert!(
-        !outbound[0].body.contains("\"model\":\"org/public\""),
-        "public name must not replace the upstream id: {}",
-        outbound[0].body
-    );
-    drop(outbound);
+    {
+        let outbound = calls.lock().expect("fake call log");
+        assert_eq!(outbound.len(), 1, "{outbound:?}");
+        assert!(
+            outbound[0].body.contains("\"model\":\"vendor/real\""),
+            "public!=upstream must forward the exact upstream id: {}",
+            outbound[0].body
+        );
+        assert!(
+            !outbound[0].body.contains("\"model\":\"org/public\""),
+            "public name must not replace the upstream id: {}",
+            outbound[0].body
+        );
+    }
 
     let (status, same_body) = chat_completion(&harness, "org/same").await;
     assert_eq!(status, StatusCode::OK, "{same_body}");
@@ -965,7 +966,7 @@ async fn in_flight_request_keeps_frozen_snapshot_across_provider_patch() {
     });
     let started = tokio::time::Instant::now();
     loop {
-        if calls.lock().expect("fake call log").len() >= 1 {
+        if !calls.lock().expect("fake call log").is_empty() {
             break;
         }
         assert!(

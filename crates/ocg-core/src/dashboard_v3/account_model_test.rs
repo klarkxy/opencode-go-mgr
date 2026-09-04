@@ -32,14 +32,16 @@ pub(super) async fn test_account_model(
     let prepared = prepare_account_model_test(&state, &id, input)?;
     let started = Instant::now();
     let (success, http_status, error) = match crate::protocol_probe::execute_account_model_test(
-        &state,
-        &prepared.config,
-        &prepared.account,
-        prepared.adapter,
-        &prepared.upstream_model,
-        prepared.protocol,
-        prepared.custom_endpoint_url.as_deref(),
-        &prepared.dynamics,
+        crate::protocol_probe::AccountModelTestInput {
+            state: &state,
+            config: &prepared.config,
+            account: &prepared.account,
+            adapter: prepared.adapter,
+            model_id: &prepared.upstream_model,
+            protocol: prepared.protocol,
+            custom_endpoint_url: prepared.custom_endpoint_url.as_deref(),
+            dynamics: &prepared.dynamics,
+        },
     )
     .await
     {

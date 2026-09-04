@@ -496,15 +496,19 @@ fn materialize_custom_account_plan(
     )
 }
 
+struct DynamicPlanNames<'a> {
+    client_model: &'a str,
+    routing_model: &'a str,
+    resolved_alias: Option<String>,
+    mapping_upstream: &'a str,
+}
+
 fn materialize_dynamic_account_plan(
     account: &Account,
     runtime: Option<&crate::dynamic::DynamicProviderRuntime>,
     config: &AppConfig,
     parsed: &ParsedClientRequest,
-    client_model: &str,
-    routing_model: &str,
-    resolved_alias: Option<String>,
-    mapping: &ProviderMapping,
+    names: DynamicPlanNames<'_>,
 ) -> Result<RequestPlan, ProtocolError> {
     let runtime = runtime.ok_or_else(|| {
         ProtocolError::new(format!(
@@ -519,21 +523,23 @@ fn materialize_dynamic_account_plan(
         )));
     }
     let selected = runtime
-        .mapping_for_public(routing_model)
-        .or_else(|| runtime.mapping_for_upstream(&mapping.upstream_model))
-        .or_else(|| runtime.mapping_for_upstream(routing_model))
+        .mapping_for_public(names.routing_model)
+        .or_else(|| runtime.mapping_for_upstream(names.mapping_upstream))
+        .or_else(|| runtime.mapping_for_upstream(names.routing_model))
         .ok_or_else(|| {
             ProtocolError::new(format!(
-                "dynamic provider `{}` has no mapping for `{routing_model}`",
-                runtime.name
+                "dynamic provider `{}` has no mapping for `{}`",
+                runtime.name, names.routing_model
             ))
         })?;
     materialize_channel_plan(
         config,
         parsed,
-        client_model,
+        names.client_model,
         &selected.upstream_model,
-        resolved_alias.or_else(|| Some(selected.public_model.clone())),
+        names
+            .resolved_alias
+            .or_else(|| Some(selected.public_model.clone())),
         UpstreamChannel::Go,
         None,
         false,
@@ -571,9 +577,7 @@ fn collect_mapping_plans(
     let mut routes = Vec::new();
     for account in accounts {
         for candidate in &plans {
-            if account.provider_id != candidate.mapping.provider_id
-                || account.provider_id != candidate.mapping.provider_id
-            {
+            if account.provider_id != candidate.mapping.provider_id {
                 continue;
             }
             if routes.iter().any(|route: &MaterializedCandidate| {
@@ -632,10 +636,12 @@ fn collect_mapping_plans(
                     crate::dynamic::find_runtime(dynamics, &account.provider_id),
                     config,
                     parsed,
-                    client_model,
-                    routing_model,
-                    resolved_alias.clone(),
-                    &candidate.mapping,
+                    DynamicPlanNames {
+                        client_model,
+                        routing_model,
+                        resolved_alias: resolved_alias.clone(),
+                        mapping_upstream: &candidate.mapping.upstream_model,
+                    },
                 ) {
                     Ok(plan) => plan,
                     Err(error) => {

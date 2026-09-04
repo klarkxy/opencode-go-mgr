@@ -118,7 +118,6 @@ pub(super) async fn refresh_provider_usage(
         if current.updated_at != account_snapshot.updated_at
             || current.key_cipher != account_snapshot.key_cipher
             || current.provider_id != account_snapshot.provider_id
-            || current.provider_id != account_snapshot.provider_id
         {
             return Err(V3ApiError::conflict_at(
                 &state,

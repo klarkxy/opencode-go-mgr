@@ -140,29 +140,35 @@ pub(crate) async fn execute_protocol_probe(
 /// Send the same minimal protocol request used by provider probes, but lock
 /// routing to the caller-selected account and retain the production route
 /// family for Plans whose provider probes are intentionally unavailable.
+pub(crate) struct AccountModelTestInput<'a> {
+    pub state: &'a CoreState,
+    pub config: &'a AppConfig,
+    pub account: &'a Account,
+    pub adapter: ProviderAdapterKind,
+    pub model_id: &'a str,
+    pub protocol: UpstreamProtocolKind,
+    pub custom_endpoint_url: Option<&'a str>,
+    pub dynamics: &'a [crate::dynamic::DynamicProviderRuntime],
+}
+
 pub(crate) async fn execute_account_model_test(
-    state: &CoreState,
-    config: &AppConfig,
-    account: &Account,
-    adapter: ProviderAdapterKind,
-    model_id: &str,
-    protocol: UpstreamProtocolKind,
-    custom_endpoint_url: Option<&str>,
-    dynamics: &[crate::dynamic::DynamicProviderRuntime],
+    input: AccountModelTestInput<'_>,
 ) -> Result<u16, (Option<u16>, String)> {
-    let custom_route = custom_endpoint_url.map(|endpoint_url| CustomRouteSpec {
-        endpoint_url: endpoint_url.to_string(),
-    });
+    let custom_route = input
+        .custom_endpoint_url
+        .map(|endpoint_url| CustomRouteSpec {
+            endpoint_url: endpoint_url.to_string(),
+        });
     let ctx = ProtocolProbeContext {
-        state,
-        config,
-        accounts: std::slice::from_ref(account),
-        adapter,
-        model_id,
+        state: input.state,
+        config: input.config,
+        accounts: std::slice::from_ref(input.account),
+        adapter: input.adapter,
+        model_id: input.model_id,
         custom_route,
         now: chrono::Utc::now(),
     };
-    execute_protocol_request(&ctx, account, protocol, true, dynamics).await
+    execute_protocol_request(&ctx, input.account, input.protocol, true, input.dynamics).await
 }
 
 async fn execute_protocol_request(

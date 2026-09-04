@@ -1973,7 +1973,7 @@ fn migrate_v35_body(tx: &Transaction<'_>) -> Result<()> {
 fn dynamic_tx_fault(point: &'static str) -> Result<()> {
     #[cfg(test)]
     {
-        return dynamic_provider_fault::inject(point);
+        dynamic_provider_fault::inject(point)
     }
     #[cfg(not(test))]
     {
@@ -2004,13 +2004,15 @@ fn list_dynamic_providers_on(conn: &Connection) -> Result<Vec<DynamicProviderRun
         let (id, name, endpoint_url, protocol, auth_kind, created_at, updated_at) = row?;
         providers.push(load_dynamic_provider_runtime(
             conn,
-            id,
-            name,
-            endpoint_url,
-            protocol,
-            auth_kind,
-            created_at,
-            updated_at,
+            DynamicProviderRow {
+                id,
+                name,
+                endpoint_url,
+                protocol,
+                auth_kind,
+                created_at,
+                updated_at,
+            },
         )?);
     }
     Ok(providers)
@@ -2044,18 +2046,19 @@ fn get_dynamic_provider_on(
     };
     Ok(Some(load_dynamic_provider_runtime(
         conn,
-        id,
-        name,
-        endpoint_url,
-        protocol,
-        auth_kind,
-        created_at,
-        updated_at,
+        DynamicProviderRow {
+            id,
+            name,
+            endpoint_url,
+            protocol,
+            auth_kind,
+            created_at,
+            updated_at,
+        },
     )?))
 }
 
-fn load_dynamic_provider_runtime(
-    conn: &Connection,
+struct DynamicProviderRow {
     id: String,
     name: String,
     endpoint_url: String,
@@ -2063,10 +2066,16 @@ fn load_dynamic_provider_runtime(
     auth_kind: String,
     created_at: String,
     updated_at: String,
+}
+
+fn load_dynamic_provider_runtime(
+    conn: &Connection,
+    provider: DynamicProviderRow,
 ) -> Result<DynamicProviderRuntime> {
-    let upstream_protocol = ocg_domain::catalog::UpstreamProtocolKind::try_from(protocol.as_str())
-        .map_err(|error| anyhow::anyhow!(error.to_string()))?;
-    let auth_kind = DynamicAuthKind::try_from(auth_kind.as_str())
+    let upstream_protocol =
+        ocg_domain::catalog::UpstreamProtocolKind::try_from(provider.protocol.as_str())
+            .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+    let auth_kind = DynamicAuthKind::try_from(provider.auth_kind.as_str())
         .map_err(|error| anyhow::anyhow!(error.to_string()))?;
     let mut stmt = conn.prepare(
         "SELECT public_model, upstream_model
@@ -2074,7 +2083,7 @@ fn load_dynamic_provider_runtime(
          WHERE provider_id = ?1
          ORDER BY public_model_key ASC",
     )?;
-    let rows = stmt.query_map([&id], |row| {
+    let rows = stmt.query_map([&provider.id], |row| {
         Ok(DynamicModelMapping {
             public_model: row.get(0)?,
             upstream_model: row.get(1)?,
@@ -2084,20 +2093,26 @@ fn load_dynamic_provider_runtime(
     for row in rows {
         mappings.push(row?);
     }
-    let created_at = DateTime::parse_from_rfc3339(&created_at)
+    let created_at = DateTime::parse_from_rfc3339(&provider.created_at)
         .map(|value| value.with_timezone(&Utc))
         .map_err(|error| {
-            anyhow::anyhow!("dynamic provider {id} has invalid created_at: {error}")
+            anyhow::anyhow!(
+                "dynamic provider {} has invalid created_at: {error}",
+                provider.id
+            )
         })?;
-    let updated_at = DateTime::parse_from_rfc3339(&updated_at)
+    let updated_at = DateTime::parse_from_rfc3339(&provider.updated_at)
         .map(|value| value.with_timezone(&Utc))
         .map_err(|error| {
-            anyhow::anyhow!("dynamic provider {id} has invalid updated_at: {error}")
+            anyhow::anyhow!(
+                "dynamic provider {} has invalid updated_at: {error}",
+                provider.id
+            )
         })?;
     Ok(DynamicProviderRuntime {
-        id,
-        name,
-        endpoint_url,
+        id: provider.id,
+        name: provider.name,
+        endpoint_url: provider.endpoint_url,
         upstream_protocol,
         auth_kind,
         mappings,
