@@ -23,7 +23,7 @@ const CUSTOM_KEY_2: &str = "v2-secret-KEY-9f3a2c1b-custom-2";
 const SUCCESS_RESPONSES_BODY: &str = r#"{"id":"ok","object":"response","model":"upstream-should-not-leak","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":10,"output_tokens":2}}"#;
 const SUCCESS_MESSAGES_BODY: &str = r#"{"id":"ok","type":"message","role":"assistant","model":"upstream-should-not-leak","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":10,"output_tokens":2}}"#;
 
-fn custom_origin(harness: &V2Harness) -> String {
+fn custom_origin(harness: &BlackBoxHarness) -> String {
     harness
         .upstream_base_url
         .trim_end_matches('/')
@@ -55,7 +55,7 @@ fn protocol_success_replies(
     replies
 }
 
-async fn verify_account(harness: &V2Harness, id: &str) -> (StatusCode, Value) {
+async fn verify_account(harness: &BlackBoxHarness, id: &str) -> (StatusCode, Value) {
     harness
         .post_json(
             &format!("/accounts/{id}/verify"),
@@ -64,7 +64,7 @@ async fn verify_account(harness: &V2Harness, id: &str) -> (StatusCode, Value) {
         .await
 }
 
-async fn toggle_account(harness: &V2Harness, id: &str) -> (StatusCode, Value) {
+async fn toggle_account(harness: &BlackBoxHarness, id: &str) -> (StatusCode, Value) {
     harness
         .post_json(
             &format!("/accounts/{id}/toggle"),
@@ -73,7 +73,7 @@ async fn toggle_account(harness: &V2Harness, id: &str) -> (StatusCode, Value) {
         .await
 }
 
-async fn ensure_account_enabled(harness: &V2Harness, id: &str) {
+async fn ensure_account_enabled(harness: &BlackBoxHarness, id: &str) {
     let enabled = harness
         .state
         .db
@@ -90,7 +90,7 @@ async fn ensure_account_enabled(harness: &V2Harness, id: &str) {
 }
 
 async fn create_verified_enabled_custom(
-    harness: &V2Harness,
+    harness: &BlackBoxHarness,
     name: &str,
     key: &str,
     model_id: &str,
@@ -134,7 +134,7 @@ async fn create_verified_enabled_custom(
 }
 
 async fn create_verified_enabled_custom_mapping(
-    harness: &V2Harness,
+    harness: &BlackBoxHarness,
     name: &str,
     key: &str,
     public_model: &str,
@@ -167,7 +167,7 @@ async fn create_verified_enabled_custom_mapping(
 
 #[tokio::test]
 async fn custom_catalog_is_routable_with_available_verification() {
-    let harness = V2Harness::start().await;
+    let harness = BlackBoxHarness::start().await;
     let catalog = harness.catalog().await;
     let custom = catalog_entry(&catalog, CUSTOM_PROVIDER_ID).unwrap();
     assert_eq!(custom["routable"], true, "{custom}");
@@ -182,7 +182,7 @@ async fn custom_catalog_is_routable_with_available_verification() {
 
 #[tokio::test]
 async fn verification_failure_persists_failed_without_enabling() {
-    let harness = V2Harness::start().await;
+    let harness = BlackBoxHarness::start().await;
     let (status, draft) = harness
         .create_account(custom_create_payload(
             "custom-fail",
@@ -216,7 +216,7 @@ async fn verification_failure_persists_failed_without_enabling() {
 
 #[tokio::test]
 async fn chat_bearer_verifies_lists_resolves_and_logs_unknown_cost() {
-    let harness = V2Harness::start_with_upstream(Some(protocol_success_replies(
+    let harness = BlackBoxHarness::start_with_upstream(Some(protocol_success_replies(
         &[CUSTOM_ACCOUNT_KEY],
         SUCCESS_CHAT_BODY,
     )))
@@ -290,7 +290,7 @@ async fn chat_bearer_verifies_lists_resolves_and_logs_unknown_cost() {
 
 #[tokio::test]
 async fn public_custom_alias_materializes_upstream_model_and_logs_all_three_identities() {
-    let harness = V2Harness::start_with_upstream(Some(protocol_success_replies(
+    let harness = BlackBoxHarness::start_with_upstream(Some(protocol_success_replies(
         &[CUSTOM_ACCOUNT_KEY],
         SUCCESS_CHAT_BODY,
     )))
@@ -349,7 +349,7 @@ async fn responses_and_messages_use_configured_protocol_and_auth_isolation() {
             body: SUCCESS_MESSAGES_BODY,
         }]),
     );
-    let harness = V2Harness::start_with_upstream(Some(replies)).await;
+    let harness = BlackBoxHarness::start_with_upstream(Some(replies)).await;
 
     let responses = create_verified_enabled_custom(
         &harness,
@@ -452,7 +452,7 @@ async fn overlap_keeps_go_mapping_and_undeclared_models_are_excluded() {
             body: SUCCESS_CHAT_BODY,
         }]),
     );
-    let harness = V2Harness::start_with_upstream(Some(replies)).await;
+    let harness = BlackBoxHarness::start_with_upstream(Some(replies)).await;
     let go = harness.create_go_account("go-main", GO_ACCOUNT_KEY).await;
     let custom = create_verified_enabled_custom(
         &harness,
@@ -548,7 +548,7 @@ async fn same_custom_model_uses_account_order_and_config_change_stales() {
             },
         ]),
     );
-    let harness = V2Harness::start_with_upstream(Some(replies)).await;
+    let harness = BlackBoxHarness::start_with_upstream(Some(replies)).await;
     let first = create_verified_enabled_custom(
         &harness,
         "custom-a",
@@ -711,7 +711,7 @@ async fn custom_stream_does_not_cross_account_retry_after_output() {
 
 #[tokio::test]
 async fn goat_raw_overlap_with_custom_is_ambiguous_and_does_not_call_upstream() {
-    let harness = V2Harness::start_with_upstream(Some(protocol_success_replies(
+    let harness = BlackBoxHarness::start_with_upstream(Some(protocol_success_replies(
         &[CUSTOM_ACCOUNT_KEY],
         SUCCESS_CHAT_BODY,
     )))
@@ -748,7 +748,7 @@ async fn goat_raw_overlap_with_custom_is_ambiguous_and_does_not_call_upstream() 
 }
 
 async fn create_pending_custom(
-    harness: &V2Harness,
+    harness: &BlackBoxHarness,
     name: &str,
     key: &str,
     model_id: &str,
@@ -907,7 +907,7 @@ async fn serve_sse_after_delay(body_delay: Duration, payload: &str) -> String {
     format!("http://{addr}")
 }
 
-async fn mark_verified_and_enable(harness: &V2Harness, id: &str) {
+async fn mark_verified_and_enable(harness: &BlackBoxHarness, id: &str) {
     harness
         .state
         .db
@@ -922,7 +922,7 @@ async fn mark_verified_and_enable(harness: &V2Harness, id: &str) {
     ensure_account_enabled(harness, id).await;
 }
 
-async fn patch_account_key(harness: &V2Harness, id: &str, key: &str) -> (StatusCode, Value) {
+async fn patch_account_key(harness: &BlackBoxHarness, id: &str, key: &str) -> (StatusCode, Value) {
     harness
         .patch_json(
             &format!("/accounts/{id}"),
@@ -938,7 +938,7 @@ async fn patch_account_key(harness: &V2Harness, id: &str, key: &str) -> (StatusC
 async fn delayed_verify_probe_conflicts_on_key_config_caps_delete_and_concurrent() {
     async fn delayed_key_race() {
         let held = HeldJsonServer::start(200, r#"{"id":"ok"}"#).await;
-        let harness = V2Harness::start().await;
+        let harness = BlackBoxHarness::start().await;
         let draft = create_pending_custom(
             &harness,
             "cas-key",
@@ -970,7 +970,7 @@ async fn delayed_verify_probe_conflicts_on_key_config_caps_delete_and_concurrent
 
     async fn delayed_config_race() {
         let held = HeldJsonServer::start(200, r#"{"id":"ok"}"#).await;
-        let harness = V2Harness::start().await;
+        let harness = BlackBoxHarness::start().await;
         let draft = create_pending_custom(
             &harness,
             "cas-config",
@@ -1017,7 +1017,7 @@ async fn delayed_verify_probe_conflicts_on_key_config_caps_delete_and_concurrent
 
     async fn delayed_capability_race() {
         let held = HeldJsonServer::start(200, r#"{"id":"ok"}"#).await;
-        let harness = V2Harness::start().await;
+        let harness = BlackBoxHarness::start().await;
         let draft = create_pending_custom(
             &harness,
             "cas-caps",
@@ -1064,7 +1064,7 @@ async fn delayed_verify_probe_conflicts_on_key_config_caps_delete_and_concurrent
 
     async fn delayed_delete_race() {
         let held = HeldJsonServer::start(200, r#"{"id":"ok"}"#).await;
-        let harness = V2Harness::start().await;
+        let harness = BlackBoxHarness::start().await;
         let draft = create_pending_custom(
             &harness,
             "cas-delete",
@@ -1103,7 +1103,7 @@ async fn delayed_verify_probe_conflicts_on_key_config_caps_delete_and_concurrent
 
     async fn delayed_concurrent_verifies() {
         let held = HeldJsonServer::start(200, r#"{"id":"ok"}"#).await;
-        let harness = V2Harness::start().await;
+        let harness = BlackBoxHarness::start().await;
         let draft = create_pending_custom(
             &harness,
             "cas-concurrent",
@@ -1154,7 +1154,7 @@ async fn custom_overlay_of_chat_preferred_builtin_preserves_native_structured_fo
             body: SUCCESS_MESSAGES_BODY,
         }]),
     );
-    let harness = V2Harness::start_with_upstream(Some(replies)).await;
+    let harness = BlackBoxHarness::start_with_upstream(Some(replies)).await;
     let _responses = create_verified_enabled_custom(
         &harness,
         "custom-responses-overlay",
@@ -1248,7 +1248,7 @@ async fn custom_overlay_of_chat_preferred_builtin_preserves_native_structured_fo
 
 #[tokio::test]
 async fn pure_builtin_chat_preferred_alias_rejects_structured_conversion_without_upstream() {
-    let harness = V2Harness::start_with_upstream(Some(protocol_success_replies(
+    let harness = BlackBoxHarness::start_with_upstream(Some(protocol_success_replies(
         &[GO_ACCOUNT_KEY],
         SUCCESS_CHAT_BODY,
     )))
@@ -1317,7 +1317,7 @@ async fn custom_timeouts_use_connect_and_per_request_limits() {
         SUCCESS_CHAT_BODY,
     )
     .await;
-    let harness = V2Harness::start().await;
+    let harness = BlackBoxHarness::start().await;
     let draft = create_pending_custom(
         &harness,
         "custom-timeout",
@@ -1350,7 +1350,7 @@ async fn custom_timeouts_use_connect_and_per_request_limits() {
         SUCCESS_CHAT_BODY,
     )
     .await;
-    let harness = V2Harness::start().await;
+    let harness = BlackBoxHarness::start().await;
     let draft = create_pending_custom(
         &harness,
         "custom-timeout-fail",
@@ -1384,7 +1384,7 @@ async fn custom_timeouts_use_connect_and_per_request_limits() {
         ),
     )
     .await;
-    let harness = V2Harness::start().await;
+    let harness = BlackBoxHarness::start().await;
     let draft = create_pending_custom(
         &harness,
         "custom-stream-timeout",
@@ -1433,7 +1433,7 @@ async fn oversized_verification_body_fails_cleanly() {
     let huge = format!(r#"{{"id":"ok","pad":"{pad}"}}"#);
     let origin =
         serve_once_after_delay(Duration::from_millis(0), 200, "application/json", &huge).await;
-    let harness = V2Harness::start().await;
+    let harness = BlackBoxHarness::start().await;
     let draft = create_pending_custom(
         &harness,
         "custom-oversize",
@@ -1463,7 +1463,7 @@ async fn oversized_verification_body_fails_cleanly() {
 
 #[tokio::test]
 async fn custom_429_is_generic_and_does_not_parse_go_windows() {
-    let harness = V2Harness::start_with_upstream(Some({
+    let harness = BlackBoxHarness::start_with_upstream(Some({
         let mut replies = HashMap::new();
         replies.insert(
             CUSTOM_ACCOUNT_KEY.to_string(),

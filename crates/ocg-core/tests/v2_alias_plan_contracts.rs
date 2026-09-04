@@ -1,4 +1,4 @@
-//! Black-box v2.0 Alias and multi-Plan contract tests.
+//! Black-box Alias and multi-Plan contract tests.
 //!
 //! These tests drive public Gateway and dashboard HTTP/JSON. They are the
 //! independent acceptance slice for the accepted unified-alias / multi-Plan
@@ -16,7 +16,7 @@ mod harness;
 
 use harness::*;
 
-async fn reorder_account_first(harness: &V2Harness, account_id: &str) {
+async fn reorder_account_first(harness: &BlackBoxHarness, account_id: &str) {
     let mut account_ids = harness
         .accounts()
         .await
@@ -35,7 +35,7 @@ async fn reorder_account_first(harness: &V2Harness, account_id: &str) {
 /// Unknown offerings fail closed at the dashboard create gate.
 #[tokio::test]
 async fn unknown_offering_create_fails_closed() {
-    let harness = V2Harness::start().await;
+    let harness = BlackBoxHarness::start().await;
     let before = harness.accounts().await;
     let (status, body) = harness
         .create_account(json!({
@@ -63,7 +63,7 @@ async fn unknown_offering_create_fails_closed() {
 /// routeable, the GOAT-shaped raw id must not fall through to OpenCode Go.
 #[tokio::test]
 async fn unique_raw_upstream_id_pins_to_one_provider_and_skips_go() {
-    let harness = V2Harness::start_with_chat_success(&[GO_ACCOUNT_KEY]).await;
+    let harness = BlackBoxHarness::start_with_chat_success(&[GO_ACCOUNT_KEY]).await;
     let go = harness.create_go_account("go-main", GO_ACCOUNT_KEY).await;
     let (status, body) = harness.chat(GOAT_UNIQUE_RAW_ID).await;
     assert_ne!(
@@ -100,7 +100,8 @@ async fn unique_raw_upstream_id_pins_to_one_provider_and_skips_go() {
 /// `v2_alias_runtime::ambiguous_model_id_is_structured_across_client_formats`.
 #[tokio::test]
 async fn ambiguous_raw_upstream_id_is_rejected() {
-    let harness = V2Harness::start_with_chat_success(&[GO_ACCOUNT_KEY, CUSTOM_ACCOUNT_KEY]).await;
+    let harness =
+        BlackBoxHarness::start_with_chat_success(&[GO_ACCOUNT_KEY, CUSTOM_ACCOUNT_KEY]).await;
     let _go = harness.create_go_account("go-main", GO_ACCOUNT_KEY).await;
     let catalog = harness.catalog().await;
     let overlaps = overlapping_raw_ids(&catalog);
@@ -162,7 +163,7 @@ async fn ambiguous_raw_upstream_id_is_rejected() {
 /// Zen Free stays anonymous and does not send an account Key.
 #[tokio::test]
 async fn zen_free_explicit_free_model_stays_anonymous() {
-    let harness = V2Harness::start_with_chat_success(&[GO_ACCOUNT_KEY]).await;
+    let harness = BlackBoxHarness::start_with_chat_success(&[GO_ACCOUNT_KEY]).await;
     let _go = harness.create_go_account("go-main", GO_ACCOUNT_KEY).await;
     let revision = harness.settings_revision().await;
     let (status, body) = harness
@@ -199,7 +200,7 @@ async fn zen_free_explicit_free_model_stays_anonymous() {
 /// Go import stays immediately routable; verification is not required.
 #[tokio::test]
 async fn go_import_remains_immediately_routable_without_verification() {
-    let harness = V2Harness::start_with_chat_success(&[GO_ACCOUNT_KEY]).await;
+    let harness = BlackBoxHarness::start_with_chat_success(&[GO_ACCOUNT_KEY]).await;
     let account = harness.create_go_account("go-main", GO_ACCOUNT_KEY).await;
     assert_eq!(account["enabled"], true, "{account}");
     assert_eq!(account["setup_step"], "ready", "{account}");
@@ -218,7 +219,7 @@ async fn go_import_remains_immediately_routable_without_verification() {
 /// GOAT is live without directory verification; Custom remains an optional-verification draft.
 #[tokio::test]
 async fn goat_creates_live_while_custom_creates_a_pending_draft() {
-    let harness = V2Harness::start().await;
+    let harness = BlackBoxHarness::start().await;
     let catalog = harness.catalog().await;
 
     let goat = catalog_entry(&catalog, COMMAND_CODE_PROVIDER_ID)
@@ -303,7 +304,8 @@ async fn goat_creates_live_while_custom_creates_a_pending_draft() {
 /// Explicitly disabled GOAT accounts must not be selected when a shared alias is requested.
 #[tokio::test]
 async fn disabled_goat_is_not_selected_for_alias_routing() {
-    let harness = V2Harness::start_with_chat_success(&[GO_ACCOUNT_KEY, GOAT_ACCOUNT_KEY]).await;
+    let harness =
+        BlackBoxHarness::start_with_chat_success(&[GO_ACCOUNT_KEY, GOAT_ACCOUNT_KEY]).await;
     let go = harness.create_go_account("go-main", GO_ACCOUNT_KEY).await;
     let (status, goat) = harness
         .create_account(json!({
@@ -341,7 +343,7 @@ async fn disabled_goat_is_not_selected_for_alias_routing() {
 /// GOAT verification is not applicable because its public catalog is not a Key check.
 #[tokio::test]
 async fn goat_account_reports_verification_not_applicable() {
-    let harness = V2Harness::start().await;
+    let harness = BlackBoxHarness::start().await;
     let (status, account) = harness
         .create_account(json!({
             "provider_id": COMMAND_CODE_PROVIDER_ID,
@@ -389,7 +391,7 @@ async fn goat_account_reports_verification_not_applicable() {
 /// Account Keys stay out of dashboard JSON, errors, and logs.
 #[tokio::test]
 async fn account_secrets_absent_from_json_errors_and_logs() {
-    let harness = V2Harness::start_with_chat_success(&[GO_ACCOUNT_KEY]).await;
+    let harness = BlackBoxHarness::start_with_chat_success(&[GO_ACCOUNT_KEY]).await;
     let account = harness.create_go_account("go-secret", GO_ACCOUNT_KEY).await;
     assert_eq!(account["key"], "");
     assert_eq!(account["password"], "");

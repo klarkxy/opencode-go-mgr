@@ -1,4 +1,4 @@
-//! HTTP-only helpers for the v2 alias / multi-Plan black-box suite.
+//! HTTP-only helpers for the alias / multi-Plan black-box suite.
 //!
 //! Tests talk to Gateway and dashboard JSON. They do not construct private
 //! gateway types. `CoreStateInner` is used only to boot an isolated data dir.
@@ -53,7 +53,7 @@ pub(crate) fn loopback_client() -> reqwest::Client {
         .expect("v2 test client should build")
 }
 
-pub(crate) struct V2Harness {
+pub(crate) struct BlackBoxHarness {
     pub state: Arc<CoreStateInner>,
     pub dir: PathBuf,
     pub handle: GatewayHandle,
@@ -65,7 +65,7 @@ pub(crate) struct V2Harness {
     stop_fake: Option<tokio::sync::oneshot::Sender<()>>,
 }
 
-impl V2Harness {
+impl BlackBoxHarness {
     pub(crate) async fn start() -> Self {
         Self::start_with_upstream(None).await
     }
@@ -372,7 +372,7 @@ pub(crate) async fn start_output_then_disconnect_upstream() -> (
     start_raw_disconnect_upstream(raw).await
 }
 
-pub(crate) async fn start_v2_with_disconnect_upstream() -> V2Harness {
+pub(crate) async fn start_v2_with_disconnect_upstream() -> BlackBoxHarness {
     let dir = temp_data_dir();
     let db = Database::open(dir.clone()).unwrap();
     let cipher: Arc<dyn KeyCipher + Send + Sync> = Arc::new(StaticKeyCipher::new("v2-tests"));
@@ -388,7 +388,7 @@ pub(crate) async fn start_v2_with_disconnect_upstream() -> V2Harness {
         .unwrap();
     let client = loopback_client();
     wait_ready(&client, handle.port).await;
-    V2Harness {
+    BlackBoxHarness {
         state,
         dir,
         port: handle.port,
