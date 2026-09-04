@@ -17,7 +17,7 @@ use crate::gateway::materialize::{
 use crate::gateway::protocol::{MaterializeSpec, RequestPlan, materialize_parsed_request};
 use crate::gateway::response::{local_protocol_failure, protocol_error_response};
 use crate::gateway::routing::resolve_conversation_key;
-use crate::gateway::selector::AccountSelector;
+
 use crate::http_client::{ForwardRouteSet, RouteLabel};
 use crate::kernel::pricing::PricingSnapshot;
 use crate::kernel::protocol::ApiFormat;
@@ -225,7 +225,7 @@ impl GatewayExecutor {
                 (accounts, free_cooldown)
             };
             let free_available = free_cooldown.is_none()
-                && !AccountSelector::free_channel_exhausted_at(&accounts, decision_wall);
+                && !crate::routing_runtime::free_channel_is_exhausted_at(&accounts, decision_wall);
             let custom_runtimes = match state.db.lock().list_custom_account_runtimes() {
                 Ok(runtimes) => crate::custom::custom_runtimes_by_account(&runtimes),
                 Err(error) => {
