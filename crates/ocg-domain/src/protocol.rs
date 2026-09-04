@@ -396,10 +396,6 @@ pub fn command_code_model_protocol(model: &str) -> Option<&'static CommandCodeMo
         .find(|profile| profile.upstream_id.eq_ignore_ascii_case(trimmed))
 }
 
-pub fn command_code_protocol_profiles() -> impl Iterator<Item = &'static CommandCodeModelProtocol> {
-    COMMAND_CODE_MODEL_PROTOCOLS.iter()
-}
-
 /// Official Command Code family split: Anthropic models speak Messages;
 /// everything else speaks Chat Completions.
 pub fn command_code_is_anthropic_model(model: &str) -> bool {

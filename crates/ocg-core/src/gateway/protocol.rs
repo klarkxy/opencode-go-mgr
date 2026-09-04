@@ -10,9 +10,8 @@ use uuid::Uuid;
 
 pub use crate::kernel::protocol::{
     ApiFormat, CommandCodeModelProtocol, command_code_model_protocol,
-    command_code_protocol_profiles, command_code_supports_upstream, is_known_model,
-    opencode_supports_upstream, supported_model_ids, supported_model_protocol_profiles,
-    supported_model_protocols,
+    command_code_supports_upstream, is_known_model, opencode_supports_upstream,
+    supported_model_ids, supported_model_protocol_profiles, supported_model_protocols,
 };
 pub use ocg_domain::protocol::{
     command_code_is_anthropic_model, command_code_preferred_format, command_code_supported_formats,

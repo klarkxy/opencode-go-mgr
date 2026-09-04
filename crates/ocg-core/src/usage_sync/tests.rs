@@ -1095,11 +1095,6 @@ fn eligibility_lists_active_hourly_vs_inactive_daily_and_exclusions() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
-#[test]
-fn unused_app_config_type_keeps_fetch_signature_honest() {
-    let _ = AppConfig::default();
-}
-
 fn seed_high_usage(state: &CoreState, account_id: &str) {
     let limits = state.pricing_snapshot().limits.clone();
     state

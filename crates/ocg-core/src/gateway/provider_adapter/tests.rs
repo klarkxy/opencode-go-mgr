@@ -15,6 +15,14 @@ use chrono::Utc;
 use serde_json::json;
 use std::sync::Arc;
 
+fn resolve_route(
+    account: &Account,
+    config: &AppConfig,
+    plan: &RequestPlan,
+) -> Result<AttemptSpec, String> {
+    resolve_route_with_dynamics(account, config, plan, &[])
+}
+
 fn account(
     id: &str,
     provider_id: &str,

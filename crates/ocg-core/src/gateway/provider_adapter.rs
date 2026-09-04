@@ -1,7 +1,7 @@
 //! Provider offering adapters: endpoint, auth, and capability checks.
 //!
 //! Authentication belongs to the provider/offering, not the wire protocol.
-//! [`resolve_route`] dispatches exhaustively on
+//! [`resolve_route_with_dynamics`] dispatches exhaustively on
 //! [`crate::provider::ProviderAdapterKind`] onto sealed route helpers. Alias resolution
 //! stays ahead of this seam: Alias and PinnedRaw candidates both materialize a
 //! [`RequestPlan`] then call here. Adapters must not probe a billable inference
@@ -241,15 +241,6 @@ pub(crate) fn supports_production_plan(
         dynamics,
     )
     .map(|_| ())
-}
-
-#[cfg_attr(not(test), allow(dead_code))]
-pub(crate) fn resolve_route(
-    account: &Account,
-    config: &AppConfig,
-    plan: &RequestPlan,
-) -> Result<AttemptSpec, String> {
-    resolve_route_with_dynamics(account, config, plan, &[])
 }
 
 pub(crate) fn resolve_route_with_dynamics(

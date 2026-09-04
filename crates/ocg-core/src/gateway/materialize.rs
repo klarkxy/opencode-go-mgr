@@ -19,7 +19,7 @@
 //!    **Never** trial a billable inference path.
 //!    Adapter identity is [`crate::provider::ProviderAdapterKind`]; Custom is
 //!    Configurable HTTP, not a base class.
-//! 4. Ask [`super::provider_adapter::resolve_route`] for endpoint + auth.
+//! 4. Ask [`super::provider_adapter::resolve_route_with_dynamics`] for endpoint + auth.
 //!    Production GOAT uses the official Provider API after a saved verified
 //!    catalog snapshot. The official slash raw ID pins to command-code/goat
 //!    without stealing Go kebab aliases.
