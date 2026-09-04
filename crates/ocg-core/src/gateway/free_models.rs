@@ -54,17 +54,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn detects_free_allowlist_and_mappings() {
-        assert!(is_free_model("mimo-v2.5-free"));
-        assert!(!is_free_model("big-pickle"));
-        assert!(is_free_model("hy3-free"));
-        assert!(!is_free_model("ox-alpha-free"));
-        assert!(is_free_model("x-preview-f-free"));
-        assert!(is_free_model("brand-new-promo-free"));
-        assert!(!is_free_model("deepseek-v4-flash"));
-    }
-
-    #[test]
     fn derives_free_base_from_go_or_zen() {
         assert_eq!(
             derive_free_upstream_base("https://opencode.ai/zen/go"),

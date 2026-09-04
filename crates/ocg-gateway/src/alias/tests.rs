@@ -1,44 +1,7 @@
 use super::*;
-use std::any::{TypeId, type_name};
 
 fn seeded_free_models() -> Vec<String> {
     ZenFreeModelCatalog::default().models
-}
-
-#[test]
-fn alias_types_are_owned_by_this_module() {
-    assert_eq!(
-        type_name::<ProviderMapping>(),
-        "ocg_gateway::alias::ProviderMapping"
-    );
-    assert_eq!(type_name::<AliasEntry>(), "ocg_gateway::alias::AliasEntry");
-    assert_eq!(
-        type_name::<ResolvedModel>(),
-        "ocg_gateway::alias::ResolvedModel"
-    );
-    assert_eq!(
-        type_name::<ResolveError>(),
-        "ocg_gateway::alias::ResolveError"
-    );
-    assert_eq!(
-        type_name::<PublishedAlias>(),
-        "ocg_gateway::alias::PublishedAlias"
-    );
-    let _ = TypeId::of::<ProviderMapping>();
-    let _ = TypeId::of::<AliasEntry>();
-    let _ = TypeId::of::<ResolvedModel>();
-    let _ = TypeId::of::<ResolveError>();
-    let _ = TypeId::of::<PublishedAlias>();
-    let _: ResolveName = resolve;
-    let _: ResolveCustom = resolve_with_custom;
-    let _: ResolveProviderModels = resolve_with_provider_models;
-    let _: ResolveCatalogs = resolve_with_catalogs;
-    let _: fn() -> Vec<String> = published_aliases;
-    let _: fn() -> Vec<PublishedAlias> = published_routeable_aliases;
-    let _: fn(&[String]) -> Vec<PublishedAlias> = published_routeable_aliases_with_zen;
-    let _: fn(&str) -> Vec<String> = routeable_aliases_for;
-    let _: RouteableWithZen = routeable_aliases_for_with_zen;
-    let _: fn(&str) -> bool = is_published_alias;
 }
 
 #[test]

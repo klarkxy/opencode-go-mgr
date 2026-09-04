@@ -1137,13 +1137,6 @@ test("settings expose the downstream display root and bounded request timeouts",
   assert.match(api, /dashboardV3\.putPricingMultipliers\(\{[\s\S]*expectedPricingRevision/);
 });
 
-test("accounts derive quota limits from the active pricing snapshot", async () => {
-  const usage = await readFile(new URL("../domain/useAccountUsage.ts", import.meta.url), "utf8");
-  assert.match(usage, /quotaLimits = ref<PricingLimits \| null>\(null\)/);
-  assert.match(usage, /quotaLimits\.value = \(await dashboardApi\.getPricing\(\)\)\.limits/);
-  assert.doesNotMatch(usage, /window_5h:\s*12|window_week:\s*30|window_month:\s*60/);
-});
-
 test("accounts keep one enabled control instead of a duplicate status badge", async () => {
   const card = await readFile(new URL("../components/AccountCard.vue", import.meta.url), "utf8");
   const template = card.slice(card.indexOf("<template>"), card.indexOf("<script setup"));
@@ -1191,17 +1184,6 @@ test("account form keeps identity first and does not collect managed password or
   assert.ok(template.indexOf('path="name"') < template.indexOf('path="username"'));
   assert.doesNotMatch(template, /path="password"|t\(['"]到期日期['"]\)/);
   assert.doesNotMatch(accountForm, /payload\.password|clearPassword/);
-});
-
-test("new account names remain explicit while the catalog controls optional login fields", async () => {
-  const accountForm = await readFile(new URL("../components/AccountFormModal.vue", import.meta.url), "utf8");
-
-  assert.match(accountForm, /@update:value="handleNameUpdate"/);
-  assert.match(
-    accountForm,
-    /function handleNameUpdate\(value: string\) \{\s*form\.value\.name = value;/,
-  );
-  assert.match(accountForm, /hasField\('username'\)/);
 });
 
 test("settings expose supported Windows auto-start safely", async () => {

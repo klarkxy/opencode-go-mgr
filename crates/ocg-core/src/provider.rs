@@ -46,35 +46,3 @@ pub use ocg_domain::provider::{
     provider_allows_enablement, validate_account_binding, validate_custom_model_id,
     validate_plan_key,
 };
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn historical_provider_facade_reexports_moved_symbols() {
-        let _ = BUILTIN_PROVIDERS;
-        let _ = COMMAND_CODE_GOAT_BASE_URL;
-        let _ = ProviderAdapterKind::ALL;
-        let _ = ProviderRegistry::iter();
-        assert!(plan_allows_enablement(
-            builtin_provider(OPENCODE_PROVIDER_ID).unwrap()
-        ));
-        assert_eq!(
-            std::any::type_name::<ProviderBindingError>(),
-            "ocg_domain::provider::ProviderBindingError"
-        );
-        assert_eq!(
-            std::any::type_name::<BuiltinProvider>(),
-            "ocg_domain::provider::BuiltinProvider"
-        );
-        assert_eq!(
-            std::any::type_name::<crate::custom::CustomUrlHost>(),
-            "ocg_core::custom_http::CustomUrlHost"
-        );
-        assert_eq!(
-            std::any::type_name::<crate::models::QuotaWindow>(),
-            "ocg_core::models::QuotaWindow"
-        );
-    }
-}

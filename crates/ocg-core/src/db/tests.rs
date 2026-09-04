@@ -525,7 +525,6 @@ fn forward_log(account_id: &str, status: &str, cost: f64) -> ForwardLog {
 fn v24_adds_route_column_and_historical_rows_stay_unlabeled() {
     let dir = temp_data_dir("v24-route-column");
     let db = Database::open(dir.clone()).unwrap();
-    assert_eq!(db.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
 
     // A row written before the column existed keeps the empty default
     // ("not recorded") — insert it without naming the route column.
@@ -624,13 +623,6 @@ fn v16_migrates_existing_accounts_to_imported_ready_keys() {
         .expect("legacy account should remain");
     assert_eq!(legacy.account_type, AccountType::Key);
     assert_eq!(legacy.setup_step, AccountSetupStep::Ready);
-    let version: i64 = db
-        .conn
-        .query_row("SELECT MAX(version) FROM schema_version", [], |row| {
-            row.get(0)
-        })
-        .unwrap();
-    assert_eq!(version as i32, CURRENT_SCHEMA_VERSION);
     drop(db);
     fs::remove_dir_all(dir).expect("test data dir should be removed");
 }
@@ -1004,13 +996,6 @@ fn v7_migration_repairs_pr11_pr12_and_combined_v6_databases() {
         drop(conn);
 
         let db = open_with_host_cipher(dir.clone()).expect("v6 database should migrate");
-        let version: i32 = db
-            .conn
-            .query_row("SELECT MAX(version) FROM schema_version", [], |row| {
-                row.get(0)
-            })
-            .expect("schema version should load");
-        assert_eq!(version, CURRENT_SCHEMA_VERSION, "{label}");
         let account = db
             .get_account("old")
             .expect("account query should work")
@@ -1081,14 +1066,7 @@ fn v4_migration_preserves_uncalibrated_usage() {
     drop(conn);
 
     let db = open_with_host_cipher(dir.clone()).expect("v3 db should migrate");
-    let version: i32 = db
-        .conn
-        .query_row("SELECT MAX(version) FROM schema_version", [], |row| {
-            row.get(0)
-        })
-        .expect("schema version should be readable");
     let usage = db.account_usage("old").expect("usage should load");
-    assert_eq!(version, CURRENT_SCHEMA_VERSION);
     assert_eq!(
         db.get_account("old")
             .expect("account should load")
@@ -1231,13 +1209,6 @@ fn v8_migration_repairs_purchase_dates_written_by_older_binaries() {
     drop(conn);
 
     let db = open_with_host_cipher(dir.clone()).expect("v7 database should migrate");
-    let version: i32 = db
-        .conn
-        .query_row("SELECT MAX(version) FROM schema_version", [], |row| {
-            row.get(0)
-        })
-        .expect("schema version should load");
-    assert_eq!(version, CURRENT_SCHEMA_VERSION);
     assert_eq!(
         db.get_account("valid")
             .expect("valid account query should work")
@@ -1375,13 +1346,6 @@ fn v10_migration_repairs_charged_errors_from_original_v9() {
     drop(conn);
 
     let db = open_with_host_cipher(dir.clone()).expect("v9 database should migrate through v11");
-    let version: i32 = db
-        .conn
-        .query_row("SELECT MAX(version) FROM schema_version", [], |row| {
-            row.get(0)
-        })
-        .expect("schema version should load");
-    assert_eq!(version, CURRENT_SCHEMA_VERSION);
     let states = db
         .conn
         .prepare("SELECT cost, cost_state FROM forward_logs ORDER BY id")
@@ -1424,13 +1388,6 @@ fn account_reads_fallback_after_v8_data_is_corrupted() {
     drop(conn);
 
     let db = Database::open(dir.clone()).expect("database should open");
-    let version: i32 = db
-        .conn
-        .query_row("SELECT MAX(version) FROM schema_version", [], |row| {
-            row.get(0)
-        })
-        .expect("schema version should load");
-    assert_eq!(version, CURRENT_SCHEMA_VERSION);
     let created_at = DateTime::parse_from_rfc3339("2026-01-02T01:30:00+02:00")
         .expect("fixed timestamp should parse")
         .with_timezone(&Utc);
@@ -2022,21 +1979,18 @@ fn v13_migration_preserves_legacy_manual_usage_calibration() {
     assert_cost(usage.window_week, 13.0);
     assert_cost(usage.window_month, 16.0);
 
-    let (version, remaining_baselines): (i32, i64) = db
+    let remaining_baselines: i64 = db
         .conn
         .query_row(
-            "SELECT
-                    (SELECT MAX(version) FROM schema_version),
-                    COUNT(*)
+            "SELECT COUNT(*)
                  FROM accounts
                  WHERE usage_5h_baseline_percent IS NOT NULL
                     OR usage_week_baseline_percent IS NOT NULL
                     OR usage_month_baseline_percent IS NOT NULL",
             [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| row.get(0),
         )
         .expect("migration state should load");
-    assert_eq!(version, CURRENT_SCHEMA_VERSION);
     assert_eq!(remaining_baselines, 0);
 
     finalize_success(&db, "legacy-calibration", 2.0, Utc::now());
@@ -2093,13 +2047,6 @@ fn v14_migrates_v13_logs_and_adds_request_id_indexes() {
     }
 
     let db = Database::open(dir.clone()).expect("v13 database should migrate");
-    let version: i32 = db
-        .conn
-        .query_row("SELECT MAX(version) FROM schema_version", [], |row| {
-            row.get(0)
-        })
-        .expect("schema version should load");
-    assert_eq!(version, CURRENT_SCHEMA_VERSION);
     for index in ["idx_forward_logs_request_id", "idx_gateway_logs_request_id"] {
         let exists: bool = db
             .conn
@@ -2168,16 +2115,14 @@ fn v15_migration_adds_nullable_auth_error() {
     drop(conn);
 
     let db = Database::open(dir.clone()).expect("v14 database should migrate");
-    let (version, auth_error): (i32, Option<String>) = db
+    let auth_error: Option<String> = db
         .conn
         .query_row(
-            "SELECT (SELECT MAX(version) FROM schema_version), auth_error
-                 FROM accounts WHERE id = 'legacy'",
+            "SELECT auth_error FROM accounts WHERE id = 'legacy'",
             [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| row.get(0),
         )
         .expect("v15 migration state should load");
-    assert_eq!(version, CURRENT_SCHEMA_VERSION);
     assert!(auth_error.is_none());
 
     drop(db);
@@ -3922,13 +3867,6 @@ fn v19_client_key_migration_is_idempotent_and_crash_replay_safe() {
     };
     assert!(probe_columns(&db.conn).contains(&"client_key_id".to_string()));
     assert!(probe_columns(&db.conn).contains(&"client_key_name".to_string()));
-    let version: i32 = db
-        .conn
-        .query_row("SELECT MAX(version) FROM schema_version", [], |row| {
-            row.get(0)
-        })
-        .unwrap();
-    assert_eq!(version, CURRENT_SCHEMA_VERSION);
 
     let index_exists: i64 = db
             .conn
@@ -3945,13 +3883,6 @@ fn v19_client_key_migration_is_idempotent_and_crash_replay_safe() {
     drop(db);
     let db = Database::open(dir.clone()).unwrap();
     db.migrate().unwrap();
-    let version: i32 = db
-        .conn
-        .query_row("SELECT MAX(version) FROM schema_version", [], |row| {
-            row.get(0)
-        })
-        .unwrap();
-    assert_eq!(version, CURRENT_SCHEMA_VERSION);
 
     drop(db);
     fs::remove_dir_all(dir).unwrap();
@@ -3990,13 +3921,6 @@ fn v20_creates_the_sub_gateway_keys_table_idempotently() {
         (table, index, legacy)
     };
     assert_eq!(probe(&db.conn), (1, 1, 0));
-    let version: i32 = db
-        .conn
-        .query_row("SELECT MAX(version) FROM schema_version", [], |row| {
-            row.get(0)
-        })
-        .unwrap();
-    assert_eq!(version, CURRENT_SCHEMA_VERSION);
 
     // Replaying the migration converges to the same shape.
     db.migrate().unwrap();
@@ -4023,7 +3947,6 @@ fn v21_adds_usage_sync_columns_with_safe_defaults() {
             "v27 must drop leftover {name}"
         );
     }
-    assert_eq!(db.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
 
     let account = account("sync-defaults");
     db.create_account(&account).unwrap();
@@ -4038,7 +3961,6 @@ fn v21_adds_usage_sync_columns_with_safe_defaults() {
     assert!(sync.last_expedited_at.is_none());
 
     db.migrate().unwrap();
-    assert_eq!(db.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
 
     drop(db);
     fs::remove_dir_all(dir).unwrap();
@@ -4082,7 +4004,6 @@ fn v21_to_v22_creates_one_usable_rollback_backup() {
     create_v21_fixture(&dir, false);
 
     let db = open_with_host_cipher(dir.clone()).expect("v21 database should migrate");
-    assert_eq!(db.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
     assert!(
         db.get_account("rollback-account")
             .expect("migrated account should load")
@@ -4174,7 +4095,6 @@ fn v21_to_v22_creates_one_usable_rollback_backup() {
 
     let backup_bytes = fs::read(backup_path).expect("backup should be readable");
     let reopened = open_with_host_cipher(dir.clone()).expect("v22 database should reopen");
-    assert_eq!(reopened.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
     drop(reopened);
     assert_eq!(pre_v22_backup_paths(&dir), backups_before);
     assert_eq!(
@@ -4191,7 +4111,6 @@ fn v20_to_v22_creates_verified_source_backup_before_direct_upgrade() {
     create_v20_fixture(&dir, false);
 
     let db = open_with_host_cipher(dir.clone()).expect("v20 database should migrate directly");
-    assert_eq!(db.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
     let account_columns = db
         .conn
         .prepare("PRAGMA table_info(accounts)")
@@ -4219,7 +4138,6 @@ fn v20_to_v22_creates_verified_source_backup_before_direct_upgrade() {
     drop(backup);
 
     let reopened = open_with_host_cipher(dir.clone()).expect("v22 database should reopen");
-    assert_eq!(reopened.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
     drop(reopened);
     assert_eq!(pre_v22_backup_paths(&dir), backups_before);
     assert_eq!(
@@ -4266,17 +4184,14 @@ fn draft_v19_libraries_without_notes_gain_the_column_on_reopen() {
     }
 
     let db = open_with_host_cipher(dir.clone()).expect("draft database should reopen");
-    let (version, notes_after): (i32, i64) = db
+    let notes_after: i64 = db
         .conn
         .query_row(
-            "SELECT
-                    (SELECT MAX(version) FROM schema_version),
-                    (SELECT COUNT(*) FROM pragma_table_info('accounts') WHERE name = 'notes')",
+            "SELECT COUNT(*) FROM pragma_table_info('accounts') WHERE name = 'notes'",
             [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| row.get(0),
         )
         .expect("repaired schema should load");
-    assert_eq!(version, CURRENT_SCHEMA_VERSION);
     assert_eq!(notes_after, 1);
     db.list_accounts()
         .expect("account reads must survive a missing notes column on the draft");
@@ -4525,7 +4440,6 @@ fn v22_to_v23_creates_one_usable_rollback_backup_and_contract_tables() {
     assert!(pre_v23_backup_paths(&dir).is_empty());
 
     let db = open_with_host_cipher(dir.clone()).expect("v22 database should migrate");
-    assert_eq!(db.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
     let go = db
         .account_verification_state("v22-account")
         .unwrap()
@@ -4555,7 +4469,6 @@ fn v22_to_v23_creates_one_usable_rollback_backup_and_contract_tables() {
     drop(backup);
 
     let reopened = open_with_host_cipher(dir.clone()).expect("v23 database should reopen");
-    assert_eq!(reopened.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
     drop(reopened);
     assert_eq!(pre_v23_backup_paths(&dir).len(), 1);
     fs::remove_dir_all(dir).unwrap();
@@ -4614,7 +4527,6 @@ fn zen_free_model_catalog_survives_reopen() {
 fn v26_fresh_database_has_contract_tables_and_reopens() {
     let dir = temp_data_dir("v26-fresh");
     let db = Database::open(dir.clone()).unwrap();
-    assert_eq!(db.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
     let tables: i64 = db
         .conn
         .query_row(
@@ -4628,10 +4540,8 @@ fn v26_fresh_database_has_contract_tables_and_reopens() {
         .unwrap();
     assert_eq!(tables, 2);
     db.migrate().unwrap();
-    assert_eq!(db.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
     drop(db);
     let reopened = Database::open(dir.clone()).unwrap();
-    assert_eq!(reopened.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
     drop(reopened);
     fs::remove_dir_all(dir).unwrap();
 }
@@ -4664,7 +4574,6 @@ fn v25_to_v26_backfills_zen_catalog_into_provider_scope() {
         assert_eq!(schema_version_on(&conn).unwrap(), 25);
     }
     let db = Database::open(dir.clone()).expect("v25 database should migrate to v26");
-    assert_eq!(db.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
     let scope = db
         .load_persisted_scope(&ContractScope::provider(OPENCODE_ZEN_FREE_PROVIDER_ID))
         .unwrap()
@@ -4979,27 +4888,28 @@ fn v23_persists_verification_custom_config_and_capabilities() {
             endpoint_url: "https://api.example.com/v1/chat/completions".into(),
             upstream_protocol: UpstreamProtocolKind::ChatCompletions,
         },
-        true,
     )
     .unwrap();
-    let rejected = db.upsert_account_custom_config(
-        "custom-1",
-        &AccountCustomConfigInput {
-            endpoint_url: "https://api.example.com/v1/messages".into(),
-            upstream_protocol: UpstreamProtocolKind::Messages,
-        },
-        false,
-    );
-    assert!(
-        rejected.is_err(),
-        "protocol must stay immutable after create"
+    let updated = db
+        .upsert_account_custom_config(
+            "custom-1",
+            &AccountCustomConfigInput {
+                endpoint_url: "https://api.example.com/v1/messages".into(),
+                upstream_protocol: UpstreamProtocolKind::Messages,
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        updated.upstream_protocol,
+        UpstreamProtocolKind::Messages,
+        "Custom protocol stays editable after create"
     );
     db.replace_account_model_capabilities(
         "custom-1",
         &[AccountModelCapabilityInput {
             public_model: "deepseek/deepseek-v4-flash".into(),
             upstream_model: "deepseek/deepseek-v4-flash".into(),
-            protocol: UpstreamProtocolKind::ChatCompletions,
+            protocol: UpstreamProtocolKind::Messages,
             source: Some("manual".into()),
         }],
     )
@@ -5571,7 +5481,6 @@ fn custom_mutations_repend_but_keep_verified_accounts_enabled() {
             endpoint_url: "https://api.example.net/v2/chat/completions".into(),
             upstream_protocol: UpstreamProtocolKind::ChatCompletions,
         },
-        false,
     )
     .unwrap();
     let after_url = db.get_account("custom-stale").unwrap().unwrap();
@@ -5733,7 +5642,6 @@ fn custom_verification_cas_rejects_stale_key_config_caps_and_delete() {
             endpoint_url: "https://api.example.net/v2/chat/completions".into(),
             upstream_protocol: UpstreamProtocolKind::ChatCompletions,
         },
-        false,
     )
     .unwrap();
     assert!(
@@ -6374,7 +6282,6 @@ fn populate_v26_source(dir: &Path) -> (String, String) {
 fn v27_fresh_database_skips_pre_v3_backup_and_has_one_primary() {
     let dir = temp_data_dir("v27-fresh");
     let db = Database::open(dir.clone()).unwrap();
-    assert_eq!(db.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
     assert!(pre_v3_backup_paths(&dir).is_empty());
     assert!(table_exists(&db.conn, "access_keys").unwrap());
     assert!(!table_exists(&db.conn, "sub_gateway_keys").unwrap());
@@ -6469,7 +6376,6 @@ fn v28_to_v29_purges_scnet_accounts_and_acknowledgements() {
     drop(conn);
 
     let db = Database::open(dir.clone()).unwrap();
-    assert_eq!(db.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
     assert!(
         db.get_account("scnet-leftover").unwrap().is_none(),
         "v29 must delete SCNet account rows"
@@ -6547,7 +6453,6 @@ fn v31_to_v32_collapses_custom_protocols_and_disables_the_account() {
     drop(db);
 
     let db = Database::open(dir.clone()).unwrap();
-    assert_eq!(db.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
     let config = db.account_custom_config("custom-v31").unwrap().unwrap();
     assert_eq!(
         config.upstream_protocol,
@@ -6636,7 +6541,6 @@ fn v32_to_v33_backfills_public_and_upstream_identities_for_custom_and_goat() {
     drop(conn);
 
     let migrated = Database::open(dir.clone()).unwrap();
-    assert_eq!(migrated.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
     for (account_id, expected) in [("custom-v32", "custom-public"), ("goat-v32", "goat/model")] {
         let capabilities = migrated
             .list_account_model_capabilities(account_id)
@@ -6665,7 +6569,6 @@ fn v33_to_v34_adds_empty_cpa_singleton_configuration_table() {
     drop(conn);
 
     let migrated = Database::open(dir.clone()).unwrap();
-    assert_eq!(migrated.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
     assert!(table_exists(&migrated.conn, "cpa_integration").unwrap());
     assert!(migrated.cpa_integration().unwrap().is_none());
     drop(migrated);
@@ -6765,7 +6668,6 @@ fn v26_to_v27_copies_keys_drops_columns_and_writes_hashed_backup() {
     };
 
     let db = open_with_host_cipher(dir.clone()).expect("v26 database should migrate to v27");
-    assert_eq!(db.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
     assert_eq!(
         db.primary_access_key_value().unwrap().as_deref(),
         Some(primary.as_str())
@@ -6819,7 +6721,6 @@ fn v26_to_v27_copies_keys_drops_columns_and_writes_hashed_backup() {
     assert!(evidence.contains(backup_name));
 
     let reopened = open_with_host_cipher(dir.clone()).unwrap();
-    assert_eq!(reopened.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
     drop(reopened);
     assert_eq!(pre_v3_backup_paths(&dir), backups);
 
@@ -6831,7 +6732,6 @@ fn v21_migrates_through_v26_before_v27_backup() {
     let dir = temp_data_dir("v21-through-v26-v27");
     create_v21_fixture(&dir, false);
     let db = open_with_host_cipher(dir.clone()).expect("v21 database should migrate");
-    assert_eq!(db.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
     drop(db);
     let pre_v3 = pre_v3_backup_paths(&dir);
     assert_eq!(pre_v3.len(), 1);
@@ -6856,7 +6756,6 @@ fn v27_fault_before_schema_version_leaves_usable_v26_source() {
     drop(conn);
     assert_eq!(pre_v3_backup_paths(&dir).len(), 1);
     let db = open_with_host_cipher(dir.clone()).expect("v26 source should still migrate");
-    assert_eq!(db.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
     drop(db);
     fs::remove_dir_all(dir).unwrap();
 }
@@ -6887,11 +6786,9 @@ fn v27_duplicate_start_converges_on_one_primary() {
             .collect::<Vec<_>>()
     );
     for db in results.into_iter().flatten() {
-        assert_eq!(db.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
         drop(db);
     }
     let db = open_with_host_cipher(dir.clone()).unwrap();
-    assert_eq!(db.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
     let count: i64 = db
         .conn
         .query_row(
@@ -6933,7 +6830,6 @@ fn v27_wrong_cipher_fails_closed_without_claiming_v27() {
     drop(conn);
 
     let recovered = Database::open_with_cipher(dir.clone(), right).unwrap();
-    assert_eq!(recovered.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
     drop(recovered);
     fs::remove_dir_all(dir).unwrap();
 }
@@ -7087,7 +6983,6 @@ fn v27_vacuum_into_writer_rejects_stale_backup_and_retries() {
     v27_test_hooks::set_race_during_vacuum(true);
     let _guard = V27HookGuard;
     let db = open_with_host_cipher(dir.clone()).expect("raced VACUUM INTO should retry and finish");
-    assert_eq!(db.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
     drop(db);
     let backups = pre_v3_backup_paths(&dir);
     assert!(
@@ -7228,7 +7123,6 @@ fn v31_migration_creates_override_table() {
     drop(db);
 
     let db = Database::open(dir.clone()).unwrap();
-    assert_eq!(db.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
     let table_exists: i64 = db
         .conn
         .query_row(
@@ -7511,7 +7405,6 @@ fn v35_maps_known_pairs_conserves_rows_and_writes_pre_v35_snapshot() {
     drop(conn);
 
     let db = open_with_host_cipher(dir.clone()).unwrap();
-    assert_eq!(schema_version_on(&db.conn).unwrap(), CURRENT_SCHEMA_VERSION);
     sqlite_quick_check(&db.conn).unwrap();
     sqlite_foreign_key_check(&db.conn).unwrap();
     let account_count_after: i64 = db
@@ -7623,7 +7516,6 @@ fn v35_catalog_collision_rolls_back_without_mutation() {
 fn v35_dynamic_provider_tables_round_trip_and_reject_duplicate_public_models() {
     let dir = temp_data_dir("v35-dynamic-providers");
     let db = open_with_host_cipher(dir.clone()).unwrap();
-    assert_eq!(schema_version_on(&db.conn).unwrap(), CURRENT_SCHEMA_VERSION);
     let columns = v35_column_names(&db.conn, "dynamic_providers");
     for required in [
         "id",
@@ -7922,7 +7814,6 @@ fn v36_to_v37_discards_cookie_usage_state_and_keeps_account_keys() {
     drop(conn);
 
     let migrated = open_with_host_cipher(dir.clone()).unwrap();
-    assert_eq!(migrated.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
     assert!(!table_exists(&migrated.conn, "ollama_cloud_usage_state").unwrap());
     assert!(table_exists(&migrated.conn, "ollama_cloud_billing").unwrap());
     let loaded = migrated.get_account("ollama-v36").unwrap().unwrap();

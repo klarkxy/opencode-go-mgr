@@ -1519,36 +1519,5 @@ pub fn is_published_alias(name: &str) -> bool {
     matches!(resolve(name), Ok(ResolvedModel::Alias { .. }))
 }
 
-type ResolveName = fn(&str) -> Result<ResolvedModel, ResolveError>;
-type ResolveCustom = fn(&str, &[String]) -> Result<ResolvedModel, ResolveError>;
-type ResolveProviderModels = fn(&str, &[String], &[String]) -> Result<ResolvedModel, ResolveError>;
-type ResolveCatalogs =
-    fn(&str, &[String], &[String], &[String]) -> Result<ResolvedModel, ResolveError>;
-type RouteableWithZen = fn(&str, &[String]) -> Vec<String>;
-type RouteableProviderExtendedCatalogs =
-    fn(&str, &[String], &[String], &[String], &[String]) -> Vec<String>;
-type ResolveRuntimeCatalogs =
-    for<'a> fn(&str, RuntimeCatalogs<'a>) -> Result<ResolvedModel, ResolveError>;
-type PublishRuntimeCatalogs = for<'a> fn(RuntimeCatalogs<'a>) -> Vec<PublishedAlias>;
-type RouteableRuntimeCatalogs = for<'a> fn(&str, RuntimeCatalogs<'a>) -> Vec<String>;
-
-const _: ResolveName = resolve;
-const _: ResolveCustom = resolve_with_custom;
-const _: ResolveProviderModels = resolve_with_provider_models;
-const _: ResolveCatalogs = resolve_with_catalogs;
-const _: ResolveRuntimeCatalogs = resolve_with_runtime_catalogs;
-const _: fn() -> Vec<String> = published_aliases;
-const _: fn() -> Vec<PublishedAlias> = published_routeable_aliases;
-const _: fn(&[String]) -> Vec<PublishedAlias> = published_routeable_aliases_with_zen;
-const _: fn(&[String], &[String]) -> Vec<PublishedAlias> =
-    published_routeable_aliases_with_catalogs;
-const _: fn(&str) -> Vec<String> = routeable_aliases_for;
-const _: RouteableWithZen = routeable_aliases_for_with_zen;
-const _: RouteableProviderExtendedCatalogs = routeable_aliases_for_with_extended_catalogs;
-const _: PublishRuntimeCatalogs = published_routeable_aliases_with_runtime_catalogs;
-const _: RouteableRuntimeCatalogs = routeable_aliases_for_with_runtime_catalogs;
-const _: fn(&str) -> String = canonical_alias_for_cpa_model;
-const _: fn(&str) -> bool = is_published_alias;
-
 #[cfg(test)]
 mod tests;

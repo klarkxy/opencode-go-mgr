@@ -115,8 +115,6 @@ export interface AccountInput {
   custom_config?: AccountCustomConfigInput;
   model_capabilities?: AccountModelCapabilityInput[];
   ollama_billing_tier?: "pro" | "max" | "team";
-  /** Page-local stale value is ignored; the controlPlane store owns CAS. */
-  expected_revision?: number;
 }
 
 export interface AccountUpdate {
@@ -128,15 +126,12 @@ export interface AccountUpdate {
   purchase_date?: string;
   notes?: string;
   ollama_billing_tier?: "pro" | "max" | "team";
-  /** Page-local stale value is ignored; the controlPlane store owns CAS. */
-  expected_revision?: number;
 }
 
 export interface ManagedAccountInput {
   name: string;
   username?: string;
   notes?: string;
-  expected_revision?: number;
 }
 
 export interface CustomModelDiscoveryInput {

@@ -135,8 +135,3 @@ test("managed account creation cannot be cancelled while its request is pending"
   assert.match(accounts, /function setManagedCreateVisible\(show: boolean\): void \{\s*if \(!show && busy\.value\) return;\s*showManagedCreate\.value = show;/);
 });
 
-test("Vite proxies remote browser WebSockets during dashboard development", async () => {
-  const source = await readSource(new URL("../../vite.config.ts", import.meta.url));
-  assert.match(source, /OCG_GATEWAY_PORT/);
-  assert.match(source, /"\/dashboard\/api": \{[\s\S]*?target: `http:\/\/127\.0\.0\.1:\$\{gatewayPort\}`[\s\S]*?ws: true/);
-});

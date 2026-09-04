@@ -59,7 +59,7 @@ test("pricing sections treat an empty catalog as no listings", () => {
 test("non-Zen accounts keep the legacy toggle endpoint", () => {
   const accounts = readFileSync(new URL("./Accounts.vue", import.meta.url), "utf8");
 
-  assert.match(accounts, /dashboardApi\.toggleAccount\(id, revision\)/);
+  assert.match(accounts, /dashboardApi\.toggleAccount\(id\)/);
   assert.match(accounts, /if \(account && isZenFreeAccount\(account\)\)/);
   assert.equal(ZEN_FREE_ACCOUNT_ID, "00000000-0000-0000-0000-000000000002");
   assert.equal(ZEN_FREE_OFFERING.quota_scope, "egress-ip");
@@ -86,7 +86,7 @@ test("pricing catalog uses one keyboard-accessible plan-family tab switcher with
   assert.doesNotMatch(reference, /订阅制|官方来源|NTag/);
   const quota = readFileSync(new URL("../components/GoatQuotaReference.vue", import.meta.url), "utf8");
   assert.match(quota, /未知价格不会参与费用估算/);
-  assert.match(quota, /GOAT_PRICING_REFERENCE\.models/);
+  assert.doesNotMatch(quota, /GOAT_PRICING_REFERENCE\.models/);
   assert.match(quota, /class="pricing-ledger"/);
   assert.match(quota, /<n-data-table/);
   assert.match(quota, /t\("官方倍率"\)/);

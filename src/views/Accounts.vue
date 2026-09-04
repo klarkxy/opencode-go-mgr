@@ -309,7 +309,6 @@ import { mapWithConcurrency } from "../utils/async.ts";
 import { useLocalizedModalCloseLabel } from "../utils/modal-close-label.ts";
 import {
   reconcileEditingAccount,
-  withFreshAccountRevision,
 } from "./account-cas.ts";
 import {
   DEFAULT_OPENCODE_INVITE_URL,
@@ -665,10 +664,9 @@ async function createManagedAccount(): Promise<void> {
   try {
     await ensureInviteUrlSaved(inviteUrl);
     const username = managedDraft.value.username.trim();
-    const created = await runWithFreshSettingsRevision((revision) => dashboardApi.createManagedAccount({
+    const created = await runWithFreshSettingsRevision(() => dashboardApi.createManagedAccount({
       name,
       ...(username ? { username } : {}),
-      expected_revision: revision,
     }));
     addAccount(created);
     showManagedCreate.value = false;
@@ -687,8 +685,8 @@ async function advanceManagedSetup(accountId: string, setupStep: AccountSetupSte
   if (busy.value) return;
   busy.value = true;
   try {
-    const updated = await runWithFreshSettingsRevision((revision) => (
-      dashboardApi.advanceAccountSetup(accountId, setupStep, revision)
+    const updated = await runWithFreshSettingsRevision(() => (
+      dashboardApi.advanceAccountSetup(accountId, setupStep)
     ));
     replaceAccount(updated);
     message.success(t("注册进度已保存"));
@@ -705,8 +703,8 @@ async function verifyManagedKey(accountId: string, key: string): Promise<void> {
   if (busy.value) return;
   busy.value = true;
   try {
-    const updated = await runWithFreshSettingsRevision((revision) => (
-      dashboardApi.verifyManagedAccountKey(accountId, key, revision)
+    const updated = await runWithFreshSettingsRevision(() => (
+      dashboardApi.verifyManagedAccountKey(accountId, key)
     ));
     replaceAccount(updated);
     if (accountIsReady(updated)) {
@@ -762,8 +760,8 @@ async function openAccountBrowser(accountId: string, target: BrowserTarget): Pro
 
 async function resetBrowserProfile(accountId: string): Promise<void> {
   try {
-    const updated = await runWithFreshSettingsRevision((revision) => (
-      dashboardApi.resetAccountBrowserProfile(accountId, revision)
+    const updated = await runWithFreshSettingsRevision(() => (
+      dashboardApi.resetAccountBrowserProfile(accountId)
     ));
     replaceAccount(updated);
     if (!accountIsReady(updated)) {
@@ -946,10 +944,7 @@ async function onFormSave(payload: AccountInput | AccountFormPayload) {
     }
     busy.value = true;
     try {
-      const saved = await runWithFreshSettingsRevision((revision) => dashboardApi.updateAccount(editing.id, {
-        ...update,
-        expected_revision: revision,
-      }));
+      const saved = await runWithFreshSettingsRevision(() => dashboardApi.updateAccount(editing.id, update));
       replaceAccount(saved);
       // purchase_date defines the monthly usage window and changing it clears
       // the persisted calibration offset, so the local usage snapshot must be
@@ -970,10 +965,7 @@ async function onFormSave(payload: AccountInput | AccountFormPayload) {
     };
     busy.value = true;
     try {
-      const created = await runWithFreshSettingsRevision((revision) => dashboardApi.createAccount({
-        ...input,
-        expected_revision: revision,
-      }));
+      const created = await runWithFreshSettingsRevision(() => dashboardApi.createAccount(input));
       addAccount(created);
       settingsRevision.value = created.revision ?? settingsRevision.value;
       message.success(t("账号已添加"));
@@ -1004,9 +996,8 @@ async function updatePurchaseDate(accountId: string, purchaseDate: string): Prom
 
   purchaseDateSaving.value[accountId] = true;
   try {
-    const saved = await runWithFreshSettingsRevision((revision) => dashboardApi.updateAccount(accountId, {
+    const saved = await runWithFreshSettingsRevision(() => dashboardApi.updateAccount(accountId, {
       purchase_date: purchaseDate,
-      expected_revision: revision,
     }));
     replaceAccount(saved);
     if (accountHasUsageDisplay(saved)) await loadAccountUsage(saved.id);
@@ -1042,21 +1033,17 @@ async function saveCustomAccountEdit(
   try {
     await executeCustomAccountEdit(editing, payload, {
       account: async (update) => {
-        replaceAccount(await runWithFreshSettingsRevision((revision) => dashboardApi.updateAccount(editing.id, {
-          ...update,
-          expected_revision: revision,
-        })));
+        replaceAccount(await runWithFreshSettingsRevision(() => dashboardApi.updateAccount(editing.id, update)));
       },
       customConfig: async (config) => {
-        replaceAccount(await runWithFreshSettingsRevision((revision) => dashboardApi.updateAccountCustomConfig(
+        replaceAccount(await runWithFreshSettingsRevision(() => dashboardApi.updateAccountCustomConfig(
           editing.id,
           config,
-          revision,
         )));
       },
       capabilities: async (capabilities) => {
-        replaceAccount(await runWithFreshSettingsRevision((revision) => (
-          dashboardApi.updateAccountModelCapabilities(editing.id, capabilities, revision)
+        replaceAccount(await runWithFreshSettingsRevision(() => (
+          dashboardApi.updateAccountModelCapabilities(editing.id, capabilities)
         )));
       },
     });
@@ -1085,7 +1072,7 @@ async function toggleAccount(id: string) {
     return;
   }
   try {
-    const updated = await runWithFreshSettingsRevision((revision) => dashboardApi.toggleAccount(id, revision));
+    const updated = await runWithFreshSettingsRevision(() => dashboardApi.toggleAccount(id));
     replaceAccount(updated);
   } catch (e) {
     if (await recoverAccountMutationConflict(e)) return;
@@ -1094,18 +1081,9 @@ async function toggleAccount(id: string) {
 }
 
 async function runWithFreshSettingsRevision<T>(
-  mutation: (revision: number) => Promise<T>,
+  mutation: () => Promise<T>,
 ): Promise<T> {
-  return withFreshAccountRevision(async () => {
-    try {
-      const settings = await dashboardApi.getSettings();
-      settingsRevision.value = settings.revision;
-      return settings.revision;
-    } catch {
-      settingsRevision.value = null;
-      return null;
-    }
-  }, mutation);
+  return mutation();
 }
 
 async function reloadAfterControlPlaneConflict(): Promise<void> {
@@ -1159,9 +1137,8 @@ async function saveZenProviderSettings(
   if (providerSettingsSaving.value[account.id]) return;
   providerSettingsSaving.value[account.id] = true;
   try {
-    const result = await runWithFreshSettingsRevision((revision) => providerApi.updateProviderSettings(account.id, {
+    const result = await runWithFreshSettingsRevision(() => providerApi.updateProviderSettings(account.id, {
       enabled,
-      expected_revision: revision,
     }));
     settingsRevision.value = result.revision;
     replaceAccount(result.account);
@@ -1177,7 +1154,7 @@ async function saveZenProviderSettings(
 
 async function deleteAccount(id: string) {
   try {
-    await runWithFreshSettingsRevision((revision) => dashboardApi.deleteAccount(id, revision));
+    await runWithFreshSettingsRevision(() => dashboardApi.deleteAccount(id));
     // DELETE returns the new revision in a response header; the shared JSON
     // transport intentionally stays body-only, so reload it before the next
     // mutation instead of guessing the counter.
@@ -1192,8 +1169,8 @@ async function deleteAccount(id: string) {
 
 async function resetCooldown(id: string) {
   try {
-    const updated = await runWithFreshSettingsRevision((revision) => (
-      dashboardApi.resetAccountCooldown(id, revision)
+    const updated = await runWithFreshSettingsRevision(() => (
+      dashboardApi.resetAccountCooldown(id)
     ));
     replaceAccount(updated);
     message.success(t("已重置冷却"));

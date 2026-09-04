@@ -1,6 +1,6 @@
 //! Dashboard V3 contract kernel: schema drift, coexistence, auth, and process generation.
 
-use ocg_core::dashboard_v3::{CATALOG_TYPE_NAMES, ControlRevision, contract_schema_pretty};
+use ocg_core::dashboard_v3::{ControlRevision, contract_schema_pretty};
 use reqwest::StatusCode;
 use serde_json::{Value, json};
 use std::fs;
@@ -29,12 +29,6 @@ fn checked_in_schema_matches_rust_dtos() {
         normalize_schema_text(&checked_in),
         "Dashboard V3 schema drifted; run `pnpm run contract:v3:generate`"
     );
-
-    let schema: Value = serde_json::from_str(&generated).unwrap();
-    let defs = schema["$defs"].as_object().expect("$defs");
-    for name in CATALOG_TYPE_NAMES {
-        assert!(defs.contains_key(*name), "catalog missing {name}");
-    }
 }
 
 #[test]

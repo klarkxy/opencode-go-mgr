@@ -28,7 +28,7 @@ export function useAccountOrder(options: {
   accounts: Ref<Account[]>;
   busy: Ref<boolean>;
   revision: Ref<number | null>;
-  runWithFreshRevision: <T>(mutation: (revision: number) => Promise<T>) => Promise<T>;
+  runWithFreshRevision: <T>(mutation: () => Promise<T>) => Promise<T>;
   reloadAfterRevisionConflict: () => Promise<void>;
 }) {
   const {
@@ -60,10 +60,9 @@ export function useAccountOrder(options: {
     if (sameAccountOrder(previous, accounts.value)) return;
     orderSaving.value = true;
     try {
-      const saved = await runWithFreshRevision((freshRevision) => {
-        revision.value = freshRevision;
-        return dashboardApi.reorderAccounts(accounts.value.map(({ id }) => id), freshRevision);
-      });
+      const saved = await runWithFreshRevision(() => (
+        dashboardApi.reorderAccounts(accounts.value.map(({ id }) => id))
+      ));
       accounts.value = saved;
       revision.value = saved[0]?.revision ?? revision.value;
       const moved = accounts.value.find(({ id }) => id === movedAccountId);

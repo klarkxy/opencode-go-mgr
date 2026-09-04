@@ -1,34 +1,13 @@
 use super::{
-    AccountInput, AppConfig, CLAUDE_DESKTOP_HAIKU_ALIAS, CLAUDE_DESKTOP_OPUS_ALIAS,
-    CLAUDE_DESKTOP_SONNET_ALIAS, ClaudeDesktopModels, DEFAULT_OPENCODE_INVITE_URL,
-    MAX_ACCOUNT_NOTES_CHARS, ProxyListDirection, ProxyMode, RoutingMode, normalize_account_notes,
-    normalize_opencode_invite_url, normalize_proxy_url, normalize_purchase_date,
-    purchase_expires_on,
+    AppConfig, CLAUDE_DESKTOP_HAIKU_ALIAS, CLAUDE_DESKTOP_OPUS_ALIAS, CLAUDE_DESKTOP_SONNET_ALIAS,
+    ClaudeDesktopModels, DEFAULT_OPENCODE_INVITE_URL, MAX_ACCOUNT_NOTES_CHARS, ProxyListDirection,
+    ProxyMode, RoutingMode, normalize_account_notes, normalize_opencode_invite_url,
+    normalize_proxy_url, normalize_purchase_date, purchase_expires_on,
 };
+use ocg_domain::account::{AccountSetupStep, AccountType, UpstreamChannel};
 
 #[test]
-fn historical_account_model_paths_compile() {
-    use std::any::TypeId;
-
-    use crate as ocg_core;
-    use ocg_core::models::{Account, AccountSetupStep, AccountType, UpstreamChannel};
-
-    assert_eq!(
-        TypeId::of::<Account>(),
-        TypeId::of::<ocg_domain::account::Account>()
-    );
-    assert_eq!(
-        TypeId::of::<AccountType>(),
-        TypeId::of::<ocg_domain::account::AccountType>()
-    );
-    assert_eq!(
-        TypeId::of::<AccountSetupStep>(),
-        TypeId::of::<ocg_domain::account::AccountSetupStep>()
-    );
-    assert_eq!(
-        TypeId::of::<UpstreamChannel>(),
-        TypeId::of::<ocg_domain::account::UpstreamChannel>()
-    );
+fn account_wire_identities_keep_canonical_strings() {
     assert_eq!(AccountType::Key.as_str(), "key");
     assert_eq!(AccountSetupStep::Ready.as_str(), "ready");
     let _ = UpstreamChannel::Go;
@@ -119,21 +98,6 @@ fn purchase_expiry_uses_the_next_natural_month() {
             expected
         );
     }
-}
-
-#[test]
-fn account_input_accepts_legacy_recharge_date_but_serializes_the_new_name() {
-    let input: AccountInput = serde_json::from_value(serde_json::json!({
-        "name": "legacy",
-        "key": "key",
-        "recharge_date": "2026-07-15"
-    }))
-    .expect("legacy input should deserialize");
-    assert_eq!(input.purchase_date.as_deref(), Some("2026-07-15"));
-
-    let json = serde_json::to_value(input).expect("input should serialize");
-    assert_eq!(json["purchase_date"], "2026-07-15");
-    assert!(json.get("recharge_date").is_none());
 }
 
 #[test]

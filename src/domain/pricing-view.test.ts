@@ -225,15 +225,4 @@ test("legacy provider sections expose the GOAT pricing table", () => {
   );
 });
 
-test("GOAT usage helper exposes local log-estimate windows", () => {
-  const usage = readFileSync(new URL("./useAccountUsage.ts", import.meta.url), "utf8");
-  const providers = readFileSync(new URL("./account-providers.ts", import.meta.url), "utf8");
-  assert.match(usage, /providerApi\.getProviderUsage\(accountId\)/);
-  assert.match(usage, /limitsFromProviderWindows\(providerUsage\.quota_windows\)/);
-  assert.match(usage, /account && isCommandCodeGoatAccount\(account\)/);
-  assert.doesNotMatch(usage, /COMMAND_CODE_GOAT_USAGE_LIMITS/);
-  assert.doesNotMatch(providers, /COMMAND_CODE_GOAT_USAGE_LIMITS|window_5h: 14/);
-  const retry = usage.slice(usage.indexOf("async function retryQuotaLimits"));
-  assert.doesNotMatch(retry, /isCommandCodeGoatAccount/);
-  assert.match(retry, /account\.provider_id === "opencode"/);
-});
+

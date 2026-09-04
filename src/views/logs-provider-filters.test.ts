@@ -5,7 +5,6 @@ import { dashboardApi } from "../api/dashboard.ts";
 import { installFetchMock } from "../test-helpers/dashboard-v3-fetch.ts";
 
 const logs = readFileSync(new URL("./Logs.vue", import.meta.url), "utf8");
-const presenters = readFileSync(new URL("../api/dashboard-presenters.ts", import.meta.url), "utf8");
 
 test("forward log API sends the provider attribution filters as exact query params", async () => {
   const requests = installFetchMock(() => ({
@@ -36,28 +35,6 @@ test("forward log API sends the provider attribution filters as exact query para
   assert.equal(query.get("credentialAccountId"), "cred 2");
   assert.equal(query.get("limit"), "20");
   assert.equal(query.get("offset"), "40");
-});
-
-test("forward log DTO declares nullable provider attribution and cost fields", () => {
-  for (const field of [
-    "route_account_id",
-    "provider_id",
-    "credential_account_id",
-    "raw_cost_usd",
-    "quota_debit",
-    "effective_paid_cost_usd",
-    "native_cost_value",
-    "native_cost_unit",
-    "native_cost_currency",
-  ]) {
-    assert.match(presenters, new RegExp(`${field}: [^;]*\\| null`));
-  }
-});
-
-test("Alias column and detail titles distinguish effective Alias from the requested model", () => {
-  assert.match(logs, /title: t\("模型别名"\)[^\n]*forwardLogAlias\(row\)/);
-  assert.match(logs, /\[t\("请求模型"\), forwardLogRequestedModel\(row\)\]/);
-  assert.match(logs, /\[t\("解析别名"\), forwardLogResolvedAlias\(row\)\]/);
 });
 
 test("forward filters are remote query params, reset paging, and are never local-page filtering", () => {

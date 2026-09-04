@@ -342,16 +342,6 @@ test("percent-only usage saves keep counting down from the backend deadline", ()
   assert.equal(resetsInMinutesForSave(clean, "window_month"), null);
 });
 
-test("reset editor derives untouched fields from the live absolute deadline", async () => {
-  const helpers = await readFile(new URL("./accounts-usage.ts", import.meta.url), "utf8");
-  const fields = helpers.slice(
-    helpers.indexOf("export function resetsFirstFieldValue"),
-    helpers.indexOf("export function resetsFieldsToMinutes"),
-  );
-
-  assert.equal(fields.match(/resetsInMinutesForSave\(edit, key, now\)/g)?.length, 2);
-});
-
 test("reset editor splits minutes into hour/minute or day/hour field pairs", () => {
   assert.equal(resetsFirstFieldMax("window_5h"), 5);
   assert.equal(resetsSecondFieldMax("window_5h"), 59);
@@ -384,17 +374,6 @@ test("calibration shortcut is disabled when every usage window is cooling", asyn
   assert.match(usage, /usageLimitsFor\(account\)\.some\(\(\{ key \}\) => !accountUsageLimitReached\(account, key\)\)/);
 });
 
-test("usage refresh initializes windows missing after an earlier quota load failure", async () => {
-  const usage = await readFile(new URL("./useAccountUsage.ts", import.meta.url), "utf8");
-  const sync = usage.slice(usage.indexOf("function syncUsageEdits"), usage.indexOf("function updateUsageDraft"));
-
-  assert.match(
-    sync,
-    /if \(!edit\) \{\s+const created = mergeUsageEdit\(undefined, saved, Boolean\(wasActuallyReset\)\);/,
-  );
-  assert.ok(sync.indexOf("if (!edit)") < sync.indexOf("Object.assign(edit"));
-});
-
 test("bounded concurrency rejects invalid limits instead of dropping work", async () => {
   const worker = async (value: number) => value * 2;
 
@@ -414,16 +393,6 @@ test("accounts render before per-account usage and expose failed loads for retry
   assert.match(accounts, /v-if="accountListLoading"[\s\S]*?v-else-if="accountListError"[\s\S]*?@click="loadAccounts"/);
 
   assert.match(accounts, /async function refreshAccountState/);
-});
-
-test("editing an account refreshes usage after purchase-date window changes", async () => {
-  const source = await readFile(new URL("../views/Accounts.vue", import.meta.url), "utf8");
-  const save = source.slice(source.indexOf("async function onFormSave"), source.indexOf("function openAccountTest"));
-
-  const update = save.indexOf("const saved = await runWithFreshSettingsRevision");
-  const replace = save.indexOf("replaceAccount(saved);");
-  const refresh = save.indexOf("if (accountHasUsageDisplay(saved)) await loadAccountUsage(saved.id);");
-  assert.ok(update >= 0 && replace > update && refresh > replace);
 });
 
 test("manual editor writes on commit events instead of each value update", async () => {

@@ -44,10 +44,6 @@ pub(crate) const CUSTOM_OVERLAP_RAW_ID: &str = "shared-raw-model";
 
 pub(crate) const SUCCESS_CHAT_BODY: &str = r#"{"id":"ok","object":"chat.completion","model":"upstream-should-not-leak","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":2,"prompt_tokens_details":{"cached_tokens":0}}}"#;
 
-pub(crate) const MIXED_UPSTREAM_MODELS_BODY: &str = r#"{"object":"list","data":[{"id":"deepseek-v4-flash"},{"id":"deepseek/deepseek-v4-flash"},{"id":"vendor-raw-not-an-alias"},{"id":"minimax-m2.7"},{"id":"grok-4.5"}]}"#;
-
-pub(crate) const CATALOG_CONTRACT: &str = include_str!("catalog_contract.json");
-
 const CHAT_STREAM_HEAD: &str = "data: {\"id\":\"chat-stream\",\"model\":\"deepseek-v4-flash\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"ok\"},\"finish_reason\":null}]}\n\n";
 
 pub(crate) fn loopback_client() -> reqwest::Client {
@@ -55,10 +51,6 @@ pub(crate) fn loopback_client() -> reqwest::Client {
         .no_proxy()
         .build()
         .expect("v2 test client should build")
-}
-
-pub(crate) fn catalog_contract() -> Value {
-    serde_json::from_str(CATALOG_CONTRACT).expect("catalog contract fixture")
 }
 
 pub(crate) struct V2Harness {
@@ -539,32 +531,6 @@ pub(crate) fn client_model_ids(body: &Value) -> Vec<String> {
         .into_iter()
         .flatten()
         .filter_map(|item| item["id"].as_str().map(str::to_string))
-        .collect()
-}
-
-pub(crate) fn required_catalog_fields() -> Vec<String> {
-    catalog_contract()["required_entry_fields"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|value| value.as_str().map(str::to_string))
-        .collect()
-}
-
-pub(crate) fn risk_notice_fields() -> Vec<String> {
-    catalog_contract()["risk_notice_fields"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|value| value.as_str().map(str::to_string))
-        .collect()
-}
-
-pub(crate) fn missing_fields(entry: &Value, fields: &[String]) -> Vec<String> {
-    fields
-        .iter()
-        .filter(|field| entry.get(field.as_str()).is_none() || entry[field.as_str()].is_null())
-        .cloned()
         .collect()
 }
 

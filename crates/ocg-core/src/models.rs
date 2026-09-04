@@ -4,28 +4,13 @@ use chrono::{DateTime, Datelike, Local, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::provider::{ConnectionVerificationStatus, UpstreamProtocolKind, default_provider_id};
+use crate::provider::{ConnectionVerificationStatus, UpstreamProtocolKind};
 
 pub use crate::kernel::ids::DEFAULT_ACCOUNT_TEST_MODEL;
 pub use ocg_domain::account::{Account, AccountSetupStep, AccountType, UpstreamChannel};
 
 /// Maximum persisted freeform account note length, counted in Unicode scalars.
 pub const MAX_ACCOUNT_NOTES_CHARS: usize = 4000;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AccountInput {
-    #[serde(default = "default_provider_id")]
-    pub provider_id: String,
-    pub name: String,
-    pub username: Option<String>,
-    pub password: Option<String>,
-    pub key: String,
-    pub referral_code: Option<String>,
-    #[serde(alias = "recharge_date")]
-    pub purchase_date: Option<String>,
-    #[serde(default)]
-    pub notes: Option<String>,
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AccountUpdate {

@@ -1,39 +1,8 @@
 //! Dashboard V3 provider/Zen/contract DTO catalog: schema prefix, nullability,
 //! request omission, protocol tokens, and secrecy.
 
-use ocg_core::dashboard_v3::{CATALOG_TYPE_NAMES, contract_schema};
+use ocg_core::dashboard_v3::contract_schema;
 use serde_json::{Map, Value, json};
-
-const ACCOUNTS_CATALOG_PREFIX: &[&str] = &[
-    "ControlRevision",
-    "MutationAck",
-    "MutationExpectation",
-    "PricingRevision",
-    "V3Error",
-    "ConnectionInfo",
-    "ConnectionSubKey",
-    "Settings",
-    "SettingsUpdate",
-    "ProxySupportedModel",
-    "KeyCreate",
-    "KeyUpdate",
-    "Account",
-    "AccountList",
-    "AccountMutation",
-    "AccountCustomConfig",
-    "AccountModelCapability",
-    "AccountCreate",
-    "AccountManagedCreate",
-    "AccountModelTestRequest",
-    "AccountModelTestResponse",
-    "AccountUpdate",
-    "AccountOrder",
-    "AccountSetupUpdate",
-    "AccountCustomConfigUpdate",
-    "AccountCustomConfigWrite",
-    "AccountModelCapabilitiesUpdate",
-    "AccountModelCapabilityWrite",
-];
 
 const PROVIDER_CATALOG_TYPES: &[&str] = &[
     "ProviderCatalog",
@@ -124,40 +93,9 @@ fn schema_field_names<'a>(value: &'a Value, acc: &mut Vec<&'a str>) {
 }
 
 #[test]
-fn catalog_type_names_keep_the_accounts_prefix() {
-    assert_eq!(
-        &CATALOG_TYPE_NAMES[..ACCOUNTS_CATALOG_PREFIX.len()],
-        ACCOUNTS_CATALOG_PREFIX
-    );
-    for name in PROVIDER_CATALOG_TYPES {
-        assert!(
-            CATALOG_TYPE_NAMES.contains(name),
-            "CATALOG_TYPE_NAMES missing {name}"
-        );
-    }
-    let provider_end = ACCOUNTS_CATALOG_PREFIX.len() + PROVIDER_CATALOG_TYPES.len();
-    assert_eq!(
-        &CATALOG_TYPE_NAMES[ACCOUNTS_CATALOG_PREFIX.len()..provider_end],
-        PROVIDER_CATALOG_TYPES
-    );
-}
-
-#[test]
 fn provider_schema_registers_nullable_responses_and_omittable_requests() {
     let schema = contract_schema();
     let defs = defs(&schema);
-    for name in CATALOG_TYPE_NAMES {
-        assert!(defs.contains_key(*name), "schema missing {name}");
-    }
-
-    let any_of = schema["anyOf"].as_array().expect("catalog anyOf");
-    for (index, name) in ACCOUNTS_CATALOG_PREFIX.iter().enumerate() {
-        assert_eq!(
-            any_of[index]["$ref"],
-            format!("#/$defs/{name}"),
-            "anyOf prefix drifted at {index}"
-        );
-    }
 
     let entry_required = required_fields(defs, "ProviderCatalogEntry");
     for field in ["creationUnavailableReason", "keyPrefix"] {

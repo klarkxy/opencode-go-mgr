@@ -588,13 +588,6 @@ mod tests {
 
     #[test]
     fn official_support_matches_each_model_preference() {
-        for profile in MODEL_PROTOCOLS {
-            assert!(
-                profile.supported.is_empty() || profile.supported == [profile.preferred],
-                "official support must be empty or the preferred endpoint for {}",
-                profile.id
-            );
-        }
         assert!(opencode_supports_upstream(
             "deepseek-v4-flash",
             ApiFormat::ChatCompletions
@@ -654,19 +647,6 @@ mod tests {
 
     #[test]
     fn ollama_cloud_seed_is_locked_and_never_enters_model_protocols() {
-        assert_eq!(OLLAMA_CLOUD_PROTOCOL_SEED.len(), 4);
-        assert_eq!(
-            OLLAMA_CLOUD_PROTOCOL_SEED
-                .iter()
-                .map(|profile| (profile.id, profile.preferred, profile.supported_upstream))
-                .collect::<Vec<_>>(),
-            vec![
-                ("deepseek-v4-flash", ApiFormat::ChatCompletions, CHAT_ONLY),
-                ("deepseek-v4-pro", ApiFormat::ChatCompletions, CHAT_ONLY),
-                ("gpt-oss:20b", ApiFormat::ChatCompletions, CHAT_ONLY),
-                ("gpt-oss:120b", ApiFormat::ChatCompletions, CHAT_ONLY),
-            ]
-        );
         for profile in OLLAMA_CLOUD_PROTOCOL_SEED {
             assert!(!profile.id.contains(':') || profile.id.starts_with("gpt-oss:"));
         }

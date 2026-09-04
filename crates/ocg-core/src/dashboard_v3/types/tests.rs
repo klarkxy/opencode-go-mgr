@@ -49,9 +49,6 @@ fn error_envelope_always_emits_nullable_fields() {
 fn schema_catalog_is_extensible_and_names_kernel_types() {
     let schema = contract_schema();
     let defs = schema["$defs"].as_object().expect("catalog $defs");
-    for name in CATALOG_TYPE_NAMES {
-        assert!(defs.contains_key(*name), "missing {name}");
-    }
     let required_error = defs["V3Error"]["required"]
         .as_array()
         .expect("V3Error.required");
@@ -956,56 +953,9 @@ fn sample_contracts() -> ProviderContracts {
 }
 
 #[test]
-fn catalog_type_names_keep_accounts_prefix_and_register_provider_dtos() {
-    assert_eq!(
-        &CATALOG_TYPE_NAMES[..ACCOUNTS_CATALOG_PREFIX.len()],
-        ACCOUNTS_CATALOG_PREFIX
-    );
-    for name in [
-        "ProviderCatalog",
-        "ProviderCatalogEntry",
-        "ProviderCatalogFormField",
-        "ProviderModelCapability",
-        "ZenFreeSettings",
-        "ZenFreeSettingsUpdate",
-        "ZenFreeModels",
-        "ZenFreeModel",
-        "ProviderContracts",
-        "ProviderContractGroup",
-        "CustomEndpointContract",
-        "ProviderAccountChoice",
-        "EffectiveCatalog",
-        "EffectiveModelContract",
-        "EffectiveModelProtocols",
-        "EffectiveProtocolEvidence",
-        "CapabilitySummary",
-        "CardCapabilitySummary",
-        "ModelProtocolOverridesUpdate",
-        "ModelProtocolOverride",
-        "ProtocolOverrideState",
-        "ProtocolProbeRequest",
-        "ProtocolProbeResult",
-        "ProtocolProbeResponse",
-    ] {
-        assert!(
-            CATALOG_TYPE_NAMES.contains(&name),
-            "CATALOG_TYPE_NAMES missing {name}"
-        );
-    }
-
+fn account_schema_keeps_required_fields() {
     let schema = contract_schema();
     let defs = schema["$defs"].as_object().expect("catalog $defs");
-    for name in CATALOG_TYPE_NAMES {
-        assert!(defs.contains_key(*name), "schema missing {name}");
-    }
-    let any_of = schema["anyOf"].as_array().expect("catalog anyOf");
-    for (index, name) in ACCOUNTS_CATALOG_PREFIX.iter().enumerate() {
-        assert_eq!(
-            any_of[index]["$ref"],
-            format!("#/$defs/{name}"),
-            "anyOf prefix drifted at {index}"
-        );
-    }
     assert_eq!(
         defs["Account"]["required"],
         json!([

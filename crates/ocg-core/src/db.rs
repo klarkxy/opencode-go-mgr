@@ -2084,6 +2084,16 @@ fn load_dynamic_provider_runtime(
     for row in rows {
         mappings.push(row?);
     }
+    let created_at = DateTime::parse_from_rfc3339(&created_at)
+        .map(|value| value.with_timezone(&Utc))
+        .map_err(|error| {
+            anyhow::anyhow!("dynamic provider {id} has invalid created_at: {error}")
+        })?;
+    let updated_at = DateTime::parse_from_rfc3339(&updated_at)
+        .map(|value| value.with_timezone(&Utc))
+        .map_err(|error| {
+            anyhow::anyhow!("dynamic provider {id} has invalid updated_at: {error}")
+        })?;
     Ok(DynamicProviderRuntime {
         id,
         name,
@@ -2091,12 +2101,8 @@ fn load_dynamic_provider_runtime(
         upstream_protocol,
         auth_kind,
         mappings,
-        created_at: DateTime::parse_from_rfc3339(&created_at)
-            .map(|value| value.with_timezone(&Utc))
-            .unwrap_or_else(|_| Utc::now()),
-        updated_at: DateTime::parse_from_rfc3339(&updated_at)
-            .map(|value| value.with_timezone(&Utc))
-            .unwrap_or_else(|_| Utc::now()),
+        created_at,
+        updated_at,
     })
 }
 
@@ -2490,7 +2496,7 @@ fn insert_import_account_on(conn: &Connection, record: &AccountImportRecord) -> 
     };
     insert_account_row(conn, account, &purchase_date, record.verification_status)?;
     if let Some(config) = &record.custom_config {
-        persist_account_custom_config_on(conn, &account.id, config, true)?;
+        persist_account_custom_config_on(conn, &account.id, config)?;
     }
     if !record.capabilities.is_empty() {
         persist_account_model_capabilities_on(conn, &account.id, &record.capabilities)?;
@@ -2646,7 +2652,7 @@ fn merge_import_account_on(conn: &Connection, record: &AccountImportRecord) -> R
         params![SCOPE_KIND_CUSTOM_ENDPOINT, account.id],
     )?;
     if let Some(config) = &record.custom_config {
-        persist_account_custom_config_on(conn, &account.id, config, true)?;
+        persist_account_custom_config_on(conn, &account.id, config)?;
     }
     if !record.capabilities.is_empty() {
         persist_account_model_capabilities_on(conn, &account.id, &record.capabilities)?;
@@ -2679,7 +2685,6 @@ fn persist_account_custom_config_on(
     conn: &Connection,
     account_id: &str,
     input: &AccountCustomConfigInput,
-    allow_protocol_change: bool,
 ) -> Result<()> {
     let endpoint_url = validate_custom_endpoint_url(&input.endpoint_url)?;
     let now = Utc::now().to_rfc3339();
@@ -2690,11 +2695,7 @@ fn persist_account_custom_config_on(
             |row| row.get::<_, String>(0),
         )
         .optional()?;
-    if let Some(protocol) = existing {
-        anyhow::ensure!(
-            allow_protocol_change || protocol == input.upstream_protocol.as_str(),
-            "Custom upstream protocol cannot be changed after create"
-        );
+    if existing.is_some() {
         conn.execute(
             "UPDATE account_custom_configs
              SET endpoint_url = ?2, upstream_protocol = ?3, updated_at = ?4
@@ -4960,7 +4961,7 @@ impl Database {
         let tx = self.conn.unchecked_transaction()?;
         insert_account_row(&tx, account, &purchase_date, verification_status)?;
         if let Some(config) = custom_config {
-            persist_account_custom_config_on(&tx, &account.id, config, true)?;
+            persist_account_custom_config_on(&tx, &account.id, config)?;
         }
         if !capabilities.is_empty() {
             persist_account_model_capabilities_on(&tx, &account.id, capabilities)?;
@@ -5908,9 +5909,8 @@ impl Database {
         &self,
         account_id: &str,
         input: &AccountCustomConfigInput,
-        allow_protocol_auth_change: bool,
     ) -> Result<AccountCustomConfig> {
-        self.commit_account_custom_config(account_id, input, allow_protocol_auth_change)?;
+        self.commit_account_custom_config(account_id, input)?;
         self.account_custom_config(account_id)?
             .ok_or_else(|| anyhow::anyhow!("custom config was not persisted"))
     }
@@ -5922,11 +5922,10 @@ impl Database {
         &self,
         account_id: &str,
         input: &AccountCustomConfigInput,
-        allow_protocol_auth_change: bool,
     ) -> Result<()> {
         anyhow::ensure!(self.get_account(account_id)?.is_some(), "account not found");
         let tx = self.conn.unchecked_transaction()?;
-        persist_account_custom_config_on(&tx, account_id, input, allow_protocol_auth_change)?;
+        persist_account_custom_config_on(&tx, account_id, input)?;
         tx.commit()?;
         Ok(())
     }
@@ -5942,7 +5941,7 @@ impl Database {
     ) -> Result<()> {
         anyhow::ensure!(self.get_account(account_id)?.is_some(), "account not found");
         let tx = self.conn.unchecked_transaction()?;
-        persist_account_custom_config_on(&tx, account_id, input, true)?;
+        persist_account_custom_config_on(&tx, account_id, input)?;
         persist_account_model_capabilities_on(&tx, account_id, capabilities)?;
         clear_custom_protocol_state_except_on(&tx, account_id, input.upstream_protocol)?;
         tx.commit()?;

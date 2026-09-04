@@ -537,13 +537,6 @@ fn routing_selector_invariant(failure: SelectorInvariant) -> (StatusCode, String
 #[cfg(test)]
 mod tests {
     #[test]
-    fn orchestration_types_are_concrete() {
-        let _ = std::any::type_name::<super::RequestSnapshots>();
-        let _ = std::any::type_name::<super::LoopState>();
-        let _ = std::any::type_name::<super::GatewayExecutor>();
-    }
-
-    #[test]
     fn duplicate_selection_error_maps_to_internal_selector_invariant() {
         let error = ocg_gateway::selector::SelectionError::DuplicateAccountId {
             first: 0,
