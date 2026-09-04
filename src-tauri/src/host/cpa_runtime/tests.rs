@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(unix)]
+use std::path::PathBuf;
 
 #[cfg(windows)]
 fn utf16_to_string(wide: &[u16]) -> String {
@@ -31,6 +33,50 @@ fn environment_block_sets_management_password() {
     let block = windows_environment("cpa-test-secret");
     let text = String::from_utf16_lossy(&block);
     assert!(text.contains("MANAGEMENT_PASSWORD=cpa-test-secret"));
+}
+
+#[cfg(unix)]
+#[test]
+fn unix_command_rejects_missing_executable() {
+    let spec = CpaRuntimeProcessSpec {
+        executable: PathBuf::from("/no/such/cpa-binary"),
+        config_path: PathBuf::from("/tmp/config.yaml"),
+        working_dir: PathBuf::from("/tmp"),
+        management_password: ocg_core::cpa_runtime::CpaRuntimeSecret::new("secret"),
+        log_secrets: Vec::new(),
+    };
+    let error = spawn_unix_owned(&spec).unwrap_err();
+    assert!(error.to_string().contains("missing"));
+}
+
+#[cfg(unix)]
+#[test]
+fn owned_sleep_process_is_group_contained_and_stoppable() {
+    let dir = std::env::temp_dir().join(format!("ocg-cpa-unix-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let script = dir.join("sleep-child");
+    std::fs::write(&script, "#!/bin/sh\nexec sleep 20\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let config = dir.join("config.yaml");
+    std::fs::write(&config, "host: \"127.0.0.1\"\n").unwrap();
+    let spec = CpaRuntimeProcessSpec {
+        executable: script,
+        config_path: config,
+        working_dir: dir.clone(),
+        management_password: ocg_core::cpa_runtime::CpaRuntimeSecret::new("cpa-test-secret"),
+        log_secrets: vec![ocg_core::cpa_runtime::CpaRuntimeSecret::new(
+            "cpa-test-secret",
+        )],
+    };
+    let session = spawn_unix_owned(&spec).expect("sleep child should start");
+    session
+        .stop()
+        .expect("owned sleep should exit after process-group signal");
+    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[cfg(windows)]

@@ -28,6 +28,40 @@ fn write_zip(files: &[(&str, &[u8])]) -> Vec<u8> {
     cursor.into_inner()
 }
 
+fn write_tar_gz(files: &[(&str, &[u8])]) -> Vec<u8> {
+    let mut tar_bytes = Vec::new();
+    {
+        let mut builder = tar::Builder::new(&mut tar_bytes);
+        for (name, bytes) in files {
+            let mut header = tar::Header::new_gnu();
+            header.set_size(bytes.len() as u64);
+            header.set_mode(0o755);
+            header.set_cksum();
+            builder.append_data(&mut header, *name, *bytes).unwrap();
+        }
+        builder.finish().unwrap();
+    }
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    encoder.write_all(&tar_bytes).unwrap();
+    encoder.finish().unwrap()
+}
+
+fn write_tar_gz_symlink(name: &str, target: &str) -> Vec<u8> {
+    let mut tar_bytes = Vec::new();
+    {
+        let mut builder = tar::Builder::new(&mut tar_bytes);
+        let mut header = tar::Header::new_gnu();
+        header.set_entry_type(tar::EntryType::Symlink);
+        header.set_size(0);
+        header.set_cksum();
+        builder.append_link(&mut header, name, target).unwrap();
+        builder.finish().unwrap();
+    }
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    encoder.write_all(&tar_bytes).unwrap();
+    encoder.finish().unwrap()
+}
+
 #[test]
 fn windows_asset_name_is_exact() {
     assert_eq!(
@@ -42,6 +76,62 @@ fn windows_asset_name_is_exact() {
             "{unsafe_version}"
         );
     }
+}
+
+#[test]
+fn shipped_desktop_assets_use_official_cli_proxy_api_names() {
+    assert_eq!(
+        CpaReleaseAsset::WindowsAmd64Zip.file_name("7.2.147"),
+        "CLIProxyAPI_7.2.147_windows_amd64.zip"
+    );
+    assert_eq!(
+        CpaReleaseAsset::DarwinAmd64TarGz.file_name("7.2.147"),
+        "CLIProxyAPI_7.2.147_darwin_amd64.tar.gz"
+    );
+    assert_eq!(
+        CpaReleaseAsset::DarwinAarch64TarGz.file_name("7.2.147"),
+        "CLIProxyAPI_7.2.147_darwin_aarch64.tar.gz"
+    );
+    assert_eq!(
+        CpaReleaseAsset::LinuxAmd64TarGz.file_name("7.2.147"),
+        "CLIProxyAPI_7.2.147_linux_amd64.tar.gz"
+    );
+    assert_eq!(
+        CpaReleaseAsset::WindowsAmd64Zip.archive_kind(),
+        extract::CpaArchiveKind::Zip
+    );
+    assert_eq!(
+        CpaReleaseAsset::DarwinAmd64TarGz.archive_kind(),
+        extract::CpaArchiveKind::TarGz
+    );
+    assert_eq!(
+        CpaReleaseAsset::DarwinAarch64TarGz.archive_kind(),
+        extract::CpaArchiveKind::TarGz
+    );
+    assert_eq!(
+        CpaReleaseAsset::LinuxAmd64TarGz.archive_kind(),
+        extract::CpaArchiveKind::TarGz
+    );
+    #[cfg(all(windows, target_arch = "x86_64"))]
+    assert_eq!(
+        current_cpa_release_asset(),
+        Some(CpaReleaseAsset::WindowsAmd64Zip)
+    );
+    #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+    assert_eq!(
+        current_cpa_release_asset(),
+        Some(CpaReleaseAsset::DarwinAmd64TarGz)
+    );
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    assert_eq!(
+        current_cpa_release_asset(),
+        Some(CpaReleaseAsset::DarwinAarch64TarGz)
+    );
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    assert_eq!(
+        current_cpa_release_asset(),
+        Some(CpaReleaseAsset::LinuxAmd64TarGz)
+    );
 }
 
 #[test]
@@ -125,6 +215,79 @@ fn extract_rejects_traversal_duplicates_and_symlinks() {
 
     assert!(extract::is_unix_symlink(Some(0o120_777)));
     assert!(!extract::is_unix_symlink(Some(0o100_644)));
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn tar_gz_extract_rejects_unsafe_duplicates_and_symlinks() {
+    let dir = temp_dir("extract-tar");
+    let archive = dir.join("ok.tar.gz");
+    fs::write(&archive, write_tar_gz(&[("CLIProxyAPI", b"elf")])).unwrap();
+    extract::extract_tar_gz(&archive, &dir.join("ok")).unwrap();
+    assert!(dir.join("ok/CLIProxyAPI").is_file());
+    assert_eq!(
+        find_managed_executable(&dir.join("ok")).unwrap(),
+        dir.join("ok/CLIProxyAPI")
+    );
+
+    let reserved = dir.join("reserved.tar.gz");
+    fs::write(&reserved, write_tar_gz(&[("CON.txt", b"elf")])).unwrap();
+    assert!(extract::extract_tar_gz(&reserved, &dir.join("reserved")).is_err());
+
+    let ads = dir.join("ads.tar.gz");
+    fs::write(&ads, write_tar_gz(&[("CLIProxyAPI:stream", b"elf")])).unwrap();
+    assert!(extract::extract_tar_gz(&ads, &dir.join("ads")).is_err());
+
+    let dup = dir.join("dup.tar.gz");
+    fs::write(
+        &dup,
+        write_tar_gz(&[("CLIProxyAPI", b"a"), ("./CLIProxyAPI", b"b")]),
+    )
+    .unwrap();
+    assert!(extract::extract_tar_gz(&dup, &dir.join("dup")).is_err());
+
+    let symlink = dir.join("link.tar.gz");
+    fs::write(&symlink, write_tar_gz_symlink("CLIProxyAPI", "../evil")).unwrap();
+    assert!(extract::extract_tar_gz(&symlink, &dir.join("link")).is_err());
+    assert!(!dir.join("evil").exists());
+
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn snapshot_without_host_stays_unsupported_and_names_shipped_desktops() {
+    let dir = temp_dir("unsupported-host");
+    let cipher: Arc<dyn KeyCipher + Send + Sync> = Arc::new(StaticKeyCipher::new("cpa-runtime"));
+    let state =
+        CoreStateInner::new(Database::open(dir.clone()).unwrap(), dir.clone(), cipher).unwrap();
+    let snapshot = state.cpa_runtime_snapshot();
+    assert!(!snapshot.supported);
+    assert_eq!(
+        snapshot.unavailable_reason.as_deref(),
+        Some(UNAVAILABLE_REASON)
+    );
+    assert!(UNAVAILABLE_REASON.contains("Windows x64"));
+    assert!(UNAVAILABLE_REASON.contains("macOS"));
+    assert!(UNAVAILABLE_REASON.contains("Linux x64"));
+    drop(state);
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test]
+async fn install_without_host_fails_closed_before_download() {
+    let dir = temp_dir("install-no-host");
+    let cipher: Arc<dyn KeyCipher + Send + Sync> = Arc::new(StaticKeyCipher::new("cpa-runtime"));
+    let state =
+        CoreStateInner::new(Database::open(dir.clone()).unwrap(), dir.clone(), cipher).unwrap();
+    let error = state
+        .install_cpa_runtime(state.settings_revision(), state.process_generation(), None)
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        CpaRuntimeError::Unavailable(message) if message == UNAVAILABLE_REASON
+    ));
+    drop(state);
     fs::remove_dir_all(dir).unwrap();
 }
 
@@ -608,7 +771,7 @@ async fn failed_rollback_restores_config_manifest_and_former_running_version() {
         Json(json!({"status": "ok"}))
     }
     async fn accounts() -> impl axum::response::IntoResponse {
-        ([(("x-cpa-version", "7.2.147"))], Json(json!({"files": []})))
+        ([("x-cpa-version", "7.2.147")], Json(json!({"files": []})))
     }
     #[derive(Clone)]
     struct ProbeCount(Arc<AtomicUsize>);

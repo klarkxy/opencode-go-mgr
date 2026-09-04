@@ -1,7 +1,8 @@
-//! Windows x64 CPA child lifecycle. OCG-owned processes only.
+//! Installed-desktop CPA child lifecycle. OCG-owned processes only.
 //!
-//! Start is CREATE_SUSPENDED, assign to a kill-on-close Job Object, then
-//! resume. The Management password is passed only as MANAGEMENT_PASSWORD.
+//! Windows starts CREATE_SUSPENDED, assigns a kill-on-close Job Object, then
+//! resumes. Unix starts a fresh process group and tears that group down on
+//! stop/exit. The Management password is passed only as MANAGEMENT_PASSWORD.
 //! This Host never inspects ports or PIDs of processes it did not start.
 
 use ocg_core::cpa_runtime::{
@@ -16,12 +17,26 @@ use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
 pub fn register(core: &CoreState) {
-    #[cfg(all(windows, target_arch = "x86_64", not(debug_assertions)))]
+    #[cfg(all(
+        not(debug_assertions),
+        any(
+            all(windows, target_arch = "x86_64"),
+            target_os = "macos",
+            all(target_os = "linux", target_arch = "x86_64"),
+        )
+    ))]
     {
-        core.set_cpa_runtime_host(Arc::new(WindowsCpaRuntimeHost::new()));
+        core.set_cpa_runtime_host(Arc::new(OwnedCpaRuntimeHost::new()));
     }
     let _ = core;
 }
+
+#[cfg(windows)]
+#[allow(dead_code)]
+type OwnedCpaRuntimeHost = WindowsCpaRuntimeHost;
+#[cfg(unix)]
+#[allow(dead_code)]
+type OwnedCpaRuntimeHost = UnixCpaRuntimeHost;
 
 pub fn stop_on_exit(core: &CoreState) {
     core.stop_owned_cpa_runtime();
@@ -402,13 +417,258 @@ fn spawn_reader(
     })
 }
 
-#[cfg(windows)]
+#[cfg(unix)]
+#[allow(dead_code)]
+struct UnixCpaRuntimeHost {
+    session: Mutex<Option<UnixOwnedSession>>,
+    last_logs: Mutex<CpaRuntimeLogTail>,
+}
+
+#[cfg(unix)]
+impl UnixCpaRuntimeHost {
+    #[allow(dead_code)]
+    fn new() -> Self {
+        Self {
+            session: Mutex::new(None),
+            last_logs: Mutex::new(CpaRuntimeLogTail {
+                stdout: String::new(),
+                stderr: String::new(),
+            }),
+        }
+    }
+}
+
+#[cfg(unix)]
+impl CpaRuntimeProcessHost for UnixCpaRuntimeHost {
+    fn start_owned(&self, spec: &CpaRuntimeProcessSpec) -> Result<(), CpaRuntimeError> {
+        if self.owned_running() {
+            self.stop_owned()?;
+        }
+        let session = spawn_unix_owned(spec)?;
+        *self.last_logs.lock() = CpaRuntimeLogTail {
+            stdout: String::new(),
+            stderr: String::new(),
+        };
+        *self.session.lock() = Some(session);
+        Ok(())
+    }
+
+    fn stop_owned(&self) -> Result<(), CpaRuntimeError> {
+        let Some(session) = self.session.lock().take() else {
+            return Ok(());
+        };
+        let snapshot = session.logs();
+        match session.stop() {
+            Ok(logs) => {
+                *self.last_logs.lock() = logs;
+                Ok(())
+            }
+            Err(error) => {
+                *self.last_logs.lock() = snapshot;
+                Err(error)
+            }
+        }
+    }
+
+    fn owned_running(&self) -> bool {
+        let mut session = self.session.lock();
+        session.as_mut().is_some_and(UnixOwnedSession::is_running)
+    }
+
+    fn logs(&self) -> CpaRuntimeLogTail {
+        let session = self.session.lock();
+        session
+            .as_ref()
+            .map(UnixOwnedSession::logs)
+            .unwrap_or_else(|| self.last_logs.lock().clone())
+    }
+
+    fn add_log_secret(&self, secret: &ocg_core::cpa_runtime::CpaRuntimeSecret) {
+        if let Some(session) = self.session.lock().as_ref() {
+            session.add_log_secret(secret.expose_to_host().as_bytes());
+        }
+    }
+}
+
+#[cfg(unix)]
+struct UnixOwnedSession {
+    child: std::process::Child,
+    stdout: Arc<Mutex<String>>,
+    stderr: Arc<Mutex<String>>,
+    secrets: Arc<Mutex<Vec<Vec<u8>>>>,
+    readers: Vec<JoinHandle<()>>,
+}
+
+#[cfg(unix)]
+impl UnixOwnedSession {
+    fn is_running(&mut self) -> bool {
+        match self.child.try_wait() {
+            Ok(None) => true,
+            Ok(Some(_)) | Err(_) => false,
+        }
+    }
+
+    fn logs(&self) -> CpaRuntimeLogTail {
+        CpaRuntimeLogTail {
+            stdout: self.stdout.lock().clone(),
+            stderr: self.stderr.lock().clone(),
+        }
+    }
+
+    fn add_log_secret(&self, secret: &[u8]) {
+        if secret.is_empty() {
+            return;
+        }
+        let mut secrets = self.secrets.lock();
+        if !secrets.iter().any(|known| known == secret) {
+            secrets.push(secret.to_vec());
+            secrets.sort_by_key(|known| std::cmp::Reverse(known.len()));
+        }
+    }
+
+    fn stop(mut self) -> Result<CpaRuntimeLogTail, CpaRuntimeError> {
+        signal_unix_group(&self.child, nix::sys::signal::Signal::SIGTERM);
+        let started = std::time::Instant::now();
+        loop {
+            match self.child.try_wait() {
+                Ok(Some(_)) => break,
+                Ok(None) if started.elapsed() >= std::time::Duration::from_secs(5) => {
+                    signal_unix_group(&self.child, nix::sys::signal::Signal::SIGKILL);
+                    let _ = self.child.wait();
+                    return Err(CpaRuntimeError::Failed(
+                        "owned CPA did not exit within 5 seconds".into(),
+                    ));
+                }
+                Ok(None) => thread::sleep(std::time::Duration::from_millis(20)),
+                Err(error) => {
+                    return Err(CpaRuntimeError::Failed(format!(
+                        "failed to wait for owned CPA: {error}"
+                    )));
+                }
+            }
+        }
+        for reader in self.readers.drain(..) {
+            let _ = reader.join();
+        }
+        Ok(self.logs())
+    }
+}
+
+#[cfg(unix)]
+impl Drop for UnixOwnedSession {
+    fn drop(&mut self) {
+        signal_unix_group(&self.child, nix::sys::signal::Signal::SIGKILL);
+        let _ = self.child.try_wait();
+    }
+}
+
+#[cfg(unix)]
+fn signal_unix_group(child: &std::process::Child, signal: nix::sys::signal::Signal) {
+    use nix::sys::signal::killpg;
+    use nix::unistd::Pid;
+    let _ = killpg(Pid::from_raw(child.id() as i32), signal);
+}
+
+#[cfg(unix)]
+fn spawn_unix_owned(spec: &CpaRuntimeProcessSpec) -> Result<UnixOwnedSession, CpaRuntimeError> {
+    use std::os::unix::fs::FileTypeExt;
+    use std::os::unix::process::CommandExt;
+    use std::process::{Command, Stdio};
+
+    if !spec.executable.is_file() {
+        return Err(CpaRuntimeError::Invalid("CPA executable is missing".into()));
+    }
+    let exe_meta = std::fs::symlink_metadata(&spec.executable).map_err(|error| {
+        CpaRuntimeError::Invalid(format!("CPA executable metadata is unreadable: {error}"))
+    })?;
+    let config_meta = std::fs::symlink_metadata(&spec.config_path).map_err(|error| {
+        CpaRuntimeError::Invalid(format!("CPA config metadata is unreadable: {error}"))
+    })?;
+    if exe_meta.file_type().is_symlink()
+        || config_meta.file_type().is_symlink()
+        || exe_meta.file_type().is_fifo()
+    {
+        return Err(CpaRuntimeError::Invalid(
+            "CPA process paths must not be reparse points".into(),
+        ));
+    }
+    let mut command = Command::new(&spec.executable);
+    command
+        .arg("--config")
+        .arg(&spec.config_path)
+        .current_dir(&spec.working_dir)
+        .env(
+            "MANAGEMENT_PASSWORD",
+            spec.management_password.expose_to_host(),
+        )
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .process_group(0);
+    let mut child = command
+        .spawn()
+        .map_err(|error| CpaRuntimeError::Failed(format!("failed to start owned CPA: {error}")))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| CpaRuntimeError::Failed("failed to capture CPA stdout".into()))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| CpaRuntimeError::Failed("failed to capture CPA stderr".into()))?;
+    let secrets = Arc::new(Mutex::new(
+        spec.log_secrets
+            .iter()
+            .map(|secret| secret.expose_to_host().as_bytes().to_vec())
+            .collect(),
+    ));
+    let stdout_buf = Arc::new(Mutex::new(String::new()));
+    let stderr_buf = Arc::new(Mutex::new(String::new()));
+    Ok(UnixOwnedSession {
+        child,
+        readers: vec![
+            spawn_unix_reader(stdout, stdout_buf.clone(), secrets.clone()),
+            spawn_unix_reader(stderr, stderr_buf.clone(), secrets.clone()),
+        ],
+        stdout: stdout_buf,
+        stderr: stderr_buf,
+        secrets,
+    })
+}
+
+#[cfg(unix)]
+fn spawn_unix_reader(
+    mut pipe: impl std::io::Read + Send + 'static,
+    buffer: Arc<Mutex<String>>,
+    secrets: Arc<Mutex<Vec<Vec<u8>>>>,
+) -> JoinHandle<()> {
+    thread::spawn(move || {
+        let mut redactor = StreamRedactor::new(secrets);
+        let mut chunk = [0u8; 4096];
+        loop {
+            match pipe.read(&mut chunk) {
+                Ok(0) => {
+                    let redacted = redactor.finish();
+                    let text = String::from_utf8_lossy(&redacted);
+                    append_log_tail(&mut buffer.lock(), &text, MAX_LOG_BYTES);
+                    break;
+                }
+                Ok(read) => {
+                    let redacted = redactor.push(&chunk[..read]);
+                    let text = String::from_utf8_lossy(&redacted);
+                    append_log_tail(&mut buffer.lock(), &text, MAX_LOG_BYTES);
+                }
+                Err(_) => break,
+            }
+        }
+    })
+}
+
 struct StreamRedactor {
     pending: Vec<u8>,
     secrets: Arc<Mutex<Vec<Vec<u8>>>>,
 }
 
-#[cfg(windows)]
 impl StreamRedactor {
     fn new(secrets: Arc<Mutex<Vec<Vec<u8>>>>) -> Self {
         Self {

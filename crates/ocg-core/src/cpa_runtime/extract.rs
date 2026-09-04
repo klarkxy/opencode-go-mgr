@@ -1,13 +1,41 @@
-//! Bounded CPA zip extraction. Rejects traversal, duplicates, symlinks,
-//! reparse points, and oversized archives.
+//! Bounded CPA archive extraction. Rejects traversal, duplicates, symlinks,
+//! reparse points, and oversized zip or tar.gz payloads.
 
+use flate2::read::GzDecoder;
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
+use tar::Archive;
 use zip::ZipArchive;
 
 use super::CpaRuntimeError;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CpaArchiveKind {
+    Zip,
+    TarGz,
+}
+
+impl CpaArchiveKind {
+    pub fn extension(self) -> &'static str {
+        match self {
+            Self::Zip => "zip",
+            Self::TarGz => "tar.gz",
+        }
+    }
+}
+
+pub fn extract_release(
+    archive: &Path,
+    destination: &Path,
+    kind: CpaArchiveKind,
+) -> Result<(), CpaRuntimeError> {
+    match kind {
+        CpaArchiveKind::Zip => extract_zip(archive, destination),
+        CpaArchiveKind::TarGz => extract_tar_gz(archive, destination),
+    }
+}
 
 const MAX_ARCHIVE_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_UNCOMPRESSED_BYTES: u64 = 256 * 1024 * 1024;
@@ -59,6 +87,207 @@ pub fn extract_zip(archive: &Path, destination: &Path) -> Result<(), CpaRuntimeE
         let _ = fs::remove_dir_all(destination);
     }
     result
+}
+
+pub fn extract_tar_gz(archive: &Path, destination: &Path) -> Result<(), CpaRuntimeError> {
+    let metadata = fs::metadata(archive).map_err(io_error)?;
+    if metadata.len() > MAX_ARCHIVE_BYTES {
+        return Err(CpaRuntimeError::Invalid(
+            "CPA release archive exceeds 64 MiB".into(),
+        ));
+    }
+    if is_reparse(archive) {
+        return Err(CpaRuntimeError::Invalid(
+            "CPA release archive must not be a reparse point".into(),
+        ));
+    }
+    if destination.exists() {
+        return Err(CpaRuntimeError::Invalid(
+            "CPA extract destination already exists".into(),
+        ));
+    }
+    fs::create_dir_all(destination).map_err(io_error)?;
+    if is_reparse(destination) {
+        let _ = fs::remove_dir_all(destination);
+        return Err(CpaRuntimeError::Invalid(
+            "CPA extract destination must not be a reparse point".into(),
+        ));
+    }
+
+    let file = File::open(archive).map_err(io_error)?;
+    let decoder = GzDecoder::new(file);
+    let mut tar = Archive::new(decoder);
+    tar.set_overwrite(false);
+    tar.set_preserve_permissions(false);
+    tar.set_preserve_mtime(false);
+    let mut seen: HashMap<String, bool> = HashMap::new();
+    let mut total_uncompressed = 0u64;
+    let mut entries = 0usize;
+    let result = (|| {
+        for entry in tar.entries().map_err(|error| {
+            CpaRuntimeError::Invalid(format!(
+                "CPA release archive is not a valid tar.gz: {error}"
+            ))
+        })? {
+            entries += 1;
+            if entries > MAX_ENTRIES {
+                return Err(CpaRuntimeError::Invalid(
+                    "CPA release archive has too many entries".into(),
+                ));
+            }
+            let mut entry = entry.map_err(|error| {
+                CpaRuntimeError::Invalid(format!("failed to read CPA archive entry: {error}"))
+            })?;
+            let entry_type = entry.header().entry_type();
+            if entry_type.is_symlink()
+                || entry_type.is_hard_link()
+                || matches!(
+                    entry_type,
+                    tar::EntryType::Link
+                        | tar::EntryType::Symlink
+                        | tar::EntryType::Fifo
+                        | tar::EntryType::Char
+                        | tar::EntryType::Block
+                )
+            {
+                return Err(CpaRuntimeError::Invalid(
+                    "CPA release archive must not contain symlinks".into(),
+                ));
+            }
+            let is_dir = entry_type.is_dir()
+                || entry
+                    .path()
+                    .map(|path| path.as_os_str().to_string_lossy().ends_with('/'))
+                    .unwrap_or(false);
+            if !is_dir
+                && !entry_type.is_file()
+                && !matches!(
+                    entry_type,
+                    tar::EntryType::Regular
+                        | tar::EntryType::GNUSparse
+                        | tar::EntryType::Continuous
+                )
+            {
+                if matches!(
+                    entry_type,
+                    tar::EntryType::XHeader
+                        | tar::EntryType::XGlobalHeader
+                        | tar::EntryType::GNULongName
+                        | tar::EntryType::GNULongLink
+                ) {
+                    continue;
+                }
+                return Err(CpaRuntimeError::Invalid(
+                    "CPA release archive contains an unsupported entry type".into(),
+                ));
+            }
+            let relative = entry.path().map_err(|error| {
+                CpaRuntimeError::Invalid(format!("CPA archive path is invalid: {error}"))
+            })?;
+            let relative = normalize_relative(&relative)?;
+            let key = windows_path_key(&relative);
+            if seen.contains_key(&key) {
+                return Err(CpaRuntimeError::Invalid(
+                    "CPA release archive contains duplicate entries".into(),
+                ));
+            }
+            let mut ancestor = String::new();
+            for component in key
+                .split('/')
+                .take(key.split('/').count().saturating_sub(1))
+            {
+                if !ancestor.is_empty() {
+                    ancestor.push('/');
+                }
+                ancestor.push_str(component);
+                if seen.get(&ancestor) == Some(&false) {
+                    return Err(CpaRuntimeError::Invalid(
+                        "CPA release archive contains a file/directory collision".into(),
+                    ));
+                }
+            }
+            if !is_dir
+                && seen
+                    .keys()
+                    .any(|seen_key| seen_key.starts_with(&format!("{key}/")))
+            {
+                return Err(CpaRuntimeError::Invalid(
+                    "CPA release archive contains a file/directory collision".into(),
+                ));
+            }
+            seen.insert(key, is_dir);
+            let out_path = destination.join(&relative);
+            if !out_path.starts_with(destination) {
+                return Err(CpaRuntimeError::Invalid(
+                    "CPA release archive contains an unsafe path".into(),
+                ));
+            }
+            if is_dir {
+                fs::create_dir_all(&out_path).map_err(io_error)?;
+                if is_reparse(&out_path) {
+                    return Err(CpaRuntimeError::Invalid(
+                        "CPA extract path resolved to a reparse point".into(),
+                    ));
+                }
+                continue;
+            }
+            let uncompressed = entry.size();
+            if uncompressed > MAX_FILE_BYTES {
+                return Err(CpaRuntimeError::Invalid(
+                    "CPA release file exceeds 128 MiB".into(),
+                ));
+            }
+            total_uncompressed = total_uncompressed
+                .checked_add(uncompressed)
+                .filter(|total| *total <= MAX_UNCOMPRESSED_BYTES)
+                .ok_or_else(|| {
+                    CpaRuntimeError::Invalid("CPA release uncompressed size exceeds 256 MiB".into())
+                })?;
+            if let Some(parent) = out_path.parent() {
+                fs::create_dir_all(parent).map_err(io_error)?;
+                if is_reparse(parent) {
+                    return Err(CpaRuntimeError::Invalid(
+                        "CPA extract path resolved to a reparse point".into(),
+                    ));
+                }
+            }
+            let mode = entry.header().mode().ok();
+            let mut output = File::create(&out_path).map_err(io_error)?;
+            let copied = io::copy(&mut entry.by_ref().take(uncompressed + 1), &mut output)
+                .map_err(io_error)?;
+            output.flush().map_err(io_error)?;
+            drop(output);
+            if copied != uncompressed {
+                return Err(CpaRuntimeError::Invalid(
+                    "CPA release file size did not match the archive entry".into(),
+                ));
+            }
+            apply_extracted_mode(&out_path, mode)?;
+            if is_reparse(&out_path) {
+                return Err(CpaRuntimeError::Invalid(
+                    "CPA extract path resolved to a reparse point".into(),
+                ));
+            }
+        }
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_dir_all(destination);
+    }
+    result
+}
+
+fn apply_extracted_mode(path: &Path, mode: Option<u32>) -> Result<(), CpaRuntimeError> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if mode.is_some_and(|mode| mode & 0o111 != 0) {
+            fs::set_permissions(path, fs::Permissions::from_mode(0o755)).map_err(io_error)?;
+        }
+    }
+    let _ = mode;
+    let _ = path;
+    Ok(())
 }
 
 fn extract_entries<R: Read + io::Seek>(

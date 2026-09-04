@@ -2519,7 +2519,7 @@
     },
     "CpaRuntime": {
       "additionalProperties": false,
-      "description": "Secret-free CPA runtime snapshot. `supported` is true only on the\ninstalled Windows x64 desktop Host.",
+      "description": "Secret-free CPA runtime snapshot. `supported` is true only on an\ninstalled desktop Host on Windows x64, macOS, or Linux x64.",
       "properties": {
         "assetSha256": {
           "type": [

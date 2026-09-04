@@ -1958,8 +1958,8 @@ export interface CpaOAuthSessionDelete {
   state: string;
 }
 /**
- * Secret-free CPA runtime snapshot. `supported` is true only on the
- * installed Windows x64 desktop Host.
+ * Secret-free CPA runtime snapshot. `supported` is true only on an
+ * installed desktop Host on Windows x64, macOS, or Linux x64.
  */
 export interface CpaRuntime {
   assetSha256: string | null;

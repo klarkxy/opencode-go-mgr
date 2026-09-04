@@ -2891,8 +2891,8 @@ pub struct CpaOAuthSessionDelete {
     pub state: String,
 }
 
-/// Secret-free CPA runtime snapshot. `supported` is true only on the
-/// installed Windows x64 desktop Host.
+/// Secret-free CPA runtime snapshot. `supported` is true only on an
+/// installed desktop Host on Windows x64, macOS, or Linux x64.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 #[schemars(rename_all = "camelCase", deny_unknown_fields)]

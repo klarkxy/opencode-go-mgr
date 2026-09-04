@@ -106,7 +106,7 @@
 
         <template v-else>
           <n-alert v-if="mode === 'unsupported'" type="warning" :title="t('当前环境不支持托管 CPA 运行时')">
-            {{ integration.runtimeUnavailableReason || runtime?.unavailableReason || t("仅已安装的 Windows x64 桌面端可以托管 CPA；请改用外部连接。") }}
+            {{ integration.runtimeUnavailableReason || runtime?.unavailableReason || t("仅已安装的 Windows x64、macOS 和 Linux x64 桌面端可以托管 CPA；请改用外部连接。") }}
           </n-alert>
 
           <template v-else>
