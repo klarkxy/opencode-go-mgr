@@ -365,7 +365,7 @@ export const esESMessages = {
   "设置自定义 Key": "Configurar una Key personalizada",
   "新 Key": "Key nueva",
   "开机启动": "Iniciar al acceder",
-  "随 Windows 登录自动启动 OCG Manager": "Iniciar OCG Manager automáticamente al acceder a Windows",
+  "随系统登录自动启动 OCG Manager": "Iniciar OCG Manager automáticamente al iniciar sesión",
   "Dock 图标": "Icono del Dock",
   "在 Dock 中显示 OCG Manager": "Mostrar OCG Manager en el Dock",
   "Dock 图标设置失败: {error}": "No se pudo actualizar el icono del Dock: {error}",

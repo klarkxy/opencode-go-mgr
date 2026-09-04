@@ -525,7 +525,7 @@ export const frFRMessages = {
   "设置自定义 Key": "Définir une Key personnalisée",
   "新 Key": "Nouvelle Key",
   "开机启动": "Lancer à la connexion",
-  "随 Windows 登录自动启动 OCG Manager": "Démarrer automatiquement OCG Manager à la connexion à Windows",
+  "随系统登录自动启动 OCG Manager": "Démarrer automatiquement OCG Manager à la connexion",
   "Dock 图标": "Icône du Dock",
   "在 Dock 中显示 OCG Manager": "Afficher OCG Manager dans le Dock",
   "Dock 图标设置失败: {error}": "Échec de la mise à jour de l’icône du Dock : {error}",

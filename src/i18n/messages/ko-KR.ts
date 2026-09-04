@@ -528,7 +528,7 @@ export const koKRMessages = {
   "设置自定义 Key": "사용자 지정 Key 설정",
   "新 Key": "새 Key",
   "开机启动": "로그인 시 실행",
-  "随 Windows 登录自动启动 OCG Manager": "Windows 로그인 시 OCG Manager 자동 실행",
+  "随系统登录自动启动 OCG Manager": "로그인 시 OCG Manager 자동 실행",
   "Dock 图标": "Dock 아이콘",
   "在 Dock 中显示 OCG Manager": "Dock에 OCG Manager 표시",
   "Dock 图标设置失败: {error}": "Dock 아이콘 설정 실패: {error}",

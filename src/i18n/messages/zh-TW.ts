@@ -365,7 +365,7 @@ export const zhTWMessages = {
   "设置自定义 Key": "設定自訂 Key",
   "新 Key": "新 Key",
   "开机启动": "開機啟動",
-  "随 Windows 登录自动启动 OCG Manager": "登入 Windows 時自動啟動 OCG Manager",
+  "随系统登录自动启动 OCG Manager": "登入系統時自動啟動 OCG Manager",
   "Dock 图标": "Dock 圖示",
   "在 Dock 中显示 OCG Manager": "在 Dock 中顯示 OCG Manager",
   "Dock 图标设置失败: {error}": "Dock 圖示設定失敗：{error}",

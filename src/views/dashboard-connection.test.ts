@@ -1195,7 +1195,7 @@ test("settings expose supported Windows auto-start safely", async () => {
   assert.match(settings, /@update:value="handleDockVisibilityToggle"/);
   assert.match(settings, /:value="config\.auto_start"/);
   assert.match(settings, /@update:value="handleAutoStartToggle"/);
-  assert.match(settings, /:aria-label="t\('随 Windows 登录自动启动 OCG Manager'\)"/);
+  assert.match(settings, /:aria-label="t\('随系统登录自动启动 OCG Manager'\)"/);
   assert.doesNotMatch(settings, /class="settings-subsection gateway-keys"/);
   assert.match(settings, /async function handleAutoStartToggle\(newValue: boolean\)/);
   assert.match(settings, /savedConfig\.value/);

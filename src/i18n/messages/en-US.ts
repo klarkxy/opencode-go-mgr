@@ -423,7 +423,7 @@ export const enUSMessages = {
   "设置自定义 Key": "Set custom key",
   "新 Key": "New key",
   "开机启动": "Launch at sign-in",
-  "随 Windows 登录自动启动 OCG Manager": "Start OCG Manager automatically when signing in to Windows",
+  "随系统登录自动启动 OCG Manager": "Start OCG Manager automatically when signing in",
   "Dock 图标": "Dock icon",
   "在 Dock 中显示 OCG Manager": "Show OCG Manager in the Dock",
   "Dock 图标设置失败: {error}": "Failed to update the Dock icon: {error}",

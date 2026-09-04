@@ -86,7 +86,14 @@ pub fn close_native_browsers(
 
 #[allow(unused_variables)]
 pub fn register_desktop_settings(core: &CoreState) {
-    #[cfg(all(windows, not(debug_assertions)))]
+    #[cfg(all(
+        not(debug_assertions),
+        any(
+            all(windows, target_arch = "x86_64"),
+            target_os = "macos",
+            all(target_os = "linux", target_arch = "x86_64"),
+        )
+    ))]
     {
         core.set_auto_start_sync(crate::autostart::sync);
         if let Err(e) = core.sync_auto_start(core.config().auto_start) {

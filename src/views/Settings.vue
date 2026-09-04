@@ -179,7 +179,7 @@
           <n-switch
             :value="config.auto_start"
             @update:value="handleAutoStartToggle"
-            :aria-label="t('随 Windows 登录自动启动 OCG Manager')"
+            :aria-label="t('随系统登录自动启动 OCG Manager')"
             :disabled="!loaded || saving"
             :loading="saving"
           >

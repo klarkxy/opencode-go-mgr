@@ -525,7 +525,7 @@ export const ptBRMessages = {
   "设置自定义 Key": "Definir Key personalizada",
   "新 Key": "Nova Key",
   "开机启动": "Iniciar ao entrar",
-  "随 Windows 登录自动启动 OCG Manager": "Iniciar o OCG Manager automaticamente ao entrar no Windows",
+  "随系统登录自动启动 OCG Manager": "Iniciar o OCG Manager automaticamente ao entrar",
   "Dock 图标": "Ícone do Dock",
   "在 Dock 中显示 OCG Manager": "Mostrar o OCG Manager no Dock",
   "Dock 图标设置失败: {error}": "Falha ao atualizar o ícone do Dock: {error}",

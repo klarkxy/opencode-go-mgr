@@ -524,7 +524,7 @@ export const deDEMessages = {
   "设置自定义 Key": "Benutzerdefinierten Key festlegen",
   "新 Key": "Neuer Key",
   "开机启动": "Bei der Anmeldung starten",
-  "随 Windows 登录自动启动 OCG Manager": "OCG Manager bei der Windows-Anmeldung automatisch starten",
+  "随系统登录自动启动 OCG Manager": "OCG Manager beim Anmelden automatisch starten",
   "Dock 图标": "Dock-Symbol",
   "在 Dock 中显示 OCG Manager": "OCG Manager im Dock anzeigen",
   "Dock 图标设置失败: {error}": "Dock-Symbol konnte nicht aktualisiert werden: {error}",

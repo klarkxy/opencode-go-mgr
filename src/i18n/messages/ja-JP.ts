@@ -525,7 +525,7 @@ export const jaJPMessages = {
   "设置自定义 Key": "カスタム Key を設定",
   "新 Key": "新しい Key",
   "开机启动": "サインイン時に起動",
-  "随 Windows 登录自动启动 OCG Manager": "Windows へのサインイン時に OCG Manager を自動起動",
+  "随系统登录自动启动 OCG Manager": "サインイン時に OCG Manager を自動起動",
   "Dock 图标": "Dockアイコン",
   "在 Dock 中显示 OCG Manager": "OCG ManagerをDockに表示",
   "Dock 图标设置失败: {error}": "Dockアイコンの設定に失敗しました: {error}",

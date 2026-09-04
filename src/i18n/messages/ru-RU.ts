@@ -524,7 +524,7 @@ export const ruRUMessages = {
   "设置自定义 Key": "Задать пользовательский Key",
   "新 Key": "Новый Key",
   "开机启动": "Запуск при входе",
-  "随 Windows 登录自动启动 OCG Manager": "Автоматически запускать OCG Manager при входе в Windows",
+  "随系统登录自动启动 OCG Manager": "Автоматически запускать OCG Manager при входе",
   "Dock 图标": "Значок в Dock",
   "在 Dock 中显示 OCG Manager": "Показывать OCG Manager в Dock",
   "Dock 图标设置失败: {error}": "Не удалось изменить значок в Dock: {error}",
