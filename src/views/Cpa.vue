@@ -453,6 +453,7 @@ const oauth = ref<CpaOAuthStart | null>(null);
 const oauthStartingProvider = ref<CpaOAuthProvider | null>(null);
 const oauthCancelling = ref(false);
 let oauthTimer: number | null = null;
+let oauthPollGeneration = 0;
 
 const runtime = ref<CpaRuntime | null>(null);
 const runtimeError = ref("");
@@ -731,42 +732,66 @@ async function deleteAccount(account: CpaAccount): Promise<void> {
 
 async function startOAuth(provider: CpaOAuthProvider): Promise<void> {
   if (oauth.value || oauthStartingProvider.value) return;
+  // A new flow invalidates any poll still in flight from a previous one.
+  bumpOAuthPollGeneration();
+  const generation = oauthPollGeneration;
   oauthStartingProvider.value = provider;
   try {
     const started = await runMutation((expectation) => dashboardV3.startCpaOAuth({ provider }, expectation));
+    if (generation !== oauthPollGeneration) {
+      // The page left or the flow was superseded while the start was in flight:
+      // never adopt the session, but release it server-side on a best-effort basis.
+      void runMutation((expectation) => dashboardV3.cancelCpaOAuth({ state: started.state }, expectation)).catch(() => {});
+      return;
+    }
     oauth.value = started;
     if (started.url) window.open(started.url, "_blank", "noopener,noreferrer");
     scheduleOAuthPoll();
   } catch (error) {
+    if (generation !== oauthPollGeneration) return;
     message.error(t("CPA 账号操作失败: {error}", { error: dashboardErrorDetail(error) }));
   } finally {
     oauthStartingProvider.value = null;
   }
 }
 
+function bumpOAuthPollGeneration(): void {
+  oauthPollGeneration += 1;
+  stopOAuthPoll();
+}
+
+// Completion-scheduled single flight: the next poll is queued only after the
+// previous response has been applied, so a slow status read never overlaps itself.
 function scheduleOAuthPoll(): void {
   stopOAuthPoll();
-  oauthTimer = window.setInterval(() => void pollOAuth(), 3000);
+  oauthTimer = window.setTimeout(() => void pollOAuth(), 3000);
 }
 
 function stopOAuthPoll(): void {
-  if (oauthTimer !== null) window.clearInterval(oauthTimer);
+  if (oauthTimer !== null) window.clearTimeout(oauthTimer);
   oauthTimer = null;
 }
 
 async function pollOAuth(): Promise<void> {
   const active = oauth.value;
   if (!active) return;
+  const generation = oauthPollGeneration;
+  const flowState = active.state;
   try {
-    const status = await dashboardV3.getCpaOAuthStatus(active.state);
+    const status = await dashboardV3.getCpaOAuthStatus(flowState);
+    // Cancel, leaving the page, or a newer flow invalidates this response.
+    if (generation !== oauthPollGeneration || oauth.value?.state !== flowState) return;
     if (isCpaOAuthTerminalStatus(status.status)) {
-      stopOAuthPoll();
+      bumpOAuthPollGeneration();
       oauth.value = null;
       if (isCpaOAuthSuccessStatus(status.status)) await loadAccounts();
       else if (status.error) message.warning(status.error);
+    } else {
+      scheduleOAuthPoll();
     }
   } catch (error) {
-    stopOAuthPoll();
+    if (generation !== oauthPollGeneration || oauth.value?.state !== flowState) return;
+    bumpOAuthPollGeneration();
     oauth.value = null;
     message.error(t("CPA 账号操作失败: {error}", { error: dashboardErrorDetail(error) }));
   }
@@ -774,20 +799,26 @@ async function pollOAuth(): Promise<void> {
 
 async function cancelOAuth(): Promise<void> {
   const active = oauth.value;
+  // Invalidate synchronously: an in-flight poll must not mutate state or
+  // re-arm the timer while the cancel request is still on the wire.
+  bumpOAuthPollGeneration();
   if (!active) return;
+  const generation = oauthPollGeneration;
   oauthCancelling.value = true;
   try {
     await runMutation((expectation) => dashboardV3.cancelCpaOAuth({ state: active.state }, expectation));
   } catch {
     // A page close must not surface a second error over the original OAuth result.
   } finally {
-    stopOAuthPoll();
-    oauth.value = null;
+    // A slow cancel must not clear a flow started after this one was invalidated.
+    if (generation === oauthPollGeneration && oauth.value?.state === active.state) oauth.value = null;
     oauthCancelling.value = false;
   }
 }
 
 function cancelOAuthOnLeave(): void {
+  // Bump even with no visible flow so a pending start resolves into a no-op.
+  bumpOAuthPollGeneration();
   if (!oauth.value) return;
   void cancelOAuth();
 }

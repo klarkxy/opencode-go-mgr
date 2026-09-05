@@ -951,6 +951,7 @@ export const enUSMessages = {
   "请填写对外模型名": "Enter a public model name",
   "请填写上游模型 ID": "Enter an upstream model ID",
   "从无鉴权改为需要 Key 时必须填写替换 Key": "Changing from no-auth to keyed auth requires a replacement Key",
+  "此 Key 仅临时用于获取模型和测试模型，保存不会更新它；更换已保存的 Key 请到账号页。": "This Key is only used temporarily for Fetch Models and Test Model; saving does not update it. To change the stored Key, go to Accounts.",
   "鉴权方式": "Auth kind",
   "测试模型": "Test model",
   "只读汇总当前供应商合同与 Custom 账号映射；点击编辑 Custom 可直接打开对应账号。": "Read-only summary of current provider contracts and Custom account mappings. Select Edit Custom to open the matching account directly.",

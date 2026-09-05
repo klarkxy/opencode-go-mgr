@@ -64,8 +64,11 @@
             type="password"
             show-password-on="click"
             :input-props="{ 'aria-label': t('API Key') }"
-            :placeholder="isEdit ? t('Key 只会在保存或测试时发送，不会重新显示。') : 'sk-...'"
+            :placeholder="keyPlaceholder"
           />
+          <p v-if="keyIsTemporary" class="field-hint">
+            {{ t("此 Key 仅临时用于获取模型和测试模型，保存不会更新它；更换已保存的 Key 请到账号页。") }}
+          </p>
         </n-form-item>
         <n-form-item v-if="!isEdit" :label="t('备注')" class="full-width-field">
           <n-input
@@ -211,6 +214,17 @@ const paidTestWarningKey = DYNAMIC_PAID_TEST_WARNING_KEY;
 const showKeyField = computed(() => (
   dynamicAuthRequiresKey(draft.value.auth_kind) || (isEdit.value && props.provider?.auth_kind === "none")
 ));
+// Update bodies only carry a Key when a none-auth Provider gains keyed auth;
+// otherwise stored Keys belong to Accounts and this field only feeds
+// discovery/test, so the save-time hint would be misleading.
+const keySavedOnUpdate = computed(() => (
+  isEdit.value && props.provider?.auth_kind === "none" && dynamicAuthRequiresKey(draft.value.auth_kind)
+));
+const keyIsTemporary = computed(() => isEdit.value && !keySavedOnUpdate.value);
+const keyPlaceholder = computed(() => {
+  if (!isEdit.value) return "sk-...";
+  return keySavedOnUpdate.value ? t("Key 只会在保存或测试时发送，不会重新显示。") : t("已设置");
+});
 const protocolOptions = computed(() => DYNAMIC_PROTOCOLS.map((value) => ({
   value,
   label: protocolDisplayName(value),

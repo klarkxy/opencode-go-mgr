@@ -11,7 +11,9 @@ use ocg_core::cpa_runtime::{
 };
 use ocg_core::state::CoreState;
 use parking_lot::Mutex;
+#[cfg(windows)]
 use std::io::Read;
+#[cfg(windows)]
 use std::path::Path;
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
@@ -527,17 +529,17 @@ impl UnixOwnedSession {
     }
 
     fn stop(mut self) -> Result<CpaRuntimeLogTail, CpaRuntimeError> {
-        signal_unix_group(&self.child, nix::sys::signal::Signal::SIGTERM);
+        signal_unix_group(&self.child, nix::sys::signal::Signal::SIGTERM)?;
         let started = std::time::Instant::now();
         loop {
             match self.child.try_wait() {
                 Ok(Some(_)) => break,
                 Ok(None) if started.elapsed() >= std::time::Duration::from_secs(5) => {
-                    signal_unix_group(&self.child, nix::sys::signal::Signal::SIGKILL);
-                    let _ = self.child.wait();
-                    return Err(CpaRuntimeError::Failed(
-                        "owned CPA did not exit within 5 seconds".into(),
-                    ));
+                    signal_unix_group(&self.child, nix::sys::signal::Signal::SIGKILL)?;
+                    self.child.wait().map_err(|error| {
+                        CpaRuntimeError::Failed(format!("failed to reap owned CPA: {error}"))
+                    })?;
+                    break;
                 }
                 Ok(None) => thread::sleep(std::time::Duration::from_millis(20)),
                 Err(error) => {
@@ -557,16 +559,24 @@ impl UnixOwnedSession {
 #[cfg(unix)]
 impl Drop for UnixOwnedSession {
     fn drop(&mut self) {
-        signal_unix_group(&self.child, nix::sys::signal::Signal::SIGKILL);
+        let _ = signal_unix_group(&self.child, nix::sys::signal::Signal::SIGKILL);
         let _ = self.child.try_wait();
     }
 }
 
 #[cfg(unix)]
-fn signal_unix_group(child: &std::process::Child, signal: nix::sys::signal::Signal) {
+fn signal_unix_group(
+    child: &std::process::Child,
+    signal: nix::sys::signal::Signal,
+) -> Result<(), CpaRuntimeError> {
     use nix::sys::signal::killpg;
     use nix::unistd::Pid;
-    let _ = killpg(Pid::from_raw(child.id() as i32), signal);
+    match killpg(Pid::from_raw(child.id() as i32), signal) {
+        Ok(()) | Err(nix::errno::Errno::ESRCH) => Ok(()),
+        Err(error) => Err(CpaRuntimeError::Failed(format!(
+            "failed to signal owned CPA process group: {error}"
+        ))),
+    }
 }
 
 #[cfg(unix)]
@@ -781,7 +791,9 @@ fn wide_z(path: &Path) -> Vec<u16> {
 #[cfg(windows)]
 struct JobObject(windows_sys::Win32::Foundation::HANDLE);
 
+#[cfg(windows)]
 unsafe impl Send for JobObject {}
+#[cfg(windows)]
 unsafe impl Sync for JobObject {}
 
 #[cfg(windows)]
@@ -872,7 +884,9 @@ impl Drop for JobObject {
 #[cfg(windows)]
 struct OwnedHandle(windows_sys::Win32::Foundation::HANDLE);
 
+#[cfg(windows)]
 unsafe impl Send for OwnedHandle {}
+#[cfg(windows)]
 unsafe impl Sync for OwnedHandle {}
 
 #[cfg(windows)]

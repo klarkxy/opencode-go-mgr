@@ -22,10 +22,11 @@ use crate::db::Database;
 
 pub(crate) const SESSION_COOKIE: &str = "ocg_dashboard_session";
 
-const FORWARDED_TRUST_HEADERS: [&str; 4] = [
+const FORWARDED_TRUST_HEADERS: [&str; 5] = [
     "forwarded",
     "x-forwarded-for",
     "x-forwarded-proto",
+    "x-forwarded-host",
     "x-real-ip",
 ];
 
@@ -53,10 +54,71 @@ pub(crate) struct Unauthorized;
 pub(crate) struct PreparedAdmin(auth::DashboardAdmin);
 
 pub(crate) fn is_local_dashboard_request(dashboard_local_mode: bool, headers: &HeaderMap) -> bool {
-    dashboard_local_mode
-        && FORWARDED_TRUST_HEADERS
+    if !dashboard_local_mode
+        || FORWARDED_TRUST_HEADERS
             .iter()
-            .all(|name| !headers.contains_key(*name))
+            .any(|name| headers.contains_key(*name))
+    {
+        return false;
+    }
+    has_local_dashboard_authority(headers)
+}
+
+pub(crate) fn has_local_dashboard_authority(headers: &HeaderMap) -> bool {
+    let Some(host) = single_header(headers, "host")
+        .and_then(|value| value.parse::<axum::http::uri::Authority>().ok())
+    else {
+        return false;
+    };
+    let hostname = host.host().trim_start_matches('[').trim_end_matches(']');
+    if host.as_str().contains('@')
+        || (host.as_str().len() != host.host().len() && host.port_u16().is_none())
+        || !(hostname.eq_ignore_ascii_case("localhost")
+            || hostname
+                .parse::<std::net::IpAddr>()
+                .is_ok_and(|ip| ip.is_loopback()))
+    {
+        return false;
+    }
+    if headers.contains_key("sec-fetch-site")
+        && !matches!(
+            single_header(headers, "sec-fetch-site"),
+            Some("same-origin" | "same-site" | "none")
+        )
+    {
+        return false;
+    }
+    // Native clients omit Origin. Browser requests must name this exact
+    // loopback authority; Vite preserves its original Host when proxying.
+    if !headers.contains_key(header::ORIGIN) {
+        return true;
+    }
+    let Some(origin) = single_header(headers, "origin")
+        .filter(|value| !value.contains('#'))
+        .and_then(|value| value.parse::<axum::http::Uri>().ok())
+    else {
+        return false;
+    };
+    let default_port = match origin.scheme_str() {
+        Some("http") => 80,
+        Some("https") => 443,
+        _ => return false,
+    };
+    let Some(authority) = origin.authority() else {
+        return false;
+    };
+    !authority.as_str().contains('@')
+        && (authority.as_str().len() == authority.host().len() || authority.port_u16().is_some())
+        && authority.host().eq_ignore_ascii_case(host.host())
+        && authority.port_u16().unwrap_or(default_port) == host.port_u16().unwrap_or(default_port)
+        && matches!(origin.path(), "" | "/")
+        && origin.query().is_none()
+}
+
+fn single_header<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
+    let mut values = headers.get_all(name).iter();
+    let value = values.next()?.to_str().ok()?;
+    values.next().is_none().then_some(value)
 }
 
 pub(crate) fn has_dashboard_session(current_token: &str, headers: &HeaderMap) -> bool {
@@ -254,82 +316,4 @@ pub(crate) fn cookie_header(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use axum::http::HeaderValue;
-
-    #[test]
-    fn cookie_is_httponly_strict_and_scoped_to_dashboard() {
-        let headers = HeaderMap::new();
-        assert_eq!(
-            cookie_header("abc123", &headers, false)
-                .unwrap()
-                .to_str()
-                .unwrap(),
-            "ocg_dashboard_session=abc123; HttpOnly; SameSite=Strict; Path=/dashboard"
-        );
-    }
-
-    #[test]
-    fn cleared_cookie_sets_max_age_zero_and_empty_value() {
-        let headers = HeaderMap::new();
-        assert_eq!(
-            cookie_header("", &headers, true).unwrap().to_str().unwrap(),
-            "ocg_dashboard_session=; HttpOnly; SameSite=Strict; Path=/dashboard; Max-Age=0"
-        );
-    }
-
-    #[test]
-    fn secure_is_inferred_only_from_https_forwarded_proto() {
-        let mut headers = HeaderMap::new();
-        headers.insert("x-forwarded-proto", HeaderValue::from_static("https"));
-        assert!(
-            cookie_header("tok", &headers, false)
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .ends_with("; Secure")
-        );
-
-        headers.insert("x-forwarded-proto", HeaderValue::from_static("HTTPS"));
-        assert!(
-            cookie_header("tok", &headers, false)
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .contains("; Secure")
-        );
-
-        headers.insert("x-forwarded-proto", HeaderValue::from_static("http"));
-        assert!(
-            !cookie_header("tok", &headers, false)
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .contains("Secure")
-        );
-    }
-
-    #[test]
-    fn loopback_trust_requires_local_mode_and_no_forwarded_headers() {
-        let mut headers = HeaderMap::new();
-        assert!(is_local_dashboard_request(true, &headers));
-        assert!(!is_local_dashboard_request(false, &headers));
-        headers.insert("x-forwarded-for", HeaderValue::from_static("203.0.113.10"));
-        assert!(!is_local_dashboard_request(true, &headers));
-    }
-
-    #[test]
-    fn session_cookie_matches_the_current_token_exactly() {
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            header::COOKIE,
-            HeaderValue::from_static("theme=dark; ocg_dashboard_session=abc123"),
-        );
-        assert!(has_dashboard_session("abc123", &headers));
-        assert!(!has_dashboard_session("other", &headers));
-        assert!(is_authorized(false, "abc123", &headers));
-        assert!(!is_authorized(false, "other", &headers));
-        assert!(is_authorized(true, "other", &headers));
-    }
-}
+mod tests;

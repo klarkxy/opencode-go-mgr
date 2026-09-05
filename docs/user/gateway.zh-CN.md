@@ -34,7 +34,7 @@ Gateway API 必须携带 **Key**，支持 `Authorization: Bearer <key>`、`x-api
 
 管理面板鉴权取决于监听地址。当前 SPA 使用 `/dashboard/api/v3/auth/status`、`/dashboard/api/v3/auth/register`、`/dashboard/api/v3/auth/login` 与 `/dashboard/api/v3/auth/logout`。注册、登录、退出需要与其他 V3 写入相同的 `expectedRevision` / `processGeneration` token。对应的 `/dashboard/api/auth/...` 路由只作为已标明的 V2 兼容例外，供缓存的旧页面使用，不是当前 SPA 数据路径。
 
-- **回环监听（默认）**：直接发到回环地址的请求跳过面板登录；但只要带有 `Forwarded`、`x-forwarded-for`、`x-forwarded-proto` 或 `x-real-ip` 中任一请求头，仍必须登录。客户端还需要 **Key** 才能访问上游端点。桌面端与默认 CLI 都走这个分支。
+- **回环监听（默认）**：Dashboard API 请求的 `Host` 必须为 `localhost` 或回环 IP 字面量；浏览器提供的 `Origin` 必须匹配该主机与端口。跨站请求会被拒绝，注册和登录也不例外。有效本地请求跳过面板登录；但只要带有 `Forwarded`、`x-forwarded-for`、`x-forwarded-proto`、`x-forwarded-host` 或 `x-real-ip` 中任一请求头，仍必须登录。使用公开主机名的反向代理必须连接非回环监听器。客户端还需要 **Key** 才能访问上游端点。桌面端与默认 CLI 都走这个分支。
 - **非回环监听**：管理面板由唯一的 **管理员账号** 管控，密码以 Argon2 哈希存在 SQLite 中，登录后下发 HttpOnly 会话 Cookie。携带标准反向代理转发头但没有 Cookie 的请求仍需要登录。Docker 可以用 `OCG_ADMIN_USERNAME` 与 `OCG_ADMIN_PASSWORD` 引导首个管理员；不提供时由首位注册者创建。
 
 ## 别名

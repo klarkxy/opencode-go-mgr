@@ -684,17 +684,17 @@ async fn forward_request_impl(
                 | "accept-encoding"
                 | "x-ocg-conversation-id"
                 | "x-cmdc-zdr"
+                | "x-opencode-session"
         ) || (plan.upstream != ApiFormat::Messages
             && matches!(header.as_str(), "anthropic-version" | "anthropic-beta")))
         {
             upstream_headers.insert(name.clone(), value.clone());
         }
     }
-    if account.provider_id == crate::provider::OPENCODE_PROVIDER_ID
-        && !upstream_headers.contains_key("x-opencode-session")
-    {
+    if account.provider_id == crate::provider::OPENCODE_PROVIDER_ID {
         let session = headers
-            .get("x-session-id")
+            .get("x-opencode-session")
+            .or_else(|| headers.get("x-session-id"))
             .or_else(|| headers.get("x-session-affinity"))
             .cloned()
             .or_else(|| {

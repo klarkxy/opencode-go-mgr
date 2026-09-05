@@ -1,6 +1,9 @@
 const STARTUP_ARG: &str = "--startup";
+#[cfg(any(target_os = "linux", test))]
 const LINUX_DESKTOP_NAME: &str = "ocg-manager.desktop";
+#[cfg(any(target_os = "macos", test))]
 const MACOS_PLIST_NAME: &str = "com.ocg-manager.plist";
+#[cfg(any(target_os = "macos", test))]
 const MACOS_LABEL: &str = "com.ocg-manager";
 
 pub fn is_startup_launch() -> bool {
@@ -23,6 +26,8 @@ pub(crate) struct AutoStartTargets {
 impl AutoStartTargets {
     fn from_current_process() -> anyhow::Result<Self> {
         let executable = std::env::current_exe()?;
+        #[cfg(target_os = "linux")]
+        let executable = linux_startup_executable(executable, std::env::var_os("APPIMAGE"))?;
         let home = std::env::var_os("HOME")
             .or_else(|| std::env::var_os("USERPROFILE"))
             .ok_or_else(|| anyhow::anyhow!("HOME is unset"))?;
@@ -60,6 +65,7 @@ pub(crate) fn sync_with(targets: &AutoStartTargets, enabled: bool) -> anyhow::Re
     }
 }
 
+#[cfg(any(target_os = "macos", test))]
 pub(crate) fn macos_plist_body(executable: &std::path::Path) -> anyhow::Result<String> {
     let path = unicode_path(executable)?;
     let path = xml_escape(&path);
@@ -83,6 +89,23 @@ pub(crate) fn macos_plist_body(executable: &std::path::Path) -> anyhow::Result<S
     ))
 }
 
+#[cfg(any(target_os = "linux", test))]
+fn linux_startup_executable(
+    executable: std::path::PathBuf,
+    appimage: Option<std::ffi::OsString>,
+) -> anyhow::Result<std::path::PathBuf> {
+    let Some(appimage) = appimage else {
+        return Ok(executable);
+    };
+    let path = std::path::PathBuf::from(appimage);
+    if !path.is_absolute() || !path.is_file() {
+        anyhow::bail!("APPIMAGE must point to an existing absolute application file");
+    }
+    unicode_path(&path)?;
+    Ok(path)
+}
+
+#[cfg(any(target_os = "linux", test))]
 pub(crate) fn linux_desktop_body(executable: &std::path::Path) -> anyhow::Result<String> {
     let path = unicode_path(executable)?;
     let exec = desktop_exec(&path);
@@ -91,6 +114,7 @@ pub(crate) fn linux_desktop_body(executable: &std::path::Path) -> anyhow::Result
     ))
 }
 
+#[cfg(any(target_os = "macos", test))]
 pub(crate) fn write_macos_launch_agent(
     launch_agents_dir: &std::path::Path,
     executable: &std::path::Path,
@@ -101,6 +125,7 @@ pub(crate) fn write_macos_launch_agent(
     Ok(path)
 }
 
+#[cfg(any(target_os = "macos", test))]
 pub(crate) fn remove_macos_launch_agent(launch_agents_dir: &std::path::Path) -> anyhow::Result<()> {
     let path = launch_agents_dir.join(MACOS_PLIST_NAME);
     match std::fs::remove_file(&path) {
@@ -110,6 +135,7 @@ pub(crate) fn remove_macos_launch_agent(launch_agents_dir: &std::path::Path) -> 
     }
 }
 
+#[cfg(any(target_os = "linux", test))]
 pub(crate) fn write_linux_desktop_entry(
     autostart_dir: &std::path::Path,
     executable: &std::path::Path,
@@ -120,6 +146,7 @@ pub(crate) fn write_linux_desktop_entry(
     Ok(path)
 }
 
+#[cfg(any(target_os = "linux", test))]
 pub(crate) fn remove_linux_desktop_entry(autostart_dir: &std::path::Path) -> anyhow::Result<()> {
     let path = autostart_dir.join(LINUX_DESKTOP_NAME);
     match std::fs::remove_file(&path) {
@@ -129,6 +156,7 @@ pub(crate) fn remove_linux_desktop_entry(autostart_dir: &std::path::Path) -> any
     }
 }
 
+#[cfg(any(target_os = "macos", target_os = "linux", test))]
 fn unicode_path(path: &std::path::Path) -> anyhow::Result<String> {
     let value = path
         .to_str()
@@ -139,6 +167,7 @@ fn unicode_path(path: &std::path::Path) -> anyhow::Result<String> {
     Ok(value.to_string())
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn xml_escape(value: &str) -> String {
     value
         .replace('&', "&amp;")
@@ -147,6 +176,7 @@ fn xml_escape(value: &str) -> String {
         .replace('"', "&quot;")
 }
 
+#[cfg(any(target_os = "linux", test))]
 fn desktop_exec(path: &str) -> String {
     format!("\"{}\" {STARTUP_ARG}", path.replace('"', r#"\""#))
 }
@@ -233,98 +263,4 @@ fn reg_command(args: &[&str]) -> std::process::Command {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::path::Path;
-
-    #[cfg(windows)]
-    #[test]
-    fn startup_value_quotes_exe_and_sets_silent_arg() {
-        let path = Path::new(r"C:\Program Files\OCG Manager\ocg-manager.exe");
-        assert_eq!(
-            super::startup_value(path),
-            r#""C:\Program Files\OCG Manager\ocg-manager.exe" --startup"#
-        );
-    }
-
-    #[test]
-    fn macos_launch_agent_contains_exe_and_startup_and_disable_removes_it() {
-        let dir =
-            std::env::temp_dir().join(format!("ocg-autostart-macos-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let exe = Path::new("/Applications/OCG Manager.app/Contents/MacOS/ocg-manager");
-        let path = write_macos_launch_agent(&dir, exe).unwrap();
-        let body = std::fs::read_to_string(&path).unwrap();
-        assert!(body.contains("<string>--startup</string>"));
-        assert!(body.contains("/Applications/OCG Manager.app/Contents/MacOS/ocg-manager"));
-        assert!(!body.contains("KeepAlive"));
-        remove_macos_launch_agent(&dir).unwrap();
-        assert!(!path.exists());
-        let _ = std::fs::remove_dir_all(dir);
-    }
-
-    #[test]
-    fn linux_desktop_entry_contains_exe_and_startup_and_disable_removes_it() {
-        let dir =
-            std::env::temp_dir().join(format!("ocg-autostart-linux-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let exe = Path::new("/opt/OCG Manager/ocg-manager");
-        let path = write_linux_desktop_entry(&dir, exe).unwrap();
-        let body = std::fs::read_to_string(&path).unwrap();
-        assert!(body.contains("--startup"));
-        assert!(body.contains("\"/opt/OCG Manager/ocg-manager\""));
-        assert!(body.contains("[Desktop Entry]"));
-        remove_linux_desktop_entry(&dir).unwrap();
-        assert!(!path.exists());
-        let _ = std::fs::remove_dir_all(dir);
-    }
-
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
-    #[test]
-    fn sync_with_writes_the_current_platform_artifact() {
-        let root =
-            std::env::temp_dir().join(format!("ocg-autostart-sync-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&root).unwrap();
-        let exe = if cfg!(target_os = "macos") {
-            Path::new("/Applications/OCG Manager.app/Contents/MacOS/ocg-manager")
-        } else {
-            Path::new("/opt/OCG Manager/ocg-manager")
-        };
-        let targets = AutoStartTargets {
-            executable: exe.to_path_buf(),
-            linux_autostart_dir: root.join("autostart"),
-            macos_launch_agents_dir: root.join("LaunchAgents"),
-        };
-        sync_with(&targets, true).unwrap();
-        #[cfg(target_os = "macos")]
-        {
-            let body =
-                std::fs::read_to_string(targets.macos_launch_agents_dir.join(MACOS_PLIST_NAME))
-                    .unwrap();
-            assert!(body.contains("--startup"));
-        }
-        #[cfg(target_os = "linux")]
-        {
-            let body =
-                std::fs::read_to_string(targets.linux_autostart_dir.join(LINUX_DESKTOP_NAME))
-                    .unwrap();
-            assert!(body.contains("--startup"));
-        }
-        sync_with(&targets, false).unwrap();
-        #[cfg(target_os = "macos")]
-        assert!(
-            !targets
-                .macos_launch_agents_dir
-                .join(MACOS_PLIST_NAME)
-                .exists()
-        );
-        #[cfg(target_os = "linux")]
-        assert!(
-            !targets
-                .linux_autostart_dir
-                .join(LINUX_DESKTOP_NAME)
-                .exists()
-        );
-        let _ = std::fs::remove_dir_all(root);
-    }
-}
+mod tests;

@@ -124,7 +124,8 @@ The **Settings** view holds the gateway's persistent configuration:
 - **Downstream Access Root** — see [Connection Center](dashboard.md#connection-center).
 - **Auto-start on login** — installed Windows x64, macOS, and Linux x64
   desktop builds expose this switch. Development builds, the CLI, and Docker
-  dashboards hide it.
+  dashboards hide it. Linux AppImage startup entries point to the AppImage file;
+  keep that file at the saved location, or toggle auto-start again after moving it.
 - **Dock icon** — only the macOS desktop build exposes this switch. Turning
   it off keeps the menu-bar icon available. Windows, Linux, CLI, and Docker
   dashboards hide it.

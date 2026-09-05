@@ -35,6 +35,8 @@
 
 ## 访问 Key 与认证
 
+- 回环监听器上的所有 Dashboard API 请求（包括公开的注册、登录）都要求唯一的 `Host` 为 `localhost` 或回环 IP 字面量。若提供 `Origin`，必须使用 HTTP/HTTPS 且主机与端口匹配 Host；跨站 Fetch Metadata 请求会被拒绝。本地原生请求可以不带 Origin。转发头会禁用本地免登录，此时仍须持有现有 Dashboard 会话。Vite 代理开发请求时保留原始 Host 和 Origin。使用公开主机名的反向代理必须连接非回环监听器，其单管理员登录流程保持不变。
+
 - 从 schema v27 起，权威表是 SQLite `access_keys`（主 Key 固定 id `gateway_keys::PRIMARY_KEY_ID` / `00000000-0000-0000-0000-000000000001`，名称快照为 "Primary"，永不可禁用/删除；子 Key 是非主行，活跃上限 64，软删除保留名称但清空明文）。消毒后的配置 JSON 把 `gateway_key` 存为 `""`，不再是 DB 权威；进程内 `AppConfig.gateway_key` 与 `GET /dashboard/api/v3/connection` 仍暴露 live 主 Key。生命周期只能通过 `/dashboard/api/v3/keys*`（包括 `POST /keys/primary/regenerate`）。主/子 Key 值互斥由 `gateway_keys::ensure_primary_value_allowed` 强制执行。`sub_gateway_keys` 只出现在迁移到 v27 之前的历史库中，迁移后即丢弃；不要把它描述为当前权威表。
 - 认证收集所有非空候选头 Bearer / x-api-key / x-goog-api-key；任一匹配凭据快照（`CoreStateInner.credential_snapshot`，含主 Key 与已启用子 Key）即通过，归因按候选头顺序中的第一个匹配；同一快照也用于转发日志名称快照。
 - 非 loopback 监听器使用单管理员登录。Docker 可通过 `OCG_ADMIN_USERNAME` 与 `OCG_ADMIN_PASSWORD` 首次初始化（两者必须同时设置；只设一个会导致启动错误）；未提供时，首个注册用户成为管理员。

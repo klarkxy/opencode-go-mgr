@@ -58,7 +58,44 @@ pub fn build_router(state: CoreState) -> Router {
             "/dashboard/assets/{*path}",
             get(crate::dashboard::serve_asset),
         )
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            require_local_dashboard_authority,
+        ))
         .with_state(state)
+}
+
+// Cover public auth as well as protected APIs: otherwise DNS rebinding can
+// register the first administrator and obtain a session before reading Keys.
+async fn require_local_dashboard_authority(
+    State(state): State<CoreState>,
+    req: Request,
+    next: Next,
+) -> Response {
+    let uri = req
+        .extensions()
+        .get::<OriginalUri>()
+        .map(|original| &original.0)
+        .unwrap_or_else(|| req.uri());
+    let path = uri.path();
+    if state.dashboard_local_mode()
+        && (path == "/dashboard/api" || path.starts_with("/dashboard/api/"))
+        && !dashboard_session::has_local_dashboard_authority(req.headers())
+    {
+        if path == "/dashboard/api/v3" || path.starts_with("/dashboard/api/v3/") {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(crate::dashboard_v3::V3Error::forbidden(
+                    "Dashboard Host is not loopback, or Origin does not match Host",
+                    state.settings_revision(),
+                    state.process_generation(),
+                )),
+            )
+                .into_response();
+        }
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    next.run(req).await
 }
 
 impl GatewayRouterHost for CoreState {

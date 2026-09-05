@@ -45,7 +45,9 @@ fn unix_command_rejects_missing_executable() {
         management_password: ocg_core::cpa_runtime::CpaRuntimeSecret::new("secret"),
         log_secrets: Vec::new(),
     };
-    let error = spawn_unix_owned(&spec).unwrap_err();
+    let error = spawn_unix_owned(&spec)
+        .err()
+        .expect("missing executable must fail");
     assert!(error.to_string().contains("missing"));
 }
 
@@ -77,6 +79,51 @@ fn owned_sleep_process_is_group_contained_and_stoppable() {
         .stop()
         .expect("owned sleep should exit after process-group signal");
     let _ = std::fs::remove_dir_all(dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn owned_process_ignoring_term_is_killed_reaped_and_returns_logs() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = std::env::temp_dir().join(format!("ocg-cpa-force-stop-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let script = dir.join("ignore-term");
+    std::fs::write(
+        &script,
+        "#!/bin/sh\ntrap '' TERM\necho ready\nwhile :; do sleep 1; done\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let config = dir.join("config.yaml");
+    std::fs::write(&config, "host: 127.0.0.1\n").unwrap();
+    let spec = CpaRuntimeProcessSpec {
+        executable: script,
+        config_path: config,
+        working_dir: dir.clone(),
+        management_password: ocg_core::cpa_runtime::CpaRuntimeSecret::new("test-secret"),
+        log_secrets: Vec::new(),
+    };
+    let session = spawn_unix_owned(&spec).unwrap();
+    let pid = nix::unistd::Pid::from_raw(session.child.id() as i32);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !session.logs().stdout.contains("ready") {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "child did not become ready"
+        );
+        thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let started = std::time::Instant::now();
+    let logs = session
+        .stop()
+        .expect("successful forced termination is a successful stop");
+    assert!(started.elapsed() >= std::time::Duration::from_secs(5));
+    assert!(logs.stdout.contains("ready"));
+    assert_eq!(
+        nix::sys::wait::waitpid(pid, None),
+        Err(nix::errno::Errno::ECHILD)
+    );
+    std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[cfg(windows)]
