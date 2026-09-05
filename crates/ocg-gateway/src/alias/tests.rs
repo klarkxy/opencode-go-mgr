@@ -1398,6 +1398,224 @@ fn extra_catalog_raw_public_conflicts_stay_ambiguous() {
     );
 }
 
+fn extra_ab_shared_model_collision(order: [ExtraProviderCatalog; 2]) {
+    let extras = order;
+    let err = resolve_with_runtime_catalogs(
+        "shared-model",
+        RuntimeCatalogs {
+            extra: &extras,
+            ..RuntimeCatalogs::default()
+        },
+    )
+    .unwrap_err();
+    assert_eq!(err.code(), Some(AMBIGUOUS_MODEL_ID));
+    match err {
+        ResolveError::Ambiguous { mappings, .. } => {
+            assert!(
+                mappings
+                    .iter()
+                    .any(|mapping| mapping.provider_id == extras[0].provider_id
+                        || mapping.provider_id == extras[1].provider_id)
+            );
+            assert!(
+                mappings.len() >= 2,
+                "raw/public collision must not pick a single extra, got {mappings:?}"
+            );
+        }
+        other => panic!("expected Ambiguous, got {other:?}"),
+    }
+}
+
+#[test]
+fn extra_catalogs_fail_closed_when_public_alias_collides_with_another_upstream() {
+    let extra_a = ExtraProviderCatalog {
+        provider_id: "11111111-1111-4111-8111-111111111111".into(),
+        mappings: vec![("shared-model".into(), "vendor-a".into())],
+    };
+    let extra_b = ExtraProviderCatalog {
+        provider_id: "22222222-2222-4222-8222-222222222222".into(),
+        mappings: vec![("other-model".into(), "shared-model".into())],
+    };
+    extra_ab_shared_model_collision([extra_a.clone(), extra_b.clone()]);
+    extra_ab_shared_model_collision([extra_b.clone(), extra_a.clone()]);
+
+    match resolve_with_runtime_catalogs(
+        "other-model",
+        RuntimeCatalogs {
+            extra: &[extra_a.clone(), extra_b.clone()],
+            ..RuntimeCatalogs::default()
+        },
+    )
+    .unwrap()
+    {
+        ResolvedModel::Alias { mappings, .. } => {
+            assert_eq!(mappings.len(), 1);
+            assert_eq!(mappings[0].provider_id, extra_b.provider_id);
+            assert_eq!(mappings[0].upstream_model, "shared-model");
+        }
+        other => panic!("other-model stays B's public alias, got {other:?}"),
+    }
+
+    match resolve_with_runtime_catalogs(
+        "vendor-a",
+        RuntimeCatalogs {
+            extra: &[extra_a.clone(), extra_b],
+            ..RuntimeCatalogs::default()
+        },
+    )
+    .unwrap()
+    {
+        ResolvedModel::PinnedRaw { mapping, .. } => {
+            assert_eq!(mapping.provider_id, extra_a.provider_id);
+            assert_eq!(mapping.upstream_model, "vendor-a");
+        }
+        other => panic!("unique raw vendor-a must pin, got {other:?}"),
+    }
+}
+
+#[test]
+fn extra_catalogs_fail_closed_on_builtin_alias_upstream_collision() {
+    let extra = ExtraProviderCatalog {
+        provider_id: "11111111-1111-4111-8111-111111111111".into(),
+        mappings: vec![("other-model".into(), "glm-5.2".into())],
+    };
+    let err = resolve_with_runtime_catalogs(
+        "glm-5.2",
+        RuntimeCatalogs {
+            extra: std::slice::from_ref(&extra),
+            ..RuntimeCatalogs::default()
+        },
+    )
+    .unwrap_err();
+    assert_eq!(err.code(), Some(AMBIGUOUS_MODEL_ID));
+}
+
+#[test]
+fn extra_catalogs_fail_closed_when_same_provider_raw_precedes_public() {
+    let extra = ExtraProviderCatalog {
+        provider_id: "11111111-1111-4111-8111-111111111111".into(),
+        mappings: vec![
+            ("other-model".into(), "shared-model".into()),
+            ("shared-model".into(), "vendor-a".into()),
+        ],
+    };
+    let err = resolve_with_runtime_catalogs(
+        "shared-model",
+        RuntimeCatalogs {
+            extra: std::slice::from_ref(&extra),
+            ..RuntimeCatalogs::default()
+        },
+    )
+    .unwrap_err();
+    assert_eq!(err.code(), Some(AMBIGUOUS_MODEL_ID));
+
+    let extra_public_first = ExtraProviderCatalog {
+        provider_id: extra.provider_id.clone(),
+        mappings: vec![
+            ("shared-model".into(), "vendor-a".into()),
+            ("other-model".into(), "shared-model".into()),
+        ],
+    };
+    let err = resolve_with_runtime_catalogs(
+        "shared-model",
+        RuntimeCatalogs {
+            extra: std::slice::from_ref(&extra_public_first),
+            ..RuntimeCatalogs::default()
+        },
+    )
+    .unwrap_err();
+    assert_eq!(err.code(), Some(AMBIGUOUS_MODEL_ID));
+}
+
+#[test]
+fn extra_catalogs_keep_canonical_public_match_without_stealing_raw() {
+    let extra = ExtraProviderCatalog {
+        provider_id: "11111111-1111-4111-8111-111111111111".into(),
+        mappings: vec![("Shared-Model".into(), "vendor-a".into())],
+    };
+    match resolve_with_runtime_catalogs(
+        "shared-model",
+        RuntimeCatalogs {
+            extra: std::slice::from_ref(&extra),
+            ..RuntimeCatalogs::default()
+        },
+    )
+    .unwrap()
+    {
+        ResolvedModel::Alias { mappings, .. } => {
+            assert_eq!(mappings.len(), 1);
+            assert_eq!(mappings[0].provider_id, extra.provider_id);
+            assert_eq!(mappings[0].upstream_model, "vendor-a");
+        }
+        other => panic!("canonical public match must resolve, got {other:?}"),
+    }
+}
+
+#[test]
+fn extra_catalogs_allow_multiple_public_names_for_the_same_raw_target() {
+    for requested in ["shared-model", "org/public"] {
+        let mut extra = ExtraProviderCatalog {
+            provider_id: "11111111-1111-4111-8111-111111111111".into(),
+            mappings: vec![
+                (requested.into(), requested.into()),
+                ("other-model".into(), requested.into()),
+            ],
+        };
+        for _ in 0..2 {
+            let resolved = resolve_with_runtime_catalogs(
+                requested,
+                RuntimeCatalogs {
+                    extra: std::slice::from_ref(&extra),
+                    ..RuntimeCatalogs::default()
+                },
+            )
+            .unwrap();
+            let mappings = resolved.routeable_mappings();
+            assert_eq!(mappings.len(), 1);
+            assert_eq!(mappings[0].provider_id, extra.provider_id);
+            assert_eq!(mappings[0].upstream_model, requested);
+            extra.mappings.reverse();
+        }
+    }
+}
+
+#[test]
+fn extra_catalogs_reject_same_provider_raw_shaped_public_target_conflicts() {
+    let mut extra = ExtraProviderCatalog {
+        provider_id: "11111111-1111-4111-8111-111111111111".into(),
+        mappings: vec![
+            ("org/public".into(), "vendor/real".into()),
+            ("other-model".into(), "org/public".into()),
+        ],
+    };
+    for _ in 0..2 {
+        let error = resolve_with_runtime_catalogs(
+            "org/public",
+            RuntimeCatalogs {
+                extra: std::slice::from_ref(&extra),
+                ..RuntimeCatalogs::default()
+            },
+        )
+        .unwrap_err();
+        assert_eq!(error.code(), Some(AMBIGUOUS_MODEL_ID));
+        let ResolveError::Ambiguous { mappings, .. } = error else {
+            unreachable!()
+        };
+        assert_eq!(mappings.len(), 2);
+        assert!(
+            mappings
+                .iter()
+                .any(|mapping| mapping.upstream_model == "vendor/real")
+        );
+        assert!(
+            mappings
+                .iter()
+                .any(|mapping| mapping.upstream_model == "org/public")
+        );
+        extra.mappings.reverse();
+    }
+}
+
 fn resolve_ollama(
     requested: &str,
     ollama: &[&str],

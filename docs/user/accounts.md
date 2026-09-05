@@ -70,10 +70,10 @@ place; stale authentication and last-error flags are cleared when package
 account fields replace the stored credential.
 Machine-local listener/root URL, auto-start, and Dock settings also stay with
 the destination. Ready managed accounts keep their Key, but their browser login
-does not move; unfinished managed drafts are skipped. A legacy V1 package is
-still accepted and keeps its older Plan/name duplicate-skip behavior; V2 remains
-import-compatible. The outer encrypted envelope remains version 1 while the
-portable payload version evolves.
+does not move; unfinished managed drafts are skipped. Import accepts payload
+V4 only; payload V1–V3 backups are rejected with an explicit
+unsupported-version error. The outer encrypted envelope remains version 1 and
+is distinct from the portable payload version.
 
 Every persistent mutation path rejects `enabled=true` for a catalogued
 `routable=false` Provider before it mutates the row, revision, or timestamps.

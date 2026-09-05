@@ -71,5 +71,3 @@ test("public models are case-insensitively unique while upstream IDs are reusabl
     (error) => error instanceof CustomCapabilityError && error.issue === "duplicate_public_model",
   );
 });
-
-

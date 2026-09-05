@@ -236,7 +236,3 @@ export function applyModelContractToResponse(
     )),
   };
 }
-
-
-
-

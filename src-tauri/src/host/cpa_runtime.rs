@@ -626,12 +626,12 @@ fn spawn_unix_owned(spec: &CpaRuntimeProcessSpec) -> Result<UnixOwnedSession, Cp
         .stderr
         .take()
         .ok_or_else(|| CpaRuntimeError::Failed("failed to capture CPA stderr".into()))?;
-    let secrets = Arc::new(Mutex::new(
+    let secrets = Arc::new(Mutex::new(normalize_secrets(
         spec.log_secrets
             .iter()
             .map(|secret| secret.expose_to_host().as_bytes().to_vec())
             .collect(),
-    ));
+    )));
     let stdout_buf = Arc::new(Mutex::new(String::new()));
     let stderr_buf = Arc::new(Mutex::new(String::new()));
     Ok(UnixOwnedSession {
@@ -721,7 +721,6 @@ impl StreamRedactor {
     }
 }
 
-#[cfg(windows)]
 fn normalize_secrets(mut secrets: Vec<Vec<u8>>) -> Vec<Vec<u8>> {
     secrets.retain(|secret| !secret.is_empty());
     secrets.sort_by_key(|secret| std::cmp::Reverse(secret.len()));

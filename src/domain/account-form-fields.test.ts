@@ -64,5 +64,3 @@ test("dynamic Provider account fields are name/Key/notes and never Endpoint or m
   const nonePlan = { ...plan, credential_kind: "none" as const };
   assert.deepEqual(resolveAccountFormFields(nonePlan, undefined).map((field) => field.id), ["name", "notes"]);
 });
-
-

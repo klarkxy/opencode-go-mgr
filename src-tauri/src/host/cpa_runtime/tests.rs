@@ -1,6 +1,7 @@
 use super::*;
 #[cfg(unix)]
 use std::path::PathBuf;
+use std::sync::Arc;
 
 #[cfg(windows)]
 fn utf16_to_string(wide: &[u16]) -> String {
@@ -196,7 +197,6 @@ fn owned_stop_detaches_when_wait_fails() {
     );
 }
 
-#[cfg(windows)]
 #[test]
 fn stream_redaction_covers_secrets_split_across_chunks() {
     let secrets = Arc::new(Mutex::new(normalize_secrets(vec![
@@ -216,6 +216,46 @@ fn stream_redaction_covers_secrets_split_across_chunks() {
     output.extend(redactor.push(b"secret"));
     output.extend(redactor.finish());
     assert_eq!(String::from_utf8(output).unwrap(), " [REDACTED]");
+}
+
+#[test]
+fn stream_redaction_prefers_longer_secret_over_prefix() {
+    let secrets = Arc::new(Mutex::new(normalize_secrets(vec![
+        b"abc".to_vec(),
+        b"abcdef".to_vec(),
+    ])));
+    let mut redactor = StreamRedactor::new(secrets);
+    let output = redactor.push(b"abcdef");
+    let output = [output, redactor.finish()].concat();
+    assert_eq!(String::from_utf8(output).unwrap(), "[REDACTED]");
+}
+
+#[test]
+fn stream_redaction_drops_empty_secrets_and_does_not_match_them() {
+    let secrets = Arc::new(Mutex::new(normalize_secrets(vec![
+        Vec::new(),
+        b"token".to_vec(),
+        Vec::new(),
+    ])));
+    assert_eq!(secrets.lock().as_slice(), [b"token".to_vec()]);
+    let mut redactor = StreamRedactor::new(secrets);
+    let output = [redactor.push(b"pre token post"), redactor.finish()].concat();
+    assert_eq!(String::from_utf8(output).unwrap(), "pre [REDACTED] post");
+}
+
+#[test]
+fn stream_redaction_longer_secret_added_later_wins_prefix() {
+    let secrets = Arc::new(Mutex::new(normalize_secrets(vec![b"abc".to_vec()])));
+    let mut redactor = StreamRedactor::new(secrets.clone());
+    {
+        let mut known = secrets.lock();
+        if !known.iter().any(|secret| secret == b"abcdef") {
+            known.push(b"abcdef".to_vec());
+            known.sort_by_key(|secret| std::cmp::Reverse(secret.len()));
+        }
+    }
+    let output = [redactor.push(b"abcdef"), redactor.finish()].concat();
+    assert_eq!(String::from_utf8(output).unwrap(), "[REDACTED]");
 }
 
 #[cfg(windows)]

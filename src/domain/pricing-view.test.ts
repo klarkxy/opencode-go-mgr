@@ -209,7 +209,3 @@ test("pricing catalog keeps refresh explicit and exposes accessible grouped mult
   assert.match(catalog, /:snapshot="group\.content\.snapshot"/);
   assert.doesNotMatch(catalog, /plan\.id !== "command-code-goat"/);
 });
-
-
-
-

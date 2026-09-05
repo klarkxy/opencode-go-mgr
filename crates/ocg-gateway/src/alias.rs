@@ -668,9 +668,19 @@ fn extra_public_hit<'a>(
     extra
         .mappings
         .iter()
+        .find(|(public_model, _upstream_model)| custom_model_id_matches(public_model, requested))
+}
+
+fn extra_raw_only_hit<'a>(
+    extra: &'a ExtraProviderCatalog,
+    requested: &str,
+) -> Option<&'a (String, String)> {
+    extra
+        .mappings
+        .iter()
         .find(|(public_model, upstream_model)| {
-            custom_model_id_matches(public_model, requested)
-                || upstream_model.trim() == requested.trim()
+            upstream_model.trim() == requested.trim()
+                && !custom_model_id_matches(public_model, requested)
         })
 }
 
@@ -689,8 +699,32 @@ fn overlay_one_extra(
     resolved: ResolvedModel,
     extra: &ExtraProviderCatalog,
 ) -> Result<ResolvedModel, ResolveError> {
-    let Some((_public_model, upstream_model)) = extra_public_hit(extra, resolved.requested())
-    else {
+    let requested_name = resolved.requested();
+    let public_hit = extra_public_hit(extra, requested_name);
+    let raw_only_hit = extra_raw_only_hit(extra, requested_name);
+    if let Some((_, upstream_model)) = raw_only_hit {
+        let raw_mapping = extra_mapping(extra, upstream_model);
+        let conflicts = match &resolved {
+            ResolvedModel::Alias { mappings, .. } => !mappings.contains(&raw_mapping),
+            ResolvedModel::PinnedRaw { mapping, .. } => mapping != &raw_mapping,
+        };
+        if conflicts {
+            let (requested, mut mappings) = match resolved {
+                ResolvedModel::Alias {
+                    requested,
+                    mappings,
+                    ..
+                } => (requested, mappings),
+                ResolvedModel::PinnedRaw { requested, mapping } => (requested, vec![mapping]),
+            };
+            mappings.push(raw_mapping);
+            return Err(ResolveError::Ambiguous {
+                requested,
+                mappings,
+            });
+        }
+    }
+    let Some((_, upstream_model)) = public_hit else {
         return Ok(resolved);
     };
     let replacement = extra_mapping(extra, upstream_model);
@@ -714,9 +748,7 @@ fn overlay_one_extra(
                 mappings,
             })
         }
-        ResolvedModel::PinnedRaw { requested, mapping }
-            if mapping.provider_id.eq_ignore_ascii_case(&extra.provider_id) =>
-        {
+        ResolvedModel::PinnedRaw { requested, mapping } if mapping == replacement => {
             Ok(ResolvedModel::PinnedRaw {
                 requested,
                 mapping: replacement,

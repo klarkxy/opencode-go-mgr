@@ -10,10 +10,10 @@ fn appimage_startup_uses_the_persistent_image_and_rejects_invalid_paths() {
     let selected =
         linux_startup_executable(mounted.clone(), Some(image.clone().into_os_string())).unwrap();
     assert_eq!(selected, image);
+    let encoded = desktop_exec(&image.to_string_lossy());
     assert!(
-        linux_desktop_body(&selected)
-            .unwrap()
-            .contains(&image.to_string_lossy().to_string())
+        linux_desktop_body(&selected).unwrap().contains(&encoded),
+        "Windows-hosted AppImage paths must use Exec encoding, got body without {encoded}"
     );
     assert_eq!(
         linux_startup_executable(mounted.clone(), None).unwrap(),
@@ -58,9 +58,8 @@ fn linux_desktop_entry_contains_exe_and_startup_and_disable_removes_it() {
     let exe = Path::new("/opt/OCG Manager/ocg-manager");
     let path = write_linux_desktop_entry(&dir, exe).unwrap();
     let body = std::fs::read_to_string(&path).unwrap();
-    assert!(body.contains("--startup"));
-    assert!(body.contains("\"/opt/OCG Manager/ocg-manager\""));
     assert!(body.contains("[Desktop Entry]"));
+    assert!(body.contains("Exec=\"/opt/OCG Manager/ocg-manager\" --startup\n"));
     remove_linux_desktop_entry(&dir).unwrap();
     assert!(!path.exists());
     let _ = std::fs::remove_dir_all(dir);
@@ -110,4 +109,48 @@ fn sync_with_writes_the_current_platform_artifact() {
             .exists()
     );
     let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn desktop_exec_encodes_field_codes_and_quoted_specials() {
+    assert_eq!(
+        desktop_exec("/opt/OCG Manager/ocg-manager"),
+        "\"/opt/OCG Manager/ocg-manager\" --startup"
+    );
+    assert_eq!(
+        desktop_exec("/opt/OCG%Manager/ocg-manager"),
+        "\"/opt/OCG%%Manager/ocg-manager\" --startup"
+    );
+    assert_eq!(
+        desktop_exec(r"/opt/OCG\Manager/ocg-manager"),
+        r#""/opt/OCG\\\\Manager/ocg-manager" --startup"#
+    );
+    assert_eq!(
+        desktop_exec("/opt/OCG\"Manager/ocg-manager"),
+        r#""/opt/OCG\\"Manager/ocg-manager" --startup"#
+    );
+    assert_eq!(
+        desktop_exec("/opt/OCG$Manager/ocg-manager"),
+        r#""/opt/OCG\\$Manager/ocg-manager" --startup"#
+    );
+    assert_eq!(
+        desktop_exec("/opt/OCG`Manager/ocg-manager"),
+        "\"/opt/OCG\\\\`Manager/ocg-manager\" --startup"
+    );
+}
+
+#[test]
+fn linux_desktop_entry_encodes_special_paths() {
+    let dir = std::env::temp_dir().join(format!(
+        "ocg-autostart-linux-special-{}",
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let exe = Path::new("/opt/OCG%Manager/ocg-manager");
+    let path = write_linux_desktop_entry(&dir, exe).unwrap();
+    let body = std::fs::read_to_string(&path).unwrap();
+    assert!(body.contains("Exec=\"/opt/OCG%%Manager/ocg-manager\" --startup\n"));
+    assert!(body.contains("X-GNOME-Autostart-enabled=true"));
+    remove_linux_desktop_entry(&dir).unwrap();
+    let _ = std::fs::remove_dir_all(dir);
 }

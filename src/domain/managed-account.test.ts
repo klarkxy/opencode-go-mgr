@@ -134,4 +134,3 @@ test("managed account creation cannot be cancelled while its request is pending"
   assert.match(managedCreateModal, /<n-button :disabled="busy" @click="setManagedCreateVisible\(false\)">\s*\{\{ busy \? t\("加载中…"\) : t\("取消"\) \}\}/);
   assert.match(accounts, /function setManagedCreateVisible\(show: boolean\): void \{\s*if \(!show && busy\.value\) return;\s*showManagedCreate\.value = show;/);
 });
-

@@ -178,7 +178,26 @@ fn xml_escape(value: &str) -> String {
 
 #[cfg(any(target_os = "linux", test))]
 fn desktop_exec(path: &str) -> String {
-    format!("\"{}\" {STARTUP_ARG}", path.replace('"', r#"\""#))
+    format!("{} {STARTUP_ARG}", quote_desktop_exec_arg(path))
+}
+
+/// Encode a quoted Exec argument: field-code `%`→`%%`, then Exec quoting of
+/// `"$\``, then Desktop Entry string escaping. A quoted literal `\` is four
+/// backslashes; `$`/`"`/`` ` `` become `\\$` / `\\"` / `` \\` ``.
+#[cfg(any(target_os = "linux", test))]
+fn quote_desktop_exec_arg(path: &str) -> String {
+    let mut quoted = String::from("\"");
+    for ch in path.replace('%', "%%").chars() {
+        match ch {
+            '"' | '`' | '$' | '\\' => {
+                quoted.push('\\');
+                quoted.push(ch);
+            }
+            other => quoted.push(other),
+        }
+    }
+    quoted.push('"');
+    quoted.replace('\\', r"\\")
 }
 
 #[cfg(target_os = "macos")]
