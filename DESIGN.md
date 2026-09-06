@@ -1,5 +1,5 @@
 ---
-name: OCG Manager Console
+name: Open Console Gateway
 colors:
   canvas: "#F7F7F8"
   surface: "#FFFFFF"
@@ -28,11 +28,11 @@ rounded:
   large: 14
 ---
 
-# OCG Manager Console
+# Open Console Gateway
 
 ## Overview
 
-OCG Manager is a local multi-account operations console. Its signature is a first-screen connection center paired with the OpenCode mascot. The interface is compact, technical, calm, and unmistakably operational rather than promotional.
+Open Console Gateway is a local multi-account operations console. Its signature is a first-screen connection center paired with the OpenCode mascot. The interface is compact, technical, calm, and unmistakably operational rather than promotional.
 
 ## Colors
 
@@ -56,7 +56,7 @@ Use the spacing scale from `{spacing.xs}` through `{spacing.xxl}`. The side rail
 
 The Dashboard order is connection center, KPIs, needs-attention list, then the full-width daily Token chart. Core connection information must stay above the fold and must never be moved into a secondary rail. The connection center is the consume surface: the current Key, copy, and rotate-current stay there, plus a manage action that opens Access Keys. Create, rename, enable, delete, and reset live only on Access Keys. The primary key has no custom-value field; rotation uses the same reset control as sub keys.
 
-Providers is the supplier control plane. A left rail lists built-in `Provider` families and user-defined Providers created from this page; user-defined Providers are not a separate navigation item. The main pane has two tabs for built-in scopes: Model catalog and Pricing. User-defined Providers bind Configurable HTTP, stay unpriced, and expose create/edit/delete plus optional discovery/test. Accounts of those Providers are Key-only and do not own Endpoint, protocol, or model mappings. Custom API remains a distinct account-owned path.
+Providers is the supplier control plane. A left rail lists built-in `Provider` families and user-defined Providers created from this page; user-defined Providers are not a separate navigation item. The main pane has two tabs for built-in scopes: Model catalog and Pricing. OpenCode Go adds a third Other tab after Pricing for the managed-signup invite URL. User-defined Providers bind Configurable HTTP, stay unpriced, and expose create/edit/delete plus optional discovery/test. Accounts of those Providers are Key-only and do not own Endpoint, protocol, or model mappings. Custom API remains a distinct account-owned path.
 
 Aliases is a separate core inspection page because it aggregates every Provider contract, user-defined Provider mapping, and Custom account capability rather than belonging to the currently selected Provider. It shows client-facing names, exact upstream identities, and current routeability; it is never an Alias editor, API, store, or cache. Custom mappings are edited only on Accounts: each row pairs the public name clients request with the exact upstream model ID, while the account keeps one protocol for all mappings. A Custom mapping's edit action uses the dashboard deep link `?view=accounts&account_id=<id>` to open that account's editor.
 

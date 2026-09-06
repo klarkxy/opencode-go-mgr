@@ -20,9 +20,13 @@ account-owned path. Scopes are split like this:
   Edit those mappings on **Accounts**.
 
 The left rail lists built-in contract scopes and user-defined Providers. Built-in
-main panes keep two tabs: **Model catalog** and **Pricing**.
-User-defined panes show configuration, mappings, and edit/delete. User-defined
-Providers are unpriced.
+main panes keep two tabs: **Model catalog** and **Pricing**. The **OpenCode Go**
+scope adds a third **Other** tab after Pricing for the managed-signup **invite
+URL**. It is a user-owned `opencode.ai` / `console.opencode.ai` HTTPS link (not
+a sealed origin). Fresh installs may ship a demo default; replace it with your
+own link before a real signup. Creating a managed draft can also edit and write
+this value back. User-defined panes show configuration, mappings, and
+edit/delete. User-defined Providers are unpriced.
 
 **Aliases** is a separate core page because its read-only table spans every
 Provider contract, user-defined Provider mapping, and Custom account instead of

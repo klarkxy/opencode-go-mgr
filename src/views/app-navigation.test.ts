@@ -5,6 +5,7 @@ import {
   APP_NAVIGATION_GROUPS,
   CORE_APP_NAVIGATION,
   EXTENSION_APP_NAVIGATION,
+  PROVIDER_OTHER_TAB,
   applyAppViewSearchParams,
   isLegacyPricingView,
   readProviderScopeQuery,
@@ -35,6 +36,7 @@ test("provider deep-link query fields round-trip on the providers view", () => {
   assert.deepEqual(readProviderScopeQuery("?view=providers&scope_kind=provider&scope_id=command-code"), {
     scope_kind: "provider",
     scope_id: "command-code",
+    tab: null,
   });
   const url = applyAppViewSearchParams(
     new URL("http://127.0.0.1:9042/dashboard/?view=accounts"),
@@ -44,16 +46,40 @@ test("provider deep-link query fields round-trip on the providers view", () => {
   assert.equal(url.searchParams.get("view"), "providers");
   assert.equal(url.searchParams.get("scope_kind"), "custom_endpoint");
   assert.equal(url.searchParams.get("scope_id"), "acc-9");
+  assert.equal(url.searchParams.get("tab"), null);
+});
+
+test("the OpenCode Go Other tab round-trips on the providers view", () => {
+  assert.deepEqual(
+    readProviderScopeQuery("?view=providers&scope_kind=provider&scope_id=opencode&tab=other"),
+    {
+      scope_kind: "provider",
+      scope_id: "opencode",
+      tab: PROVIDER_OTHER_TAB,
+    },
+  );
+  const url = applyAppViewSearchParams(
+    new URL("http://127.0.0.1:9042/dashboard/?view=accounts"),
+    "providers",
+    { scope_kind: "provider", scope_id: "opencode", tab: PROVIDER_OTHER_TAB },
+  );
+  assert.equal(url.searchParams.get("tab"), PROVIDER_OTHER_TAB);
+  const catalog = applyAppViewSearchParams(url, "providers", {
+    scope_kind: "provider",
+    scope_id: "opencode",
+  });
+  assert.equal(catalog.searchParams.get("tab"), null);
 });
 
 test("leaving providers strips scope query fields", () => {
   const url = applyAppViewSearchParams(
-    new URL("http://127.0.0.1:9042/dashboard/?view=providers&scope_kind=provider&scope_id=opencode"),
+    new URL("http://127.0.0.1:9042/dashboard/?view=providers&scope_kind=provider&scope_id=opencode&tab=other"),
     "logs",
   );
   assert.equal(url.searchParams.get("view"), "logs");
   assert.equal(url.searchParams.get("scope_kind"), null);
   assert.equal(url.searchParams.get("scope_id"), null);
+  assert.equal(url.searchParams.get("tab"), null);
 });
 
 test("leaving Accounts strips a stale account deep-link parameter", () => {

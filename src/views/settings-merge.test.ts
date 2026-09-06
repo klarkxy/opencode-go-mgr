@@ -12,7 +12,6 @@ function config(overrides: Partial<AppConfig> = {}): AppConfig {
     revision: 1,
     gateway_port: 9042,
     gateway_port_from_env: false,
-    upstream_base_url: "https://opencode.ai/zen/go",
     proxy_mode: "auto",
     proxy_url: "",
     proxy_list_direction: "whitelist",
@@ -37,7 +36,6 @@ function config(overrides: Partial<AppConfig> = {}): AppConfig {
 test("settings conflict merge preserves local edits and accepts unrelated remote edits", () => {
   const saved = config();
   const current = config({
-    opencode_invite_url: "https://opencode.ai/invite/local",
     proxy_mode: "manual",
     proxy_url: "http://127.0.0.1:7890",
     connect_timeout_secs: 45,
@@ -51,12 +49,32 @@ test("settings conflict merge preserves local edits and accepts unrelated remote
   const merged = mergeUnsavedSettings(latest, current, saved);
 
   assert.equal(merged.revision, 2);
-  assert.equal(merged.opencode_invite_url, "https://opencode.ai/invite/local");
   assert.equal(merged.proxy_mode, "manual");
   assert.equal(merged.proxy_url, "http://127.0.0.1:7890");
   assert.equal(merged.connect_timeout_secs, 45);
   assert.equal(merged.gateway_port, 9142);
   assert.equal(merged.non_stream_timeout_secs, 1_200);
+});
+
+test("settings conflict merge adopts the remote OpenCode Go invite URL", () => {
+  const saved = config();
+  const current = config({
+    opencode_invite_url: "https://opencode.ai/invite/local",
+    proxy_mode: "manual",
+  });
+  const latest = config({
+    revision: 2,
+    opencode_invite_url: "https://opencode.ai/invite/remote",
+  });
+
+  const merged = mergeUnsavedSettings(latest, current, saved);
+
+  assert.equal(merged.opencode_invite_url, "https://opencode.ai/invite/remote");
+  assert.equal(merged.proxy_mode, "manual");
+});
+
+test("the OpenCode Go invite URL is not an editable Settings-page field", () => {
+  assert.ok(!(EDITABLE_SETTING_KEYS as readonly string[]).includes("opencode_invite_url"));
 });
 
 test("settings conflict merge keeps local edits and adopts server capability flags", () => {

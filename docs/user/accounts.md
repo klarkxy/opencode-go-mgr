@@ -47,7 +47,7 @@ The Adapter Registry is sealed. Built-in Provider families are:
 Use **Export** on the Accounts toolbar to create a password-encrypted
 `.ocgbackup` file, then use **Import** on the destination node to preview and
 confirm the merge. Choose a migration password of at least 12 characters and
-transfer it separately from the file; OCG Manager cannot recover it. The
+transfer it separately from the file; Open Console Gateway cannot recover it. The
 operation remains available only from the node's loopback dashboard; forwarded
 scheme headers do not grant access to a remote dashboard.
 
@@ -173,13 +173,13 @@ Managed signup and isolated browser profiles are **Beta** features. They have
 not been thoroughly tested; do not rely on them in production.
 
 When you create a managed draft, the form shows the **invite URL** (prefilled
-from Settings; fresh installs may ship a demo default). Edit it in place: it must
-be an HTTPS URL no longer than 2,048 characters, contain no username or password,
-and use exactly `opencode.ai` or `console.opencode.ai` as its host. If it differs
-from Settings, it is written back to **Settings → OpenCode Go invite URL**.
-Changes affect later invite-page opens only; they do not rewrite completed
-accounts. Replace the demo default with your own invite link before a real
-signup, or referral credit goes to the link owner.
+from the OpenCode Go provider; fresh installs may ship a demo default). Edit it
+in place: it must be an HTTPS URL no longer than 2,048 characters, contain no
+username or password, and use exactly `opencode.ai` or `console.opencode.ai` as
+its host. If it differs from the saved value, it is written back to
+**Providers → OpenCode Go → Other**. Changes affect later invite-page opens
+only; they do not rewrite completed accounts. Replace the demo default with your
+own invite link before a real signup, or referral credit goes to the link owner.
 
 The managed wizard is intentionally manual (no password autofill, no payment
 clicks, no automatic key extraction):
@@ -230,7 +230,7 @@ free cooldown rather than a key quota.
 
 - **Usage baselines.** Type a percentage or drag a bar to set its current
   real-world usage baseline. After the value is saved, successful request cost
-  recorded by OCG Manager continues to accumulate above that baseline. Reaching
+  recorded by Open Console Gateway continues to accumulate above that baseline. Reaching
   100% is still only a warning; it does not stop the gateway from selecting the
   account. Manual calibration is shown only when the Plan declares it; GOAT
   uses it to correct for traffic that OCG cannot observe.

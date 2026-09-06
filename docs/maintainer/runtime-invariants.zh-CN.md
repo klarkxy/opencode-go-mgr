@@ -25,7 +25,7 @@
 
 ## Dashboard V3 与 V2 墓碑
 
-- Dashboard V3 挂载在 `/dashboard/api/v3`。控制面变更需要 CAS（`expectedRevision`，以及 `processGeneration`；价格写入还需要 `expectedPricingRevision`）。`ConnectionInfo` 是唯一允许返回明文 OCG Manager Key 的 V3 响应 DTO；Key 变更响应不包含明文，客户端会重新 `GET /connection`。创建或轮换托管 CPA 客户端 Inference Key 时，该 CPA 密钥只返回一次。
+- Dashboard V3 挂载在 `/dashboard/api/v3`。控制面变更需要 CAS（`expectedRevision`，以及 `processGeneration`；价格写入还需要 `expectedPricingRevision`）。`ConnectionInfo` 是唯一允许返回明文 Open Console Gateway Key 的 V3 响应 DTO；Key 变更响应不包含明文，客户端会重新 `GET /connection`。创建或轮换托管 CPA 客户端 Inference Key 时，该 CPA 密钥只返回一次。
 - `GET /contract` 返回当前进程的 live revision / generation token。
 - 节点迁移只存在于 V3：`POST /accounts/transfer/export|preview|import`，并且只允许从回环面板执行；转发 scheme 请求头不会赋予权限。导出没有管理员二次确认。面板只会收到版本 1 的 Argon2id（64 MiB、3 次迭代、单 lane）+ AES-256-GCM 固定 AAD 密文包，绝不会收到账号或接入 Key 明文。密码学工作在进程级单飞限制下执行，且不占用设置或 SQLite 锁；全部响应都带 `Cache-Control: no-store`。预览与导入复用同一解密/校验流程。导入在 KDF 后重新检查 CAS，并通过一次 SQLite 事务写入数据库归并结果。payload V2 建立了稳定 ID 身份语义：同 ID 的账号/接入 Key 采用迁移包字段；Plan 或名称相同但 ID 不同的记录可并存；目标端已有账号 ID 保持当前顺序，来源端新增账号 ID 按迁移包顺序接在后面。目标端独有接入 Key 和 Provider 范围保留。不同 ID 的 Key 值冲突、归并后超过 64 个有效子 Key、包内重复 ID 或任一非法行都会拒绝并回滚整个数据库归并。V2 包含可用普通账号及验证状态、ready 账号 Key、主/有效子接入 Key、可迁移配置、Zen Free 状态/目录以及 Provider 目录/证据/覆盖。同 ID 目标记录保留本机浏览器数据和用量/冷却历史；迁移包账号凭据覆盖时会清除过时的鉴权错误和最近错误。来源端浏览器 Profile/Cookie、登录密码、邀请码、日志、用量、冷却状态和未完成托管草稿不迁移。目标端监听/根地址以及操作系统负责的开机启动/Dock 设置保持本机值。所有可能失败的运行态快照构建都读取尚未提交的归并事务；只有构建成功后 SQLite 才提交，随后执行不会失败的快照替换并只递增一次 revision。
 - 当前导出细化：密码学 envelope 继续使用版本 1；新导出的 portable 内容改为 payload V4，只带 `providerId`。V4 还带一份可选/默认空的用户定义供应商定义集合（id、名称、Endpoint、协议、鉴权种类、映射）以及这些供应商的可迁移账号。导出包含每一份已保存定义。导入用现有类型化动态供应商校验器校验每一份定义，只绑定 Configurable HTTP，拒绝悬空/未知 ID，并在同一 SQLite 事务内归并：相同定义 ID 以迁移包字段为准；不同 ID 即使显示名相同也可并存；目标端独有定义和账号保留。若同 ID 定义跨越“需 Key/无鉴权”边界，目标端引用它的每个账号也必须包含在迁移包中；否则导入会 fail closed，而不会编造或批量复制账号 Key。解密/校验拒绝 payload V1–V3，并返回单独的不支持版本 `400`，写明发现的版本与当前期望版本；该错误不是密码错误或文件损坏。
@@ -96,7 +96,7 @@
 
 ## 托管账号（Beta）
 
-- `setup_step` 顺序为 `google_account`（UI：登录身份，可跳过）→ `opencode_registration` → `payment` → `key_verification` → `ready`。`PATCH /dashboard/api/v3/accounts/{id}/setup` 允许前进一步或回退到更早步骤；禁止跳过步骤或直达 `ready`。草稿创建可编辑邀请链接并写回 `opencode_invite_url`（`DEFAULT_OPENCODE_INVITE_URL` 是演示默认值）。浏览器目标包括 Google/GitHub 注册与登录、邀请 URL，以及控制台 `https://opencode.ai/auth`。托管页可通过 dashboard HTTP 打开浏览器；桌面原生浏览器是 Host hook。
+- `setup_step` 顺序为 `google_account`（UI：登录身份，可跳过）→ `opencode_registration` → `payment` → `key_verification` → `ready`。`PATCH /dashboard/api/v3/accounts/{id}/setup` 允许前进一步或回退到更早步骤；禁止跳过步骤或直达 `ready`。草稿创建可编辑邀请链接并写回 `opencode_invite_url`（`DEFAULT_OPENCODE_INVITE_URL` 是演示默认值）。面板在 OpenCode Go 供应商的 **其他** 页签编辑该字段。浏览器目标包括 Google/GitHub 注册与登录、邀请 URL，以及控制台 `https://opencode.ai/auth`。托管页可通过 dashboard HTTP 打开浏览器；桌面原生浏览器是 Host hook。
 
 ## Ollama Cloud
 

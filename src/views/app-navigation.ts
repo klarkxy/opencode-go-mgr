@@ -49,12 +49,14 @@ export const EXTENSION_APP_NAVIGATION = APP_NAVIGATION.filter(({ group }) => gro
 
 export const LEGACY_PRICING_VIEW = "pricing";
 export const PROVIDERS_VIEW: AppViewKey = "providers";
+export const PROVIDER_OTHER_TAB = "other";
 
 const viewKeySet = new Set<string>(APP_VIEW_KEYS);
 
 export interface ProviderScopeQuery {
   scope_kind?: string;
   scope_id?: string;
+  tab?: string;
 }
 
 export function isLegacyPricingView(raw: string | null | undefined): boolean {
@@ -70,11 +72,13 @@ export function resolveAppViewKey(raw: string | null | undefined): AppViewKey {
 export function readProviderScopeQuery(search: string): {
   scope_kind: string | null;
   scope_id: string | null;
+  tab: string | null;
 } {
   const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
   return {
     scope_kind: params.get("scope_kind"),
     scope_id: params.get("scope_id"),
+    tab: params.get("tab"),
   };
 }
 
@@ -93,17 +97,21 @@ export function applyAppViewSearchParams(
   if (view !== "providers") {
     url.searchParams.delete("scope_kind");
     url.searchParams.delete("scope_id");
+    url.searchParams.delete("tab");
     return url;
   }
   if (scope === undefined) return url;
   if (scope === null) {
     url.searchParams.delete("scope_kind");
     url.searchParams.delete("scope_id");
+    url.searchParams.delete("tab");
     return url;
   }
   if (scope.scope_kind) url.searchParams.set("scope_kind", scope.scope_kind);
   else url.searchParams.delete("scope_kind");
   if (scope.scope_id) url.searchParams.set("scope_id", scope.scope_id);
   else url.searchParams.delete("scope_id");
+  if (scope.tab) url.searchParams.set("tab", scope.tab);
+  else url.searchParams.delete("tab");
   return url;
 }

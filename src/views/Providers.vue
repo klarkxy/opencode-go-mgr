@@ -108,7 +108,8 @@
           </table>
         </section>
 
-        <n-tabs v-else-if="activeScope" v-model:value="activeTab" class="providers-tabs" display-directive="if">
+        <template v-else-if="activeScope">
+          <n-tabs v-model:value="activeTab" class="providers-tabs" display-directive="if">
           <n-tab-pane name="catalog" :tab="t('模型目录')">
             <section class="providers-section" aria-labelledby="provider-catalog-title">
               <div class="providers-catalog-head">
@@ -210,7 +211,11 @@
               <PricingCatalog :provider-id="activeScope.provider_id" />
             </section>
           </n-tab-pane>
-        </n-tabs>
+          <n-tab-pane v-if="isOpenCodeGoScope" name="other" :tab="t('其他')">
+            <OpenCodeInviteUrlField />
+          </n-tab-pane>
+          </n-tabs>
+        </template>
       </div>
     </div>
 
@@ -255,9 +260,10 @@ import type {
 import ProviderModelMatrix from "../components/ProviderModelMatrix.vue";
 import PricingCatalog from "../components/PricingCatalog.vue";
 import DynamicProviderModal from "../components/DynamicProviderModal.vue";
+import OpenCodeInviteUrlField from "../components/OpenCodeInviteUrlField.vue";
 import { locale, t } from "../i18n/index.ts";
 import { dashboardErrorDetail } from "../utils/errors.ts";
-import { applyAppViewSearchParams, readProviderScopeQuery } from "./app-navigation.ts";
+import { applyAppViewSearchParams, PROVIDER_OTHER_TAB, readProviderScopeQuery } from "./app-navigation.ts";
 import {
   applyModelContractToResponse,
   catalogRefreshSupported,
@@ -269,6 +275,7 @@ import {
   PROVIDER_PROTOCOLS,
   selectProviderScope,
 } from "../domain/provider-contracts.ts";
+import { DEFAULT_PROVIDER_ID } from "../domain/account-providers.ts";
 import { isDynamicCatalogEntry } from "../domain/dynamic-provider.ts";
 import {
   CATALOG_SOURCE_CUSTOM_DISCOVERY,
@@ -324,6 +331,7 @@ const activeSelection = computed(() => {
   return selectProviderScope(scopes.value, scopeKind, scopeId);
 });
 const activeScope = computed(() => activeSelection.value.scope);
+const isOpenCodeGoScope = computed(() => activeScope.value?.provider_id === DEFAULT_PROVIDER_ID);
 const initialLoading = computed(() => loading.value && !contracts.value);
 const actionLocked = computed(() => (
   catalogRefreshing.value
@@ -409,8 +417,19 @@ function writeScopeToUrl(scopeKind: string, scopeId: string) {
   const url = applyAppViewSearchParams(new URL(window.location.href), "providers", {
     scope_kind: scopeKind,
     scope_id: scopeId,
+    ...(isOpenCodeGoScope.value && activeTab.value === PROVIDER_OTHER_TAB
+      ? { tab: PROVIDER_OTHER_TAB }
+      : {}),
   });
   window.history.replaceState(null, "", url);
+}
+
+function applyProviderTabFromQuery(tab: string | null) {
+  if (isOpenCodeGoScope.value && tab === PROVIDER_OTHER_TAB) {
+    activeTab.value = PROVIDER_OTHER_TAB;
+    return;
+  }
+  if (activeTab.value === PROVIDER_OTHER_TAB) activeTab.value = "catalog";
 }
 
 function selectDynamicProvider(providerId: string): boolean {
@@ -436,6 +455,7 @@ function applyScopeFromQuery(fellBackNotice = false, preferDynamicId?: string) {
     return;
   }
   selectedKey.value = selected.scope.key;
+  applyProviderTabFromQuery(query.tab);
   writeScopeToUrl(selected.scope.scope_kind, selected.scope.scope_id);
   if (fellBackNotice && selected.fellBack) {
     actionLive.value = t("已选择过期范围，已回到第一个供应商");
@@ -759,7 +779,18 @@ function onPopState() {
 }
 
 watch(activeScope, (scope, previous) => {
-  if (scope?.key !== previous?.key) resetScopeActions();
+  if (scope?.key !== previous?.key) {
+    resetScopeActions();
+    if (scope?.provider_id !== DEFAULT_PROVIDER_ID && activeTab.value === PROVIDER_OTHER_TAB) {
+      activeTab.value = "catalog";
+    }
+  }
+});
+
+watch(activeTab, () => {
+  const scope = activeScope.value;
+  if (!scope) return;
+  writeScopeToUrl(scope.scope_kind, scope.scope_id);
 });
 
 onMounted(() => {

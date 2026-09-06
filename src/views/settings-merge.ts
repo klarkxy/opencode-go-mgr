@@ -2,12 +2,10 @@ import type { AppConfig } from "../api/dashboard";
 
 export const EDITABLE_SETTING_KEYS = [
   "gateway_port",
-  "upstream_base_url",
   "proxy_mode",
   "proxy_url",
   "proxy_list_direction",
   "proxy_list_models",
-  "opencode_invite_url",
   "client_root_url",
   "auto_start",
   "show_dock_icon",

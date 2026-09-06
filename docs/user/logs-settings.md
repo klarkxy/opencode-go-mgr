@@ -62,7 +62,6 @@ The **Settings** view holds the gateway's persistent configuration:
 - **Gateway Port** — the port the gateway binds (default `9042`). Desktop builds
   also accept the read-only `OCG_GATEWAY_PORT` runtime override; while it is set,
   the Settings field is disabled and the saved value is unchanged.
-- **Upstream URL** — the OpenCode-Go base URL.
 - **Routing mode** — strict priority, global sticky, or round robin. All three
   modes apply the one global card order only after filtering incompatible,
   disabled, cooling, or already-failed cards. Only one base mode is active at
@@ -89,7 +88,8 @@ The **Settings** view holds the gateway's persistent configuration:
   authenticated `GET /v1/models` and protected
   `GET /dashboard/api/v3/application-models` are local lists and do not use
   this outbound path. The browser sidecar is outside its scope. **Test
-  connection** uses the unsaved form values against the current upstream. Any
+  connection** uses the unsaved form values against the sealed OpenCode Go
+  origin. Any
   HTTP status proves network reachability, without running model inference or
   incurring model usage. In list mode it probes only the
   direction's default leg, not a listed model's real forwarding path.
@@ -116,10 +116,6 @@ The **Settings** view holds the gateway's persistent configuration:
   recorded". List mode requires this version or newer; an older binary cannot
   start on a config saved with `list` mode — switch back to manual or direct
   mode first when rolling back.
-- **OpenCode Go invite URL** — the restricted HTTPS invite used by managed
-  account onboarding. Fresh installs may ship a demo default; replace it with
-  your own link before a real signup. Creating a managed draft can also edit
-  and write this value back.
 - **Downstream Access Root** — see [Connection Center](dashboard.md#connection-center).
 - **Auto-start on login** — installed Windows x64, macOS, and Linux x64
   desktop builds expose this switch. Development builds, the CLI, and Docker

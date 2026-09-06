@@ -143,7 +143,7 @@
       :invite-missing="!opencodeInviteUrl"
       @import-key="openCreateModal(OPENCODE_GO_PLAN)"
       @register-managed="openManagedCreateModal"
-      @open-settings="openSettings"
+      @open-invite-url="openInviteUrl"
       @select-plan="handleSelectPlan"
     />
 
@@ -212,7 +212,7 @@
         </n-form-item>
       </n-form>
       <n-alert type="warning" :show-icon="false">
-        {{ t("请确认邀请链接是你自己的（默认仅演示）。修改后会写入设置。草稿可随时继续。") }}
+        {{ t("请确认邀请链接是你自己的（默认仅演示）。修改后会写入 OpenCode Go 供应商。草稿可随时继续。") }}
       </n-alert>
       <template #footer>
         <n-space justify="end">
@@ -281,7 +281,7 @@ import type {
 } from "../api/dashboard";
 import { isCooling } from "../domain/accounts-usage.ts";
 import { accountIsReady, accountMenuOptions } from "../domain/account-display.ts";
-import { isCommandCodeGoatAccount, isOllamaCloudAccount, isOfficialCnPlanAccount, isZenFreeAccount } from "../domain/account-providers.ts";
+import { DEFAULT_PROVIDER_ID, isCommandCodeGoatAccount, isOllamaCloudAccount, isOfficialCnPlanAccount, isZenFreeAccount } from "../domain/account-providers.ts";
 import {
   executeCustomAccountEdit,
   isCustomApiAccount,
@@ -304,7 +304,7 @@ import {
 import { isDynamicCatalogEntry } from "../domain/dynamic-provider.ts";
 import { t, type MessageKey } from "../i18n/index.ts";
 import { dashboardErrorDetail } from "../utils/errors.ts";
-import { readAccountDeepLink } from "./app-navigation.ts";
+import { applyAppViewSearchParams, PROVIDER_OTHER_TAB, readAccountDeepLink } from "./app-navigation.ts";
 import { mapWithConcurrency } from "../utils/async.ts";
 import { useLocalizedModalCloseLabel } from "../utils/modal-close-label.ts";
 import {
@@ -425,7 +425,7 @@ const managedInvitePreview = computed(() => {
     return {
       status: undefined as "error" | undefined,
       feedback: normalized
-        ? t("将用于打开邀请页；与设置不同时会写回设置。")
+        ? t("将用于打开邀请页；与 OpenCode Go 供应商中的值不同时会写回。")
         : t("必填。仅接受 opencode.ai 官方 HTTPS 链接。"),
       normalized,
     };
@@ -591,10 +591,13 @@ function openManagedWizard(accountId: string): void {
   showManagedWizard.value = true;
 }
 
-function openSettings(): void {
+function openInviteUrl(): void {
   showAddModal.value = false;
-  const url = new URL(window.location.href);
-  url.searchParams.set("view", "settings");
+  const url = applyAppViewSearchParams(new URL(window.location.href), "providers", {
+    scope_kind: "provider",
+    scope_id: DEFAULT_PROVIDER_ID,
+    tab: PROVIDER_OTHER_TAB,
+  });
   url.searchParams.delete("session");
   url.hash = "";
   window.history.pushState(null, "", url);

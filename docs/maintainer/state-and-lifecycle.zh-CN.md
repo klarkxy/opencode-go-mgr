@@ -25,7 +25,7 @@
 
 schema v16 给账号增加 `account_type`（`key | managed`）与 `setup_step` （`google_account → opencode_registration → payment → key_verification → ready`）。旧行迁移为 `key + ready`。托管草稿立即持久化为空 Key、`enabled=false`；选择器、启用接口和路由都必须同时要求 `ready` 与非空 Key。步骤名 `google_account` 在 UI 上展示为「登录身份」，可跳过。
 
-`AppConfig::default()` 的 `opencode_invite_url` 带演示默认值（`DEFAULT_OPENCODE_INVITE_URL`）。规范化后只接受最长 2048 字符、无用户名密码的 HTTPS URL，主机严格限定为 `opencode.ai` 或 `console.opencode.ai`。创建托管草稿时可编辑邀请链接；与设置不同时写回 SQLite。注册/支付/验证码仍由用户在浏览器中完成，Key 由用户复制回填；OCG Manager 不会使用 CDP 自动填表或代点支付。
+`AppConfig::default()` 的 `opencode_invite_url` 带演示默认值（`DEFAULT_OPENCODE_INVITE_URL`）。规范化后只接受最长 2048 字符、无用户名密码的 HTTPS URL，主机严格限定为 `opencode.ai` 或 `console.opencode.ai`。面板在 OpenCode Go 供应商的 **其他** 页签编辑该值。创建托管草稿时可编辑邀请链接；与已保存值不同时写回 SQLite。注册/支付/验证码仍由用户在浏览器中完成，Key 由用户复制回填；Open Console Gateway 不会使用 CDP 自动填表或代点支付。
 
 托管状态允许 **向前一步** 或 **回退到任意更早的未完成步骤**。普通 setup PATCH 只写这些步骤变更；独立的 Key 验证请求写入 `ready`。Key 实测返回 `2xx` 时进入 `ready + enabled`；`429` 同样证明 Key 有效并写入冷却；其他 HTTP 响应——包括重定向、`429` 以外的 `4xx` 与 `5xx`——以及网络或超时错误都保持 `key_verification`。
 
@@ -85,7 +85,7 @@ Profile 删除先停浏览器，校验账号 ID 防目录穿越，再把新旧 P
 - **v36：** 增量创建 `ollama_cloud_usage_state`，用于未发布的 Cookie 用量抓取。
 - **v37：** 删除 `ollama_cloud_usage_state` 且不动账号 Key 与日志，并创建 `ollama_cloud_billing`。
 
-GUI 数据目录：Windows `%USERPROFILE%\.ocg-mgr` 或 macOS/Linux `~/.ocg-mgr`。 CLI 默认 `~/.ocg-mgr-cli`。Docker 将 SQLite、Key 与 `.encryption-key` 放在 `ocg-data`，长期 Cookie 与浏览器状态放在 `ocg-browser-profiles`。两卷都是高敏感持久状态，必须在服务停止后成对备份；`ocg-browser-runtime` 只含运行时控制 token，不应加入备份。浏览器 Profile 不由 OCG Manager 加密。
+GUI 数据目录：Windows `%USERPROFILE%\.ocg-mgr` 或 macOS/Linux `~/.ocg-mgr`。 CLI 默认 `~/.ocg-mgr-cli`。Docker 将 SQLite、Key 与 `.encryption-key` 放在 `ocg-data`，长期 Cookie 与浏览器状态放在 `ocg-browser-profiles`。两卷都是高敏感持久状态，必须在服务停止后成对备份；`ocg-browser-runtime` 只含运行时控制 token，不应加入备份。浏览器 Profile 不由 Open Console Gateway 加密。
 
 转发日志插入走 `ocg-infra::sqlite_logs`（每个辅助恰好一条显式语句）。调用方拥有时间戳、诊断、费用策略、脱敏与事务。
 

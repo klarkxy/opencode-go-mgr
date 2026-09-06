@@ -64,8 +64,9 @@ skippable.
 `AppConfig::default()` seeds `opencode_invite_url` with
 `DEFAULT_OPENCODE_INVITE_URL` (demo). Normalized values must be a
 credential-free HTTPS URL up to 2,048 characters whose host is exactly
-`opencode.ai` or `console.opencode.ai`. Creating a managed draft can edit
-the invite URL and write it back to Settings when it differs. Signup,
+`opencode.ai` or `console.opencode.ai`. The dashboard edits that value on
+the OpenCode Go provider **Other** tab. Creating a managed draft can edit the invite
+URL and write it back to `opencode_invite_url` when it differs. Signup,
 registration, and payment remain manual in the isolated browser; the user
 copies the key back. Never add CDP autofill or automated payment clicks.
 
@@ -224,7 +225,7 @@ GUI data directory: Windows `%USERPROFILE%\.ocg-mgr` or macOS/Linux
 and `.encryption-key` in `ocg-data`; long-lived cookies and browser state
 live in `ocg-browser-profiles`. Stop and back up those two sensitive
 volumes together. `ocg-browser-runtime` contains only the runtime control
-token and should not be backed up. OCG Manager does not encrypt browser
+token and should not be backed up. Open Console Gateway does not encrypt browser
 profiles.
 
 Forward-log inserts go through `ocg-infra::sqlite_logs` (one explicit
