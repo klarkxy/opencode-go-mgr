@@ -11,7 +11,7 @@ const json = (relativePath) => JSON.parse(read(relativePath));
 
 const generatedModelsPlaceholder = "__OCG_MANAGER_GENERATED_MODELS__";
 
-test("Pi package registers the fixed OCG Manager provider through Pi's native API-key flow", () => {
+test("Pi package registers the fixed Open Console Gateway provider through Pi's native API-key flow", () => {
   const manifest = json("integrations/pi/package.json");
   const catalog = json("integrations/pi/models.generated.json");
 

@@ -1,8 +1,8 @@
 [简体中文](overview.zh-CN.md)
 
-# What OCG Manager Does
+# What Open Console Gateway Does
 
-OCG Manager is a local gateway that stores provider API keys in a SQLite
+Open Console Gateway is a local gateway that stores provider API keys in a SQLite
 database — including built-in Provider keys, trusted Custom API destinations,
 and user-defined Provider definitions — and exposes a loopback gateway at
 `http://127.0.0.1:9042/v1`. A Provider and a Plan are one product identity,

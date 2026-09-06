@@ -2,7 +2,7 @@
 
 # OpenCode-Go Anti-Abuse Statement
 
-OCG Manager is for legitimate local account management and gateway routing
+Open Console Gateway is for legitimate local account management and gateway routing
 only.
 
 Do not use this project to:
@@ -15,7 +15,7 @@ Do not use this project to:
 - run spam, scraping, credential attacks, fraud, or other abusive traffic;
 - disguise automated misuse as normal local client traffic.
 
-OCG Manager records upstream 429 cooldowns and skips cooled-down accounts.
+Open Console Gateway records upstream 429 cooldowns and skips cooled-down accounts.
 Respecting upstream limits is part of the design.
 
 Users are responsible for following OpenCode-Go's terms, local law, and the

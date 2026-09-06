@@ -2,7 +2,7 @@
 
 # Docker
 
-OCG Manager runs headlessly in Docker, serving the same dashboard and gateway
+Open Console Gateway runs headlessly in Docker, serving the same dashboard and gateway
 on port `9042`. Pull the image from GHCR anonymously — it ships `linux/amd64`
 and `linux/arm64`, and Docker picks the right variant. Save the release's
 `compose.example.yaml` as `compose.yaml`, add `.env` if needed, and run the
@@ -120,7 +120,7 @@ runtime volume, but always stop and back up the two sensitive persistent
 volumes, `ocg-data` and `ocg-browser-profiles`, together.
 
 Google may treat a data-center egress IP as high risk, require additional
-verification, or reject registration/login. OCG Manager does not bypass that
+verification, or reject registration/login. Open Console Gateway does not bypass that
 risk control. Complete Google's checks yourself, or use the desktop build on
 a residential connection. Real payment is always an explicit user action on
 the official site.

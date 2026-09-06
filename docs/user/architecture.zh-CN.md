@@ -2,17 +2,17 @@
 
 # 架构
 
-OCG Manager 是一个本地节点。Desktop、CLI 与 Docker 只是承载同一
+Open Console Gateway 是一个本地节点。Desktop、CLI 与 Docker 只是承载同一
 `ocg-core` 进程的不同 Host。默认监听地址为 `127.0.0.1:9042`。每个节点把数据保存在本地。
 
 ## 一个本地节点
 
-[![OCG Manager 单节点架构](../diagrams/local-node.visual-check.1440x900.light.png)](https://klarkxy.github.io/opencode-go-mgr/diagrams/local-node/)
+[![Open Console Gateway 单节点架构](../diagrams/local-node.visual-check.1440x900.light.png)](https://klarkxy.github.io/opencode-go-mgr/diagrams/local-node/)
 
 [在 GitHub Pages 打开交互图](https://klarkxy.github.io/opencode-go-mgr/diagrams/local-node/)可以切换主题、追踪关系或导出其他格式。
 
 Dashboard 与推理入口共用 `9042`，但使用两类不同凭据。客户端 **Key** 用于 AI
-工具向 OCG Manager 鉴权；选定账号后，账号凭据只会发往该账号配置的上游，Zen
+工具向 Open Console Gateway 鉴权；选定账号后，账号凭据只会发往该账号配置的上游，Zen
 Free 没有凭据。Vue SPA 通过 HTTP Dashboard V3 通信。
 
 ## 请求生命周期

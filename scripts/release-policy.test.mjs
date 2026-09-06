@@ -57,7 +57,7 @@ test("immutable image tags are created once or retained at the same digest", () 
 });
 
 test("Compose header and default image must match the release version", () => {
-  const valid = `# Pull-only Docker Compose example for OCG Manager v1.5.0.\n`
+  const valid = `# Pull-only Docker Compose example for Open Console Gateway v1.5.0.\n`
     + `image: \${OCG_IMAGE:-ghcr.io/klarkxy/opencode-go-mgr:1.5.0}\n`
     + `browser: \${OCG_BROWSER_IMAGE:-ghcr.io/klarkxy/opencode-go-mgr-browser:1.5.0}\n`;
   assert.equal(validateComposeVersion(valid, "1.5.0"), "1.5.0");

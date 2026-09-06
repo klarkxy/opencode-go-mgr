@@ -1,6 +1,6 @@
-# OCG Manager — agent guidance
+# Open Console Gateway — agent guidance
 
-OCG Manager is a local multi-Plan console: Rust workspace, Vue 3 dashboard, and Tauri desktop Host. Treat current code as authoritative. Preserve unrelated changes.
+Open Console Gateway is a local multi-Plan console: Rust workspace, Vue 3 dashboard, and Tauri desktop Host. Treat current code as authoritative. Preserve unrelated changes.
 
 ## Boundaries that affect changes
 

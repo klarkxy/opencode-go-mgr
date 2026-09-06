@@ -1,6 +1,6 @@
 [English](extending.md)
 
-# 扩展 OCG Manager
+# 扩展 Open Console Gateway
 
 扩展必须走以下三条明确路径之一。它们有意不同。
 

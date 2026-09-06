@@ -2,19 +2,19 @@
 
 # Architecture
 
-OCG Manager is one local node. Desktop, CLI, and Docker are alternative hosts
+Open Console Gateway is one local node. Desktop, CLI, and Docker are alternative hosts
 for the same `ocg-core` process. The default listener is `127.0.0.1:9042`.
 Each node stores its own data locally.
 
 ## One local node
 
-[![OCG Manager local-node architecture](../diagrams/local-node.visual-check.1440x900.light.png)](https://klarkxy.github.io/opencode-go-mgr/diagrams/local-node/)
+[![Open Console Gateway local-node architecture](../diagrams/local-node.visual-check.1440x900.light.png)](https://klarkxy.github.io/opencode-go-mgr/diagrams/local-node/)
 
 [Open the interactive diagram on GitHub Pages](https://klarkxy.github.io/opencode-go-mgr/diagrams/local-node/) to switch themes,
 trace relationships, or export another format.
 
 The Dashboard and inference endpoints share port `9042`, but they use different
-credentials. A client **Key** authenticates an AI tool to OCG Manager. After
+credentials. A client **Key** authenticates an AI tool to Open Console Gateway. After
 selection, the account credential is sent only to that account's configured
 upstream; Zen Free has no credential. The Vue SPA talks HTTP Dashboard V3.
 

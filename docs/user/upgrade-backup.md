@@ -81,7 +81,7 @@ table and adds account-scoped Ollama Cloud billing tiers (Free/Pro/Max/Team).
    `docker compose cp ocg-manager:/browser-profiles/. ../ocg-browser-profiles-backup`.
 3. Keep the backup outside the repository, and check that it contains
    `data.sqlite` and, where present, `.encryption-key`. Browser profiles hold
-   long-lived cookies and login state and are not encrypted by OCG Manager;
+   long-lived cookies and login state and are not encrypted by Open Console Gateway;
    protect them like account keys and the database.
 
 ## Restore

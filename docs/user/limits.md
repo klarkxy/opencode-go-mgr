@@ -44,7 +44,7 @@ supported protocol matrix lives in
   register Google accounts, solve verification challenges, pay, scrape
   pages, or extract keys automatically.
 - The installed Windows x64, macOS, and Linux x64 desktop dashboards can start
-  OCG Manager in the tray when the user logs in. Development builds, CLI, and
+  Open Console Gateway in the tray when the user logs in. Development builds, CLI, and
   Docker do not expose that dashboard `auto_start` switch. Docker Compose
   separately uses `restart: unless-stopped`, so its service can restart with
   the Docker daemon.

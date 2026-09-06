@@ -2,7 +2,7 @@
 
 # Release Artifacts
 
-OCG Manager ships desktop installers for three platforms, a CLI archive for each,
+Open Console Gateway ships desktop installers for three platforms, a CLI archive for each,
 and a multi-arch container image.
 
 | Runner | GUI | CLI |

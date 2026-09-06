@@ -22,7 +22,7 @@
 
 写入使用跨进程锁、同目录临时文件、替换与回读校验；多文件中途失败时会补偿，无法完全补偿则留下可恢复的“部分完成”状态。预览、错误、日志和所有权记录都不会暴露所选 Key。
 
-损坏、链接、过大、非 UTF-8、重复键，以及连接器不支持的 JSON5/YAML 结构都会安全拒绝，并继续提供手动教程。Hermes 会逐字节保留顶层 `model` 区段之外的内容；若受管的 `model` 区段内部含注释，则会拒绝写入，而不是静默丢掉注释。接入前请关闭目标客户端，提交后再重新打开；OCG Manager 不会强制结束可能包含未保存会话的进程。Hermes 只管理默认原生 profile：显式 `HERMES_HOME` 优先；Windows 默认使用 `%LOCALAPPDATA%/hermes`，`~/.hermes` 仅作为旧版位置识别。检测到多个位置时会拒绝双写。
+损坏、链接、过大、非 UTF-8、重复键，以及连接器不支持的 JSON5/YAML 结构都会安全拒绝，并继续提供手动教程。Hermes 会逐字节保留顶层 `model` 区段之外的内容；若受管的 `model` 区段内部含注释，则会拒绝写入，而不是静默丢掉注释。接入前请关闭目标客户端，提交后再重新打开；Open Console Gateway 不会强制结束可能包含未保存会话的进程。Hermes 只管理默认原生 profile：显式 `HERMES_HOME` 优先；Windows 默认使用 `%LOCALAPPDATA%/hermes`，`~/.hermes` 仅作为旧版位置识别。检测到多个位置时会拒绝双写。
 
 各客户端对 Base URL 都有自己的执念：
 
@@ -30,7 +30,7 @@
 - Claude Desktop 使用根地址加 `/claude-desktop`，由客户端继续请求 `/claude-desktop/v1/messages` 与 `/claude-desktop/v1/models`。
 - Gemini CLI 使用根地址，并设置 `GOOGLE_GENAI_API_VERSION=v1beta`。远端 Base URL 必须使用 HTTPS；只有 `localhost`、`127.0.0.1` 与 `[::1]` 可用 HTTP。非回环 HTTP 根地址不符合该客户端限制。
 - Pi、Kimi Code CLI、OpenCode、OpenClaw、Hermes、Cline、Roo Code、Continue 使用带 `/v1` 的 API Base URL。
-- VS Code Copilot Chat 与 WorkBuddy 使用完整 `/v1/chat/completions` 端点。Codex 使用带 `/v1` 的 API Base URL，且必须 `wire_api = "responses"`。CLI 用 `~/.codex/ocg.config.toml` + `codex --profile ocg`，Desktop 或常驻默认则合并进用户级 `~/.codex/config.toml`。`~/.codex/ocg-model-catalog.json` 可选：不写也能请求；只有需要选择器、真实上下文窗口和推理档位时才启用 `model_catalog_json`。启用后会整份替换 Codex 内置目录，且必须包含当前必填字段。不写 catalog 时，未知 slug 按 Codex 的 272K 回退元数据。请求始终走 OCG Manager 的 Responses 入口。
+- VS Code Copilot Chat 与 WorkBuddy 使用完整 `/v1/chat/completions` 端点。Codex 使用带 `/v1` 的 API Base URL，且必须 `wire_api = "responses"`。CLI 用 `~/.codex/ocg.config.toml` + `codex --profile ocg`，Desktop 或常驻默认则合并进用户级 `~/.codex/config.toml`。`~/.codex/ocg-model-catalog.json` 可选：不写也能请求；只有需要选择器、真实上下文窗口和推理档位时才启用 `model_catalog_json`。启用后会整份替换 Codex 内置目录，且必须包含当前必填字段。不写 catalog 时，未知 slug 按 Codex 的 272K 回退元数据。请求始终走 Open Console Gateway 的 Responses 入口。
 
 Codex 连接器会尊重 `CODEX_HOME`，否则使用 `~/.codex/config.toml`。它只接管根级 `model`、根级 `model_provider` 与 `model_providers.ocg_manager` 表，绝不读取或修改 `~/.codex/auth.json`、`openai_base_url`、其他 Provider、MCP、权限或模型目录。所选 Key 会作为 Codex 的 `experimental_bearer_token` 保存在 OCG 自有 Provider 表中，因此该文件必须只允许当前系统用户读取。与其他配置切换器混用前请单独备份。
 

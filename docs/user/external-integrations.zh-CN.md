@@ -2,11 +2,11 @@
 
 # 外部接入
 
-外部接入是可选、受本产品支持的本机服务，用来扩展 OCG Manager。管理面板保留七个核心页面；受支持的入口位于 **设置** 下方通用的 **扩展** 分组。
+外部接入是可选、受本产品支持的本机服务，用来扩展 Open Console Gateway。管理面板保留七个核心页面；受支持的入口位于 **设置** 下方通用的 **扩展** 分组。
 
 ## CPA
 
-CPA（CLI Proxy API）是本机订阅运行时。OCG Manager 可管理其当前稳定支持的 Codex、Claude、Antigravity、Kimi 和 xAI 账号流程，并路由得到的订阅池；但 OAuth 浏览器会话、Token、auth 文件和内部调度始终由 CPA 持有。OCG 只保存本地连接配置、两把 CPA 凭据和本地模型快照。Management Key 在 OCG 存储中加密，托管子进程只通过 `MANAGEMENT_PASSWORD` 接收它。CPA 自身的配置必须包含客户端 `api-keys`，因此受保护的 Inference Key 和直连客户端 Key 必然出现在 OCG 数据目录下的 CPA 本地配置中。创建客户端 Key 时，V3 仍只返回一次明文；列表只显示指纹。
+CPA（CLI Proxy API）是本机订阅运行时。Open Console Gateway 可管理其当前稳定支持的 Codex、Claude、Antigravity、Kimi 和 xAI 账号流程，并路由得到的订阅池；但 OAuth 浏览器会话、Token、auth 文件和内部调度始终由 CPA 持有。OCG 只保存本地连接配置、两把 CPA 凭据和本地模型快照。Management Key 在 OCG 存储中加密，托管子进程只通过 `MANAGEMENT_PASSWORD` 接收它。CPA 自身的配置必须包含客户端 `api-keys`，因此受保护的 Inference Key 和直连客户端 Key 必然出现在 OCG 数据目录下的 CPA 本地配置中。创建客户端 Key 时，V3 仍只返回一次明文；列表只显示指纹。
 
 只支持以下本机部署：
 
@@ -14,7 +14,7 @@ CPA（CLI Proxy API）是本机订阅运行时。OCG Manager 可管理其当前�
 - **桌面版或 CLI：** 在同一台机器运行 CPA，并配置回环地址，例如 `http://127.0.0.1:8317`。
 - **Docker：** 启用 [Docker](docker.zh-CN.md) 中的可选 Compose 并列服务。OCG 使用只读的 `http://cpa:8317` 服务地址；面板不接受局域网、互联网或跨节点 CPA 地址。
 
-包含内嵌凭据、query、fragment、重定向或非回环主机的 URL 会被拒绝。不要把 OCG Manager Key 复用为任一 CPA Key。
+包含内嵌凭据、query、fragment、重定向或非回环主机的 URL 会被拒绝。不要把 Open Console Gateway Key 复用为任一 CPA Key。
 
 ### 连接与运维
 
@@ -29,7 +29,7 @@ CPA（CLI Proxy API）是本机订阅运行时。OCG Manager 可管理其当前�
 
 ## 新增其他接入
 
-静态外部接入出现在 **扩展** 分组。它们必须经过产品批准，使用 typed Dashboard V3 adapter 和有文档的本机边界。贡献路径见[扩展 OCG Manager](../maintainer/extending.zh-CN.md)。
+静态外部接入出现在 **扩展** 分组。它们必须经过产品批准，使用 typed Dashboard V3 adapter 和有文档的本机边界。贡献路径见[扩展 Open Console Gateway](../maintainer/extending.zh-CN.md)。
 
 ---
 

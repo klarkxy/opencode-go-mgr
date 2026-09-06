@@ -547,7 +547,7 @@ fn inspect(
                 ApplicationConnectorStatus::Conflict,
                 true,
                 detected,
-                Some("connector-owned fields changed outside OCG Manager".into()),
+                Some("connector-owned fields changed outside Open Console Gateway".into()),
                 &targets,
             ),
             Err(error) => info(
@@ -903,7 +903,7 @@ fn desired_documents(
                 toml_field("model_provider", "ocg_manager".into(), false),
                 toml_field(
                     "model_providers.ocg_manager.name",
-                    "OCG Manager".into(),
+                    "Open Console Gateway".into(),
                     false,
                 ),
                 toml_field(
@@ -967,7 +967,7 @@ fn desired_documents(
                     fields: vec![
                         json_field(
                             "/provider/ocg",
-                            json!({"npm":"@ai-sdk/openai-compatible","name":"OCG Manager","options":{"baseURL":format!("{}/v1", request.gateway_url),"apiKey":"{env:OCG_API_KEY}"},"models":model_map}),
+                            json!({"npm":"@ai-sdk/openai-compatible","name":"Open Console Gateway","options":{"baseURL":format!("{}/v1", request.gateway_url),"apiKey":"{env:OCG_API_KEY}"},"models":model_map}),
                             false,
                         ),
                         json_field("/model", json!(format!("ocg/{primary}")), false),
@@ -2596,7 +2596,7 @@ fn state_target(data_dir: &Path, id: ApplicationConnectorId) -> Target {
     Target {
         id: "__state",
         path: state_path(data_dir, id),
-        label: "OCG Manager connector sidecar",
+        label: "Open Console Gateway connector sidecar",
         format: DocumentFormat::Json,
     }
 }

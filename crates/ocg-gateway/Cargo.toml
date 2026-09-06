@@ -6,7 +6,7 @@ authors.workspace = true
 license-file.workspace = true
 repository.workspace = true
 rust-version.workspace = true
-description = "Protocol, policy, and execution boundaries for the OCG Manager inference gateway"
+description = "Protocol, policy, and execution boundaries for the Open Console Gateway inference gateway"
 
 [dependencies]
 anyhow = "1"

@@ -117,7 +117,7 @@ function encodePayload(payload: unknown): string {
 export function buildChatboxConfig(context: GuideContext) {
   return {
     id: `ocg-manager-${encodeURIComponent(context.rootUrl)}`,
-    name: "OCG Manager",
+    name: "Open Console Gateway",
     type: "openai" as const,
     iconUrl: context.iconUrl,
     urls: { website: `${context.rootUrl}/dashboard/` },
@@ -511,7 +511,7 @@ export function buildCodexModelCatalog(context: GuideContext) {
       const entry: Record<string, unknown> = {
         slug: modelId,
         display_name: modelId,
-        description: `${modelId} via OCG Manager`,
+        description: `${modelId} via Open Console Gateway`,
         base_instructions: CODEX_CATALOG_BASE_INSTRUCTIONS,
         context_window: metadata.contextWindow,
         max_context_window: metadata.contextWindow,
@@ -551,7 +551,7 @@ function buildCodexProviderConfig(context: GuideContext): string {
     '# model_catalog_json = "ocg-model-catalog.json"',
     "",
     "[model_providers.ocg]",
-    'name = "OCG Manager"',
+    'name = "Open Console Gateway"',
     `base_url = ${JSON.stringify(context.apiBaseUrl)}`,
     'env_key = "OCG_API_KEY"',
     'wire_api = "responses"',
@@ -611,7 +611,7 @@ function kimiCodeModelTable(modelId: string): string {
     ? `\nsupport_efforts = ${JSON.stringify(metadata.efforts)}`
       + (metadata.defaultEffort ? `\ndefault_effort = ${JSON.stringify(metadata.defaultEffort)}` : "")
     : "";
-  return `[models.${JSON.stringify(alias)}]\nprovider = "ocg"\nmodel = ${JSON.stringify(modelId)}\nmax_context_size = ${metadata.contextWindow}\ncapabilities = ${JSON.stringify(kimiCodeCapabilities(metadata))}\ndisplay_name = ${JSON.stringify(`${modelId} (OCG Manager)`)}${effortLines}`;
+  return `[models.${JSON.stringify(alias)}]\nprovider = "ocg"\nmodel = ${JSON.stringify(modelId)}\nmax_context_size = ${metadata.contextWindow}\ncapabilities = ${JSON.stringify(kimiCodeCapabilities(metadata))}\ndisplay_name = ${JSON.stringify(`${modelId} (Open Console Gateway)`)}${effortLines}`;
 }
 
 function kimiTemporaryLaunch(context: GuideContext, key: string, shell: "powershell" | "bash"): string {
@@ -693,11 +693,11 @@ export const APPLICATION_GUIDES = [
     protocol: "Anthropic Messages",
     endpointKind: "messages",
     officialUrl: "https://code.claude.com/docs/en/llm-gateway-connect",
-    summary: "通过 Anthropic 兼容入口连接 OCG Manager，地址使用不带 /v1 的根地址。",
+    summary: "通过 Anthropic 兼容入口连接 Open Console Gateway，地址使用不带 /v1 的根地址。",
     steps: [
       "打开用户级 ~/.claude/settings.json，将下面的环境变量和模型配置合并进去。",
       "确认 ANTHROPIC_BASE_URL 使用下方根地址，ANTHROPIC_AUTH_TOKEN 使用 Key。",
-      "启动 Claude Code 并发送一条测试消息，再到 OCG Manager 的请求日志确认成功记录。",
+      "启动 Claude Code 并发送一条测试消息，再到 Open Console Gateway 的请求日志确认成功记录。",
     ],
     notes: [
       "Claude Code 使用 Anthropic Messages 协议，因此不要给 ANTHROPIC_BASE_URL 追加 /v1。",
@@ -744,12 +744,12 @@ export const APPLICATION_GUIDES = [
     protocol: "Anthropic Messages",
     endpointKind: "messages",
     officialUrl: "https://claude.com/docs/third-party/claude-desktop/gateway",
-    summary: "通过 Anthropic 兼容入口连接 OCG Manager，地址使用不带 /v1 的根地址。",
+    summary: "通过 Anthropic 兼容入口连接 Open Console Gateway，地址使用不带 /v1 的根地址。",
     steps: [
       "先在 Help → Troubleshooting → Enable Developer Mode 打开开发者模式，然后重启 Claude Desktop。",
       "打开 Claude Desktop 的 Developer → Configure Third-Party Inference，选择 Gateway。",
       "填写下方 Gateway base URL 和 Key；三个角色模型在本页选择，桌面窗口不填模型 ID。",
-      "发送一条测试任务，再到 OCG Manager 的请求日志确认成功记录。",
+      "发送一条测试任务，再到 Open Console Gateway 的请求日志确认成功记录。",
     ],
     notes: [
       "Claude Desktop 可从配置窗口导出 .reg 或 .mobileconfig 供团队部署；个人用户直接使用该窗口。",
@@ -773,18 +773,18 @@ export const APPLICATION_GUIDES = [
     endpointKind: "responses",
     officialUrl: "https://learn.chatgpt.com/docs/config-file/config-advanced#custom-model-providers",
     badge: "Responses",
-    summary: "注册 OCG Manager 为 Codex 自定义模型提供商，通过 Responses 接口调用。",
+    summary: "注册 Open Console Gateway 为 Codex 自定义模型提供商，通过 Responses 接口调用。",
     steps: [
       "CLI 切换：保存 ~/.codex/ocg.config.toml 后运行 codex --profile ocg；Desktop 或默认提供商：把相同配置合并进用户级 ~/.codex/config.toml。",
       "可选：把模型目录保存为 ~/.codex/ocg-model-catalog.json，并在 toml 里取消注释 model_catalog_json。",
       "在启动 Codex 的同一终端设置 OCG_API_KEY 环境变量。",
-      "启动 Codex 并发送一条测试消息，再到 OCG Manager 的请求日志确认成功记录。",
+      "启动 Codex 并发送一条测试消息，再到 Open Console Gateway 的请求日志确认成功记录。",
     ],
     notes: [
       "Codex 自定义 provider 必须 wire_api = \"responses\"；当前 Codex 不再支持 chat wire_api。",
-      "OCG Manager 原生接收 /v1/responses；若上游更偏好其他协议，Gateway 会转换，无需再叠一层 Chat 转换器。",
+      "Open Console Gateway 原生接收 /v1/responses；若上游更偏好其他协议，Gateway 会转换，无需再叠一层 Chat 转换器。",
       "model_catalog_json 可选。不写也能请求，未知模型按 272K 回退。写了会整份替换 Codex 内置目录，用来提供选择器、真实上下文窗口和推理档位。",
-      "OCG Manager 当前提供无状态 Responses 转发，不要依赖 previous_response_id 延续服务端状态。",
+      "Open Console Gateway 当前提供无状态 Responses 转发，不要依赖 previous_response_id 延续服务端状态。",
       "项目内 .codex/config.toml 不能配置 model_providers；provider 必须写在用户级配置或 profile 文件。",
       "Desktop 更适合合并用户级 config.toml；CLI 可用 profile 避免改默认配置。合并 config.toml 会切换默认 model_provider。",
       "模型能力由实际上游决定；Agent 工具调用需要所选模型正确支持 tools。",
@@ -837,7 +837,7 @@ export const APPLICATION_GUIDES = [
     summary: "填写下方 Base URL、Key 和模型 ID。",
     steps: [
       "填写下方 Base URL、Key 和模型 ID。",
-      "发送一条测试任务，再到 OCG Manager 的请求日志确认成功记录。",
+      "发送一条测试任务，再到 Open Console Gateway 的请求日志确认成功记录。",
     ],
     notes: [
       "模型能力由实际上游决定；Agent 工具调用需要所选模型正确支持 tools。",
@@ -912,14 +912,14 @@ export const APPLICATION_GUIDES = [
     endpointKind: "chat",
     officialUrl: "https://pi.dev/docs/latest/models",
     badge: "原生插件",
-    summary: "把 OCG Manager 作为原生 Provider 扩展安装到 Pi，不直接改写 models.json。",
+    summary: "把 Open Console Gateway 作为原生 Provider 扩展安装到 Pi，不直接改写 models.json。",
     steps: [
       "在上方选择要暴露给 Pi 的 Alias，然后使用本机接入面板安装插件。",
-      "重新启动 Pi，在 Provider 的原生登录入口为 OCG Manager 保存当前 Key。",
-      "选择 ocg-manager 下的模型发送测试任务，再到 OCG Manager 的请求日志确认成功记录。",
+      "重新启动 Pi，在 Provider 的原生登录入口为 Open Console Gateway 保存当前 Key。",
+      "选择 ocg-manager 下的模型发送测试任务，再到 Open Console Gateway 的请求日志确认成功记录。",
     ],
     notes: [
-      "插件由 Pi 自己的 package manager 安装与卸载；OCG Manager 不接管 Pi 的其他扩展。",
+      "插件由 Pi 自己的 package manager 安装与卸载；Open Console Gateway 不接管 Pi 的其他扩展。",
       "Key 通过 Pi 的原生 auth/login 流程保存，不会写入插件源码或生成的模型目录。",
       "重新安装只更新 OCG 自有 Provider 与模型清单，不覆盖内置 Provider。",
     ],
@@ -971,11 +971,11 @@ export const APPLICATION_GUIDES = [
     endpointKind: "chat",
     officialUrl: "https://github.com/deepseek-ai/deepseek-harness",
     badge: "原生插件",
-    summary: "把 OCG Manager 作为原生 Bundle 安装到 DSH 的 web profile，不覆盖现有 Harness 配置。",
+    summary: "把 Open Console Gateway 作为原生 Bundle 安装到 DSH 的 web profile，不覆盖现有 Harness 配置。",
     steps: [
       "在上方选择要暴露给 DSH 的 Alias，然后使用本机接入面板安装插件。",
       "重新启动 DSH web profile，在 Models 页面为 OCG_MANAGER_API_KEY 保存当前 Key。",
-      "选择 ocg-manager 下的模型发送测试任务，再到 OCG Manager 的请求日志确认成功记录。",
+      "选择 ocg-manager 下的模型发送测试任务，再到 Open Console Gateway 的请求日志确认成功记录。",
     ],
     notes: [
       "第一阶段只管理 DSH 的 web profile；headless、TUI 和自定义 profile 暂不自动安装。",
@@ -1009,7 +1009,7 @@ export const APPLICATION_GUIDES = [
     steps: [
       "复制并运行当前平台的临时启动命令；Kimi Code CLI 会在内存中创建 OCG Provider。",
       "把下面的 provider 与 model 配置合并到用户级 ~/.kimi-code/config.toml。",
-      "启动 Kimi Code CLI 并发送一条测试任务，再到 OCG Manager 的请求日志确认成功记录。",
+      "启动 Kimi Code CLI 并发送一条测试任务，再到 Open Console Gateway 的请求日志确认成功记录。",
     ],
     notes: [
       "Kimi CLI 已迁移到 Kimi Code CLI；新接入使用 ~/.kimi-code 而不是旧版 ~/.kimi。",
@@ -1045,11 +1045,11 @@ export const APPLICATION_GUIDES = [
     protocol: "OpenAI Chat Completions",
     endpointKind: "chat",
     officialUrl: "https://opencode.ai/docs/providers/",
-    summary: "使用 OpenAI Compatible AI SDK provider，将 OCG Manager 注册为自定义服务商。",
+    summary: "使用 OpenAI Compatible AI SDK provider，将 Open Console Gateway 注册为自定义服务商。",
     steps: [
       "把下面的 provider 配置保存为 ~/.config/opencode/ocg.json。",
       "设置 OCG_API_KEY 和 OPENCODE_CONFIG 后启动 OpenCode。",
-      "在 OpenCode 中发送一条测试消息，再到 OCG Manager 的请求日志确认成功记录。",
+      "在 OpenCode 中发送一条测试消息，再到 Open Console Gateway 的请求日志确认成功记录。",
     ],
     notes: [
       "baseURL 必须使用带 /v1 的 API Base URL。",
@@ -1064,7 +1064,7 @@ export const APPLICATION_GUIDES = [
             provider: {
               ocg: {
                 npm: "@ai-sdk/openai-compatible",
-                name: "OCG Manager",
+                name: "Open Console Gateway",
                 options: { baseURL: context.apiBaseUrl, apiKey: "{env:OCG_API_KEY}" },
                 models: Object.fromEntries(models(context).map((modelId) => [
                   modelId,
@@ -1101,7 +1101,7 @@ export const APPLICATION_GUIDES = [
     endpointKind: "chat",
     officialUrl: "https://www.workbuddy.cn/docs/workbuddy/From-Beginner-to-Expert-Guide/Function-Description/Model",
     badge: "GUI",
-    summary: "通过 WorkBuddy 官方可视化自定义模型表单接入 OCG Manager，无需编辑 JSON。",
+    summary: "通过 WorkBuddy 官方可视化自定义模型表单接入 Open Console Gateway，无需编辑 JSON。",
     steps: [
       "打开 WorkBuddy 设置 → 模型 → 自定义模型，点击添加模型并选择 自定义/Custom。",
       "按下方参数填写完整 Chat Completions 地址、Key、模型 ID 与能力开关。",
@@ -1129,7 +1129,7 @@ export const APPLICATION_GUIDES = [
     steps: [
       "首次配置时运行下方 onboarding 命令；命令会修改 OpenClaw 本机配置，请先确认内容。",
       "填写下方 Base URL、Key 和模型 ID。",
-      "运行 openclaw models status --probe --probe-provider ocg，再到 OCG Manager 请求日志确认真实调用。",
+      "运行 openclaw models status --probe --probe-provider ocg，再到 Open Console Gateway 请求日志确认真实调用。",
     ],
     notes: [
       "onboarding 的 ref 模式固定引用 CUSTOM_API_KEY；下方 .env 与手工 JSON 使用同一变量。",
@@ -1197,7 +1197,7 @@ export const APPLICATION_GUIDES = [
     steps: [
       "运行 hermes model，选择 Custom endpoint，再填写下方地址、Key 和模型。",
       "transport 使用 chat_completions，并按下方元数据填写 context_length 与图片能力。",
-      "运行 hermes chat -q 发送测试任务，再到 OCG Manager 请求日志确认真实调用。",
+      "运行 hermes chat -q 发送测试任务，再到 Open Console Gateway 请求日志确认真实调用。",
     ],
     notes: [
       "baseURL 必须使用带 /v1 的 API Base URL。",
@@ -1227,7 +1227,7 @@ export const APPLICATION_GUIDES = [
     steps: [
       "进入设置 → 模型服务，新增 OpenAI 类型的自定义服务商。",
       "填写 API 地址和 Key 后，点击获取模型列表并勾选需要的模型。",
-      "执行连接检查或发送一条测试消息，再到 OCG Manager 的请求日志确认成功记录。",
+      "执行连接检查或发送一条测试消息，再到 Open Console Gateway 的请求日志确认成功记录。",
     ],
     notes: ["API 地址使用不带 /v1 的根地址，由 Cherry Studio 补全 OpenAI 请求路径。"],
     snippets: (context) => [
@@ -1257,7 +1257,7 @@ export const APPLICATION_GUIDES = [
     steps: [
       "在 Copilot Chat 的模型管理中选择 Custom Endpoint，并将 API 类型设为 Chat Completions。",
       "填写下方完整 Chat Completions Endpoint、Key 和模型 ID。",
-      "在 Chat 中选择该模型并发送测试消息，再到 OCG Manager 的请求日志确认成功记录。",
+      "在 Chat 中选择该模型并发送测试消息，再到 Open Console Gateway 的请求日志确认成功记录。",
     ],
     notes: [
       "BYOK 只影响支持自带密钥的聊天模型，不接管 Copilot 行内补全、embedding 等能力。",
@@ -1267,7 +1267,7 @@ export const APPLICATION_GUIDES = [
       keyedSnippet(context, "chatLanguageModels.json", "json", (key) =>
         JSON.stringify(
           [{
-            name: "OCG Manager",
+            name: "Open Console Gateway",
             vendor: "customendpoint",
             apiKey: key,
             apiType: "chat-completions",
@@ -1295,11 +1295,11 @@ export const APPLICATION_GUIDES = [
     protocol: "OpenAI Chat Completions",
     endpointKind: "chat",
     officialUrl: "https://docs.cline.bot/provider-config/openai-compatible",
-    summary: "选择 OpenAI Compatible provider，直接填写 OCG Manager 的 API Base URL。",
+    summary: "选择 OpenAI Compatible provider，直接填写 Open Console Gateway 的 API Base URL。",
     steps: [
       "打开 Cline 设置，将 API Provider 选择为 OpenAI Compatible。",
       "填写下方 Base URL、Key 和模型 ID。",
-      "发送一条测试任务，再到 OCG Manager 的请求日志确认成功记录。",
+      "发送一条测试任务，再到 Open Console Gateway 的请求日志确认成功记录。",
     ],
     notes: ["模型能力由实际上游决定；Agent 工具调用需要所选模型正确支持 tools。"],
     snippets: (context) => [
@@ -1318,12 +1318,12 @@ export const APPLICATION_GUIDES = [
     protocol: "OpenAI Chat Completions",
     endpointKind: "chat",
     officialUrl: "https://roocodeinc.github.io/Roo-Code/features/settings-management/",
-    summary: "选择 OpenAI Compatible provider，将对话请求转发到 OCG Manager。",
+    summary: "选择 OpenAI Compatible provider，将对话请求转发到 Open Console Gateway。",
     steps: [
       "打开 Roo Code 配置，将 API Provider 选择为 OpenAI Compatible。",
       "填写下方 Base URL、Key 和模型 ID。",
       "首次配置后导出 roo-code-settings.json；其他环境可用 Import 或 roo-cline.autoImportSettingsPath 自动导入。",
-      "发送一条测试任务，再到 OCG Manager 的请求日志确认成功记录。",
+      "发送一条测试任务，再到 Open Console Gateway 的请求日志确认成功记录。",
     ],
     notes: [
       "Roo Code 导出文件包含明文 API Key，只能保存在可信位置。",
@@ -1356,7 +1356,7 @@ export const APPLICATION_GUIDES = [
       "打开 Continue 用户级 YAML 配置，将下面的模型项合并到 models。",
       "把 Key 写入 ~/.continue/.env，YAML 通过 secrets.OCG_API_KEY 引用。",
       "保持 provider 为 openai、apiBase 使用 /v1 地址、useResponsesApi 为 false。",
-      "选择 OCG Manager 模型发送测试消息，再到请求日志确认成功记录。",
+      "选择 Open Console Gateway 模型发送测试消息，再到请求日志确认成功记录。",
     ],
     notes: [
       "useResponsesApi: false 用于明确走 Chat Completions 兼容路径。",
@@ -1367,8 +1367,8 @@ export const APPLICATION_GUIDES = [
       {
         label: "Continue YAML",
         language: "yaml",
-        display: `name: OCG Manager\nversion: 1.0.0\nschema: v1\nmodels:\n${models(context).map((modelId) => `  - name: ${JSON.stringify(`${modelId} (OCG)`)}\n    provider: openai\n    model: ${JSON.stringify(modelId)}\n    apiBase: ${JSON.stringify(context.apiBaseUrl)}\n    apiKey: \${{ secrets.OCG_API_KEY }}\n    useResponsesApi: false\n    capabilities:\n      - tool_use`).join("\n")}`,
-        copy: `name: OCG Manager\nversion: 1.0.0\nschema: v1\nmodels:\n${models(context).map((modelId) => `  - name: ${JSON.stringify(`${modelId} (OCG)`)}\n    provider: openai\n    model: ${JSON.stringify(modelId)}\n    apiBase: ${JSON.stringify(context.apiBaseUrl)}\n    apiKey: \${{ secrets.OCG_API_KEY }}\n    useResponsesApi: false\n    capabilities:\n      - tool_use`).join("\n")}`,
+        display: `name: Open Console Gateway\nversion: 1.0.0\nschema: v1\nmodels:\n${models(context).map((modelId) => `  - name: ${JSON.stringify(`${modelId} (OCG)`)}\n    provider: openai\n    model: ${JSON.stringify(modelId)}\n    apiBase: ${JSON.stringify(context.apiBaseUrl)}\n    apiKey: \${{ secrets.OCG_API_KEY }}\n    useResponsesApi: false\n    capabilities:\n      - tool_use`).join("\n")}`,
+        copy: `name: Open Console Gateway\nversion: 1.0.0\nschema: v1\nmodels:\n${models(context).map((modelId) => `  - name: ${JSON.stringify(`${modelId} (OCG)`)}\n    provider: openai\n    model: ${JSON.stringify(modelId)}\n    apiBase: ${JSON.stringify(context.apiBaseUrl)}\n    apiKey: \${{ secrets.OCG_API_KEY }}\n    useResponsesApi: false\n    capabilities:\n      - tool_use`).join("\n")}`,
       },
       keyedSnippet(context, "~/.continue/.env", "dotenv", (key) => `OCG_API_KEY=${JSON.stringify(key)}`),
     ],
@@ -1381,11 +1381,11 @@ export const APPLICATION_GUIDES = [
     protocol: "OpenAI Chat Completions",
     endpointKind: "chat",
     officialUrl: "https://docs.chatboxai.app/en/guides/providers/import-config",
-    summary: "新增 OpenAI API 类型提供商，API Host 使用 OCG Manager 根地址。",
+    summary: "新增 OpenAI API 类型提供商，API Host 使用 Open Console Gateway 根地址。",
     steps: [
       "优先点击上方一键导入；若客户端未安装或浏览器阻止协议链接，再按下方参数手动添加。",
       "填写下方 API Host、Key 和模型 ID，保留默认的 /v1/chat/completions 路径。",
-      "发送一条测试消息，再到 OCG Manager 的请求日志确认成功记录。",
+      "发送一条测试消息，再到 Open Console Gateway 的请求日志确认成功记录。",
     ],
     notes: [
       "Chatbox 深链中的 Base64 只是编码，不是加密；不要分享包含 Key 的导入链接。",

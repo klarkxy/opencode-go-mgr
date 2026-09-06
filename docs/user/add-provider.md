@@ -2,13 +2,13 @@
 
 # Add a Provider
 
-Use this guide when you want OCG Manager to route to another upstream service. There are three different integration paths:
+Use this guide when you want Open Console Gateway to route to another upstream service. There are three different integration paths:
 
 | Goal | Path | Repository change |
 | --- | --- | --- |
 | Add a named Provider this node can reuse across accounts | **Providers** → **New Provider** (user-defined) | No |
 | Connect one OpenAI- or Anthropic-compatible endpoint on a single account | Add a **Custom API** account | No |
-| Ship a named built-in Provider (the product's Provider/Plan identity) to every OCG Manager user | Add a sealed built-in Provider | Yes, reviewed code and tests |
+| Ship a named built-in Provider (the product's Provider/Plan identity) to every Open Console Gateway user | Add a sealed built-in Provider | Yes, reviewed code and tests |
 
 The **Adapter Registry** stays static and sealed. User-defined Providers are typed persisted definitions; every one binds the code-owned Configurable HTTP adapter. OCG never loads user scripts, plugins, or binaries. Unknown `provider_id` values fail closed unless they match a saved definition. Custom API remains a distinct account-owned path: it keeps Endpoint, protocol, and model mappings on the account card.
 
@@ -33,7 +33,7 @@ Backups use payload V4 with `providerId` only and include every saved user-defin
 2. Enter a name, the upstream API Key, one API URL, and one upstream protocol: **Chat Completions**, **Responses**, or **Messages**.
 3. Add at least one mapping: a public model name clients request and the exact upstream model ID. **Fetch models** can fill the draft from upstream IDs when the upstream exposes the optional model-list interface below.
 4. Save the account. A valid new account is enabled by default; **Test connection** is an optional real, potentially billable request through that exact account.
-5. Call authenticated `GET /v1/models` on OCG Manager and confirm the routeable public name is published, then send one inference request.
+5. Call authenticated `GET /v1/models` on Open Console Gateway and confirm the routeable public name is published, then send one inference request.
 
 One Custom account uses one upstream protocol for every mapping on that card. Matching client traffic passes through; other supported client formats are converted to the selected upstream protocol. **Fetch models** returns upstream IDs only; importing one makes `public model = upstream ID` exactly, without suffix stripping or generated Aliases. You may then edit the public name while retaining the exact upstream ID.
 
@@ -89,7 +89,7 @@ A built-in integration is appropriate only when the Provider needs product-owned
 
 Before opening a contribution, write down the upstream origin, auth scheme, catalog source, supported model/protocol pairs, streaming behavior, error semantics, quota/price source, and a non-billable validation plan. Keep the new family fail-closed until its complete routing and control-plane path exists.
 
-For repository architecture details, continue with [Extending OCG Manager](../maintainer/extending.md) and [Runtime invariants](../maintainer/runtime-invariants.md).
+For repository architecture details, continue with [Extending Open Console Gateway](../maintainer/extending.md) and [Runtime invariants](../maintainer/runtime-invariants.md).
 
 ---
 

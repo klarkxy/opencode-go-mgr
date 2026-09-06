@@ -2,7 +2,7 @@
 
 # 常见问题
 
-OCG Manager 出问题，通常先怀疑有别的进程占了 `127.0.0.1:9042`——本地 Gateway 的端口，向来不太空闲。下文还覆盖陈旧 SPA、冲突写入、账号冷却，以及看起来能跑但实际仍是 `pending` 草稿的 Plan；Gateway 宁可报错，也不会替你猜一个可能多收钱的请求。
+Open Console Gateway 出问题，通常先怀疑有别的进程占了 `127.0.0.1:9042`——本地 Gateway 的端口，向来不太空闲。下文还覆盖陈旧 SPA、冲突写入、账号冷却，以及看起来能跑但实际仍是 `pending` 草稿的 Plan；Gateway 宁可报错，也不会替你猜一个可能多收钱的请求。
 
 - **托盘里点不开管理面板。**`127.0.0.1:9042` 被其他进程占用，或上一个托盘程序还握着单实例锁。退出占用端口的进程或上一个 release 托盘程序后重试。仅源码开发时可用 `scripts/free-dev-port.mjs` 清理 `30001` 上的残留 Vite 进程；它不会释放 `9042`，也不会释放桌面端单实例锁。
 - **上游返回 `401 Unauthorized`。**Zen Free 原样返回。OpenCode Go 只在结构化错误为 `CreditsError` 时换号并记录 `auth_error`；续费后重新保存同一个 Key 即可清除。`ModelError`、未知或畸形的 OpenCode 401 仍原样返回。Custom API 的 `401` 会换到下一张合格卡片并记录 `auth_error`。要确认 OpenCode Go Key 本身是否失效，请执行 `key ping <id>` 或发一次真实客户端请求。托管账号 Key 验证与 Custom **验证连接** 在各自流程里拿到 401 时仍会记录 `auth_error`。

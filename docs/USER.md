@@ -2,7 +2,7 @@
 
 # User Guide
 
-This guide is for people running OCG Manager as a desktop app, a headless gateway, or a Docker service. Chapters follow the order you will actually meet them: install first, troubleshoot later.
+This guide is for people running Open Console Gateway as a desktop app, a headless gateway, or a Docker service. Chapters follow the order you will actually meet them: install first, troubleshoot later.
 
 ## Add integrations
 
@@ -11,7 +11,7 @@ This guide is for people running OCG Manager as a desktop app, a headless gatewa
 
 ## Chapters
 
-- [What OCG Manager Does](user/overview.md) — Product positioning and the four jobs the gateway performs.
+- [What Open Console Gateway Does](user/overview.md) — Product positioning and the four jobs the gateway performs.
 - [Architecture Diagrams](user/architecture.md) — Text maps of one node, a client request, Plans, and the dashboard.
 - [Install And First Run](user/install.md) — Windows, macOS, and Linux installers; the SmartScreen ritual included.
 - [Connect Your First Client](user/first-client.md) — Copy the Key and base URL, then prove it with one request.

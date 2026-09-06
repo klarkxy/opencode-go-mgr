@@ -6,7 +6,7 @@ authors.workspace = true
 license-file.workspace = true
 repository.workspace = true
 rust-version.workspace = true
-description = "Core library for OCG Manager gateway, account management, cooldown, and fallback"
+description = "Core library for Open Console Gateway, account management, cooldown, and fallback"
 
 [dependencies]
 aes-gcm = "0.10"

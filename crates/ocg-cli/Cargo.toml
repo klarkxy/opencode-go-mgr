@@ -6,7 +6,7 @@ authors.workspace = true
 license-file.workspace = true
 repository.workspace = true
 rust-version.workspace = true
-description = "Headless CLI for OCG Manager gateway"
+description = "Headless CLI for Open Console Gateway"
 
 [[bin]]
 name = "ocg-manager-cli"

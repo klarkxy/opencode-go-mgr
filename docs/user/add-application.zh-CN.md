@@ -14,7 +14,7 @@
 
 从 **接入中心** 复制 **Key** 与地址，选择客户端本身已经支持的接口：
 
-| 客户端协议 | 常见 Base 值 | OCG Manager 请求路径 | 鉴权 |
+| 客户端协议 | 常见 Base 值 | Open Console Gateway 请求路径 | 鉴权 |
 | --- | --- | --- | --- |
 | OpenAI Chat Completions | `http://127.0.0.1:9042/v1` | `POST /v1/chat/completions` | `Authorization: Bearer <key>` |
 | OpenAI Responses | `http://127.0.0.1:9042/v1` | `POST /v1/responses` | `Authorization: Bearer <key>` |
@@ -69,7 +69,7 @@ Preview 只接受 `action`、可选 `keyId` 与 `modelValues`。调用方不能�
 - 同步 `src/views/Applications.vue` 中显式的连接器集合与 UI 状态。Pi/DSH 原生包属于 `integrations/`，并遵循各客户端的原生凭据规则。
 - 添加 Core/V3、Desktop Host 与前端测试。按[开发](../maintainer/development.zh-CN.md)对这些表面跑对应检查。
 
-受支持的路径是通过上述受 session 保护的 V3 preview/commit 接口实现的静态桌面连接器。自动检测或写入不受支持时，手动教程始终保留。仓库约束见[扩展 OCG Manager](../maintainer/extending.zh-CN.md)与[编码约定](../maintainer/conventions.zh-CN.md)。
+受支持的路径是通过上述受 session 保护的 V3 preview/commit 接口实现的静态桌面连接器。自动检测或写入不受支持时，手动教程始终保留。仓库约束见[扩展 Open Console Gateway](../maintainer/extending.zh-CN.md)与[编码约定](../maintainer/conventions.zh-CN.md)。
 
 ---
 

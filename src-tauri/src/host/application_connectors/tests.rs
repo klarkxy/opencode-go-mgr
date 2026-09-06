@@ -982,7 +982,11 @@ fn codex_toml_preserves_unrelated_comments_redacts_secret_and_restores() {
         &[
             ("model", "ocg-model", false),
             ("model_provider", "ocg_manager", false),
-            ("model_providers.ocg_manager.name", "OCG Manager", false),
+            (
+                "model_providers.ocg_manager.name",
+                "Open Console Gateway",
+                false,
+            ),
             (
                 "model_providers.ocg_manager.base_url",
                 "http://127.0.0.1:9042/v1",

@@ -11,10 +11,10 @@
     <main v-if="authState !== 'ready'" class="auth-page">
       <section class="auth-panel">
         <div class="auth-panel-head">
-          <div class="auth-brand"><span>OCG</span> Manager</div>
+          <div class="auth-brand"><span>OCG</span> Gateway</div>
           <LocaleSwitcher />
         </div>
-        <p class="auth-kicker">OpenCode-Go Console</p>
+        <p class="auth-kicker">Open Console Gateway</p>
         <h1>{{ authState === "register" ? t("创建管理员") : t("管理员登录") }}</h1>
         <p v-if="authState === 'checking'" class="auth-copy">{{ t("正在连接管理服务…") }}</p>
         <n-form
@@ -87,9 +87,9 @@
           @collapse="collapsed = true"
           @expand="collapsed = false"
         >
-          <div class="brand" :class="{ collapsed }">
+          <div class="brand" :class="{ collapsed }" aria-label="Open Console Gateway">
             <span class="brand-mark">OCG</span>
-            <span v-if="!collapsed" class="brand-name">Manager</span>
+            <span v-if="!collapsed" class="brand-name">Gateway</span>
           </div>
           <n-menu
             :collapsed="collapsed"

@@ -2,7 +2,7 @@
 
 # 协议转换
 
-OCG Manager 在一个端口上提供五种客户端协议，再把每份请求转换成上游 Plan 所需的格式。转换过程是确定性的：解析 Alias、检查账号资格、应用适配器上限与已保存的供应商合约、检查按模型/按协议的 effective 状态，然后决定透传或转换。强制关闭或全局关闭的协议优先于模型声明。
+Open Console Gateway 在一个端口上提供五种客户端协议，再把每份请求转换成上游 Plan 所需的格式。转换过程是确定性的：解析 Alias、检查账号资格、应用适配器上限与已保存的供应商合约、检查按模型/按协议的 effective 状态，然后决定透传或转换。强制关闭或全局关闭的协议优先于模型声明。
 
 每个已知 OpenCode Go 模型从硬编码的 **推荐协议** 与 **已验证可用协议集合** 起步，由测试账号探测后写入代码。协议选择使用已保存的合约。在 **供应商** 页探测成功只能在该适配器上限内确认或新增支持，失败会被记录，但不会删除静态能力。客户端协议在集合内且 effective 启用时透传；否则 **请求体** 转到推荐上游协议，**响应体** 或 SSE 流转回客户端协议。Custom API 同样转到该账号声明的上游协议，再遵守该端点的合约与按模型覆盖。转换覆盖文本、system、图像、工具调用与结果、推理内容、完成状态、错误与 usage 字段。`grok-4.6`、`grok-4.5` 与 `gpt-5.6-luna` 均仅支持 Responses；`glm-5.3` 与 `glm-5.2` 均仅支持 Chat。其他客户端格式（包括 Gemini）会转换，不会触发上游协议试探。
 
@@ -62,7 +62,7 @@ OCG Manager 在一个端口上提供五种客户端协议，再把每份请求�
 
 未知模型名在所有支持的客户端格式上直接返回 `400`——Chat Completions、Responses、Messages，以及 Gemini `generateContent` / `streamGenerateContent`——未知 Claude Desktop 别名也一样。见 [别名](gateway.zh-CN.md#别名)。
 
-Gateway 协议端点最多接受 16 MiB 的 JSON 请求体；这是传输上限，不是上下文窗口。若 OCG Manager 前面还有反向代理，需把请求体上限设为至少 16 MiB，否则请求可能还没到达 Gateway 就被代理以 `413 Payload Too Large` 拒绝。
+Gateway 协议端点最多接受 16 MiB 的 JSON 请求体；这是传输上限，不是上下文窗口。若 Open Console Gateway 前面还有反向代理，需把请求体上限设为至少 16 MiB，否则请求可能还没到达 Gateway 就被代理以 `413 Payload Too Large` 拒绝。
 
 ## Responses 是无状态端点
 

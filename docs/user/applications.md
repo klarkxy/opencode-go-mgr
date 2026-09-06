@@ -74,7 +74,7 @@ Each client has its own idea of where the API lives:
   Enable `model_catalog_json` only for the picker plus real context windows and
   reasoning levels. A catalog replaces Codex's bundled model list and must
   include the current required fields. Without a catalog, unknown slugs use
-  Codex's 272K fallback metadata. Requests always use OCG Manager's Responses
+  Codex's 272K fallback metadata. Requests always use Open Console Gateway's Responses
   endpoint.
 
 Codex's connector respects `CODEX_HOME` and otherwise uses

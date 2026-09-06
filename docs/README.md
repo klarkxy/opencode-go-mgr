@@ -2,9 +2,9 @@
 
 # Documentation index
 
-OCG Manager documentation is split by audience. Start with the guide for your
-role, then follow its chapter links. When a guide conflicts with the current
-implementation, code is authoritative.
+Open Console Gateway documentation is split by audience. Start
+with the guide for your role, then follow its chapter links. When a guide
+conflicts with the current implementation, code is authoritative.
 
 ## Start here
 

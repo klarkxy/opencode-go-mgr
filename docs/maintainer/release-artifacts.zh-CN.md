@@ -2,7 +2,7 @@
 
 # 发布产物
 
-OCG Manager 为三个平台提供桌面安装包、各一份 CLI 压缩包，以及一份多架构容器镜像。
+Open Console Gateway 为三个平台提供桌面安装包、各一份 CLI 压缩包，以及一份多架构容器镜像。
 
 | Runner | GUI | CLI |
 | --- | --- | --- |

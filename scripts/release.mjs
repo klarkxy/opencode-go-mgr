@@ -160,7 +160,7 @@ function updaterBuildArgs(plan, secretConfigPath) {
 function verifyUpdaterSigningPair(plan, tauriCli) {
   if (!plan.enabled) return;
   const payloadPath = join(workDir, "updater-signing-preflight.txt");
-  writeFileSync(payloadPath, "OCG Manager updater signing preflight\n");
+  writeFileSync(payloadPath, "Open Console Gateway updater signing preflight\n");
   run(process.execPath, [tauriCli, "signer", "sign", payloadPath], {
     env: resolveFileSignerEnvironment(),
   });

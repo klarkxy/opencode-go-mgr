@@ -104,7 +104,7 @@ Settings 的持久化、重绑与补偿顺序见
 | 数据表、迁移、备份与回滚 | [存储与迁移](storage-migration.zh-CN.md) |
 | 完整 HTTP 路由 | [HTTP 路由](http-routes.zh-CN.md) |
 | Workspace 结构与开发命令 | [结构](layout.zh-CN.md)、[开发](development.zh-CN.md) |
-| 扩展边界 | [扩展 OCG Manager](extending.zh-CN.md) |
+| 扩展边界 | [扩展 Open Console Gateway](extending.zh-CN.md) |
 
 ---
 

@@ -2,7 +2,7 @@
 
 # Data And Security
 
-OCG Manager stores your keys, passwords, and browser sessions on the local disk.
+Open Console Gateway stores your keys, passwords, and browser sessions on the local disk.
 Protect the data directory: there is no remote recovery if it is lost.
 
 - **GUI data location.** Windows: `%USERPROFILE%\.ocg-mgr`. macOS / Linux:
@@ -21,7 +21,7 @@ Protect the data directory: there is no remote recovery if it is lost.
   401.
 - **Browser profiles.** `browser-profiles/`, or Docker's
   `ocg-browser-profiles`, contains long-lived cookies and official-site login
-  state and is not encrypted by OCG Manager at all. Protect, transfer, and
+  state and is not encrypted by Open Console Gateway at all. Protect, transfer, and
   destroy it with the same care as the database and account keys.
 - **Portable node backup.** Each node manages its own accounts through its own
   dashboard. Move portable node state with a password-encrypted `.ocgbackup`

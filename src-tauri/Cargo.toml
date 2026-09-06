@@ -1,7 +1,7 @@
 [package]
 name = "ocg-manager"
 version = "2.2.0"
-description = "OpenCode-Go multi-account key manager"
+description = "Open Console Gateway"
 authors = ["ocg-manager"]
 license-file = "../LICENSE"
 repository = ""

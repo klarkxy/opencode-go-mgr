@@ -41,7 +41,7 @@ Protocol, schema, CAS, and local-list behavior belong in `cargo test` /
       `/zen/go/v1/usage` on a ready Key account and a ready managed
       account.
 - [ ] Windows: SmartScreen text, dashboard, one account, one request,
-      `auto_start` ↔ `HKCU\...\Run\OCG Manager`, value gone after uninstall.
+      `auto_start` ↔ `HKCU\...\Run\Open Console Gateway`, value gone after uninstall.
 - [ ] macOS: **Open Anyway**, dashboard, one account, one request.
 - [ ] Linux: `.deb` and AppImage under a real Wayland or X11 session.
 - [ ] Browser discovery (Edge/Chrome on Windows; platform browsers on

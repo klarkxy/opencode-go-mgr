@@ -112,5 +112,5 @@ networks:
   # Project-scoped bridge: browser control/VNC stay unpublished while Chromium
   # retains outbound HTTPS access for Google and OpenCode.
   browser-private: {}
-  # Project-scoped bridge for OCG Manager and the optional CPA sibling.
+  # Project-scoped bridge for Open Console Gateway and the optional CPA sibling.
   cpa-private: {}

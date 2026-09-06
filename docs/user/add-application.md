@@ -14,7 +14,7 @@ Use this guide when a client is missing from **Applications**. If the app accept
 
 Copy the **Key** and URLs from **Connection Center**. Choose the interface the client already supports:
 
-| Client protocol | Typical base value | OCG Manager request path | Authentication |
+| Client protocol | Typical base value | Open Console Gateway request path | Authentication |
 | --- | --- | --- | --- |
 | OpenAI Chat Completions | `http://127.0.0.1:9042/v1` | `POST /v1/chat/completions` | `Authorization: Bearer <key>` |
 | OpenAI Responses | `http://127.0.0.1:9042/v1` | `POST /v1/responses` | `Authorization: Bearer <key>` |
@@ -69,7 +69,7 @@ Implementation ownership is split deliberately:
 - Keep the explicit connector sets and UI state handling in `src/views/Applications.vue` synchronized. Native Pi/DSH packages belong under `integrations/` and follow their client-native credential rules.
 - Add Core/V3, Desktop Host, and frontend tests. Run the checks in [Development](../maintainer/development.md) for those surfaces.
 
-The supported path is a static Desktop connector over those session-protected V3 preview and commit endpoints. The manual guide remains available whenever automatic detection or writing is unsupported. Repository constraints live in [Extending OCG Manager](../maintainer/extending.md) and [Coding conventions](../maintainer/conventions.md).
+The supported path is a static Desktop connector over those session-protected V3 preview and commit endpoints. The manual guide remains available whenever automatic detection or writing is unsupported. Repository constraints live in [Extending Open Console Gateway](../maintainer/extending.md) and [Coding conventions](../maintainer/conventions.md).
 
 ---
 

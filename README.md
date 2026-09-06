@@ -1,6 +1,6 @@
 [简体中文](README.zh-CN.md)
 
-# OCG Manager
+# Open Console Gateway
 
 A local gateway that keeps provider credentials in one SQLite database and
 serves five client protocols on one port (`http://127.0.0.1:9042`). Your local
@@ -28,7 +28,7 @@ an optional local Extension. Each node stores credentials locally.
 
 ## Architecture At A Glance
 
-[![OCG Manager local-node architecture](https://klarkxy.github.io/opencode-go-mgr/diagrams/local-node.visual-check.1440x900.light.png)](https://klarkxy.github.io/opencode-go-mgr/diagrams/local-node/)
+[![Open Console Gateway local-node architecture](https://klarkxy.github.io/opencode-go-mgr/diagrams/local-node.visual-check.1440x900.light.png)](https://klarkxy.github.io/opencode-go-mgr/diagrams/local-node/)
 
 [Explore all interactive architecture and workflow diagrams](https://klarkxy.github.io/opencode-go-mgr/).
 
@@ -59,7 +59,7 @@ Auth:    Authorization: Bearer <key>
 1. Install and launch. The dashboard opens in your system browser when the
    gateway is ready; the tray icon brings it back.
 2. In **Accounts**, add a Plan and its credential when needed. Copy a client
-   **Key** from **Access Keys**; it is the only OCG Manager credential your
+   **Key** from **Access Keys**; it is the only Open Console Gateway credential your
    client needs.
 3. Point your client at `http://127.0.0.1:9042/v1`. Per-client setup is in
    [Application guides](docs/user/applications.md).
@@ -102,10 +102,10 @@ an upstream destination. Complete model, capability, and conversion tables are i
 
 ## Community
 
-Join the OCG Manager QQ group: **1104321231**.
+Join the Open Console Gateway QQ group: **1104321231**.
 
 <p align="center">
-  <img src="assets/qq-group.png" alt="OCG Manager QQ group QR code" width="360" />
+  <img src="assets/qq-group.png" alt="Open Console Gateway QQ group QR code" width="360" />
 </p>
 
 ## License

@@ -116,7 +116,7 @@ states are shown in
 | Tables, migrations, backups, rollback | [Storage and migrations](storage-migration.md) |
 | Complete HTTP route inventory | [HTTP routes](http-routes.md) |
 | Workspace layout and development commands | [Layout](layout.md), [Development](development.md) |
-| Extension boundaries | [Extending OCG Manager](extending.md) |
+| Extension boundaries | [Extending Open Console Gateway](extending.md) |
 
 ---
 

@@ -2,7 +2,7 @@
 
 # Gateway Behavior
 
-OCG Manager exposes one HTTP surface on `127.0.0.1:9042` that speaks five client protocols and routes requests to whichever eligible OpenCode Go, Zen Free, Command Code GOAT, MiniMax CN, Kimi Code CN, Ollama Cloud, or Custom API account wins selection.
+Open Console Gateway exposes one HTTP surface on `127.0.0.1:9042` that speaks five client protocols and routes requests to whichever eligible OpenCode Go, Zen Free, Command Code GOAT, MiniMax CN, Kimi Code CN, Ollama Cloud, or Custom API account wins selection.
 
 Ollama Cloud is a routable sealed fixed-origin Plan (`https://ollama.com`): Chat Completions only, Bearer. Its saved and raw catalog IDs do not join `GET /v1/models` or the Go Alias registry. An actual upstream 429 uses the generic cooldown and fallback path.
 

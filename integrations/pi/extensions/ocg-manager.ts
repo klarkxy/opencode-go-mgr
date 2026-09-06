@@ -16,7 +16,7 @@ function loadGeneratedModels(): Model<"openai-completions">[] {
   ) as GeneratedCatalog;
 
   if (!Array.isArray(catalog.models)) {
-    throw new Error("OCG Manager model catalog has not been generated.");
+    throw new Error("Open Console Gateway model catalog has not been generated.");
   }
 
   return catalog.models;
@@ -26,17 +26,17 @@ export default function registerOcgManagerProvider(pi: ExtensionAPI) {
   pi.registerProvider(
     createProvider({
       id: providerId,
-      name: "OCG Manager",
+      name: "Open Console Gateway",
       baseUrl,
       auth: {
         apiKey: {
-          name: "OCG Manager API key",
+          name: "Open Console Gateway API key",
           async login(interaction) {
             return {
               type: "api_key",
               key: await interaction.prompt({
                 type: "secret",
-                message: "OCG Manager API key",
+                message: "Open Console Gateway API key",
               }),
             };
           },

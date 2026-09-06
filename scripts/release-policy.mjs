@@ -92,7 +92,7 @@ export function immutableTagDecision({ tag, candidateDigest, existingDigest }) {
 
 export function validateComposeVersion(source, expectedVersion) {
   const expected = normalizeReleaseVersion(expectedVersion);
-  const headerMatches = [...source.matchAll(/^# Pull-only Docker Compose example for OCG Manager v([^\s]+)\.$/gm)];
+  const headerMatches = [...source.matchAll(/^# Pull-only Docker Compose example for Open Console Gateway v([^\s]+)\.$/gm)];
   const imageMatches = [...source.matchAll(/\$\{OCG_IMAGE:-ghcr\.io\/klarkxy\/opencode-go-mgr:([^}]+)\}/g)];
   const browserImageMatches = [
     ...source.matchAll(/\$\{OCG_BROWSER_IMAGE:-ghcr\.io\/klarkxy\/opencode-go-mgr-browser:([^}]+)\}/g),

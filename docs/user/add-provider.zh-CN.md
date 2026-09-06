@@ -2,13 +2,13 @@
 
 # 新增供应商
 
-当你希望 OCG Manager 把请求路由到另一个上游服务时，先判断走哪条路径：
+当你希望 Open Console Gateway 把请求路由到另一个上游服务时，先判断走哪条路径：
 
 | 目标 | 路径 | 是否修改仓库 |
 | --- | --- | --- |
 | 给本节点增加可跨账号复用的具名供应商 | **供应商** → **新建供应商**（用户定义） | 否 |
 | 给一张账号接入 OpenAI 或 Anthropic 兼容端点 | 新增 **Custom API** 账号 | 否 |
-| 让所有 OCG Manager 用户获得一个具名内置 Provider（产品中的 Provider/Plan 身份） | 新增密封的内置供应商 | 是，需要经过审查的代码与测试 |
+| 让所有 Open Console Gateway 用户获得一个具名内置 Provider（产品中的 Provider/Plan 身份） | 新增密封的内置供应商 | 是，需要经过审查的代码与测试 |
 
 **适配器注册表**保持静态密封。用户定义供应商是类型化的持久定义；每一条都绑定代码持有的 Configurable HTTP 适配器。OCG 从不加载用户脚本、插件或二进制。未知 `provider_id` 除非匹配已保存的定义，否则 fail closed。Custom API 仍是独立的账号所有路径：Endpoint、协议和模型映射留在账号卡上。
 
@@ -33,7 +33,7 @@
 2. 填写名称、上游 API Key、一个 API 地址，以及一个上游协议：**Chat Completions**、**Responses** 或 **Messages**。
 3. 至少添加一条映射：客户端请求的公开模型名，以及精确上游模型 ID。若上游实现了下文的可选模型目录接口，可用 **获取模型** 以其上游 ID 填充当前草稿。
 4. 保存账号。合法的新账号默认启用；**测试连接** 会通过这一张账号发送一次可产生费用的真实请求，属于可选诊断。
-5. 调用 OCG Manager 上带鉴权的 `GET /v1/models`，确认可路由公开名称已经公布，再发送一次推理请求。
+5. 调用 Open Console Gateway 上带鉴权的 `GET /v1/models`，确认可路由公开名称已经公布，再发送一次推理请求。
 
 一张 Custom 账号卡的所有映射共用一个上游协议。同协议客户端请求直接透传，其他受支持客户端格式会转换到所选上游协议。**获取模型** 只返回上游 ID；导入时精确写入“公开模型 = 上游 ID”，不剥离后缀、不生成 Alias。之后可编辑公开名称，同时保留准确上游 ID。
 
@@ -89,7 +89,7 @@ OCG 根据协议派生鉴权。它不会同时发送两类鉴权头，不会在 
 
 提交贡献前，请写清上游来源、鉴权方式、目录来源、支持的模型/协议组合、流式行为、错误语义、额度/价格来源，以及不产生费用的验证方案。在完整路由与控制面路径真正存在前，让新家族保持 fail closed。
 
-仓库架构细节继续阅读[扩展 OCG Manager](../maintainer/extending.zh-CN.md)与[运行时不变量](../maintainer/runtime-invariants.zh-CN.md)。
+仓库架构细节继续阅读[扩展 Open Console Gateway](../maintainer/extending.zh-CN.md)与[运行时不变量](../maintainer/runtime-invariants.zh-CN.md)。
 
 ---
 

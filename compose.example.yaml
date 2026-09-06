@@ -1,4 +1,4 @@
-# Pull-only Docker Compose example for OCG Manager v2.2.0.
+# Pull-only Docker Compose example for Open Console Gateway v2.2.0.
 # Save this file as compose.yaml. Optionally create a neighboring .env file
 # with OCG_PORT, OCG_IMAGE, OCG_BROWSER_IMAGE, or the runtime variables below.
 # The images are multi-architecture (linux/amd64 and linux/arm64); Compose
@@ -107,5 +107,5 @@ networks:
   # Project-scoped bridge: browser control/VNC stay unpublished while Chromium
   # retains outbound HTTPS access for Google and OpenCode.
   browser-private: {}
-  # Project-scoped bridge for OCG Manager and the optional CPA sibling.
+  # Project-scoped bridge for Open Console Gateway and the optional CPA sibling.
   cpa-private: {}

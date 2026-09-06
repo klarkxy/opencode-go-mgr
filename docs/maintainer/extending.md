@@ -1,6 +1,6 @@
 [简体中文](extending.zh-CN.md)
 
-# Extending OCG Manager
+# Extending Open Console Gateway
 
 Use one of three explicit extension paths. They are intentionally different.
 

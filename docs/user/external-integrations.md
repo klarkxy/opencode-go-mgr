@@ -8,7 +8,7 @@ in the general **Extensions** group below the Settings divider.
 
 ## CPA
 
-CPA (CLI Proxy API) is a local subscription runtime. OCG Manager can manage
+CPA (CLI Proxy API) is a local subscription runtime. Open Console Gateway can manage
 its supported Codex, Claude, Antigravity, Kimi, and xAI account flows and route
 the resulting subscription pool, but CPA remains the owner of OAuth browser
 sessions, tokens, auth files, and internal scheduling. OCG stores only its
@@ -35,7 +35,7 @@ Use one of these local deployments:
   the dashboard does not accept a LAN, Internet, or cross-node CPA address.
 
 URLs with embedded credentials, queries, fragments, redirects, or non-loopback
-hosts are rejected. Do not reuse an OCG Manager Key as either CPA key.
+hosts are rejected. Do not reuse an Open Console Gateway Key as either CPA key.
 
 ### Connect and operate
 
@@ -81,7 +81,7 @@ externally operated CPA.
 
 Static external integrations appear in **Extensions**. They require product
 approval, a typed Dashboard V3 adapter, and a documented local boundary. The
-contribution path is in [Extending OCG Manager](../maintainer/extending.md).
+contribution path is in [Extending Open Console Gateway](../maintainer/extending.md).
 
 ---
 

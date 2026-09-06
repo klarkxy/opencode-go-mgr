@@ -2,7 +2,7 @@
 
 # Protocol Conversion
 
-OCG Manager speaks five client protocols on one port, then translates each
+Open Console Gateway speaks five client protocols on one port, then translates each
 request into whatever the upstream Plan actually understands. The conversion
 layer is deterministic: it resolves the Alias, checks account
 eligibility, applies the adapter ceiling and saved provider contract, checks
@@ -96,7 +96,7 @@ Completions, Responses, Messages, and Gemini `generateContent` /
 
 Gateway protocol endpoints accept JSON request bodies up to 16 MiB. That is
 a transport limit, not a context-window limit. If a reverse proxy sits in
-front of OCG Manager, allow at least 16 MiB request bodies or the proxy may
+front of Open Console Gateway, allow at least 16 MiB request bodies or the proxy may
 return `413 Payload Too Large` before the gateway sees the request.
 
 ## Responses is stateless

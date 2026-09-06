@@ -26,7 +26,7 @@ v36 曾加入尚未发布的 Ollama Cookie 用量状态；v37 删除该表，并
 
 1. 停止所有会写数据的进程：从桌面托盘选择 **退出**，用 Ctrl+C 或服务管理器停止 CLI，Docker 则执行 `docker compose stop`。
 2. 复制 **整个** GUI 数据目录、CLI 数据目录；桌面账号的 `browser-profiles/` 已包含在 GUI 数据目录中。Docker 必须同时备份 `ocg-data` 与 `ocg-browser-profiles` 两个敏感卷。已停止的 Docker 容器可分别执行 `docker compose cp ocg-manager:/data/. ../ocg-data-backup` 和 `docker compose cp ocg-manager:/browser-profiles/. ../ocg-browser-profiles-backup`。
-3. 备份必须放在仓库外，并确认其中有 `data.sqlite`，以及适用时的 `.encryption-key`。浏览器 Profile 含长期 Cookie 和登录状态，不由 OCG Manager 加密，必须按账号 Key 与数据库同等级保护。
+3. 备份必须放在仓库外，并确认其中有 `data.sqlite`，以及适用时的 `.encryption-key`。浏览器 Profile 含长期 Cookie 和登录状态，不由 Open Console Gateway 加密，必须按账号 Key 与数据库同等级保护。
 
 ## 恢复
 
