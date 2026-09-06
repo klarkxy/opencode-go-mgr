@@ -15,8 +15,10 @@
     </n-alert>
 
     <template v-else-if="integration">
+      <n-tabs v-model:value="activeTab" type="line" animated class="cpa-tabs" display-directive="if">
+        <n-tab-pane name="overview" :tab="t('概览')">
       <section class="cpa-section" aria-labelledby="cpa-overview-title">
-        <h2 id="cpa-overview-title" class="cpa-section-title">{{ t("概览") }}</h2>
+        <h2 id="cpa-overview-title" class="cpa-section-title sr-only">{{ t("概览") }}</h2>
         <n-space class="cpa-mode-choice" align="center" wrap>
           <span class="cpa-muted">{{ t("选择 CPA 使用方式") }}</span>
           <n-button size="small" :type="mode === 'external' ? 'primary' : 'default'" @click="selectMode('external')">
@@ -193,37 +195,15 @@
                   @click="confirmRemoveRuntime"
                 >{{ t("移除") }}</n-button>
               </n-space>
-
-              <div class="cpa-logs">
-                <n-button size="small" secondary :aria-expanded="logsExpanded" @click="toggleLogs">
-                  {{ logsExpanded ? t("收起日志") : t("查看日志") }}
-                </n-button>
-                <template v-if="logsExpanded">
-                  <div v-if="logsLoading" class="cpa-state"><n-spin size="small" /></div>
-                  <n-alert v-else-if="logsError" type="error" :title="t('加载 CPA 运行时日志失败: {error}', { error: logsError })">
-                    <n-button size="small" secondary @click="refreshLogs">{{ t("重试") }}</n-button>
-                  </n-alert>
-                  <template v-else-if="logs">
-                    <div class="cpa-log-actions">
-                      <n-button size="tiny" quaternary :loading="logsLoading" @click="refreshLogs">{{ t("刷新日志") }}</n-button>
-                    </div>
-                    <template v-if="stdoutTail || stderrTail">
-                      <h3 class="cpa-log-title">{{ t("标准输出") }}</h3>
-                      <pre class="cpa-log mono">{{ stdoutTail || t("暂无日志") }}</pre>
-                      <h3 class="cpa-log-title">{{ t("标准错误") }}</h3>
-                      <pre class="cpa-log mono">{{ stderrTail || t("暂无日志") }}</pre>
-                    </template>
-                    <n-empty v-else :description="t('暂无日志')" />
-                  </template>
-                </template>
-              </div>
             </n-card>
           </template>
         </template>
       </section>
+        </n-tab-pane>
 
+        <n-tab-pane name="accounts" :tab="t('账号')">
       <section class="cpa-section" aria-labelledby="cpa-accounts-title">
-        <h2 id="cpa-accounts-title" class="cpa-section-title">{{ t("账号") }}</h2>
+        <h2 id="cpa-accounts-title" class="cpa-section-title sr-only">{{ t("账号") }}</h2>
 
         <n-card size="small" :title="t('模型目录')" class="cpa-card">
           <n-space align="center" wrap>
@@ -296,9 +276,11 @@
           </div>
         </n-card>
       </section>
+        </n-tab-pane>
 
-      <section v-if="showClientKeys" class="cpa-section" aria-labelledby="cpa-keys-title">
-        <h2 id="cpa-keys-title" class="cpa-section-title">{{ t("客户端 Key") }}</h2>
+        <n-tab-pane v-if="showClientKeys" name="keys" :tab="t('客户端 Key')">
+      <section class="cpa-section" aria-labelledby="cpa-keys-title">
+        <h2 id="cpa-keys-title" class="cpa-section-title sr-only">{{ t("客户端 Key") }}</h2>
 
         <n-card size="small" class="cpa-card">
           <template #header-extra>
@@ -377,12 +359,40 @@
           </template>
         </n-card>
       </section>
+        </n-tab-pane>
+
+        <n-tab-pane v-if="mode === 'managed'" name="logs" :tab="t('运行时日志')">
+      <section class="cpa-section" aria-labelledby="cpa-logs-title">
+        <h2 id="cpa-logs-title" class="cpa-section-title sr-only">{{ t("运行时日志") }}</h2>
+
+        <n-card size="small" class="cpa-card">
+          <template #header-extra>
+            <n-button size="small" quaternary :loading="logsLoading" @click="refreshLogs">{{ t("刷新日志") }}</n-button>
+          </template>
+          <div v-if="logsLoading" class="cpa-state"><n-spin size="small" /></div>
+          <n-alert v-else-if="logsError" type="error" :title="t('加载 CPA 运行时日志失败: {error}', { error: logsError })">
+            <n-button size="small" secondary @click="refreshLogs">{{ t("重试") }}</n-button>
+          </n-alert>
+          <template v-else-if="logs">
+            <template v-if="stdoutTail || stderrTail">
+              <h3 class="cpa-log-title">{{ t("标准输出") }}</h3>
+              <pre class="cpa-log mono">{{ stdoutTail || t("暂无日志") }}</pre>
+              <h3 class="cpa-log-title">{{ t("标准错误") }}</h3>
+              <pre class="cpa-log mono">{{ stderrTail || t("暂无日志") }}</pre>
+            </template>
+            <n-empty v-else :description="t('暂无日志')" />
+          </template>
+          <n-empty v-else :description="t('暂无日志')" />
+        </n-card>
+      </section>
+        </n-tab-pane>
+      </n-tabs>
     </template>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, h, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref } from "vue";
+import { computed, h, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from "vue";
 import {
   NAlert,
   NButton,
@@ -394,6 +404,8 @@ import {
   NSpin,
   NSpace,
   NSwitch,
+  NTabPane,
+  NTabs,
   NTag,
   useDialog,
   useMessage,
@@ -464,9 +476,10 @@ let runtimeTimer: number | null = null;
 let runtimePollGeneration = 0;
 
 const logs = ref<CpaRuntimeLogs | null>(null);
-const logsExpanded = ref(false);
 const logsLoading = ref(false);
 const logsError = ref("");
+
+const activeTab = ref("overview");
 
 const runtimeKeys = ref<CpaRuntimeKey[]>([]);
 const keysLoading = ref(false);
@@ -1012,10 +1025,13 @@ function confirmRemoveRuntime(): void {
 
 // --- runtime logs ---
 
-function toggleLogs(): void {
-  logsExpanded.value = !logsExpanded.value;
-  if (logsExpanded.value && !logs.value) void refreshLogs();
-}
+// Logs live in their own tab: load them on first visit, and fall back to the
+// overview tab if the active pane disappears with the managed runtime.
+watch([activeTab, mode, showClientKeys], () => {
+  if (activeTab.value === "keys" && !showClientKeys.value) activeTab.value = "overview";
+  if (activeTab.value === "logs" && mode.value !== "managed") activeTab.value = "overview";
+  if (activeTab.value === "logs" && !logs.value && !logsLoading.value) void refreshLogs();
+});
 
 async function refreshLogs(): Promise<void> {
   if (logsLoading.value) return;
@@ -1142,14 +1158,13 @@ onBeforeUnmount(() => {
 .cpa-header p, .cpa-help, .cpa-danger p { margin: 6px 0 0; color: var(--ocg-muted); line-height: 1.6; }
 .cpa-section { display: grid; gap: 12px; }
 .cpa-section-title { margin: 8px 0 0; color: var(--ocg-ink); font-size: var(--ocg-font-lg); }
+.cpa-tabs :deep(.n-tabs-nav) { margin-bottom: 12px; }
 .cpa-card { box-shadow: var(--ocg-shadow-sm); }
 .cpa-status-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
 .cpa-status-cell { display: grid; gap: 6px; min-width: 0; align-content: start; }
 .cpa-status-detail, .cpa-muted { overflow-wrap: anywhere; color: var(--ocg-muted); font-size: var(--ocg-font-sm); }
 .cpa-phase { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 14px; }
 .cpa-runtime-actions { margin-top: 14px; }
-.cpa-logs { display: grid; gap: 10px; margin-top: 14px; justify-items: start; }
-.cpa-log-actions { display: flex; justify-content: flex-end; width: 100%; }
 .cpa-log-title { margin: 0; color: var(--ocg-muted); font-size: var(--ocg-font-sm); font-weight: 600; }
 .cpa-log {
   box-sizing: border-box;

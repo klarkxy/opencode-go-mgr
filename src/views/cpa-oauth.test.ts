@@ -35,7 +35,7 @@ function cpaHarnessPlugin() {
       } });
       export const NCard = pass; export const NEmpty = pass; export const NForm = pass;
       export const NFormItem = pass; export const NInput = pass; export const NSpin = pass; export const NSpace = pass;
-      export const NSwitch = pass; export const NTag = pass;
+      export const NSwitch = pass; export const NTabPane = pass; export const NTabs = pass; export const NTag = pass;
       export const useDialog = () => ({ warning: (options) => options.onPositiveClick?.() });
       export const useMessage = () => ({ error() {}, success() {}, warning() {} });
     `,
