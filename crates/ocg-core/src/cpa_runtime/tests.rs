@@ -761,6 +761,94 @@ async fn occupied_managed_port_never_stops_an_unknown_process() {
 }
 
 #[tokio::test]
+async fn fresh_runtime_accepts_authenticated_empty_catalog_without_publishing_models() {
+    use axum::http::HeaderMap;
+    use axum::routing::get;
+    use axum::{Json, Router};
+    use serde_json::json;
+
+    async fn accounts(headers: HeaderMap) -> impl axum::response::IntoResponse {
+        assert_eq!(headers["authorization"], "Bearer management-key");
+        ([("x-cpa-version", "7.2.151")], Json(json!({"files": []})))
+    }
+    async fn models(headers: HeaderMap) -> Json<serde_json::Value> {
+        assert_eq!(headers["authorization"], "Bearer inference-key");
+        Json(json!({"data": []}))
+    }
+    let app = Router::new()
+        .route("/healthz", get(|| async { Json(json!({"status": "ok"})) }))
+        .route("/v0/management/auth-files", get(accounts))
+        .route("/v1/models", get(models));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let dir = temp_dir("empty-catalog");
+    let cipher: Arc<dyn KeyCipher + Send + Sync> = Arc::new(StaticKeyCipher::new("cpa-runtime"));
+    let state =
+        CoreStateInner::new(Database::open(dir.clone()).unwrap(), dir.clone(), cipher).unwrap();
+
+    let models = state
+        .probe_candidate(port, "management-key", "inference-key")
+        .await
+        .unwrap();
+    assert!(models.is_empty());
+    state
+        .persist_managed_connection(port, "management-key", "inference-key", models)
+        .unwrap();
+    assert!(
+        !state
+            .db
+            .lock()
+            .get_account(CPA_ACCOUNT_ID)
+            .unwrap()
+            .unwrap()
+            .enabled
+    );
+    assert!(state.cpa_model_catalog().is_empty());
+
+    let report = CpaClient::new(
+        &state.config(),
+        &format!("http://127.0.0.1:{port}"),
+        "management-key".into(),
+        "inference-key".into(),
+        false,
+    )
+    .unwrap()
+    .test()
+    .await
+    .unwrap();
+    assert!(report.reachable && report.management_ready && report.inference_ready);
+    assert_eq!(report.model_count, 0);
+
+    // An empty authenticated result must also replace an older catalog.
+    state
+        .persist_managed_connection(
+            port,
+            "management-key",
+            "inference-key",
+            vec!["stale".into()],
+        )
+        .unwrap();
+    state
+        .persist_managed_connection(port, "management-key", "inference-key", vec![])
+        .unwrap();
+    assert!(state.cpa_model_catalog().is_empty());
+    assert!(
+        state
+            .db
+            .lock()
+            .cpa_model_catalog()
+            .unwrap()
+            .unwrap()
+            .models
+            .is_empty()
+    );
+    server.abort();
+    drop(state);
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test]
 async fn failed_rollback_restores_config_manifest_and_former_running_version() {
     use axum::extract::State;
     use axum::routing::get;
@@ -868,6 +956,16 @@ async fn failed_rollback_restores_config_manifest_and_former_running_version() {
 
 #[tokio::test]
 async fn successful_rollback_replaces_catalog_and_bumps_once() {
+    assert_successful_rollback_catalog(vec!["rollback-model".into()]).await;
+}
+
+#[tokio::test]
+async fn successful_rollback_to_empty_catalog_clears_stale_models_and_bumps_once() {
+    assert_successful_rollback_catalog(vec![]).await;
+}
+
+async fn assert_successful_rollback_catalog(expected_models: Vec<String>) {
+    use axum::extract::State;
     use axum::routing::get;
     use axum::{Json, Router};
     use serde_json::json;
@@ -878,14 +976,15 @@ async fn successful_rollback_replaces_catalog_and_bumps_once() {
     async fn accounts() -> impl axum::response::IntoResponse {
         ([("x-cpa-version", "7.2.140")], Json(json!({"files": []})))
     }
-    async fn models() -> Json<serde_json::Value> {
-        Json(json!({"data": [{"id": "rollback-model"}]}))
+    async fn models(State(models): State<Vec<String>>) -> Json<serde_json::Value> {
+        Json(json!({"data": models.iter().map(|id| json!({"id": id})).collect::<Vec<_>>()}))
     }
 
     let app = Router::new()
         .route("/healthz", get(health))
         .route("/v0/management/auth-files", get(accounts))
-        .route("/v1/models", get(models));
+        .route("/v1/models", get(models))
+        .with_state(expected_models.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
@@ -945,7 +1044,7 @@ async fn successful_rollback_replaces_catalog_and_bumps_once() {
         .unwrap();
 
     assert_eq!(state.settings_revision(), revision + 1);
-    assert_eq!(state.cpa_model_catalog().as_ref(), &["rollback-model"]);
+    assert_eq!(state.cpa_model_catalog().as_ref(), &expected_models);
     let managed = load_managed(&dir).unwrap().unwrap();
     assert_eq!(managed.current_version, "7.2.140");
     assert_eq!(managed.previous_version.as_deref(), Some("7.2.147"));

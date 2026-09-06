@@ -552,7 +552,9 @@ fn parse_models(value: &Value) -> Result<Vec<String>, CpaError> {
             models.push(id.to_string());
         }
     }
-    if models.is_empty() {
+    // A newly installed CPA has no OAuth accounts and legitimately lists no models.
+    // A nonempty payload without any valid IDs is still malformed.
+    if !data.is_empty() && models.is_empty() {
         return Err(CpaError::Response("CPA model catalog is empty".into()));
     }
     Ok(models)
@@ -734,13 +736,15 @@ mod tests {
     }
 
     #[test]
-    fn model_catalog_is_deduplicated_and_nonempty() {
+    fn model_catalog_is_deduplicated_and_allows_an_empty_list() {
         let models = parse_models(&json!({
             "data": [{"id":"gpt-5"}, {"id":"gpt-5"}, {"id":"claude"}]
         }))
         .unwrap();
         assert_eq!(models, ["gpt-5", "claude"]);
-        assert!(parse_models(&json!({"data": []})).is_err());
+        assert!(parse_models(&json!({"data": []})).unwrap().is_empty());
+        assert!(parse_models(&json!({"data": [{"id": " "}]})).is_err());
+        assert!(parse_models(&json!({"data": null})).is_err());
     }
 
     #[test]

@@ -466,7 +466,6 @@ impl CoreStateInner {
         source_url: &str,
         refreshed_at: chrono::DateTime<chrono::Utc>,
     ) -> crate::Result<()> {
-        anyhow::ensure!(!models.is_empty(), "CPA model catalog cannot be empty");
         let zen = self.zen_free_model_catalog();
         let contracts = self.provider_contracts();
         let provider_models = sealed_proxy_model_ids(&contracts, &models);

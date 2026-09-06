@@ -1852,10 +1852,8 @@ impl CoreStateInner {
             .lock()
             .upsert_cpa_integration(&account, &base_url, &management_key_cipher)
             .map_err(|error| CpaRuntimeError::Failed(error.to_string()))?;
-        if !models.is_empty() {
-            self.activate_cpa_model_catalog(models, &base_url, now)
-                .map_err(|error| CpaRuntimeError::Failed(error.to_string()))?;
-        }
+        self.activate_cpa_model_catalog(models, &base_url, now)
+            .map_err(|error| CpaRuntimeError::Failed(error.to_string()))?;
         self.routing.reset();
         Ok(())
     }

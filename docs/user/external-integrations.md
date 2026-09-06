@@ -54,7 +54,10 @@ reuse an OCG Manager Key as either CPA key.
    OCG requires CPA 7.1.0 or newer; later major versions continue through the
    same typed response and exact-account validation instead of being rejected
    solely for their version number.
-3. Start an OAuth flow from CPA's account table. Browser-callback providers
+3. A fresh managed installation can start successfully with an empty model
+   catalog. This confirms CPA and its local authentication are working; it
+   does not make any model routeable. Start an OAuth flow from CPA's account
+   table. Browser-callback providers
    use CPA's loopback callback ports; Kimi and xAI use their device-code flow.
    OCG never runs an OAuth callback server and does not restore an old flow
    after a refresh or restart.

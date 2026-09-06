@@ -5652,7 +5652,6 @@ impl Database {
         source_url: &str,
         refreshed_at: DateTime<Utc>,
     ) -> Result<()> {
-        anyhow::ensure!(!models.is_empty(), "CPA model catalog cannot be empty");
         let models_json = serde_json::to_string(models)?;
         self.conn.execute(
             "INSERT INTO provider_model_catalogs
