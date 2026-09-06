@@ -8,6 +8,8 @@ import {
   accountRoutingDraftLabel,
   accountStatusLabel,
   accountStatusTagType,
+  isUsageRefreshBlocked,
+  usageSyncCaption,
 } from "./account-display.ts";
 
 function draftAccount(overrides: Partial<Account> = {}): Account {
@@ -135,4 +137,72 @@ test("Ollama cards drop OpenCode-only console and profile actions but keep gener
     accountMenuOptions(cooling, now).map((option) => option.key),
     ["open-site", "edit", "reset", "delete"],
   );
+});
+
+test("routable Custom accounts follow live enablement rather than legacy verification state", () => {
+  const custom = (overrides: Partial<Account> = {}) => draftAccount({
+    id: "custom-1",
+    name: "Custom",
+    purchase_date: "",
+    expires_on: "",
+    plan_routable: true,
+    ...overrides,
+  });
+
+  const pending = custom();
+  assert.equal(accountStatusLabel(pending), "已禁用");
+  assert.equal(accountStatusTagType(pending), "default");
+  assert.equal(accountStatusLabel(custom({ verification_status: "failed" })), "已禁用");
+  assert.equal(accountStatusLabel(custom({ verification_status: "verified" })), "已禁用");
+  assert.deepEqual(accountMenuOptions(custom(), Date.now()).map(({ key }) => key), ["edit", "delete"]);
+});
+
+test("GOAT account states are live without a verification phase", () => {
+  const goat = (overrides: Partial<Account> = {}) => draftAccount({
+    id: "goat-1",
+    name: "GOAT",
+    provider_id: "command-code",
+    plan_routable: true,
+    verification_status: "not_required",
+    ...overrides,
+  });
+
+  assert.equal(accountStatusLabel(goat()), "已禁用");
+  assert.equal(accountStatusLabel(goat({ enabled: true })), "可用");
+  assert.equal(accountStatusLabel(goat({ plan_routable: false })), "等待支持");
+});
+
+test("upstream auth failure is a distinct unavailable state, not cooldown", () => {
+  const broken = draftAccount({
+    plan_routable: true,
+    verification_status: "verified",
+    enabled: true,
+    auth_error: "401",
+  });
+  assert.equal(accountStatusLabel(broken), "不可用");
+  assert.equal(accountStatusTagType(broken), "error");
+  assert.equal(
+    accountStatusLabel({ ...broken, enabled: false }),
+    "已禁用 · 不可用",
+  );
+});
+
+test("usage sync captions distinguish never-synced, last success, and refresh cooldown", () => {
+  const now = Date.parse("2026-08-21T00:00:00Z");
+  const neverSynced = draftAccount({
+    plan_routable: true,
+    verification_status: "verified",
+  });
+  assert.equal(isUsageRefreshBlocked(neverSynced, now), false);
+  assert.equal(usageSyncCaption(neverSynced, now), "尚未官方同步");
+
+  const cooling = draftAccount({
+    plan_routable: true,
+    verification_status: "verified",
+    usage_sync_last_success_at: "2026-08-20T12:00:00Z",
+    usage_sync_next_allowed_at: "2026-08-21T00:01:00Z",
+  });
+  assert.equal(isUsageRefreshBlocked(cooling, now), true);
+  assert.match(usageSyncCaption(cooling, now), /上次官方同步:/);
+  assert.match(usageSyncCaption(cooling, now), /刷新额度冷却中，请于 .+ 后重试/);
 });

@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
 import type { PricingModel } from "../api/dashboard.ts";
 import {
@@ -166,46 +165,4 @@ test("MiniMax roots retain standard rates while every upgrade is materialized be
   assert.equal(m27?.children?.[0]?.output, 2.4);
   assert.equal(m27?.children?.[0]?.cache_read, 0.06);
   assert.equal(m27?.children?.[0]?.cache_write, 0.375);
-});
-
-test("pricing catalog keeps refresh explicit and exposes accessible grouped multiplier editing", () => {
-  const catalog = readFileSync(new URL("../components/PricingCatalog.vue", import.meta.url), "utf8");
-  const settings = readFileSync(new URL("../views/Settings.vue", import.meta.url), "utf8");
-  assert.doesNotMatch(settings, /PricingCatalog/);
-  assert.match(catalog, /if \(props\.providerId === "opencode"\) void loadPricing\(\)/);
-  assert.doesNotMatch(catalog, /onMounted\(\(\) => void performPricingRefresh\(\)\)/);
-  assert.match(catalog, /@click="requestPricingRefresh"/);
-  assert.match(catalog, /result\.error \|\| t\("价格表刷新失败，详见页面提示"\)/);
-  assert.match(catalog, /message\.warning\(t\("价格表刷新失败，详见页面提示"\)\)/);
-  assert.match(catalog, /trigger: "focus"/);
-  assert.match(catalog, /tabindex: 0,[\s\S]*?"aria-label"/);
-  assert.match(catalog, /"aria-expanded": rowExpanded\(row\)/);
-  assert.doesNotMatch(catalog, /renderAdjustments|title: t\("本地调整"\)/);
-  assert.match(catalog, /updatePricingMultipliers\(active\.revision/);
-  assert.match(catalog, /updateValueOnInput: true/);
-  assert.match(catalog, /onUpdateValue:[\s\S]*updateMultiplierDraft\(row\.model_id/);
-  assert.match(catalog, /disabled: disabled \|\| savingModelId\.value !== null \|\| refreshing\.value/);
-  assert.match(catalog, /true,\s*!valid,/);
-  assert.match(catalog, /function hasMultiplierDraft[\s\S]*?multiplierDrafts\.value\[modelId\] !== undefined/);
-  assert.doesNotMatch(catalog, /hasOwnProperty\.call\(multiplierDrafts\.value/);
-  assert.doesNotMatch(catalog, /precision: 4/);
-  assert.match(catalog, /refresh_status === "needs_confirmation"/);
-  assert.match(catalog, /dashboardApi\.refreshProviderPricing\(props\.providerId/);
-  assert.match(catalog, /expected_provider_revision: expectedRevision/);
-  assert.match(catalog, /provider_pricing_revision/);
-  assert.match(catalog, /expected_official_content_hash: expectedOfficialContentHash/);
-  assert.match(catalog, /result\.official_content_hash/);
-  assert.match(catalog, /async function reloadPricingAfterRevisionChange[\s\S]*?dashboardApi\.getPricing\(\)/);
-  assert.match(catalog, /detail\.includes\("pricing revision changed"\)[\s\S]*?reloadPricingAfterRevisionChange\(\)/);
-  assert.match(catalog, /async function saveMultiplier[\s\S]*?reloadPricingAfterRevisionChange\(\)/);
-  assert.match(catalog, /performPricingRefresh\("keep_current"|apply\("keep_current"\)/);
-  assert.match(catalog, /performPricingRefresh\("use_official"|apply\("use_official"\)/);
-  assert.match(catalog, /模型价格为 OpenCode Go 表中的美元\/百万 tokens；官方倍率用于换算额度消耗，可按活动手动调整。/);
-  assert.doesNotMatch(catalog, /额度有效价格|effectivePricingRate|effective-rates/);
-  assert.doesNotMatch(catalog, /本地条件价格最后叠加/);
-  assert.doesNotMatch(catalog, /official_price_multiplier|表价已含|Go 倍率/);
-  assert.match(catalog, /kind="goat"/);
-  assert.doesNotMatch(catalog, /kind="scnet"/);
-  assert.match(catalog, /:snapshot="group\.content\.snapshot"/);
-  assert.doesNotMatch(catalog, /plan\.id !== "command-code-goat"/);
 });

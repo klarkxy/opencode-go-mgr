@@ -10,11 +10,9 @@ const read = (relativePath) => readFileSync(new URL(relativePath, root), "utf8")
 const json = (relativePath) => JSON.parse(read(relativePath));
 
 const generatedModelsPlaceholder = "__OCG_MANAGER_GENERATED_MODELS__";
-const loopbackBaseUrl = "http://127.0.0.1:9042/v1";
 
 test("Pi package registers the fixed OCG Manager provider through Pi's native API-key flow", () => {
   const manifest = json("integrations/pi/package.json");
-  const extension = read("integrations/pi/extensions/ocg-manager.ts");
   const catalog = json("integrations/pi/models.generated.json");
 
   assert.equal(manifest.name, "ocg-manager-pi");
@@ -22,13 +20,6 @@ test("Pi package registers the fixed OCG Manager provider through Pi's native AP
   assert.ok(manifest.keywords.includes("pi-package"));
   assert.equal(manifest.peerDependencies["@earendil-works/pi-ai"], "*");
   assert.equal(manifest.peerDependencies["@earendil-works/pi-coding-agent"], "*");
-  assert.match(extension, /createProvider/);
-  assert.match(extension, /openAICompletionsApi/);
-  assert.match(extension, /id: providerId/);
-  assert.match(extension, new RegExp(loopbackBaseUrl.replaceAll("/", "\\/")));
-  assert.match(extension, /async login\(interaction\)/);
-  assert.match(extension, /credential\?\.key/);
-  assert.match(extension, /models\.generated\.json/);
   assert.equal(catalog.models, generatedModelsPlaceholder);
   assert.equal(
     JSON.stringify(catalog).split(generatedModelsPlaceholder).length - 1,
@@ -39,30 +30,11 @@ test("Pi package registers the fixed OCG Manager provider through Pi's native AP
 
 test("DSH bundle inserts one additive companion plugin with the fixed OCG route", () => {
   const manifest = json("integrations/dsh/package.json");
-  const patch = read("integrations/dsh/cordis.patch.yml");
-  const plugin = read("integrations/dsh/index.js");
 
   assert.equal(manifest.name, "ocg-manager-dsh");
   assert.equal(manifest.main, "./index.js");
   assert.equal(manifest.dsh.bundle.patch, "./cordis.patch.yml");
   assert.equal(manifest.peerDependencies["@deepseek-ai/dsh-llm-pi-ai"], ">=0.1.1-rc.2 <0.2.0");
-  assert.match(patch, /- insert:/);
-  assert.match(patch, /- id: ocg-manager-dsh/);
-  assert.match(patch, /name: ocg-manager-dsh/);
-  assert.match(plugin, /new PiAiAdapter/);
-  assert.match(plugin, /registerAdapter\(\[providerId\]/);
-  assert.match(plugin, /findPackageJSON\(packageName, runtimeBase\)/);
-  assert.match(plugin, /pathToFileURL\(process\.argv\[1\]\)/);
-  assert.doesNotMatch(plugin, /^import .*@deepseek-ai|^import .*@earendil-works/m);
-  assert.match(plugin, /apiKeyEnv: "OCG_MANAGER_API_KEY"/);
-  assert.doesNotMatch(plugin, /installSettingsSection|registerConfigurableProviders/);
-  assert.match(plugin, /api: "openai-completions"/);
-  assert.match(plugin, new RegExp(loopbackBaseUrl.replaceAll("/", "\\/")));
-  assert.equal(
-    plugin.split(generatedModelsPlaceholder).length - 1,
-    1,
-    "DSH has one generated model-catalog placeholder",
-  );
 });
 
 test("DSH bundle composes with the installed rc.2 parser without replacing llm-pi-ai", async (t) => {

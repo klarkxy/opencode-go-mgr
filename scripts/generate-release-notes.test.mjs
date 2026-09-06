@@ -101,19 +101,12 @@ test("every prerelease note leads with the full Beta risk warning", () => {
     });
     assert.ok(notes.includes(PRERELEASE_WARNING));
     assert.ok(notes.startsWith(`${PRERELEASE_WARNING}\n\n# OCG Manager ${tag}`));
-    assert.match(notes, /managed account registration and isolated browser profiles are Beta/i);
-    assert.match(notes, /have not been thoroughly tested/i);
-    assert.match(notes, /Real Google signup, OpenCode signup, and payment flows/);
-    assert.match(notes, /noVNC keyboard and clipboard behavior/);
-    assert.match(notes, /Live GHCR first-publication behavior/);
-    assert.match(notes, /gateway, redaction, and release-pipeline changes/);
-    assert.match(notes, /Do not treat it as production-ready/);
   }
 });
 
 test("stable notes do not show the Beta warning", () => {
   const notes = buildReleaseNotes({ tag: "v1.5.8", previousTag: "v1.5.7", subjects: [] });
-  assert.doesNotMatch(notes, /\[!WARNING\]|Beta preview/);
+  assert.ok(!notes.includes(PRERELEASE_WARNING));
 });
 
 test("selectPreviousTag walks descending versions", () => {

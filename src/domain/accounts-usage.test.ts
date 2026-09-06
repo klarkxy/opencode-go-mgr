@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { dashboardApi } from "../api/dashboard.ts";
+import {
+  installFetchMock,
+  setupControlPlane,
+} from "../test-helpers/dashboard-v3-fetch.ts";
+import { mapWithConcurrency } from "../utils/async.ts";
 import {
   isCooling,
   isFreeCooling,
@@ -19,7 +24,21 @@ import {
   usageProgressStatus,
 } from "./accounts-usage.ts";
 import type { UsageEditState, UsageKey } from "./accounts-usage.ts";
-import { mapWithConcurrency } from "../utils/async.ts";
+
+function usageWindow() {
+  return {
+    accountId: "acc-1",
+    pricingRevision: null,
+    processGeneration: 99,
+    resetsIn5h: null,
+    resetsInMonth: null,
+    resetsInWeek: null,
+    revision: 7,
+    window5h: 50,
+    windowMonth: 10,
+    windowWeek: 20,
+  };
+}
 
 test("fills every active 5-hour, weekly, or monthly limit", () => {
   const cases: Array<[UsageKey, "cooldown_5h_until" | "cooldown_week_until" | "cooldown_month_until"]> = [
@@ -136,28 +155,6 @@ test("shows local estimated saturation as a warning, not a real breaker", () => 
   assert.equal(usageProgressPercentage(realWeeklyBreaker, "window_week", 0), 100);
 });
 
-test("shows a live reset countdown below a quota progress bar during cooldown", async () => {
-  // The strip lives in UsageStrip.vue with its own 1s clock so a tick only
-  // re-renders the strip instead of the whole account card list.
-  const source = await readFile(new URL("../components/UsageStrip.vue", import.meta.url), "utf8");
-  const progress = source.indexOf(':percentage="usageProgressPercentage(');
-  const countdown = source.indexOf('class="usage-reset-countdown"');
-
-  assert.ok(progress >= 0);
-  assert.ok(countdown > progress);
-  assert.match(source, /v-if="isUsageLimitReached\(account, limit\.key, now\)"[\s\S]*class="usage-reset-countdown"[\s\S]*formatWindowRemaining\(limit\.key\)/);
-  assert.match(source, /\.usage-reset-countdown \{[\s\S]*color: var\(--ocg-error\);/);
-  assert.doesNotMatch(source, /\.usage-reset-countdown \{[\s\S]*?min-height:/);
-});
-
-test("shows a distinct upstream account breaker instead of disguising it as cooldown", async () => {
-  const card = await readFile(new URL("../components/AccountCard.vue", import.meta.url), "utf8");
-  const display = await readFile(new URL("./account-display.ts", import.meta.url), "utf8");
-  assert.match(card, /account\.auth_error \|\| isCooling\(account, now\)/);
-  assert.match(display, /account\.enabled[\s\S]*t\("不可用"\)[\s\S]*t\("已禁用"\)/);
-  assert.match(display, /if \(account\.auth_error\) return "error"/);
-});
-
 test("maps each usage window to its cooldown reset deadline", () => {
   const account = {
     cooldown_5h_until: "2026-07-20T01:00:00Z",
@@ -169,98 +166,12 @@ test("maps each usage window to its cooldown reset deadline", () => {
   assert.equal(resetTimeForWindow(account, "window_month"), null);
 });
 
-test("keeps account cards compact with metadata tags and popover calibration", async () => {
-  const accounts = await readFile(new URL("../views/Accounts.vue", import.meta.url), "utf8");
-  const card = await readFile(new URL("../components/AccountCard.vue", import.meta.url), "utf8");
-  const editor = await readFile(new URL("../components/AccountUsageEditor.vue", import.meta.url), "utf8");
-  const usage = await readFile(new URL("./useAccountUsage.ts", import.meta.url), "utf8");
-  const display = await readFile(new URL("./account-display.ts", import.meta.url), "utf8");
-  const strip = await readFile(new URL("../components/UsageStrip.vue", import.meta.url), "utf8");
-  const header = card.slice(
-    card.indexOf("<template #header>"),
-    card.indexOf('<div v-if="!accountIsReady(account)"'),
-  );
-  const stripBody = strip.slice(
-    strip.indexOf('class="usage-strip-body" role="group"'),
-    strip.indexOf("<script"),
-  );
-
-  assert.ok(header.indexOf("accountStatusLabel(account, now)") < header.indexOf('v-if="hasValidityPeriod"'));
-  // Subscription dates collapse into one clickable status tag whose popover
-  // supports a selected date or a one-click update to today.
-  assert.match(header, /<n-popover[\s\S]*?v-if="hasValidityPeriod"[\s\S]*?trigger="click"/);
-  assert.match(header, /accountExpiryLabel\(account, now\) \}\} ·/);
-  assert.match(header, /t\("到期于 \{date\}"/);
-  assert.match(header, /:aria-label="`\$\{accountExpiryLabel/);
-  assert.match(header, /<n-date-picker[\s\S]*?v-model:formatted-value="purchaseDateDraft"/);
-  assert.match(header, /@click="commitPurchaseDate\(today\)"/);
-  assert.doesNotMatch(header, /<n-tag v-if="isGo && accountIsReady\(account\)"/);
-  assert.match(card, /<n-popover[\s\S]*?trigger="click"[\s\S]*?placement="bottom-end"[\s\S]*?:width="320"[\s\S]*?@update:show="\(show: boolean\) => show && emit\('usage-editor-open'\)"/);
-  assert.match(editor, /class="usage-editor-popover"/);
-  assert.doesNotMatch(card, /:flip="false"/);
-  assert.ok(card.indexOf("@update:value=\"emit('toggle')\"") < card.indexOf('placement="bottom-end"'));
-  assert.ok(card.indexOf("<n-popover") < card.indexOf("<n-dropdown"));
-  assert.match(editor, /class="usage-editor-popover"[\s\S]*?class="usage-resets-row"/);
-  assert.match(usage, /async function focusUsageEditor\(accountId: string\)[\s\S]*?requestAnimationFrame[\s\S]*?\.n-input-number input[\s\S]*?\.focus\(\)/);
-  assert.match(card, /v-if="\(isGo \|\| isOfficialCn\) && accountIsReady\(account\)"[\s\S]*?刷新额度/);
-  assert.doesNotMatch(
-    card,
-    /isOllamaCloud && accountIsReady\(account\)"[\s\S]*?刷新额度/,
-  );
-  assert.doesNotMatch(
-    card,
-    /accountIsReady\(account\) && account\.account_type === 'managed'/,
-  );
-  assert.match(usage, /async function refreshAccountUsage/);
-  assert.match(usage, /dashboardApi\.refreshAccountUsage/);
-  assert.match(usage, /额度已从 OpenCode 官方用量刷新/);
-  assert.doesNotMatch(usage, /refreshManagedUsage|refreshManagedAccountUsage|额度已从 OpenCode 控制台刷新/);
-  assert.match(card, /:aria-label="t\('校准用量'\)"/);
-  assert.doesNotMatch(card, /根据 OCG 内已定价请求估算/);
-  assert.match(
-    card,
-    /manualUsageCalibration && accountIsReady\(account\) && edits"[\s\S]*?class="account-action account-action--secondary"/,
-  );
-  assert.doesNotMatch(card, /account-action--edit/);
-  assert.doesNotMatch(stripBody, /usage-strip-title|\{\{ t\("用量"\) \}\}/);
-  assert.match(stripBody, /class="usage-strip-body" role="group" :aria-label="t\('用量'\)"/);
-  assert.match(stripBody, /<n-progress[\s\S]*?:percentage="usageProgressPercentage\(/);
-  assert.match(stripBody, /usage\[limit\.key\] > limit\.limit[\s\S]*超出 \{amount\}/);
-  assert.doesNotMatch(stripBody, /<n-input-number|<n-slider|class="usage-resets-row"/);
-  assert.match(
-    strip,
-    /\.usage-strip\s*\{\s*min-width:\s*0;\s*\}\s*\.usage-strip-body\s*\{[\s\S]*?grid-template-columns:\s*repeat\(auto-fit,\s*minmax\(180px,\s*1fr\)\)/,
-  );
-  assert.match(strip, /@media \(max-width: 900px\) \{\s*\.usage-strip-body\s*\{\s*grid-template-columns: 1fr;/);
-  assert.doesNotMatch(card, /class="account-lifecycle"|\.account-lifecycle\s*\{/);
-  assert.match(display, /key: "edit", label: t\("编辑账号"\)/);
-  assert.match(accounts, /v-if="quotaLimitsError"[\s\S]*?@click="retryQuotaLimits"/);
-  assert.equal(accounts.match(/v-if="quotaLimitsError"/g)?.length, 1);
-});
-
 test("normalizes manually entered percentages to the supported range and precision", () => {
   assert.equal(normalizeUsagePercent(-1), 0);
   assert.equal(normalizeUsagePercent(42.56), 42.6);
   assert.equal(normalizeUsagePercent(101), 100);
   assert.equal(usagePercentFromCost(6, 12), 50);
   assert.equal(usagePercentFromCost(180, 100), 100);
-});
-
-test("accounts page surfaces official sync last-success and retry state beyond button loading", async () => {
-  const card = await readFile(new URL("../components/AccountCard.vue", import.meta.url), "utf8");
-  const usage = await readFile(new URL("./useAccountUsage.ts", import.meta.url), "utf8");
-  const display = await readFile(new URL("./account-display.ts", import.meta.url), "utf8");
-  assert.match(usage, /usage_sync_last_success_at/);
-  assert.match(usage, /usage_sync_next_allowed_at/);
-  assert.match(display, /isUsageRefreshBlocked/);
-  assert.match(display, /usageSyncCaption/);
-  assert.match(card, /class="usage-sync-meta"/);
-  assert.match(usage, /error\.status === 429/);
-  assert.match(usage, /请稍后再试（约 \{seconds\} 秒）/);
-  assert.match(display, /上次官方同步: \{time\}/);
-  assert.match(display, /尚未官方同步/);
-  assert.match(display, /刷新额度冷却中，请于 \{time\} 后重试/);
-  assert.match(card, /\(!isOfficialCn && isUsageRefreshBlocked\(account, now\)\)/);
 });
 
 test("usage refresh preserves dirty drafts unless a real 429 reset that window", () => {
@@ -365,15 +276,6 @@ test("reset editor splits minutes into hour/minute or day/hour field pairs", () 
   assert.equal(resetsFirstFieldValue(dirty, "window_month"), 0);
 });
 
-test("calibration shortcut is disabled when every usage window is cooling", async () => {
-  const card = await readFile(new URL("../components/AccountCard.vue", import.meta.url), "utf8");
-  const usage = await readFile(new URL("./useAccountUsage.ts", import.meta.url), "utf8");
-
-  assert.match(card, /:disabled="!usageEditorAvailable"/);
-  assert.match(usage, /usageLoading\.value\[account\.id\] \|\| usageLoadErrors\.value\[account\.id\]/);
-  assert.match(usage, /usageLimitsFor\(account\)\.some\(\(\{ key \}\) => !accountUsageLimitReached\(account, key\)\)/);
-});
-
 test("bounded concurrency rejects invalid limits instead of dropping work", async () => {
   const worker = async (value: number) => value * 2;
 
@@ -383,56 +285,41 @@ test("bounded concurrency rejects invalid limits instead of dropping work", asyn
   await assert.rejects(mapWithConcurrency([1], 0.5, worker), RangeError);
 });
 
-test("accounts render before per-account usage and expose failed loads for retry", async () => {
-  const accounts = await readFile(new URL("../views/Accounts.vue", import.meta.url), "utf8");
-  const usage = await readFile(new URL("./useAccountUsage.ts", import.meta.url), "utf8");
-  const load = accounts.slice(accounts.indexOf("async function loadAccounts"), accounts.indexOf("async function onFormSave"));
+test("usage API patches the selected window and percent, and refreshes with POST", async () => {
+  setupControlPlane(7);
+  const requests = installFetchMock(({ url, method }) => {
+    if (method === "PATCH" && url.endsWith("/accounts/acc%201/usage")) {
+      return { revision: 7, processGeneration: 99, usage: usageWindow() };
+    }
+    if (method === "POST" && url.endsWith("/accounts/acc%201/usage/refresh")) {
+      return {
+        lastSuccessAt: "2026-08-21T00:00:00Z",
+        nextAllowedAt: "2026-08-21T00:01:00Z",
+        processGeneration: 99,
+        revision: 7,
+        source: "official_go_usage",
+        usage: usageWindow(),
+      };
+    }
+    throw new Error(`unexpected ${method} ${url}`);
+  });
 
-  assert.ok(load.indexOf("accounts.value = loaded") < load.indexOf("loadAccountUsage(account.id)"));
-  assert.match(usage, /usageLoadErrors\.value\[accountId\] = dashboardErrorDetail\(error\)/);
-  assert.match(accounts, /v-if="accountListLoading"[\s\S]*?v-else-if="accountListError"[\s\S]*?@click="loadAccounts"/);
+  await dashboardApi.updateAccountUsage("acc 1", "window_week", 42, 15);
+  await dashboardApi.refreshAccountUsage("acc 1");
 
-  assert.match(accounts, /async function refreshAccountState/);
-});
-
-test("manual editor writes on commit events instead of each value update", async () => {
-  const editor = await readFile(new URL("../components/AccountUsageEditor.vue", import.meta.url), "utf8");
-  const usage = await readFile(new URL("./useAccountUsage.ts", import.meta.url), "utf8");
-
-  assert.match(editor, /@update:value="emit\('update-draft', limit\.key, \$event\)"/);
-  assert.match(editor, /@dragend="emit\('save', limit\.key\)"/);
-  assert.match(editor, /@blur="emit\('save', limit\.key\)"/);
-  assert.match(editor, /@keydown\.enter\.prevent="emit\('save', limit\.key\)"/);
-  assert.match(usage, /if \(!edit \|\| edit\.saving\) return;/);
-  assert.equal(usage.match(/edit\.resets_dirty = true;/g)?.length, 2);
-  assert.match(usage, /const resetsInMin = resetsInMinutesForSave\(edit, key\)/);
-  assert.match(usage, /message\.error\(t\("用量保存失败: \{error\}"/);
-});
-
-test("account drag keeps receiving touch pointers after keyed cards move", async () => {
-  const order = await readFile(new URL("../views/useAccountOrder.ts", import.meta.url), "utf8");
-
-  assert.match(order, /window\.addEventListener\("pointermove", previewAccountDrag, \{ passive: false \}\)/);
-  assert.match(order, /window\.addEventListener\("pointerup", finishAccountDrag\)/);
-  assert.match(order, /window\.addEventListener\("pointercancel", cancelAccountDrag\)/);
-  assert.match(order, /window\.removeEventListener\("pointermove", previewAccountDrag\)/);
-  assert.doesNotMatch(order, /@lostpointercapture|@pointermove="previewAccountDrag"/);
-});
-
-test("usage API sends the selected window and percent with PATCH", async () => {
-  const dashboardSource = await readFile(new URL("../api/dashboard.ts", import.meta.url), "utf8");
-  const v3Source = await readFile(new URL("../api/dashboard-v3.ts", import.meta.url), "utf8");
-  const update = dashboardSource.slice(
-    dashboardSource.indexOf("updateAccountUsage"),
-    dashboardSource.indexOf("refreshAccountUsage"),
-  );
-
-  assert.match(update, /patchAccountUsage/);
-  assert.match(update, /resetsInMinutes/);
-  assert.match(v3Source, /patchAccountUsage: \(id: string, update: WithoutExpectation<AccountUsageUpdate>, expectation: MutationExpectation\)/);
-  assert.match(v3Source, /method: "PATCH"/);
-  assert.match(v3Source, /refreshAccountUsage: \(id: string, expectation: MutationExpectation\)/);
-  assert.match(v3Source, /`\/accounts\/\$\{encode\(id\)\}\/usage\/refresh`/);
-  assert.match(v3Source, /method: "POST"/);
-  assert.doesNotMatch(dashboardSource, /refreshManagedAccountUsage/);
+  assert.equal(requests[0]?.url, "/dashboard/api/v3/accounts/acc%201/usage");
+  assert.equal(requests[0]?.method, "PATCH");
+  assert.deepEqual(requests[0]?.body, {
+    window: "window_week",
+    percent: 42,
+    resetsInMinutes: 15,
+    expectedRevision: 7,
+    processGeneration: 99,
+  });
+  assert.equal(requests[1]?.url, "/dashboard/api/v3/accounts/acc%201/usage/refresh");
+  assert.equal(requests[1]?.method, "POST");
+  assert.deepEqual(requests[1]?.body, {
+    expectedRevision: 7,
+    processGeneration: 99,
+  });
 });

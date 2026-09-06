@@ -35,6 +35,9 @@ test("forward log API sends remote paging and filter parameters", async () => {
     status: "success",
     account_id: "account 117",
     request_id: "ocg-test id",
+    provider_id: "opencode",
+    route_account_id: "route 1",
+    credential_account_id: "cred 2",
     sort_by: "attempt",
     sort_order: "asc",
   });
@@ -45,6 +48,9 @@ test("forward log API sends remote paging and filter parameters", async () => {
   assert.equal(query.get("status"), "success");
   assert.equal(query.get("accountId"), "account 117");
   assert.equal(query.get("requestId"), "ocg-test id");
+  assert.equal(query.get("providerId"), "opencode");
+  assert.equal(query.get("routeAccountId"), "route 1");
+  assert.equal(query.get("credentialAccountId"), "cred 2");
   assert.equal(query.get("sortBy"), "attempt");
   assert.equal(query.get("sortOrder"), "asc");
 });
