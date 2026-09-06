@@ -1055,7 +1055,6 @@ async function loadSettings(loadApplicationModels = true) {
         gateway_port: previousServiceConfig.gateway_port,
         gateway_key: selectedKey.value?.value ?? "",
         client_root_url: previousServiceConfig.client_root_url,
-        upstream_base_url: "",
       },
       {
         gateway_port: nextServiceConfig.gateway_port,
@@ -1066,7 +1065,6 @@ async function loadSettings(loadApplicationModels = true) {
             : nextServiceConfig.sub_keys.find((entry) => entry.id === selectedKeyId.value)?.value
         ) ?? nextServiceConfig.primary_key,
         client_root_url: nextServiceConfig.client_root_url,
-        upstream_base_url: "",
       },
       snippetDrafts.value,
     );

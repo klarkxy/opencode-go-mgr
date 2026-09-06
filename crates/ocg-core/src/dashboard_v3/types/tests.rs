@@ -73,7 +73,6 @@ fn connection_info_is_the_only_secret_bearing_dto() {
     let connection = ConnectionInfo {
         gateway_port: 9042,
         client_root_url: String::new(),
-        upstream_base_url: "https://opencode.ai/zen/go".into(),
         primary_key: "ocg-secret".into(),
         sub_keys: vec![ConnectionSubKey {
             id: "sub".into(),
@@ -87,6 +86,7 @@ fn connection_info_is_the_only_secret_bearing_dto() {
     let value = serde_json::to_value(&connection).unwrap();
     assert_eq!(value["primaryKey"], "ocg-secret");
     assert_eq!(value["subKeys"][0]["value"], "ocg-sub-secret");
+    assert!(value.get("upstreamBaseUrl").is_none());
     assert!(value.get("gatewayKey").is_none());
     assert!(value.get("key").is_none());
     assert!(value.get("gateway_key").is_none());
@@ -100,7 +100,6 @@ fn settings_wire_omits_key_fields_and_nulls_unsupported_host_toggles() {
         process_generation: 9,
         gateway_port: 9042,
         gateway_port_from_env: false,
-        upstream_base_url: "https://opencode.ai/zen/go".into(),
         proxy_mode: ProxyMode::Auto,
         proxy_url: String::new(),
         proxy_list_direction: ProxyListDirection::Whitelist,
@@ -131,6 +130,8 @@ fn settings_wire_omits_key_fields_and_nulls_unsupported_host_toggles() {
         "gateway_key",
         "primaryKey",
         "primary_key",
+        "upstreamBaseUrl",
+        "upstream_base_url",
     ] {
         assert!(
             !object.contains_key(forbidden),
@@ -166,6 +167,14 @@ fn settings_update_requires_cas_and_allows_omitted_patch_fields() {
             "expectedRevision": 7,
             "processGeneration": 9,
             "gatewayKey": "ocg-secret"
+        }))
+        .is_err()
+    );
+    assert!(
+        serde_json::from_value::<SettingsUpdate>(json!({
+            "expectedRevision": 7,
+            "processGeneration": 9,
+            "upstreamBaseUrl": "https://opencode.ai/zen/go"
         }))
         .is_err()
     );

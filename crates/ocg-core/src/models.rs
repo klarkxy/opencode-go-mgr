@@ -4,7 +4,7 @@ use chrono::{DateTime, Datelike, Local, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::provider::{ConnectionVerificationStatus, UpstreamProtocolKind};
+use crate::provider::{ConnectionVerificationStatus, OPENCODE_GO_BASE_URL, UpstreamProtocolKind};
 
 pub use crate::kernel::ids::DEFAULT_ACCOUNT_TEST_MODEL;
 pub use ocg_domain::account::{Account, AccountSetupStep, AccountType, UpstreamChannel};
@@ -287,6 +287,8 @@ pub const UNATTRIBUTED_KEY_FILTER: &str = "__unattributed__";
 pub struct AppConfig {
     pub gateway_port: u16,
     pub gateway_key: String,
+    /// Persisted for compatibility. Production OpenCode Go/Zen routes use the
+    /// sealed official origins; only loopback HTTP(S) values remain a test seam.
     pub upstream_base_url: String,
     pub proxy_mode: ProxyMode,
     pub proxy_url: String,
@@ -311,7 +313,7 @@ impl Default for AppConfig {
         Self {
             gateway_port: 9042,
             gateway_key: String::new(),
-            upstream_base_url: "https://opencode.ai/zen/go".to_string(),
+            upstream_base_url: OPENCODE_GO_BASE_URL.to_string(),
             proxy_mode: ProxyMode::Auto,
             proxy_url: String::new(),
             proxy_list_direction: ProxyListDirection::Whitelist,

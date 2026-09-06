@@ -8,7 +8,6 @@ function appConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     revision: 1,
     gateway_port: 9042,
     gateway_port_from_env: false,
-    upstream_base_url: "https://gateway.example.test",
     proxy_mode: "auto",
     proxy_url: "",
     proxy_list_direction: "whitelist",
@@ -42,7 +41,6 @@ function assertAlwaysSentFields(input: ReturnType<typeof settingsUpdateInput>, v
   assert.equal(input.proxyUrl, value.proxy_url);
   assert.equal(input.routingMode, value.routing_mode);
   assert.equal(input.streamIdleTimeoutSecs, value.stream_idle_timeout_secs);
-  assert.equal(input.upstreamBaseUrl, value.upstream_base_url);
 }
 
 test("settingsUpdateInput omits showDockIcon when dock visibility is unsupported (Windows)", () => {

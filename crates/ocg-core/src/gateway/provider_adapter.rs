@@ -328,7 +328,7 @@ fn resolve_open_code_go(
     }
     require_opencode_protocol_policy(descriptor, account, plan, policy, "OpenCode Go")?;
     Ok(AttemptSpec {
-        base_url: config.upstream_base_url.trim_end_matches('/').to_string(),
+        base_url: crate::gateway::free_models::opencode_go_base_url(&config.upstream_base_url),
         path: opencode_upstream_path(plan.upstream)?,
         upstream: plan.upstream,
         auth: descriptor_auth(descriptor.inference.auth)?,

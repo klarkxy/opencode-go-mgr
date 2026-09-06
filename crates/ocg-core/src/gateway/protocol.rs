@@ -39,7 +39,7 @@ pub struct RequestPlan {
     pub body: Bytes,
     /// Resolved upstream product channel (Go vs Zen free).
     pub channel: UpstreamChannel,
-    /// Optional override for `AppConfig.upstream_base_url` (Zen free base).
+    /// Optional override for the sealed Zen free base (loopback tests).
     pub upstream_base_override: Option<String>,
     /// Client-requested model before prefer mapping, when different.
     pub original_model: Option<String>,

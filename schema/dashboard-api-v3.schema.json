@@ -1830,15 +1830,11 @@
             "$ref": "#/$defs/ConnectionSubKey"
           },
           "type": "array"
-        },
-        "upstreamBaseUrl": {
-          "type": "string"
         }
       },
       "required": [
         "gatewayPort",
         "clientRootUrl",
-        "upstreamBaseUrl",
         "primaryKey",
         "subKeys",
         "revision",
@@ -6197,9 +6193,6 @@
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
-        },
-        "upstreamBaseUrl": {
-          "type": "string"
         }
       },
       "required": [
@@ -6207,7 +6200,6 @@
         "processGeneration",
         "gatewayPort",
         "gatewayPortFromEnv",
-        "upstreamBaseUrl",
         "proxyMode",
         "proxyUrl",
         "proxyListDirection",
@@ -6347,12 +6339,6 @@
           "minimum": 0,
           "type": [
             "integer",
-            "null"
-          ]
-        },
-        "upstreamBaseUrl": {
-          "type": [
-            "string",
             "null"
           ]
         }

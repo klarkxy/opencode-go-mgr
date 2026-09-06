@@ -347,7 +347,6 @@ export interface ConnectionInfo {
   processGeneration: number;
   revision: number;
   subKeys: ConnectionSubKey[];
-  upstreamBaseUrl: string;
 }
 /**
  * One non-deleted sub Key as exposed by [`ConnectionInfo`].
@@ -384,7 +383,6 @@ export interface Settings {
   routingMode: RoutingMode;
   showDockIcon: boolean | null;
   streamIdleTimeoutSecs: number;
-  upstreamBaseUrl: string;
 }
 /**
  * One known model backing the list-mode checkbox grid.
@@ -416,7 +414,6 @@ export interface SettingsUpdate {
   routingMode?: RoutingMode | null;
   showDockIcon?: boolean | null;
   streamIdleTimeoutSecs?: number | null;
-  upstreamBaseUrl?: string | null;
 }
 /**
  * POST `/keys` body. CAS tokens are required; `name` is required. Unknown

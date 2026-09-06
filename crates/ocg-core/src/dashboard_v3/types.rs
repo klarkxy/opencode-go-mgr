@@ -11,7 +11,7 @@
 //! `GET /settings/update-status` are operational reads without CAS and do not bump
 //! revision. `POST /settings/install-update` is an in-memory control-plane mutation
 //! that requires `expectedRevision` and `processGeneration` but does not bump them.
-//! Plaintext OCG Manager Keys must not appear on `Settings` or
+//! Plaintext Open Console Gateway Keys must not appear on `Settings` or
 //! provider/Zen/contract DTOs —`ConnectionInfo` is the only secret-bearing
 //! V3 response DTO for those Keys. `CpaRuntimeKeyCreated.secret` returns a
 //! newly generated CPA client inference key once. `CustomModelDiscoveryRequest.apiKey` is write-only. Protocol path/switch tokens
@@ -521,7 +521,6 @@ impl V3Error {
 pub struct ConnectionInfo {
     pub gateway_port: u16,
     pub client_root_url: String,
-    pub upstream_base_url: String,
     pub primary_key: String,
     pub sub_keys: Vec<ConnectionSubKey>,
     pub revision: u64,
@@ -549,7 +548,6 @@ pub struct Settings {
     pub process_generation: u64,
     pub gateway_port: u16,
     pub gateway_port_from_env: bool,
-    pub upstream_base_url: String,
     pub proxy_mode: ProxyMode,
     pub proxy_url: String,
     pub proxy_list_direction: ProxyListDirection,
@@ -580,8 +578,6 @@ pub struct SettingsUpdate {
     pub expectation: MutationExpectation,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gateway_port: Option<u16>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub upstream_base_url: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proxy_mode: Option<ProxyMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -16,6 +16,14 @@ use crate::ids::{
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+/// Official OpenCode Go inference origin. Production routes always use this
+/// origin; loopback substitutes exist only as a test seam.
+pub const OPENCODE_GO_BASE_URL: &str = "https://opencode.ai/zen/go";
+pub const OPENCODE_GO_HOST: &str = "opencode.ai";
+/// Official OpenCode Zen free-channel origin. Sibling of
+/// [`OPENCODE_GO_BASE_URL`], not derived from settings.
+pub const OPENCODE_ZEN_BASE_URL: &str = "https://opencode.ai/zen";
+
 /// Official Command Code Provider API v1 base. Production GOAT routes this
 /// fixed origin; loopback substitutes exist only as a test seam.
 pub const COMMAND_CODE_GOAT_BASE_URL: &str = "https://api.commandcode.ai/provider/v1";
@@ -881,8 +889,6 @@ pub enum InferenceChannelKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InferenceOriginKind {
-    ConfigUpstreamBase,
-    DerivedZenBase,
     OfficialFixed,
     AccountConfigured,
     LocalExternalIntegration,
@@ -1052,7 +1058,7 @@ fn open_code_go_capabilities(plan: BuiltinProvider) -> ProviderCapabilities {
             quota_scope: plan.quota_scope,
             auth: InferenceAuthDescriptor::OpenCodeProtocolDefault,
             follow_redirects: true,
-            origin: InferenceOriginKind::ConfigUpstreamBase,
+            origin: InferenceOriginKind::OfficialFixed,
             loopback_test_seam_only: false,
         },
         protocol_probe: ProtocolProbeDescriptor {
@@ -1117,7 +1123,7 @@ fn zen_free_capabilities(plan: BuiltinProvider) -> ProviderCapabilities {
             quota_scope: plan.quota_scope,
             auth: InferenceAuthDescriptor::None,
             follow_redirects: true,
-            origin: InferenceOriginKind::DerivedZenBase,
+            origin: InferenceOriginKind::OfficialFixed,
             loopback_test_seam_only: false,
         },
         protocol_probe: ProtocolProbeDescriptor {

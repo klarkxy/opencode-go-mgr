@@ -160,7 +160,6 @@ export interface AppConfig {
   revision: number;
   gateway_port: number;
   gateway_port_from_env: boolean;
-  upstream_base_url: string;
   proxy_mode: ProxyMode;
   proxy_url: string;
   proxy_list_direction: ProxyListDirection;
@@ -190,7 +189,6 @@ export interface ConnectionSubKey {
 export interface ConnectionInfo {
   gateway_port: number;
   client_root_url: string;
-  upstream_base_url: string;
   primary_key: string;
   sub_keys: ConnectionSubKey[];
   revision: number;
@@ -529,7 +527,6 @@ export function presentSettings(value: V3Settings): AppConfig {
     revision: value.revision,
     gateway_port: value.gatewayPort,
     gateway_port_from_env: value.gatewayPortFromEnv,
-    upstream_base_url: value.upstreamBaseUrl,
     proxy_mode: value.proxyMode,
     proxy_url: value.proxyUrl,
     proxy_list_direction: value.proxyListDirection,
@@ -567,7 +564,6 @@ export function settingsUpdateInput(value: AppConfig): Omit<V3SettingsUpdate, "e
     proxyUrl: value.proxy_url,
     routingMode: value.routing_mode,
     streamIdleTimeoutSecs: value.stream_idle_timeout_secs,
-    upstreamBaseUrl: value.upstream_base_url,
   };
   if (value.auto_start_supported) input.autoStart = value.auto_start;
   if (value.dock_visibility_supported) input.showDockIcon = value.show_dock_icon;
@@ -579,7 +575,6 @@ export function presentConnection(value: V3ConnectionInfo): ConnectionInfo {
   return {
     gateway_port: value.gatewayPort,
     client_root_url: value.clientRootUrl,
-    upstream_base_url: value.upstreamBaseUrl,
     primary_key: value.primaryKey,
     sub_keys: value.subKeys.map((key) => ({ id: key.id, name: key.name, enabled: key.enabled, value: key.value })),
     revision: value.revision,

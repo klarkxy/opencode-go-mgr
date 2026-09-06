@@ -199,7 +199,10 @@ fn prepare_managed_key_verify(
     ensure_plan_can_enable(state, &account)?;
     let (_protocol, path, body) = go_verification_request()?;
     let config = state.config();
-    let base = verification_base_url(state.process_generation(), &config.upstream_base_url);
+    let base = verification_base_url(
+        state.process_generation(),
+        &crate::gateway::free_models::opencode_go_base_url(&config.upstream_base_url),
+    );
     validate_upstream_url(&base)
         .map_err(|message| V3ApiError::invalid_request_at(state, message))?;
     Ok(PreparedVerify {

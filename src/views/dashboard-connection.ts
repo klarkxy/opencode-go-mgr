@@ -15,7 +15,6 @@ export interface ConnectionDraftContext {
   gateway_port: number;
   gateway_key: string;
   client_root_url: string;
-  upstream_base_url: string;
 }
 
 export function connectionDraftContextChanged(
@@ -24,8 +23,7 @@ export function connectionDraftContextChanged(
 ): boolean {
   return previous.gateway_port !== next.gateway_port
     || previous.gateway_key !== next.gateway_key
-    || previous.client_root_url !== next.client_root_url
-    || previous.upstream_base_url !== next.upstream_base_url;
+    || previous.client_root_url !== next.client_root_url;
 }
 
 export function reconcileConnectionDrafts(

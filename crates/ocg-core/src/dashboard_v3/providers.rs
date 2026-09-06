@@ -334,7 +334,7 @@ async fn refresh_go_or_command_catalog(
         };
         let config = state.config();
         let base_url = if provider_id == OPENCODE_PROVIDER_ID {
-            config.upstream_base_url.clone()
+            crate::gateway::free_models::opencode_go_base_url(&config.upstream_base_url)
         } else {
             #[cfg(debug_assertions)]
             {

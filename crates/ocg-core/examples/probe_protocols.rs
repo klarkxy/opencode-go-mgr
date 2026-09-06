@@ -266,7 +266,7 @@ async fn main() -> anyhow::Result<()> {
             )
         })
         .count();
-    let go_base = config.upstream_base_url.trim_end_matches('/').to_string();
+    let go_base = ocg_core::gateway::free_models::opencode_go_base_url(&config.upstream_base_url);
     let free_base = resolve_upstream_base(UpstreamChannel::Free, &go_base).ok();
 
     println!("offline inventory (no network unless --run):");

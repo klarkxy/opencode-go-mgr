@@ -151,31 +151,6 @@
               </n-tooltip>
             </div>
           </div>
-
-          <div class="connection-row">
-            <n-icon size="18" aria-hidden="true"><CloudServerOutlined /></n-icon>
-            <div class="connection-value">
-              <span class="sr-only">{{ t("上游地址") }}</span>
-              <code>{{ serviceConfig.upstream_base_url || t("未设置") }}</code>
-            </div>
-            <n-tooltip trigger="hover" :delay="200">
-              <template #trigger>
-                <n-button
-                  circle
-                  quaternary
-                  size="small"
-                  :aria-label="t('复制上游地址')"
-                  :disabled="!serviceConfig.upstream_base_url"
-                  @click="copyConnection('upstream', serviceConfig.upstream_base_url, t('上游地址'))"
-                >
-                  <template #icon>
-                    <n-icon :component="copiedTarget === 'upstream' ? CheckOutlined : CopyOutlined" />
-                  </template>
-                </n-button>
-              </template>
-              {{ t("复制上游地址") }}
-            </n-tooltip>
-          </div>
         </div>
         <p v-if="connectionUrls.insecureHttp" class="connection-warning" role="status">
           {{ t("非本机 HTTP 会明文传输 Key 与请求内容，请仅在可信网络中使用。") }}
@@ -260,7 +235,6 @@ import { NAlert, NButton, NEmpty, NIcon, NPopconfirm, NPopover, NSpin, NTag, NTo
 import {
   ApiOutlined,
   CheckOutlined,
-  CloudServerOutlined,
   CopyOutlined,
   DownOutlined,
   KeyOutlined,
@@ -318,7 +292,6 @@ const lifecycleNow = ref(Date.now());
 const EMPTY_CONNECTION: ConnectionInfo = {
   gateway_port: 9042,
   client_root_url: "",
-  upstream_base_url: "",
   primary_key: "",
   sub_keys: [],
   revision: 0,

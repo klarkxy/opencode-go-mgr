@@ -22,7 +22,6 @@ The first panel above the fold — and the only one that stays pinned to the top
 
 - The **Key**, with regenerate, one-click copy, and a **Manage access keys** action that opens the Access Keys view. Regenerating invalidates only the selected key's previous value; other keys keep working. When more than one enabled key exists, a selector switches the displayed masked value, copy target, and regenerate target. Copying places the full plaintext value on the clipboard; clear clipboard history after use on shared or public computers. Create, rename, enable, disable, and delete live on **Access Keys**, not here. The primary key is rotated the same way as a sub key; there is no custom-value field.
 - The **API Base URL** (e.g. `http://127.0.0.1:9042/v1`) with one-click copy, plus the full Chat Completions, Responses, and Messages endpoints.
-- The **Upstream URL** the gateway forwards to, with a copy action.
 - An **HTTP warning** that appears whenever the resolved root URL is a non-loopback `http://` URL, warning that the Key and request contents would be transmitted in clear text.
 
 The **Downstream Access Root** setting in **Settings** controls only the URLs the dashboard shows and the application tutorials emit. Its effective value is selected in this order:

@@ -435,7 +435,11 @@ fn adapter_descriptors_preserve_current_capability_decisions() {
         InferenceAuthDescriptor::OpenCodeProtocolDefault
     );
     assert!(go.inference.follow_redirects);
-    assert_eq!(go.inference.origin, InferenceOriginKind::ConfigUpstreamBase);
+    assert_eq!(go.inference.origin, InferenceOriginKind::OfficialFixed);
+    assert_eq!(OPENCODE_GO_BASE_URL, "https://opencode.ai/zen/go");
+    assert_eq!(OPENCODE_GO_HOST, "opencode.ai");
+    assert_eq!(OPENCODE_ZEN_BASE_URL, "https://opencode.ai/zen");
+    assert!(OPENCODE_GO_USAGE_URL.starts_with(OPENCODE_GO_BASE_URL));
     assert!(go.usage.automatic_sync);
     assert!(go.usage.authoritative_for_quota);
     assert_eq!(go.usage.endpoint, Some(OPENCODE_GO_USAGE_URL));
@@ -467,6 +471,7 @@ fn adapter_descriptors_preserve_current_capability_decisions() {
     assert_eq!(zen.inference.quota_scope, QuotaScope::EgressIp);
     assert_eq!(zen.inference.channel, Some(InferenceChannelKind::Free));
     assert!(zen.inference.follow_redirects);
+    assert_eq!(zen.inference.origin, InferenceOriginKind::OfficialFixed);
     assert!(zen.model_catalog.admin_explicit_refresh);
     assert!(zen.protocol_probe.unknown_zen_free_defaults_to_chat);
     assert!(zen.protocol_probe.explicit_probe);

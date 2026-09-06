@@ -24,7 +24,6 @@ test("connection draft context changes only when copied connection values change
     gateway_port: 9042,
     gateway_key: "ocg-old-key",
     client_root_url: "https://old.example.com",
-    upstream_base_url: "https://opencode.ai/zen/go",
   };
 
   assert.equal(connectionDraftContextChanged(previous, { ...previous }), false);
@@ -32,7 +31,6 @@ test("connection draft context changes only when copied connection values change
     { ...previous, gateway_port: 9043 },
     { ...previous, gateway_key: "ocg-new-key" },
     { ...previous, client_root_url: "https://new.example.com" },
-    { ...previous, upstream_base_url: "https://upstream.example.com" },
   ]) {
     assert.equal(connectionDraftContextChanged(previous, next), true);
   }
@@ -830,7 +828,7 @@ test("generated VS Code and Continue configs use their current complete shapes",
 
   const continueGuide = APPLICATION_GUIDES.find((guide) => guide.id === "continue")!;
   const yaml = continueGuide.snippets(context)[0].copy;
-  assert.match(yaml, /^name: OCG Manager\nversion: 1\.0\.0\nschema: v1\nmodels:/);
+  assert.match(yaml, /^name: Open Console Gateway\nversion: 1\.0\.0\nschema: v1\nmodels:/);
   assert.match(yaml, /model: "selected-model"/);
   assert.match(yaml, /model: "second-model"/);
   assert.match(yaml, /apiKey: \$\{\{ secrets\.OCG_API_KEY \}\}/);
