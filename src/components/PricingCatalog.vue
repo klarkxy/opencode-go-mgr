@@ -658,6 +658,7 @@ function showRefreshConfirmation(
   };
   instance = dialog.warning({
     title: t("价格表与当前倍率不同"),
+    style: "width: min(640px, calc(100vw - 64px))",
     content: () => renderMultiplierChanges(changes),
     closable: false,
     closeOnEsc: false,
@@ -880,7 +881,7 @@ onMounted(() => void loadProviderCatalog());
   cursor: help;
 }
 :global(.pricing-refresh-comparison) {
-  min-width: min(560px, 76vw);
+  max-width: 100%;
 }
 :global(.pricing-refresh-comparison > p) {
   margin: 0 0 12px;
@@ -944,9 +945,6 @@ onMounted(() => void loadProviderCatalog());
   }
   .pricing-ledger--compact {
     grid-template-columns: repeat(1, minmax(0, 1fr));
-  }
-  :global(.pricing-refresh-comparison) {
-    min-width: 0;
   }
   :global(.pricing-refresh-actions) {
     align-items: stretch;
