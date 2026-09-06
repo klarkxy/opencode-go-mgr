@@ -1,6 +1,6 @@
 ---
 name: defensive-overdesign-audit
-description: Classify one suspected defensive mechanism as necessary protection, removable overdesign, or replacement-first coverage. Use for focused questions about defensive tests, validators, compatibility layers, retries, fallbacks, guards, requirement maps, CI gates, 过度防御设计, 防御性编程清理, test-suite entropy, or architecture-police tests. Do not use for broad codebase simplification or implementation of accepted cuts; use simplify-codebase for those. Do not use as authorization to weaken authentication, validation, lifecycle, compatibility, accessibility, data-loss, or release boundaries.
+description: "Assess a suspected defensive mechanism as removable duplication, replacement-first coverage, or necessary protection. Review is read-only unless changes are requested."
 ---
 
 # Defensive Overdesign Audit
@@ -12,8 +12,7 @@ truth that changes in lockstep with the code.
 
 This skill is a narrow decision gate, not a second general simplification
 framework. It classifies a suspected defense. If the user explicitly
-authorizes implementation, pass accepted cuts to `simplify-codebase` in Change
-mode for editing, recovery, and validation.
+authorizes implementation, pass accepted cuts to the active implementation workflow for editing, recovery, and validation.
 
 ## Set the boundary
 
@@ -131,30 +130,6 @@ Do not create an AST or keyword scanner to find these patterns, do not make the
 skill a CI blocker, and do not auto-delete. Search results are leads; the
 failure and consumer evidence decides.
 
-## Calibrate from the OCG cleanup batch
-
-The repository batch `d35813cc^..bc1079ec` demonstrates the boundary:
-
-- `d35813cc` removed repeated schema-number assertions, source-text policing,
-  and an unused contract fixture while retaining migration and live catalog
-  behavior.
-- `862391b0` removed thousands of lines of `syn` and text-based architecture
-  police plus their exclusive dev-dependencies.
-- `dd186eb1` moved tests into sibling modules without deleting assertions; it
-  was a readability change, not a defensive-overdesign cut.
-- `baee80b8` extracted a shared fallback harness but retained error variants
-  with distinct breaker, fallback, status, replay, and persistence outcomes.
-- `ee546fcd` removed workflow-shape meta-tests and split slow release tooling
-  from the fast web loop while preserving real release helpers and smoke.
-- `ab702050` deleted documentation-shape and duplicate frontend assertions,
-  while retaining WCAG, localization parity, redaction, and the only available
-  UI regression net.
-- `bc1079ec` removed drifting hand-maintained requirement maps and recorded the
-  behavior-first testing convention.
-
-The lesson is not "delete defensive tests." Delete self-maintained mirrors;
-retain distinct observable consequences.
-
 ## Report the decision
 
 Lead with the result, then use one record per candidate:
@@ -178,5 +153,7 @@ Finish with:
 - unresolved facts and the next evidence needed.
 
 For an authorized change, hand only `GREEN CUT` records to
-`simplify-codebase`. Preserve the `YELLOW HOLD` and `RED KEEP` boundaries as
+the active implementation workflow. Preserve the `YELLOW HOLD` and `RED KEEP` boundaries as
 explicit constraints in that implementation brief.
+
+Historical calibration, when useful: [OCG examples](references/ocg-examples.md).
