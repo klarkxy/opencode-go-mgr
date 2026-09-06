@@ -304,7 +304,7 @@ fn percent_nan_and_out_of_range_are_schema_errors() {
 }
 
 #[test]
-fn illegal_and_out_of_range_resets_at_are_rejected() {
+fn illegal_and_far_out_of_range_resets_at_are_rejected() {
     let now = fixed_now();
     let weekly = rfc3339(now + ChronoDuration::minutes(10));
     let monthly = rfc3339(now + ChronoDuration::days(1));
@@ -321,7 +321,7 @@ fn illegal_and_out_of_range_resets_at_are_rejected() {
         0.0,
         0.0,
         "ok",
-        &rfc3339(now + ChronoDuration::minutes(301)),
+        &rfc3339(now + ChronoDuration::minutes(302)),
         &weekly,
         &monthly,
     );
@@ -336,7 +336,7 @@ fn illegal_and_out_of_range_resets_at_are_rejected() {
         0.0,
         "ok",
         &rfc3339(now + ChronoDuration::minutes(300)),
-        &rfc3339(now + ChronoDuration::minutes(10_081)),
+        &rfc3339(now + ChronoDuration::minutes(10_082)),
         &monthly,
     );
     assert_eq!(
@@ -355,8 +355,47 @@ fn illegal_and_out_of_range_resets_at_are_rejected() {
     );
     let snapshot = parse_go_usage_body(past.as_bytes(), now).unwrap();
     assert_eq!(snapshot.rolling_resets_in_minutes, 0);
+}
 
-    let just_over_300 = official_body(
+#[test]
+fn expired_window_ceil_slack_clamps_to_max() {
+    let now = fixed_now();
+    let weekly = rfc3339(now + ChronoDuration::minutes(10));
+    let monthly = rfc3339(now + ChronoDuration::days(1));
+
+    let exact = official_body(
+        0.0,
+        0.0,
+        0.0,
+        "ok",
+        &rfc3339(now + ChronoDuration::minutes(300)),
+        &weekly,
+        &monthly,
+    );
+    assert_eq!(
+        parse_go_usage_body(exact.as_bytes(), now)
+            .unwrap()
+            .rolling_resets_in_minutes,
+        300
+    );
+
+    let one_ms_over = official_body(
+        0.0,
+        0.0,
+        0.0,
+        "ok",
+        &rfc3339(now + ChronoDuration::minutes(300) + ChronoDuration::milliseconds(1)),
+        &weekly,
+        &monthly,
+    );
+    assert_eq!(
+        parse_go_usage_body(one_ms_over.as_bytes(), now)
+            .unwrap()
+            .rolling_resets_in_minutes,
+        300
+    );
+
+    let one_second_over = official_body(
         0.0,
         0.0,
         0.0,
@@ -366,8 +405,42 @@ fn illegal_and_out_of_range_resets_at_are_rejected() {
         &monthly,
     );
     assert_eq!(
-        parse_go_usage_body(just_over_300.as_bytes(), now),
-        Err(GoUsageError::Window)
+        parse_go_usage_body(one_second_over.as_bytes(), now)
+            .unwrap()
+            .rolling_resets_in_minutes,
+        300
+    );
+
+    let one_minute_over = official_body(
+        0.0,
+        0.0,
+        0.0,
+        "ok",
+        &rfc3339(now + ChronoDuration::minutes(301)),
+        &weekly,
+        &monthly,
+    );
+    assert_eq!(
+        parse_go_usage_body(one_minute_over.as_bytes(), now)
+            .unwrap()
+            .rolling_resets_in_minutes,
+        300
+    );
+
+    let weekly_slack = official_body(
+        0.0,
+        0.0,
+        0.0,
+        "ok",
+        &rfc3339(now + ChronoDuration::minutes(300)),
+        &rfc3339(now + ChronoDuration::minutes(10_081)),
+        &monthly,
+    );
+    assert_eq!(
+        parse_go_usage_body(weekly_slack.as_bytes(), now)
+            .unwrap()
+            .weekly_resets_in_minutes,
+        10_080
     );
 }
 
