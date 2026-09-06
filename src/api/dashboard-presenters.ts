@@ -556,7 +556,6 @@ export function presentSettings(value: V3Settings): AppConfig {
 
 export function settingsUpdateInput(value: AppConfig): Omit<V3SettingsUpdate, "expectedRevision" | "processGeneration"> {
   const input: Omit<V3SettingsUpdate, "expectedRevision" | "processGeneration"> = {
-    autoStart: value.auto_start,
     clientRootUrl: value.client_root_url,
     connectTimeoutSecs: value.connect_timeout_secs,
     conversationSticky: value.conversation_sticky,
@@ -567,10 +566,11 @@ export function settingsUpdateInput(value: AppConfig): Omit<V3SettingsUpdate, "e
     proxyMode: value.proxy_mode,
     proxyUrl: value.proxy_url,
     routingMode: value.routing_mode,
-    showDockIcon: value.show_dock_icon,
     streamIdleTimeoutSecs: value.stream_idle_timeout_secs,
     upstreamBaseUrl: value.upstream_base_url,
   };
+  if (value.auto_start_supported) input.autoStart = value.auto_start;
+  if (value.dock_visibility_supported) input.showDockIcon = value.show_dock_icon;
   if (!value.gateway_port_from_env) input.gatewayPort = value.gateway_port;
   return input;
 }
