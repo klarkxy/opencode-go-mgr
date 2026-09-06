@@ -2,7 +2,7 @@
   <div class="aliases-page">
     <header class="aliases-header">
       <h1>{{ t("别名") }}</h1>
-      <p>{{ t("只读汇总当前供应商合同与 Custom 账号映射；点击编辑 Custom 可直接打开对应账号。") }}</p>
+      <p>{{ t("只读汇总当前供应商合同与 Custom 账号映射。") }}</p>
     </header>
 
     <div
@@ -62,10 +62,8 @@
             <tr>
               <th>{{ t("对外模型名") }}</th>
               <th>{{ t("供应商 / 方案") }}</th>
-              <th>{{ t("Custom 账号") }}</th>
               <th>{{ t("上游模型 ID") }}</th>
               <th>{{ t("可路由") }}</th>
-              <th>{{ t("操作") }}</th>
             </tr>
           </thead>
           <tbody v-for="group in aliasGroups" :key="group.public_model">
@@ -74,18 +72,8 @@
                 <code>{{ group.public_model }}</code>
               </td>
               <td>{{ row.provider_plan }}</td>
-              <td>{{ row.custom_account ?? '—' }}</td>
               <td><code>{{ row.upstream_model }}</code></td>
               <td>{{ row.routable ? t("可用") : t("不可用") }}</td>
-              <td>
-                <n-button
-                  v-if="row.custom_account_id"
-                  size="small"
-                  tertiary
-                  @click="openCustomAccount(row.custom_account_id)"
-                >{{ t("编辑 Custom") }}</n-button>
-                <span v-else>—</span>
-              </td>
             </tr>
           </tbody>
         </table>
@@ -111,7 +99,6 @@ import { t } from "../i18n/index.ts";
 import { useAccountsStore } from "../stores/accounts.ts";
 import { useProvidersStore } from "../stores/providers.ts";
 import { dashboardErrorDetail } from "../utils/errors.ts";
-import { applyAccountViewSearchParams } from "./app-navigation.ts";
 
 const accountsStore = useAccountsStore();
 const providersStore = useProvidersStore();
@@ -204,12 +191,6 @@ async function loadAliases(options: { retain?: boolean } = {}): Promise<void> {
   } finally {
     loading.value = false;
   }
-}
-
-function openCustomAccount(accountId: string): void {
-  const url = applyAccountViewSearchParams(new URL(window.location.href), accountId);
-  window.history.pushState(null, "", url);
-  window.dispatchEvent(new PopStateEvent("popstate"));
 }
 
 onMounted(() => void loadAliases());

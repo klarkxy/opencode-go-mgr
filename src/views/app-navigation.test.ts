@@ -5,10 +5,8 @@ import {
   APP_NAVIGATION_GROUPS,
   CORE_APP_NAVIGATION,
   EXTENSION_APP_NAVIGATION,
-  applyAccountViewSearchParams,
   applyAppViewSearchParams,
   isLegacyPricingView,
-  readAccountDeepLink,
   readProviderScopeQuery,
   resolveAppViewKey,
 } from "./app-navigation.ts";
@@ -65,15 +63,4 @@ test("leaving Accounts strips a stale account deep-link parameter", () => {
   );
   assert.equal(url.searchParams.get("view"), "providers");
   assert.equal(url.searchParams.get("account_id"), null);
-});
-
-test("Custom account edit links target Accounts and preserve the exact account id", () => {
-  const url = applyAccountViewSearchParams(
-    new URL("http://127.0.0.1:9042/dashboard/?view=aliases&scope_kind=provider&scope_id=custom"),
-    "custom-account-9",
-  );
-  assert.equal(url.searchParams.get("view"), "accounts");
-  assert.equal(readAccountDeepLink(url.search), "custom-account-9");
-  assert.equal(url.searchParams.get("scope_kind"), null);
-  assert.equal(url.searchParams.get("scope_id"), null);
 });

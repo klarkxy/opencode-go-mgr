@@ -109,9 +109,3 @@ export function applyAppViewSearchParams(
   else url.searchParams.delete("scope_id");
   return url;
 }
-
-export function applyAccountViewSearchParams(url: URL, accountId: string): URL {
-  applyAppViewSearchParams(url, "accounts");
-  url.searchParams.set("account_id", accountId);
-  return url;
-}

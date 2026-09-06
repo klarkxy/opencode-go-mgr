@@ -29,10 +29,8 @@ Providers are unpriced.
 Provider contract, user-defined Provider mapping, and Custom account instead of
 the selected Provider. It aggregates existing contracts and account capabilities
 into public names with their routeability and exact upstream identities. It does
-not create a new Alias API, store, cache, or editor. A Custom mapping links to
-the one editor on **Accounts** with `?view=accounts&account_id=<id>`; loading
-that link opens the matching account editor. Closing the editor removes
-`account_id`; an unknown account shows a notice and clears the stale parameter.
+not create a new Alias API, store, cache, or editor. Custom mappings stay
+editable only on **Accounts**.
 
 **Model catalog** is local. The matrix has one row per current catalog model and
 three columns — Chat Completions, Responses, and Messages. Each cell is a binary
