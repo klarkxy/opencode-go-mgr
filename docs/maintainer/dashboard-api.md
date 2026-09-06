@@ -15,6 +15,9 @@ Control-plane identity:
 - `pricingRevision` — immutable snapshot id. Pricing mutations also send
   `expectedPricingRevision`.
 
+`GET /contract` returns the current process's live revision / generation token
+(`ControlRevision`: `revision`, `processGeneration`, `pricingRevision`).
+
 Mutations require top-level `expectedRevision` and `processGeneration`
 (including `/auth/register`, `/auth/login`, `/auth/logout`, and
 `POST /accounts/{id}/usage/refresh`). A missing `expectedRevision` returns
@@ -48,8 +51,7 @@ The frozen contract is `schema/dashboard-api-v3.schema.json`, generated from
 appending must keep existing definitions byte-identical.
 
 Pinia stores call `dashboardV3` directly. Pages that still use older field names
-go through `src/api/dashboard.ts` presenters. Do not add V2 imports, route
-fallbacks, or recursive case conversion.
+go through `src/api/dashboard.ts` presenters.
 
 `dashboard.rs` serves the SPA and preserves the V2 auth and browser WebSocket
 handlers. Retired `/dashboard/api/...` REST paths are tombstoned in

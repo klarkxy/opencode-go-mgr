@@ -78,10 +78,10 @@ Each usable row needs a non-empty string `id`. For pagination, set `has_more: tr
 
 ## Add a built-in Provider
 
-A built-in integration is appropriate only when the Provider needs product-owned identity, catalog, account lifecycle, routing, pricing/usage, or other semantics that Custom API cannot express. Start from the current code, not an older requirements document.
+A built-in integration is appropriate only when the Provider needs product-owned identity, catalog, account lifecycle, routing, pricing/usage, or other semantics that Custom API cannot express. Start from the current code.
 
-1. Define one stable `provider_id`, its Provider row, credential/quota semantics, and an exhaustive `ProviderAdapterKind` mapping in `crates/ocg-domain/src/ids.rs` and `provider.rs`. Do not add a separate Offering or Plan identity: Provider and Plan are one product concept.
-2. Add only verified protocol facts to `crates/ocg-domain/src/protocol.rs`. Request routing must never probe a billable endpoint to guess a protocol.
+1. Define one stable `provider_id`, its Provider row, credential/quota semantics, and an exhaustive `ProviderAdapterKind` mapping in `crates/ocg-domain/src/ids.rs` and `provider.rs`. Provider and Plan share `provider_id`.
+2. Add only verified protocol facts to `crates/ocg-domain/src/protocol.rs`. Request routing uses the saved contract.
 3. Add code-owned client Alias mappings in `crates/ocg-gateway/src/alias.rs`. Preserve exact upstream IDs and reject ambiguous raw IDs; a discovered row must not silently invent a public Alias.
 4. Implement the host route resolver in `ocg-core`. The adapter returns an `AttemptSpec`; database access, Key decryption, proxy selection, and outbound HTTP remain host-owned.
 5. Add the account and **Providers** control-plane/UI workflow, including catalog refresh, enablement, verification, errors, cooldown, pricing, and usage only where the Provider actually supports them. Dashboard writes use `/dashboard/api/v3` CAS.

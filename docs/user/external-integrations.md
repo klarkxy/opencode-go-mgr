@@ -3,9 +3,8 @@
 # External Integrations
 
 External integrations are optional, locally supported services that extend OCG
-Manager without becoming a Provider, a Plan, or a plugin. The dashboard keeps
-its eight core views; supported surfaces appear in the general **Extensions**
-group below the Settings divider.
+Manager. The dashboard keeps its seven core views; supported surfaces appear
+in the general **Extensions** group below the Settings divider.
 
 ## CPA
 
@@ -35,9 +34,8 @@ Use one of these local deployments:
   [Docker](docker.md). OCG uses the read-only `http://cpa:8317` service URL;
   the dashboard does not accept a LAN, Internet, or cross-node CPA address.
 
-CPA is intentionally not a remote integration. URLs with embedded credentials,
-queries, fragments, redirects, or non-loopback hosts are rejected. Do not
-reuse an OCG Manager Key as either CPA key.
+URLs with embedded credentials, queries, fragments, redirects, or non-loopback
+hosts are rejected. Do not reuse an OCG Manager Key as either CPA key.
 
 ### Connect and operate
 
@@ -81,10 +79,9 @@ externally operated CPA.
 
 ## Adding another integration
 
-Static external integrations are one kind of non-core surface that can appear
-in **Extensions**. They require product approval, a typed Dashboard V3 adapter,
-and a documented local boundary. Dynamic Provider plugins, user scripts,
-generic management proxies, and runtime adapter loading are not supported.
+Static external integrations appear in **Extensions**. They require product
+approval, a typed Dashboard V3 adapter, and a documented local boundary. The
+contribution path is in [Extending OCG Manager](../maintainer/extending.md).
 
 ---
 

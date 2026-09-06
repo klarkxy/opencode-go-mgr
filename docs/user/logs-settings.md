@@ -15,7 +15,7 @@ Authenticated parse, validation, or routing failures that happen before account
 selection also appear here with unresolved/Gateway attribution. Runtime Logs are
 reserved for process and control-plane events.
 Each stored row keeps the request identity separate from the upstream
-identity. There is no `requested_alias` field:
+identity:
 
 - `requested_model` — the public name or Alias the client sent
 - `resolved_alias` — the resolved public Alias when one exists
@@ -28,7 +28,7 @@ and present only when the provider supplies enough pricing evidence.
 
 Each row also stores raw supplier cost, quota debit, and effective paid cost
 when the selected provider supplies enough pricing evidence. An allowance only
-changes the quota-debit multiplier; it does not make a model or provider routable.
+changes the quota-debit multiplier.
 
 - Chat streaming requests set `stream_options.include_usage` so OpenAI-compatible
   upstreams emit a usage chunk. Rows with `success_no_usage` mean the stream
@@ -65,8 +65,8 @@ The **Settings** view holds the gateway's persistent configuration:
 - **Upstream URL** — the OpenCode-Go base URL.
 - **Routing mode** — strict priority, global sticky, or round robin. All three
   modes apply the one global card order only after filtering incompatible,
-  disabled, cooling, or already-failed cards; they do not create a provider or
-  model routing table. Only one base mode is active at a time.
+  disabled, cooling, or already-failed cards. Only one base mode is active at
+  a time.
 - **Conversation sticky** — an overlay switch, not a fourth routing mode.
   When on, the gateway prefers the `X-OCG-Conversation-Id` request header;
   without it, it uses a prompt fingerprint (system / tools / first user
@@ -145,7 +145,7 @@ The **Settings** view holds the gateway's persistent configuration:
 Settings are written to SQLite and reloaded on the next start. The Settings
 resource never includes Key plaintext. Saves use the same `expectedRevision` /
 `processGeneration` tokens as other Dashboard V3 writes. The update check is
-on-demand and is not persisted.
+on-demand.
 
 ---
 

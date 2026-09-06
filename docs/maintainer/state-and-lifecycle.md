@@ -15,13 +15,13 @@ rebind → compensation) is acquired before `gateway_lifecycle` when a
 settings write also rebinds. Never hold a `parking_lot` lock across those
 awaits.
 
-Two credential tiers share one `access_keys` table (current schema v35) and one
-auth snapshot:
+From schema v27 the authoritative table is `access_keys`. Two credential
+tiers share that table (current schema v37) and one auth snapshot:
 
 - Primary key: fixed id `00000000-0000-0000-0000-000000000001`, display
   name `"Primary"`. Always enabled, never deleted. Public `AppConfig` and
-  dashboard APIs still expose `gateway_key`; sanitized config JSON is
-  **not** the database authority after v27.
+  dashboard APIs still expose `gateway_key`; sanitized config JSON stores
+  `gateway_key` as `""` after v27.
 - Sub keys: non-primary rows, active ceiling 64, soft-delete keeps
   identity/name and clears the value. Lifecycle only through
   `/dashboard/api/v3/keys*`. CLI has no sub-key commands.
@@ -70,12 +70,12 @@ registration, and payment remain manual in the isolated browser; the user
 copies the key back. Never add CDP autofill or automated payment clicks.
 
 Managed setup may move **forward exactly one step** or **rewind to any
-earlier unfinished step**. Skipping forward is rejected; the setup API
-must not enter `ready` directly. A real key probe returning `2xx`
-transitions to `ready + enabled`; `429` also proves validity and records
-cooldown. Any other HTTP response—including redirects, `4xx` other than
-`429`, and `5xx`—plus network or timeout errors remains at
-`key_verification`.
+earlier unfinished step**. The ordinary setup PATCH writes those step
+changes; a separate key-verification request writes `ready`. A real key
+probe returning `2xx` transitions to `ready + enabled`; `429` also proves
+validity and records cooldown. Any other HTTP response—including
+redirects, `4xx` other than `429`, and `5xx`—plus network or timeout
+errors remains at `key_verification`.
 
 ### Managed account setup lifecycle
 
@@ -113,9 +113,6 @@ last success or the previous baseline.
 
 Sync metadata lives in `provider_usage_sync_state`; v27 drops the leftover
 `accounts.usage_sync_*` columns. The public Go docs have not listed this path.
-
-Only `usage_sync.rs` handles usage sync. There is no Profile Cookie or HTML
-console usage path.
 
 Zen Free is database-owned: it can be enabled, disabled, and reordered,
 but cannot be created or deleted through generic account APIs. Command Code
@@ -162,7 +159,7 @@ and profile are removed.
 ## Persistence
 
 `crates/ocg-core/src/db.rs` defines the SQLite schema, migrations, and
-queries. Current schema is **v35**. `provider_contracts.rs` owns provider
+queries. Current schema is **v37**. `provider_contracts.rs` owns provider
 contract scopes, per-model/per-protocol overrides, effective contract
 derivation, and model-protocol evidence. `models.rs` defines shared
 serde types and `AppConfig`. Key obfuscation is `ocg-infra::crypto`
@@ -217,6 +214,10 @@ Historical versions still matter on upgrade:
   fail-closed preflight and rebuild; it also persists typed user-defined
   Provider definitions. See [Storage and migrations](storage-migration.md)
   for the pre-v35 backup and rollback procedure.
+- **v36:** additive `ollama_cloud_usage_state` for the unreleased Cookie-usage
+  scrape.
+- **v37:** drops `ollama_cloud_usage_state` without touching account Keys or
+  logs, and creates `ollama_cloud_billing`.
 
 GUI data directory: Windows `%USERPROFILE%\.ocg-mgr` or macOS/Linux
 `~/.ocg-mgr`. CLI default: `~/.ocg-mgr-cli`. Docker stores SQLite, keys,
@@ -233,7 +234,6 @@ redaction, and transactions.
 ## Per-node boundaries
 
 Each node owns its account data and is managed through its own dashboard.
-There is no cross-node sync and no Admin API. Do not add one.
 
 ## Lifecycle Classes
 
@@ -243,7 +243,7 @@ Keep these four classes separate. Do not cancel one from another.
 | --- | --- | --- | --- |
 | **Gateway listener** (`GatewayLifecycle`) | `start_gateway` / `bind` | `stop` (signal-only) or `stop_and_wait` (CLI) | TCP bind, dashboard trust, forward-log backfill, HTTP server. Rebind is slot-aware (same-port stop-then-bind, new-port bind-first). Does not start or cancel process-level workers. |
 | **Control-plane workers** (`ControlPlaneWorkers`) | `ensure_started` from `start_gateway` (once per `CoreState`) | none — exits when the owning `CoreState` is dropped | Official usage reconciler. No public cancel API. Listener stop must not kill it. |
-| **Desktop capabilities** | Tauri setup: auto-start (Windows x64 / macOS / Linux x64 release/installed), Dock (macOS), updater starter | process exit | Not WebView commands. CLI/Docker leave hooks unset. `auto_start` and `show_dock_icon` stay capability-gated on the HTTP settings form. |
+| **Desktop capabilities** | Tauri setup: auto-start (Windows x64 / macOS / Linux x64 release/installed), Dock (macOS), updater starter | process exit | Host-registered capabilities. CLI/Docker leave hooks unset. `auto_start` and `show_dock_icon` stay capability-gated on the HTTP settings form. |
 | **Browser runtime** | Native hooks on desktop; remote worker in Docker | account switch / profile reset / process exit | Native Browser vs sidecar are different hosts of the same `BrowserRuntime` slot. |
 
 Tauri `src/lib.rs`: start uses `start_gateway` (listener + usage workers);
@@ -252,8 +252,8 @@ changes rebind through `GatewayLifecycle` / `settings_host_effects` with
 config-fingerprint compensation; concurrent failed port writes must not
 clobber a successful timeout write.
 
-Updater is configured as a `CoreState` starter, never a WebView `invoke`
-command. `src-tauri/capabilities/default.json` has no updater permission.
+Updater is configured as a `CoreState` starter.
+`src-tauri/capabilities/default.json` has no updater permission.
 Updater outbound follows the process-wide **default-leg** proxy policy
 (List mode included).
 ---

@@ -2,11 +2,11 @@
 
 # CLI
 
-The CLI is the desktop app with the tray icon removed. Download the archive
-for your platform and extract it into a directory. Keep `dist/` next to the
-executable so `serve` has a dashboard to serve. On Windows the executable is
-`ocg-manager-cli.exe`; on Linux you may need `chmod +x ocg-manager-cli` after
-extraction.
+The CLI is a headless host for the same `ocg-core` process. Download the
+archive for your platform and extract it into a directory. Keep `dist/` next
+to the executable so `serve` has a dashboard to serve. On Windows the
+executable is `ocg-manager-cli.exe`; on Linux you may need
+`chmod +x ocg-manager-cli` after extraction.
 
 The CLI data directory defaults to `~/.ocg-mgr-cli` on every platform;
 override it with `--data-dir <path>`. The obfuscation secret lives at

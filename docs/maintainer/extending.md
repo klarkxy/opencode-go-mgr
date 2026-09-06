@@ -2,8 +2,7 @@
 
 # Extending OCG Manager
 
-Use one of three explicit extension paths. They are intentionally different;
-do not make a new surface look like a Provider merely to reuse a label.
+Use one of three explicit extension paths. They are intentionally different.
 
 ## 1. Provider or Plan: sealed and static
 
@@ -12,18 +11,16 @@ catalog, protocol, key, and failure contract.
 
 1. Add identities and catalog facts in `ocg-domain` (`ids.rs`, `provider.rs`),
    extend `ProviderAdapterKind` exhaustively, and keep each static Provider's
-   contract scope stable. Provider and Plan are one `provider_id` identity;
-   do not add an Offering dimension or derive identities at runtime. Keep
-   Custom as `ConfigurableHttp`, not a superclass.
+   contract scope stable. Provider and Plan are one `provider_id` identity.
+   Custom stays `ConfigurableHttp`.
 2. Add required protocol rows in `ocg-domain::protocol` and Alias mappings in
-   `ocg-gateway::alias`. Never probe protocols on the request path.
+   `ocg-gateway::alias`. The request path uses the saved contract.
 3. Implement `resolve_route` in `ocg-core` so it returns an `AttemptSpec`
    only. Adapters cannot own DB, `CoreState`, or a raw reqwest client.
 4. Fail closed until control-plane and routing semantics exist, then test the
    domain, gateway, and core boundaries.
 
-The Provider registry remains static and sealed. There is no plugin loader,
-dynamic library, user script, or runtime-discovered adapter.
+The Provider registry remains static and sealed.
 Each static Provider owns its catalog, evidence, and override state under its
 single `provider_id` identity.
 
@@ -31,8 +28,7 @@ single `provider_id` identity.
 
 Use this for a client-side configuration or package integration. Follow the
 application-guide/connector boundary: it is process-owned by the Desktop host,
-uses documented field ownership, and does not add a service, daemon, remote
-sync path, or Provider registry entry.
+uses documented field ownership, and stays out of the Provider registry.
 
 ## 3. External integration: static local-service adapter
 
@@ -52,8 +48,8 @@ Providers, Plans, or the Add Account selector.
   contract calls for it. Do not invent internal accounts, costs, or quotas the
   external service does not expose.
 
-CPA is the first instance of this path. Do not extract a general framework
-until a second approved integration proves a shared requirement.
+CPA is the first instance of this path. Extract a shared framework only after
+a second approved integration proves a shared requirement.
 
 ## Dashboard V3 endpoint changes
 
@@ -64,7 +60,7 @@ until a second approved integration proves a shared requirement.
 3. Prefer existing persistence/control helpers and keep `dashboard_v3`
    independent of `gateway`.
 4. Add a focused integration test, update `src/api/dashboard-v3.ts`, and run
-   `pnpm run contract:v3:check`. Retired `/dashboard/api` REST stays retired.
+   `pnpm run contract:v3:check`.
 
 ---
 

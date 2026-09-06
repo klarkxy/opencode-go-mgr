@@ -164,9 +164,7 @@ package 可见性、匿名拉取、index 精确 children 和两份签名 provena
 版本后输出唯一的完整 SHA；后续 job 不再解析符号 ref。若重建内容与既有完整版本或
 `sha-*` 标签的 digest 不同，会失败而不是覆盖；只接受完全相同 digest 的重放。它的
 GitHub 签名证书记录发起 dispatch 的 workflow ref，即使构建随后检出的是已解析的
-release commit。历史手动回填的 provenance 因此来自 dispatch workflow ref，不应
-被描述为 tag-triggered provenance；正常 `release.published` 使用 Release tag 上
-下文。
+release commit。正常 `release.published` 使用 Release tag 上下文。
 
 发布后记录 digest，并同时核验 OCI index 与 GitHub attestation，约束到本仓库的
 signer workflow：
@@ -217,17 +215,17 @@ Tauri 桌面 crate），以及 Windows 上桌面 crate 的编译和单元测试�
 push 上运行，也会由生产 tag 发布调用；原生安装包与打包冒烟只在手动候选或 tag 流程运行。
 容器工作流覆盖 `linux/amd64` 与 `linux/arm64`，各自在原生 runner 上构建且仅 amd64 冒烟；它在 Release 发布后或手动触发时运行。
 
-CI 不操作真实桌面 UI，也不启动真实 Claude Desktop 或 Gemini CLI，不测试备份恢复、
-数据库降级、迁移回滚、真实上游账号或真实 Gateway 请求。Rust 测试覆盖 Gemini/Claude
-Desktop 路由、鉴权、别名改写、非流式转换、SSE 事件形状、Dashboard V3 CAS、V2 410
-墓碑、v27 open/备份以及宿主生命周期源码契约，但不能证明第三方客户端的新版本仍接
-受生成的配置。
+CI 证据覆盖上述质量门 job、候选或 tag 流程上的原生安装包与打包冒烟，以及容器
+amd64 冒烟套件。Rust 测试覆盖 Gemini/Claude Desktop 路由、鉴权、别名改写、非流
+式转换、SSE 事件形状、Dashboard V3 CAS、V2 410 墓碑、v27 open/备份以及宿主生命
+周期源码契约。真实桌面 UI、Claude Desktop、Gemini CLI、备份恢复、数据库降级、迁
+移回滚、真实上游账号、真实 Gateway 请求，以及第三方客户端是否仍接受生成的配置，
+仍需在真实机器上检查。
 
-容器冒烟只检查 TCP 健康、Dashboard HTML、auth status、镜像内许可证，以及未登录
-settings 返回 `401`。浏览器容器冒烟会启动真实 Chromium、确认 Profile 目录和无公
-开端口，但不登录 Google/OpenCode、不操作 noVNC 键鼠/剪贴板，也不执行真实支付。
-Google 数据中心 IP 风控、桌面浏览器发现、Cookie 跨重启保留和远程账号切换仍需手
-工验证。
+主镜像冒烟检查 TCP 健康、Dashboard HTML、auth status、镜像内许可证，以及未登录
+settings 返回 `401`。浏览器容器冒烟会启动真实 Chromium，并确认 Profile 目录和无
+公开端口。Google/OpenCode 登录、noVNC 键鼠/剪贴板、真实支付、Google 数据中心 IP
+风控、桌面浏览器发现、Cookie 跨重启保留和远程账号切换仍需在真实机器上检查。
 
 ---
 

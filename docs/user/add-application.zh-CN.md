@@ -2,7 +2,7 @@
 
 # 新增应用
 
-当某个客户端没有出现在 **应用** 页面时，使用这份指南。大多数客户端不需要修改 OCG Manager：只要应用能为一种受支持协议配置自定义 Base URL、API Key 和模型 ID，就先手动接入。内置教程卡片与桌面自动连接器是两个彼此独立的可选贡献。
+当某个客户端没有出现在 **应用** 页面时，使用这份指南。只要应用能为一种受支持协议配置自定义 Base URL、API Key 和模型 ID，就先手动接入。内置教程卡片与桌面自动连接器是两个彼此独立的可选贡献。
 
 | 目标 | 接入层级 |
 | --- | --- |
@@ -31,13 +31,13 @@ curl http://127.0.0.1:9042/v1/models \
   -H "Authorization: Bearer <key>"
 ```
 
-这份列表只读本地状态，不访问上游。它包含当前可路由且由代码持有的 Alias 与合格 Custom ID，不等同于面板应用选择器的列表。五类接口的最小请求体见[接入第一个客户端](first-client.zh-CN.md)。
+这份列表是本地读取，包含当前可路由且由代码持有的 Alias 与合格 Custom ID。面板应用选择器是[应用教程](applications.zh-CN.md)中的 Go 可路由交集。五类接口的最小请求体见[接入第一个客户端](first-client.zh-CN.md)。
 
-配置完成后发送一次真实请求，并在 **日志** 中确认。设置页接受了 URL，不等于客户端真的使用了它。
+配置完成后发送一次真实请求，并在 **日志** 中确认。
 
 ## 新增应用教程
 
-教程注册表位于 `src/views/application-guides.ts`。教程负责展示与生成可复制配置；它不会新增供应商、模型、路由或自动连接器。
+教程注册表位于 `src/views/application-guides.ts`。教程负责展示与生成可复制配置。
 
 1. 核对客户端当前官方文档，选择一个 `endpointKind`：`chat`、`responses`、`messages` 或 `gemini`。
 2. 添加稳定的 kebab-case `id`、显示名称、分类、协议、官方文档地址、短摘要、按顺序排列的步骤、操作注意事项，以及一个或多个动态配置片段。
@@ -50,7 +50,7 @@ curl http://127.0.0.1:9042/v1/models \
 
 ## 新增桌面自动连接器
 
-教程不要求自动配置。自动连接器只是本机已安装桌面版针对少量静态客户端提供的能力；CLI、Docker 与远程面板继续只能手动配置。只有目标配置稳定且有文档，并且 connect/restore 能保留所有无关字段时，才适合新增。
+自动连接器是本机已安装桌面版针对少量静态客户端提供的能力。CLI、Docker 与远程面板使用手动教程。只有目标配置稳定且有文档，并且 connect/restore 能保留所有无关字段时，才适合新增。
 
 本机面板使用以下受 session 保护的 V3 接口：
 
@@ -69,7 +69,7 @@ Preview 只接受 `action`、可选 `keyId` 与 `modelValues`。调用方不能�
 - 同步 `src/views/Applications.vue` 中显式的连接器集合与 UI 状态。Pi/DSH 原生包属于 `integrations/`，并遵循各客户端的原生凭据规则。
 - 添加 Core/V3、Desktop Host 与前端测试。运行 `cargo test -p ocg-core`、`cargo test -p ocg-manager --lib`、`pnpm run test:web` 与 `pnpm run build:web`；若冻结 DTO 契约变化，再运行 `pnpm run contract:v3:check`。
 
-不要新增连接器 daemon、远端同步、Tauri `invoke` 路径、调用方任意指定的文件，或第二条 Key 分发通道。自动检测或写入不受支持时，手动教程始终保留。
+受支持的路径是通过上述受 session 保护的 V3 preview/commit 接口实现的静态桌面连接器。自动检测或写入不受支持时，手动教程始终保留。仓库约束见[扩展 OCG Manager](../maintainer/extending.zh-CN.md)与[编码约定](../maintainer/conventions.zh-CN.md)。
 
 ---
 

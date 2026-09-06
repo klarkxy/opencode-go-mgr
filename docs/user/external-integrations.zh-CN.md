@@ -2,7 +2,7 @@
 
 # 外部接入
 
-外部接入是可选、受本产品支持的本机服务。它扩展 OCG Manager，但不是供应商、套餐或插件。管理面板仍保留八个核心页面；受支持的入口位于 **设置** 下方通用的 **扩展** 分组。
+外部接入是可选、受本产品支持的本机服务，用来扩展 OCG Manager。管理面板保留七个核心页面；受支持的入口位于 **设置** 下方通用的 **扩展** 分组。
 
 ## CPA
 
@@ -14,7 +14,7 @@ CPA（CLI Proxy API）是本机订阅运行时。OCG Manager 可管理其当前�
 - **桌面版或 CLI：** 在同一台机器运行 CPA，并配置回环地址，例如 `http://127.0.0.1:8317`。
 - **Docker：** 启用 [Docker](docker.zh-CN.md) 中的可选 Compose 并列服务。OCG 使用只读的 `http://cpa:8317` 服务地址；面板不接受局域网、互联网或跨节点 CPA 地址。
 
-CPA 有意不做远程接入。包含内嵌凭据、query、fragment、重定向或非回环主机的 URL 会被拒绝。不要把 OCG Manager Key 复用为任一 CPA Key。
+包含内嵌凭据、query、fragment、重定向或非回环主机的 URL 会被拒绝。不要把 OCG Manager Key 复用为任一 CPA Key。
 
 ### 连接与运维
 
@@ -29,7 +29,7 @@ CPA 有意不做远程接入。包含内嵌凭据、query、fragment、重定向
 
 ## 新增其他接入
 
-静态外部接入只是 **扩展** 分组可以容纳的一类非核心功能。它们必须经过产品批准，使用 typed Dashboard V3 adapter 和有文档的本机边界；不支持动态 Provider 插件、用户脚本、通用管理 API 代理或运行时加载适配器。
+静态外部接入出现在 **扩展** 分组。它们必须经过产品批准，使用 typed Dashboard V3 adapter 和有文档的本机边界。贡献路径见[扩展 OCG Manager](../maintainer/extending.zh-CN.md)。
 
 ---
 

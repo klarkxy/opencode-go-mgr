@@ -2,13 +2,13 @@
 
 # Docker
 
-Docker 版没有托盘图标；它在同一个端口 `9042` 上提供 Dashboard 和 Gateway。镜像在 GHCR 上匿名可拉，`linux/amd64`
+Docker 版在同一个端口 `9042` 上无头提供 Dashboard 和 Gateway。镜像在 GHCR 上匿名可拉，`linux/amd64`
 与 `linux/arm64` 自动匹配。把 Release 的 `compose.example.yaml` 存为
 `compose.yaml`，按需加 `.env`，然后执行下面命令；或者检出对应 tag
 的仓库：
 
 ```bash
-git clone --branch v2.1.0 --depth 1 https://github.com/klarkxy/opencode-go-mgr.git
+git clone --branch v2.2.0 --depth 1 https://github.com/klarkxy/opencode-go-mgr.git
 cd opencode-go-mgr
 cp .env.example .env
 # PowerShell: Copy-Item .env.example .env
@@ -25,13 +25,13 @@ docker compose ps
 - 仓库源码里的 `compose.yaml` 默认用 `latest`；Release 的
   `compose.example.yaml` 钉死对应完整版本。
 - 生产部署建议在 `.env` 中用 `OCG_IMAGE` 固定完整版本标签，例如
-  `ghcr.io/klarkxy/opencode-go-mgr:2.1.0`。
+  `ghcr.io/klarkxy/opencode-go-mgr:2.2.0`。
 - 完整版本与 `sha-<commit>` 标签指向单次发布，按策略不应移动；
   `1.5` 与 `latest` 会继续移动。技术上只有 digest
   `ghcr.io/klarkxy/opencode-go-mgr@sha256:...` 真正不可变。
 - 想调试当前源码时，设置 `OCG_IMAGE=ocg-manager:local`，再执行
   `docker compose up -d --build`。`NPM_REGISTRY` 与 `CARGO_REGISTRY`
-  只属于源码构建参数，不会影响已拉取镜像。
+  只属于源码构建参数。
 
 | 变量 | 作用范围 | 含义 |
 | --- | --- | --- |
@@ -51,7 +51,7 @@ docker compose ps
 
 ## 可选本机 CPA
 
-CPA 是可选的**本机**订阅运行时并列服务，不是 OCG 的供应商或套餐，默认关闭。启用前先在 Compose 文件旁复制模板，并设置独立的 CPA 推理 Key：
+CPA 是可选的**本机**订阅运行时并列服务，默认关闭。启用前先在 Compose 文件旁复制模板，并设置独立的 CPA 推理 Key：
 
 ```bash
 cp cpa-config.example.yaml cpa-config.yaml
@@ -172,19 +172,19 @@ curl --fail http://127.0.0.1:9042/dashboard/
 的 provenance attestation。可这样检查发布版本：
 
 ```bash
-docker buildx imagetools inspect ghcr.io/klarkxy/opencode-go-mgr:2.1.0
-docker buildx imagetools inspect ghcr.io/klarkxy/opencode-go-mgr-browser:2.1.0
+docker buildx imagetools inspect ghcr.io/klarkxy/opencode-go-mgr:2.2.0
+docker buildx imagetools inspect ghcr.io/klarkxy/opencode-go-mgr-browser:2.2.0
 gh attestation verify \
-  oci://ghcr.io/klarkxy/opencode-go-mgr:2.1.0 \
+  oci://ghcr.io/klarkxy/opencode-go-mgr:2.2.0 \
   --repo klarkxy/opencode-go-mgr
 gh attestation verify \
-  oci://ghcr.io/klarkxy/opencode-go-mgr-browser:2.1.0 \
+  oci://ghcr.io/klarkxy/opencode-go-mgr-browser:2.2.0 \
   --repo klarkxy/opencode-go-mgr
 ```
 
 两条 `gh attestation verify` 命令都要求 GitHub CLI 已登录。公开镜像可匿名
 拉取；如果 OCI 客户端仍要求 registry 凭据，请用具备 package 读取权限的
-token 登录 `ghcr.io`。Provenance 证明产物如何构建，不等于漏洞扫描。
+token 登录 `ghcr.io`。Provenance 证明产物如何构建。
 
 如果 Key 泄露，请重新生成。
 

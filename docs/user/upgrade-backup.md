@@ -101,8 +101,7 @@ Caveats:
 - macOS/Linux GUI, CLI, and Docker restores must preserve `.encryption-key`
   or the explicitly supplied `--encryption-key` /
   `OCG_MANAGER_ENCRYPTION_KEY` value.
-- There is no automatic downgrade compatibility guarantee; do not open a
-  newer database with an older build.
+- Open a migrated database only with the same or a newer build.
 
 ## Docker Restore Into A Fresh Volume
 

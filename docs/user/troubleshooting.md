@@ -56,8 +56,8 @@ get billed for a bad guess.
   while preserving the card's current enabled state.
 - **Gemini requests fail with `400` over `safetySettings`.** The gateway
   cannot map Google's safety thresholds to a Chat/Messages upstream, so it
-  rejects non-empty arrays. Remove the field and retry; do not assume the
-  same Google content-safety policy still applies.
+  rejects non-empty arrays. Remove the field and retry; the Chat/Messages
+  upstream applies its own policy.
 - **Docker first-run registration does not pick up my
   `OCG_ADMIN_PASSWORD`.** These variables are only honored when the database
   has no administrator yet; use the stored administrator account. Recreate
@@ -68,8 +68,6 @@ get billed for a bad guess.
   current Windows builds are unsigned and the macOS app is ad-hoc signed. Use
   **Open Anyway** for the first launch; the warning is not a sign of
   tampering.
-
----
 
 ---
 

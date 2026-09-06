@@ -15,7 +15,7 @@ Every database open uses the Host-resolved cipher (`Database::open_with_cipher` 
 | CLI | `~/.ocg-mgr-cli`, or `--data-dir <path>` | Priority: `--encryption-key` > `OCG_MANAGER_ENCRYPTION_KEY` > `<data-dir>/.encryption-key`. |
 | Docker | container `--data-dir /data` (Compose volume `ocg-data`) | Same CLI resolution. Optional `OCG_MANAGER_ENCRYPTION_KEY` is an explicit restore override; a normal volume keeps `.encryption-key`. Files in `/data` must stay writable by UID/GID `10001`. |
 
-Do not mix these identities:
+Keep each surface on its own cipher identity:
 
 - Windows desktop data cannot decrypt account ciphertext on another Windows user or machine, nor under the CLI/Docker static cipher.
 - Copying a GUI directory onto the CLI default path (or the reverse) uses a different directory and, on Windows, a different cipher.
@@ -37,7 +37,7 @@ Downgrades are not supported: never point an older binary at a migrated database
 
 ## Schema v31 — per-model/per-protocol overrides
 
-v31 creates the `provider_contract_model_protocol_overrides` table. It stores one row per contract scope × model × protocol, with `state` ∈ `force_on` / `force_off`; an absent row means "auto". The composite primary key is `(scope_kind, scope_id, model_id, protocol)`. The `provider_contract_scopes` switch columns remain in the database for backward compatibility but are no longer read by effective contract derivation.
+v31 creates the `provider_contract_model_protocol_overrides` table. It stores one row per contract scope × model × protocol, with `state` ∈ `force_on` / `force_off`; an absent row means "auto". The composite primary key is `(scope_kind, scope_id, model_id, protocol)`. The `provider_contract_scopes` switch columns remain in the database for backward compatibility. Effective contract derivation reads `provider_contract_model_protocol_overrides`.
 
 ## Schema v32 — single-protocol Custom Endpoint
 
@@ -80,10 +80,9 @@ account holds:
 
 The row is keyed by `account_id` with `ON DELETE CASCADE`, so account
 deletion removes the usage state; clearing the Cookie deletes the row and
-returns the capability to the unconfigured state. The migration is
-additive-only: no existing table, row, or routing fact changes, and it does
-not create a new backup family. Rollback remains the existing whole-directory
-restore.
+returns the capability to the unconfigured state. The migration is additive:
+existing tables, rows, and routing facts stay as they are. It does not create
+a new backup family. Rollback remains the existing whole-directory restore.
 
 ## Schema v37 — Ollama Cloud billing
 
@@ -133,7 +132,7 @@ On Windows, compare `Get-FileHash -Algorithm SHA256` with the first field of the
 3. Copy the verified `.bak` over `data.sqlite`, and remove the stale `data.sqlite-wal` / `data.sqlite-shm` left behind by the previous live file.
 4. Start a v26-capable binary with the same cipher identity, or retry the v27 upgrade on that restored v26 file. Restoring after a successful v27 open discards every write made since the snapshot.
 
-A failed v27 transaction rolls back: the live file must remain schema 26 with `sub_gateway_keys` intact. Leave any pre-v3 files in place; a later successful open creates another unique name instead of overwriting. A wrong or missing Host cipher fails closed; never rewrite `key_cipher` / `password_cipher`. `ocg-manager-cli status` opens the database and will attempt v27; it is not a read-only schema inspector.
+A failed v27 transaction rolls back: the live file must remain schema 26 with `sub_gateway_keys` intact. Leave any pre-v3 files in place; a later successful open creates another unique name instead of overwriting. A wrong or missing Host cipher fails closed; never rewrite `key_cipher` / `password_cipher`. `ocg-manager-cli status` opens the database and will attempt v27, so it migrates rather than inspecting schema read-only.
 
 ---
 [Maintainer guide index](../MAINTAINER.md) · [简体中文](storage-migration.zh-CN.md) · [Docs index](../README.md)

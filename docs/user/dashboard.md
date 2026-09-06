@@ -2,19 +2,19 @@
 
 # The Dashboard
 
-The dashboard is the gateway's own single-page Vue 3 interface. **Dashboard**, **Access Keys**, **Accounts**, **Providers**, **Aliases**, **Applications**, **Logs**, and **Settings** are its eight fixed core views in the left rail (or horizontal menu below 1024px). A divider below Settings starts the optional **Extensions** group; CPA is its local-only entry. On a Windows x64, macOS, or Linux x64 desktop app or CLI, that page can also install and manually start an OCG-owned CPA runtime; other platforms keep connect-only CPA. Theme and language switches and a sign-out button live in the header. It speaks ten languages — 简体中文, 繁體中文, English, 日本語, 한국어, Español, Français, Deutsch, Português (Brasil), and Русский — with 简体中文 as the default. Your choice persists in `localStorage` under `ocg-manager.locale`; when persistence is unavailable, the in-memory locale still works for the session. The dashboard does not judge private browsing.
+The dashboard is the gateway's own single-page Vue 3 interface. **Dashboard**, **Access Keys**, **Accounts**, **Providers**, **Aliases**, **Logs**, and **Settings** are its seven fixed core views in the left rail (or horizontal menu below 1024px). A divider below Settings starts the optional **Extensions** group; CPA is its local-only entry. On a Windows x64, macOS, or Linux x64 desktop app or CLI, that page can also install and manually start an OCG-owned CPA runtime; other platforms keep connect-only CPA. Theme and language switches and a sign-out button live in the header. It speaks ten languages — 简体中文, 繁體中文, English, 日本語, 한국어, Español, Français, Deutsch, Português (Brasil), and Русский — with 简体中文 as the default. Your choice persists in `localStorage` under `ocg-manager.locale`; when persistence is unavailable, the in-memory locale still works for the session.
 
 ## Dashboard V3
 
-The current SPA talks only to **`/dashboard/api/v3`**. All views — Connection Center, Access Keys, Accounts, Providers, Aliases, Applications, Logs, Settings — plus login, register, and logout use that path. Writes carry `expectedRevision` and `processGeneration` for CAS; if another tab saves first, the server returns HTTP 409 with code `revisionConflict`. The SPA refreshes its control tokens and the affected resource, but never auto-replays the rejected change; review the current value and submit again. These tokens are process-local, so separate processes sharing one data directory are not a coordinated CAS domain. The OpenCode Go pricing snapshot uses its own `pricingRevision`, independent of the settings tokens.
+The current SPA talks only to **`/dashboard/api/v3`**. All views — Connection Center, Access Keys, Accounts, Providers, Aliases, Logs, Settings — plus login, register, and logout use that path. Writes carry `expectedRevision` and `processGeneration` for CAS; if another tab saves first, the server returns HTTP 409 with code `revisionConflict`. The SPA refreshes its control tokens and the affected resource, but never auto-replays the rejected change; review the current value and submit again. These tokens are process-local, so separate processes sharing one data directory are not a coordinated CAS domain. The OpenCode Go pricing snapshot uses its own `pricingRevision`, independent of the settings tokens.
 
 Plaintext Keys travel only inside the Connection Center payload (`GET /dashboard/api/v3/connection`). The Settings resource never contains Key values. The browser keeps secrets in memory; signing out or a 401 session expiry wipes them immediately.
 
 Views are cached while you switch tabs (`KeepAlive`) and refresh their server data when you return. The Dashboard view also refreshes when the browser tab comes back to the foreground. Catalogs, pricing, and provider directories are not polled automatically; official usage sync runs on the server. The Settings page may poll signed desktop install progress until the process restarts.
 
-Cached pages that still call retired `/dashboard/api` REST receive HTTP 410 with code `dashboardV2Removed` and a prompt to refresh, then upgrade if needed. Anonymous retired REST is rejected with 401 before that 410. Two V2 families remain as compatibility exceptions, not as the current data path: the auth endpoints (`/dashboard/api/auth/status`, `/dashboard/api/auth/register`, `/dashboard/api/auth/login`, `/dashboard/api/auth/logout`) and `/dashboard/api/browser/sessions/{token}/ws`. The current dashboard uses the V3 equivalents.
+Cached pages that still call retired `/dashboard/api` REST receive HTTP 410 with code `dashboardV2Removed` and a prompt to refresh, then upgrade if needed. Anonymous retired REST is rejected with 401 before that 410. Two V2 families remain as compatibility exceptions for cached older pages: the auth endpoints (`/dashboard/api/auth/status`, `/dashboard/api/auth/register`, `/dashboard/api/auth/login`, `/dashboard/api/auth/logout`) and `/dashboard/api/browser/sessions/{token}/ws`. The current dashboard uses the V3 equivalents.
 
-There is no dashboard **Ping** button. To test an OpenCode Go key from this product, use CLI `key ping` or send a real client request. Custom cards still have **Verify connection**, and managed signup still performs Key verification.
+To test an OpenCode Go key, use CLI `key ping` or send a real client request. Custom cards still have **Verify connection**, and managed signup still performs Key verification.
 
 ## Connection Center
 
@@ -42,7 +42,7 @@ The **Access Keys** view is the home for client-facing credentials. Primary and 
 - The **primary key** is always active and cannot be disabled or deleted; rotate it with the reset control. Its id is `00000000-0000-0000-0000-000000000001`. It is the credential the application guides show by default. There is no custom-value field.
 - **Sub keys** are additional credentials you create, name, rename, enable/disable, regenerate, or delete — useful for handing one key to each device. Deleting a sub key is a soft delete: it stops authenticating immediately and its plaintext is cleared, but forward logs keep resolving to its name. A sub key value may never equal the primary key value or another sub key value, and at most 64 non-deleted sub keys are supported.
 
-The Connection Center and the Applications view only consume enabled keys. Usage by key is filtered on the Logs view.
+Connection Center only copies enabled keys. Usage by key is filtered on the Logs view. Per-client setup lives in [Application guides](applications.md).
 
 ---
 

@@ -26,9 +26,9 @@ ocg-manager/
 │   ├── components/    Account cards, managed wizard, pricing catalog, …
 │   ├── i18n/          i18n setup + per-locale message tables + tests
 │   ├── styles/        Theme tokens, design-system overrides
-│   └── views/         Dashboard, Keys, Accounts, Providers, Applications, Logs, Settings, BrowserSession
+│   └── views/         Dashboard, Keys, Accounts, Providers, Aliases, Applications, Logs, Settings, BrowserSession
 ├── src-tauri/         Tray host: Native Browser, Gateway Lifecycle, Desktop Settings, Updater
-│   └── src/host/      Process-owned capabilities; no `invoke` commands
+│   └── src/host/      Process-owned capabilities registered into CoreState
 ├── schema/            Frozen Dashboard V3 JSON Schema (`dashboard-api-v3.schema.json`)
 ├── docs/              USER / MAINTAINER / anti-abuse (EN+ZH), CONTRIBUTORS, index, v27 recovery note
 ├── scripts/           release, updater manifest, dashboard-v3-contract, smokes, …
@@ -45,13 +45,12 @@ ocg-manager/
 Workspace members are declared in the root `Cargo.toml`: `ocg-domain`,
 `ocg-gateway`, `ocg-infra`, `ocg-core`, `ocg-cli`, `ocg-browser-worker`,
 `src-tauri` (package `ocg-manager`). Binaries: `ocg-manager-cli` and the
-Tauri app. Current workspace version is `2.1.0`; `rust-version` is `1.85.0`;
+Tauri app. Current workspace version is `2.2.0`; `rust-version` is `1.85.0`;
 edition is `2024`.
 
 The production dashboard uses HTTP Dashboard V3 (`src/api/dashboard-v3.ts`
 and the presenters in `src/api/dashboard.ts` / `src/api/providers.ts`).
-There is no `src-tauri/src/commands/` module and no `#[tauri::command]`
-surface; the dashboard does not call `invoke()`.
+Desktop Host capabilities are registered into `CoreState`.
 ---
 
 [Maintainer guide index](../MAINTAINER.md) · [简体中文](layout.zh-CN.md) · [Docs index](../README.md)

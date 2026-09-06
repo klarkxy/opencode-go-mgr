@@ -11,8 +11,8 @@ converts. A force_off or globally closed protocol wins — even if the model
 claims it supports it.
 
 Each known OpenCode Go model starts from a hardcoded **preferred** protocol
-and a **supported** set, maintained after test-account probes; the request
-path does not discover protocols. A successful probe on **Providers** can
+and a **supported** set, maintained after test-account probes. Protocol
+selection uses the saved contract. A successful probe on **Providers** can
 confirm or add support only within that adapter ceiling; failures are recorded
 but never remove static capability. If the client protocol is supported and
 effectively enabled, request and response pass through. Otherwise the gateway
@@ -91,9 +91,8 @@ map `max` → `xhigh` (upstream rejects `max`). Other models pass
 
 Unknown model names return `400` on every supported client format — Chat
 Completions, Responses, Messages, and Gemini `generateContent` /
-`streamGenerateContent` — and unknown Claude Desktop aliases do too. The
-gateway refuses to guess a protocol by trial — that would bill the request
-twice. See [Aliases](gateway.md#aliases).
+`streamGenerateContent` — and unknown Claude Desktop aliases do too. See
+[Aliases](gateway.md#aliases).
 
 Gateway protocol endpoints accept JSON request bodies up to 16 MiB. That is
 a transport limit, not a context-window limit. If a reverse proxy sits in
@@ -117,14 +116,14 @@ forcing one returns `400`.
 
 ## Gemini is a client-only format
 
-The gateway never sends Gemini wire data upstream. It converts `contents`,
+Gemini is a client format: the gateway converts `contents`,
 text-only `systemInstruction`, supported `inlineData` images,
 `functionDeclarations`, function calls/results, JSON-schema output,
 generation options, Google error envelopes, usage metadata, and SSE frames to
 and from the known model's native Chat Completions or Messages protocol. Both
 the `v1beta` and `v1` URL forms are accepted.
 
-The compatibility boundary — nothing is silently pretended equivalent:
+Unconvertible fields return `400`:
 
 - Non-empty `safetySettings` return `400 INVALID_ARGUMENT`, because a
   different upstream protocol cannot preserve their safety semantics.
@@ -151,11 +150,12 @@ The compatibility boundary — nothing is silently pretended equivalent:
 The dedicated entry accepts only the advertised aliases
 `claude-sonnet-4-6`, `claude-opus-4-6`, and `claude-haiku-4-5-20251001`.
 Before entering the existing Messages conversion path, the gateway rewrites
-the alias to the actual model saved from the Applications view; model
-capabilities, tool support, and context limits in the response still follow
-the actual model. The `sonnet`, `opus`, and `haiku` mappings are serialized
-inside `AppConfig`; omitted roles inherit the first configured role, while
-the dashboard returns the resolved three-role mapping.
+the alias to the actual model in the stored `sonnet` / `opus` / `haiku`
+mapping. Model capabilities, tool support, and context limits in the response
+still follow the actual model. The mapping is serialized inside `AppConfig`
+and updated through `PUT /dashboard/api/v3/claude-desktop/models`; omitted
+roles inherit the first configured role, and the dashboard returns the
+resolved three-role mapping.
 
 ---
 

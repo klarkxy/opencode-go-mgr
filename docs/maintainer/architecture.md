@@ -3,8 +3,8 @@
 # Architecture
 
 This page defines stable dependency and ownership boundaries. Runtime edge
-cases, schema history, route inventories, and release procedures stay in their
-own chapters so this page does not become a second implementation manual.
+cases, schema history, route inventories, and release procedures live in
+their own chapters.
 
 ## Dependency graph
 
@@ -19,8 +19,7 @@ Vue SPA              static assets; HTTP Dashboard V3 only
 ```
 
 The **Adapter Registry** is static and sealed. Runtime Provider definitions
-are typed data bound to Configurable HTTP; they are not adapter implementations
-or plugins.
+are typed data bound to Configurable HTTP.
 
 | Crate | Owns | Must not own |
 | --- | --- | --- |
@@ -52,7 +51,7 @@ component.
 ```
 
 The SPA remains an HTTP client. Desktop capabilities are registered into
-`CoreState`; there are no Tauri `invoke` commands for Dashboard state.
+`CoreState`.
 
 ## Gateway request path
 
@@ -62,7 +61,8 @@ Inference is implemented under `crates/ocg-core/src/gateway/`:
    client protocol, rewrites Claude Desktop roles, and resolves model identity.
 2. `GatewayExecutor` captures one request-entry snapshot for pricing, proxy
    routes, contracts, and Alias resolution. Fallback iterations re-read live
-   account state, eligible Custom runtimes, and Zen Free cooldown.
+   account state, eligible Custom runtimes, and Zen Free cooldown. Protocol
+   selection uses that saved contract.
 3. Candidate materialization applies adapter ceilings and effective
    model/protocol state before the no-I/O selector chooses a card.
 4. `provider_adapter.rs` exhaustively maps the sealed `ProviderAdapterKind` to
@@ -71,7 +71,8 @@ Inference is implemented under `crates/ocg-core/src/gateway/`:
 5. The Host resolves the selected credential. `forward_once` performs exactly
    one upstream `.send()`; retry and fallback policy stay in the outer loop.
 6. Classification decides same-account retry, account fallback, cooldown, or
-   terminal return. The Host then converts the response and writes logs.
+   terminal return. The Host then converts the response and writes logs
+   (`requested_model`, `resolved_alias`, `upstream_model`).
 
 Unknown or ambiguous model identity fails before outbound HTTP. Timeouts,
 stream interruptions, and other outcomes that may have reached the upstream
@@ -86,13 +87,11 @@ they match a persisted typed Provider definition, which always selects the
 existing Configurable HTTP adapter.
 
 Custom API remains an account-owned product path even though it uses the same
-sealed adapter kind. CPA is a separate static external integration. Neither
-boundary loads user code, extends the enum at runtime, or grants arbitrary
-process control.
+sealed adapter kind. CPA is a separate static external integration.
 
 Provider-owned catalogs and contracts are resolved before account credentials
 are used. Saved discovery rows may activate code-owned Alias mappings or remain
-exact raw pins; discovery never creates adapter implementations.
+exact raw pins.
 
 ## Control plane
 
@@ -102,8 +101,7 @@ presenters. CAS-protected mutations carry `expectedRevision` and
 Operational reads and diagnostics that do not mutate state skip CAS.
 
 The CLI calls the same HTTP-neutral services without an argv CAS token. Shared
-services own persistence and revision bumps; neither the CLI nor the frontend
-implements a second mutation path.
+services own persistence and revision bumps for both the CLI and the frontend.
 
 The settings-specific persist/rebind/compensation sequence is shown in
 [Dashboard API](dashboard-api.md#settings-mutation-workflow). Account setup

@@ -39,7 +39,7 @@ v36 曾加入尚未发布的 Ollama Cookie 用量状态；v37 删除该表，并
 - Docker `/browser-profiles` 中的文件也必须继续允许 UID/GID `10001` 写入。
 - Windows GUI 的混淆信息绑定 Windows 用户与机器，换机后不能直接恢复账号 Key 或密码；请在新机器创建全新数据并重新录入凭据。
 - macOS/Linux GUI、CLI 与 Docker 恢复时必须保留 `.encryption-key`，或原来显式传入的 `--encryption-key` / `OCG_MANAGER_ENCRYPTION_KEY` 值。
-- 项目不保证数据库自动向下兼容，旧版本无法打开新版数据库。
+- 请用相同或更新的版本打开已迁移的数据库。
 
 ## 恢复 Docker 备份到全新卷
 

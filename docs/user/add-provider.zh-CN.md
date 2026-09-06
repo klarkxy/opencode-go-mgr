@@ -78,10 +78,10 @@ OCG 根据协议派生鉴权。它不会同时发送两类鉴权头，不会在 
 
 ## 新增内置供应商
 
-只有当供应商需要产品持有的身份、目录、账号生命周期、路由、价格/用量或 Custom API 无法表达的其他语义时，才适合新增内置集成。以当前代码为准，不要从旧需求文档推断实现。
+只有当供应商需要产品持有的身份、目录、账号生命周期、路由、价格/用量或 Custom API 无法表达的其他语义时，才适合新增内置集成。以当前代码为准。
 
-1. 在 `crates/ocg-domain/src/ids.rs` 与 `provider.rs` 定义一个稳定的 `provider_id`、对应 Provider 行、凭据/额度语义，并穷尽扩展 `ProviderAdapterKind` 映射。不要新增独立 Offering 或 Plan 身份：Provider 与 Plan 是同一个产品概念。
-2. 只把已经验证的协议事实加入 `crates/ocg-domain/src/protocol.rs`。请求路由绝不能通过可计费端点猜测协议。
+1. 在 `crates/ocg-domain/src/ids.rs` 与 `provider.rs` 定义一个稳定的 `provider_id`、对应 Provider 行、凭据/额度语义，并穷尽扩展 `ProviderAdapterKind` 映射。Provider 与 Plan 共用 `provider_id`。
+2. 只把已经验证的协议事实加入 `crates/ocg-domain/src/protocol.rs`。请求路由使用已保存的合约。
 3. 在 `crates/ocg-gateway/src/alias.rs` 添加由代码持有的客户端 Alias 映射。保留准确上游 ID，拒绝有歧义的 raw ID；发现的新目录行不能擅自创造公开 Alias。
 4. 在 `ocg-core` 实现宿主路由 resolver。适配器只返回 `AttemptSpec`；数据库访问、Key 解密、代理选择和出站 HTTP 继续由宿主持有。
 5. 补齐账号与 **供应商** 控制面/UI 流程；只在该供应商真实支持时加入目录刷新、启停、验证、错误、冷却、价格和用量。Dashboard 变更统一走带 CAS 的 `/dashboard/api/v3`。

@@ -8,9 +8,9 @@
 
 锁顺序：(1) `settings_update`，(2) `db`，(3) `config`，(4) `http_client`， (5) `gateway`，(6) `pricing`，(7) `zen_free_models`，(8) `provider_contracts`，(9) `routing`，(10) `credential_snapshot`。反向获取会造成死锁；持有 `routing` 锁时不应执行 DB 或网络 I/O。异步闸口：设置写同时重绑时， `settings_host_effects`（持久化 → 监听器重绑 → 补偿）先于 `gateway_lifecycle`。这些 await 期间应释放 `parking_lot` 锁。
 
-两层凭证共用一张 `access_keys` 表（当前 schema v35）和一份鉴权快照：
+从 schema v27 起，权威表是 `access_keys`。两层凭证共用该表（当前 schema v37）和一份鉴权快照：
 
-- 主 Key：固定 id `00000000-0000-0000-0000-000000000001`，显示名 `"Primary"`。始终启用，没有删除入口。公开 `AppConfig` 与面板 API 仍暴露 `gateway_key`；v27 之后经消毒的 config JSON **不再** 是该值的数据库权威。
+- 主 Key：固定 id `00000000-0000-0000-0000-000000000001`，显示名 `"Primary"`。始终启用，没有删除入口。公开 `AppConfig` 与面板 API 仍暴露 `gateway_key`；v27 之后经消毒的 config JSON 把 `gateway_key` 存为 `""`。
 - 子 Key：非主行，活跃上限 64，软删保留身份/名称并清除明文。只经 `/dashboard/api/v3/keys*` 生命周期 API 变更。CLI 没有子 Key 命令。
 
 主/子 Key 值互斥由 `gateway_keys::ensure_primary_value_allowed` 在 dashboard、settings 与子 Key 启用路径强制。
@@ -27,7 +27,7 @@ schema v16 给账号增加 `account_type`（`key | managed`）与 `setup_step` �
 
 `AppConfig::default()` 的 `opencode_invite_url` 带演示默认值（`DEFAULT_OPENCODE_INVITE_URL`）。规范化后只接受最长 2048 字符、无用户名密码的 HTTPS URL，主机严格限定为 `opencode.ai` 或 `console.opencode.ai`。创建托管草稿时可编辑邀请链接；与设置不同时写回 SQLite。注册/支付/验证码仍由用户在浏览器中完成，Key 由用户复制回填；OCG Manager 不会使用 CDP 自动填表或代点支付。
 
-托管状态允许 **向前一步** 或 **回退到任意更早的未完成步骤**；跳步前进不被允许，setup API 也不会直接进入 `ready`。Key 实测返回 `2xx` 时进入 `ready + enabled`；`429` 同样证明 Key 有效并写入冷却；其他 HTTP 响应——包括重定向、`429` 以外的 `4xx` 与 `5xx`——以及网络或超时错误都保持 `key_verification`。
+托管状态允许 **向前一步** 或 **回退到任意更早的未完成步骤**。普通 setup PATCH 只写这些步骤变更；独立的 Key 验证请求写入 `ready`。Key 实测返回 `2xx` 时进入 `ready + enabled`；`429` 同样证明 Key 有效并写入冷却；其他 HTTP 响应——包括重定向、`429` 以外的 `4xx` 与 `5xx`——以及网络或超时错误都保持 `key_verification`。
 
 ### 托管账号 setup 生命周期
 
@@ -47,8 +47,6 @@ ready+enabled 且近 24h 有本地活动的账号约每小时对账，无活动�
 
 sync 元数据在 `provider_usage_sync_state`；v27 删除遗留的五列 `accounts.usage_sync_*`。公开 Go docs 尚未列出该路径。
 
-用量同步仅由 `usage_sync.rs` 处理；不存在 Profile Cookie 或 HTML 控制台用量路径。
-
 Zen Free 由数据库持有：可启用、停用、排序，但不能通过通用账号 API 创建或删除。Command Code 账号在 enabled、ready 且 Key 非空时可路由；供应商矩阵控制模型供应，GOAT 预设行默认开启，额外行默认关闭。Custom 声明协议后即可路由；验证为可选。
 
 浏览器：`GET /dashboard/api/v3/browser/capabilities`、 `POST /accounts/{id}/browser`、`DELETE /accounts/{id}/browser-profile` 与 `/browser/sessions/{token}/ws`。浏览目标允许 Google 注册/登录、GitHub 注册/ 登录、配置的邀请 URL 与 OpenCode 控制台（`https://opencode.ai/auth`）。 worker 主机白名单含 `accounts.google.com`、`github.com`、`opencode.ai`、 `console.opencode.ai`、`auth.opencode.ai`。远程会话令牌只在内存中保存，绑定管理员会话并检查 Origin，空闲 30 分钟或总计 4 小时失效。
@@ -65,7 +63,7 @@ Profile 删除先停浏览器，校验账号 ID 防目录穿越，再把新旧 P
 
 ## 持久化
 
-`crates/ocg-core/src/db.rs` 定义 SQLite schema、迁移与查询。当前 schema 是 **v35**。`provider_contracts.rs` 负责供应商合约范围、按模型/按协议覆盖、effective 合约推导与模型协议证据。 `models.rs` 定义共享 serde 类型和 `AppConfig`。Key 混淆在 `ocg-infra::crypto`（门面 `ocg_core::crypto`）：这是轻量混淆，不是 KMS。 Windows 桌面使用 `MachineBoundCipher`；CLI/Docker 使用来自 `OCG_MANAGER_ENCRYPTION_KEY` 或 `<data-dir>/.encryption-key` 的 `StaticKeyCipher`。生产宿主必须调用 `Database::open_with_cipher`，让 v27 密文探测使用已经解析的 cipher。账号 `key_cipher` / `password_cipher` 就地校验，**不会重新加密**。比本构建支持的更新 schema 会 fail closed。
+`crates/ocg-core/src/db.rs` 定义 SQLite schema、迁移与查询。当前 schema 是 **v37**。`provider_contracts.rs` 负责供应商合约范围、按模型/按协议覆盖、effective 合约推导与模型协议证据。 `models.rs` 定义共享 serde 类型和 `AppConfig`。Key 混淆在 `ocg-infra::crypto`（门面 `ocg_core::crypto`）：这是轻量混淆，不是 KMS。 Windows 桌面使用 `MachineBoundCipher`；CLI/Docker 使用来自 `OCG_MANAGER_ENCRYPTION_KEY` 或 `<data-dir>/.encryption-key` 的 `StaticKeyCipher`。生产宿主必须调用 `Database::open_with_cipher`，让 v27 密文探测使用已经解析的 cipher。账号 `key_cipher` / `password_cipher` 就地校验，**不会重新加密**。比本构建支持的更新 schema 会 fail closed。
 
 升级路径上历史版本仍然重要：
 
@@ -84,6 +82,8 @@ Profile 删除先停浏览器，校验账号 ID 防目录穿越，再把新旧 P
 - **v33：** 新增非空 `account_model_capabilities.upstream_model`，由 `model_id` 回填。
 - **v34：** 新增 CPA 接入单例配置。
 - **v35：** 经 fail-closed 预检与重建后，将 Provider 与 Plan 身份收敛为 `provider_id`；同时持久化类型化用户定义 Provider。pre-v35 备份与回滚流程见[存储与迁移](storage-migration.zh-CN.md)。
+- **v36：** 增量创建 `ollama_cloud_usage_state`，用于未发布的 Cookie 用量抓取。
+- **v37：** 删除 `ollama_cloud_usage_state` 且不动账号 Key 与日志，并创建 `ollama_cloud_billing`。
 
 GUI 数据目录：Windows `%USERPROFILE%\.ocg-mgr` 或 macOS/Linux `~/.ocg-mgr`。 CLI 默认 `~/.ocg-mgr-cli`。Docker 将 SQLite、Key 与 `.encryption-key` 放在 `ocg-data`，长期 Cookie 与浏览器状态放在 `ocg-browser-profiles`。两卷都是高敏感持久状态，必须在服务停止后成对备份；`ocg-browser-runtime` 只含运行时控制 token，不应加入备份。浏览器 Profile 不由 OCG Manager 加密。
 
@@ -91,7 +91,7 @@ GUI 数据目录：Windows `%USERPROFILE%\.ocg-mgr` 或 macOS/Linux `~/.ocg-mgr`
 
 ## 节点边界
 
-每个节点由自己的面板独立管理；不提供跨节点同步，也不提供 Admin API。
+每个节点由自己的面板独立管理。
 
 ## 生命周期类别
 
@@ -101,12 +101,12 @@ GUI 数据目录：Windows `%USERPROFILE%\.ocg-mgr` 或 macOS/Linux `~/.ocg-mgr`
 | --- | --- | --- | --- |
 | **Gateway 监听器**（`GatewayLifecycle`） | `start_gateway` / `bind` | `stop`（只发信号）或 `stop_and_wait`（CLI） | TCP 绑定、面板信任、转发日志回填、HTTP 服务。重绑感知槽位（同端口先停后绑，新端口先绑）。不启动也不取消进程级 worker。 |
 | **控制面 worker**（`ControlPlaneWorkers`） | 由 `start_gateway` 调用 `ensure_started`（每个 `CoreState` 一次） | 无 —— 拥有该 `CoreState` 被 drop 时退出 | 官方用量对账。没有公开 cancel API。监听器停止不会杀死它。 |
-| **桌面能力** | Tauri setup：自启（Windows x64 / macOS / Linux x64 release/已安装）、Dock（macOS）、升级 starter | 进程退出 | 不是 WebView command。CLI/Docker 不注册 hook。HTTP 设置表单仍按能力门控 `auto_start` 与 `show_dock_icon`。 |
+| **桌面能力** | Tauri setup：自启（Windows x64 / macOS / Linux x64 release/已安装）、Dock（macOS）、升级 starter | 进程退出 | Host 注册的 capability。CLI/Docker 不注册 hook。HTTP 设置表单仍按能力门控 `auto_start` 与 `show_dock_icon`。 |
 | **浏览器运行时** | 桌面原生 hook；Docker 远程 worker | 账号切换 / Profile 重置 / 进程退出 | 原生浏览器与 Sidecar 是同一 `BrowserRuntime` 槽的不同宿主。 |
 
 Tauri `src/lib.rs`：启动用 `start_gateway`（监听器 + 用量 worker）；退出用 `host::gateway::stop_listener`（只停监听器）。设置端口变更经 `GatewayLifecycle` / `settings_host_effects` 重绑，并用配置指纹做补偿；并发失败的端口写入不会覆盖成功的超时写入。
 
-升级器注册为 `CoreState` starter，不是 WebView `invoke` command。 `src-tauri/capabilities/default.json` 没有 updater 权限。升级器出站遵循进程级 **默认段** 代理策略（含 List 模式）。
+升级器注册为 `CoreState` starter。`src-tauri/capabilities/default.json` 没有 updater 权限。升级器出站遵循进程级 **默认段** 代理策略（含 List 模式）。
 
 ---
 

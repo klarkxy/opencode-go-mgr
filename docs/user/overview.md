@@ -10,8 +10,8 @@ keyed only by `provider_id`; each account card belongs to one such Provider.
 Clients send **aliases** from the local registry or eligible Custom model IDs;
 live routing includes OpenCode Go, Zen Free, Command Code GOAT, MiniMax CN
 Token Plan, Kimi Code CN, Custom API, and saved user-defined Providers. The Vue 3 dashboard is at
-`/dashboard/` and the current SPA talks JSON at `/dashboard/api/v3`. Every node
-is independent: no remote sync, no Admin API, no telemetry.
+`/dashboard/` and the current SPA talks JSON at `/dashboard/api/v3`. Each node
+stores its own data locally.
 
 The gateway does four jobs, in roughly the order you would expect:
 
@@ -21,8 +21,8 @@ The gateway does four jobs, in roughly the order you would expect:
    filtering, the adapter ceiling, the saved provider contract, and the
    per-model protocol effective state.
 3. Convert the request to the selected Plan's effective upstream protocol,
-   and the response back to the client protocol. Client requests never
-   discover or probe.
+   and the response back to the client protocol. Protocol selection uses the
+   saved contract.
 4. Log the request (`requested_model`, `resolved_alias`, `upstream_model`),
    write usage and any cooldown to SQLite, and surface everything in the
    dashboard.

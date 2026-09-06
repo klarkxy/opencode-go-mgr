@@ -2,7 +2,7 @@
 
 # Gateway Behavior
 
-OCG Manager exposes one HTTP surface on `127.0.0.1:9042` that speaks five client protocols and routes requests to whichever eligible OpenCode Go, Zen Free, Command Code GOAT, MiniMax CN, Kimi Code CN, Ollama Cloud, or Custom API account wins selection — so every client can keep believing every upstream speaks the same dialect.
+OCG Manager exposes one HTTP surface on `127.0.0.1:9042` that speaks five client protocols and routes requests to whichever eligible OpenCode Go, Zen Free, Command Code GOAT, MiniMax CN, Kimi Code CN, Ollama Cloud, or Custom API account wins selection.
 
 Ollama Cloud is a routable sealed fixed-origin Plan (`https://ollama.com`): Chat Completions only, Bearer. Its saved and raw catalog IDs do not join `GET /v1/models` or the Go Alias registry. An actual upstream 429 uses the generic cooldown and fallback path.
 
@@ -15,7 +15,7 @@ The gateway listens on `http://<bind>:<port>` and exposes these endpoints:
 | `POST` | `/v1/chat/completions` | OpenAI Chat Completions |
 | `POST` | `/v1/responses` | OpenAI Responses |
 | `POST` | `/v1/messages` | Anthropic Messages |
-| `GET`  | `/v1/models` | Authenticated local list: routeable code-owned Go and sealed CN aliases, plus eligible Custom IDs that currently have an effective enabled protocol |
+| `GET`  | `/v1/models` | Authenticated local list: routeable code-owned Go and sealed CN aliases, saved user-defined Provider public models, and eligible Custom IDs that currently have an effective enabled protocol |
 | `POST` | `/v1beta/models/{model}:generateContent` | Gemini non-stream generation (`/v1/models/...` is also accepted) |
 | `POST` | `/v1beta/models/{model}:streamGenerateContent` | Gemini SSE generation (`/v1/models/...` is also accepted) |
 | `POST` | `/v1beta/models/{model}:countTokens` | Returns `501`; Gemini CLI can fall back to local estimation |
@@ -30,9 +30,9 @@ Default bind is `127.0.0.1:9042`. Override with `serve --host 0.0.0.0` and `serv
 
 ## Authentication
 
-Gateway API endpoints need the **Key** in one of three header forms: `Authorization: Bearer <key>`, `x-api-key: <key>`, or `x-goog-api-key: <key>`. The gateway strips the client auth header before forwarding and injects the selected account's credential instead. OpenCode Go sends `x-api-key` to Messages upstreams and `Authorization: Bearer` to Chat Completions / Responses. Custom API derives the one upstream header from its selected protocol: Messages uses `x-api-key`, while Chat Completions and Responses use Bearer. It never sends both or forwards dashboard/client credentials.
+Gateway API endpoints need the **Key** in one of three header forms: `Authorization: Bearer <key>`, `x-api-key: <key>`, or `x-goog-api-key: <key>`. The gateway strips the client auth header before forwarding and injects the selected account's credential instead. OpenCode Go sends `x-api-key` to Messages upstreams and `Authorization: Bearer` to Chat Completions / Responses. Custom API derives the one upstream header from its selected protocol: Messages uses `x-api-key`, while Chat Completions and Responses use Bearer. The gateway does not forward dashboard or client credentials.
 
-Dashboard auth depends on the listener bind. The current SPA uses `/dashboard/api/v3/auth/status`, `/dashboard/api/v3/auth/register`, `/dashboard/api/v3/auth/login`, and `/dashboard/api/v3/auth/logout`. Register, login, and logout need the same `expectedRevision` / `processGeneration` tokens as other V3 writes. The matching `/dashboard/api/auth/...` routes are preserved only as a labeled V2 compatibility exception for cached older pages; they are not the current SPA data path.
+Dashboard auth depends on the listener bind. The current SPA uses `/dashboard/api/v3/auth/status`, `/dashboard/api/v3/auth/register`, `/dashboard/api/v3/auth/login`, and `/dashboard/api/v3/auth/logout`. Register, login, and logout need the same `expectedRevision` / `processGeneration` tokens as other V3 writes. The matching `/dashboard/api/auth/...` routes are preserved only as a labeled V2 compatibility exception for cached older pages.
 
 - **Loopback binds (the default).** Dashboard API requests require a `Host` of `localhost` or a literal loopback IP; browser `Origin`, when present, must match that host and port. Cross-site requests are rejected, including registration and login. Valid local requests skip dashboard login unless they carry `Forwarded`, `x-forwarded-for`, `x-forwarded-proto`, `x-forwarded-host`, or `x-real-ip`; any of those headers requires login. Public-host reverse proxies must target a non-loopback listener. The client still needs the **Key** to reach the upstream endpoints. This is what the desktop app and the default CLI use.
 - **Non-loopback binds.** A single administrator account, stored as an Argon2 password hash in SQLite, governs the dashboard. Sign-in returns an HttpOnly session cookie. Standard reverse-proxy forwarding headers on a non-loopback bind still require the cookie. In Docker, the first administrator can be bootstrapped with `OCG_ADMIN_USERNAME` and `OCG_ADMIN_PASSWORD`; otherwise the first registration wins.
@@ -41,15 +41,15 @@ Dashboard auth depends on the listener bind. The current SPA uses `/dashboard/ap
 
 Clients send **aliases**: stable lowercase kebab-case names from the local registry. Built-in Alias authority is code-owned: the original static OpenCode Go protocol table plus sealed exact MiniMax CN, Kimi CN, and selected GOAT long-name maps. Case-folded Alias spellings such as `GLM-5.2` are accepted.
 
-Authenticated `GET /v1/models` returns the currently routeable code-owned Aliases in registry order, then appends eligible Custom capability IDs that do not collide with those Aliases (`owned_by` is `custom`) and also have an effective enabled protocol. It never calls upstream: explicit catalog refreshes only update saved Provider mappings and contracts. It does not write a forward log. Saved Zen `-free` rows keep the exact raw pin and publish the suffix-stripped Alias; saved Command rows may join any code-owned Alias; saved MiniMax/Kimi rows activate only exact sealed CN mappings. Unknown future Command/MiniMax/Kimi rows cannot create arbitrary Aliases. Eligible Custom IDs come from enabled + ready Custom accounts that have a key (verification is optional).
+Authenticated `GET /v1/models` returns the currently routeable code-owned Aliases in registry order, then appends saved user-defined Provider public models and eligible Custom capability IDs that do not collide with those Aliases (`owned_by` is `custom`) and also have an effective enabled protocol. The list uses saved local state. Explicit catalog refreshes update saved Provider mappings and contracts. The list read does not write a forward log. Saved Zen `-free` rows keep the exact raw pin and publish the suffix-stripped Alias; saved Command rows may join any code-owned Alias; saved MiniMax/Kimi rows activate only exact sealed CN mappings. Unknown future Command/MiniMax/Kimi rows cannot create arbitrary Aliases. Eligible Custom IDs come from enabled + ready Custom accounts that have a key (verification is optional).
 
-Protected `GET /dashboard/api/v3/application-models` is a different local list: currently routeable OpenCode Go aliases intersected with the active OpenCode Go pricing snapshot. Highspeed variants inherit the base row. An empty intersection returns `[]`. It never includes Custom IDs, never selects an account, and never calls upstream.
+Protected `GET /dashboard/api/v3/application-models` is a different local list: currently routeable OpenCode Go aliases intersected with the active OpenCode Go pricing snapshot. Highspeed variants inherit the base row. An empty intersection returns `[]`. The list excludes Custom IDs and uses saved local state.
 
 `/v1/models` may publish shared Zen, Command Code, MiniMax, or Kimi mappings through a code-owned Alias, and may publish provider-only sealed Aliases. Command drops the Provider namespace, removes `-paid` / `-free` only when the shorter Alias is already authorized, and maps `nvidia/nemotron-3-ultra-550b-a55b` to `nemotron-3-ultra`; semantic qualifiers are not truncated by length. It publishes an Alias only while the exact saved catalog row exists and at least one Provider mapping has an enabled protocol. A Command/MiniMax/Kimi catalog ID with no code-owned Alias match remains available only as its exact raw ID and is not advertised as a new Alias. Eligible Custom declared IDs may appear even when they contain `/`; they are not folded into kebab aliases. `application-models` remains the narrower Go-and-pricing list.
 
 A raw upstream ID with exactly one registry mapping is pinned to that mapping — no cross-Plan fallback or Zen prefer overlay — and routability is checked afterward. Built-in raw IDs are exact and case-sensitive. Names containing `/`, `_`, or whitespace are also never folded into kebab aliases (`glm/5.2` is not `glm-5.2`). Custom capability IDs keep their existing case-folded matching behavior. An exact raw ID that matches more than one mapping, including an eligible Custom capability and another Plan, returns `400` with code `ambiguous_model_id` and does not call upstream. Unknown names — neither an authorized alias, an exact saved built-in raw ID, nor an eligible Custom ID — return `400` on every supported client format: Chat Completions, Responses, Messages, and Gemini `generateContent` / `streamGenerateContent`. The canonical kebab alias `deepseek-v4-flash` can select among enabled Go, Zen, and Command Code mappings because it exists in the static Go table and has a matching Zen `-free` twin; the unique raw ID `deepseek/deepseek-v4-flash` pins only to Command Code. A Zen `foo-free` row always keeps the exact raw pin and publishes Alias `foo` from the `-free` suffix.
 
-Forward logs separate the request identity from the upstream identity. There is no `requested_alias` field:
+Forward logs separate the request identity from the upstream identity:
 
 - `requested_model` — the public name or Alias the client sent
 - `resolved_alias` — the resolved public Alias when one exists
@@ -57,7 +57,7 @@ Forward logs separate the request identity from the upstream identity. There is 
 
 plus `provider_id`. Native cost fields are optional.
 
-Claude Desktop keeps its own three-role alias layer (`claude-sonnet-4-6`, `claude-opus-4-6`, and `claude-haiku-4-5-20251001`). These are rewritten to the mapping saved in **Applications** before Alias resolution. `GET /claude-desktop/v1/models` still advertises only those three role aliases, not the Plan model union.
+Claude Desktop keeps its own three-role alias layer (`claude-sonnet-4-6`, `claude-opus-4-6`, and `claude-haiku-4-5-20251001`). These are rewritten to the stored `sonnet` / `opus` / `haiku` mapping before Alias resolution. `GET /claude-desktop/v1/models` advertises those three role aliases.
 
 ---
 

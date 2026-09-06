@@ -262,8 +262,7 @@ version, and emits one full SHA; no downstream job re-resolves the symbolic
 input. Rebuilding different bytes for an existing full-version or `sha-*` tag
 fails instead of overwriting it; only an exact-digest replay is accepted. Its
 GitHub signing certificate identifies the workflow ref that triggered the
-dispatch, even though the build checks out the resolved release commit. Do not
-describe a historical manual backfill as tag-triggered provenance; normal
+dispatch, even though the build checks out the resolved release commit. Normal
 `release.published` runs use the release tag context.
 
 After publication, record the digest and verify the OCI index and GitHub
@@ -328,21 +327,21 @@ container workflow covers `linux/amd64` and `linux/arm64`, each built on its
 native runner and smoke-tested on amd64 only; it runs after a release is
 published or is manually dispatched.
 
-CI does not drive real desktop UI interactions, launch real Claude Desktop or
-Gemini CLI clients, or test backup/restore, database downgrade, migration
-rollback, upstream accounts, or real gateway requests. Rust tests cover
-Gemini/Claude Desktop routing, authentication, alias rewriting, non-stream
-conversion, SSE event shapes, Dashboard V3 CAS, the V2 410 tombstone, v27
-open/backup, and host lifecycle source contracts, but they cannot prove that
-new versions of third-party clients still accept the generated configuration.
+CI evidence covers those quality-gate jobs, native installer and package
+smokes on candidate or tag runs, and the container amd64 smoke suite. Rust
+tests cover Gemini/Claude Desktop routing, authentication, alias rewriting,
+non-stream conversion, SSE event shapes, Dashboard V3 CAS, the V2 410
+tombstone, v27 open/backup, and host lifecycle source contracts. Real desktop
+UI, Claude Desktop, Gemini CLI, backup/restore, database downgrade, migration
+rollback, upstream accounts, real gateway requests, and third-party client
+acceptance of generated configuration remain machine checks.
 
 The main container smoke checks TCP health, dashboard HTML, auth status, the
 bundled license, and a protected settings request returning `401`. The browser
 smoke launches real Chromium and verifies its profile and absence of public
-ports, but it does not log in to Google/OpenCode, operate noVNC
-keyboard/clipboard, or make a real payment. Google data-center-IP risk,
-desktop browser discovery, cookie persistence across restarts, and remote
-account switching remain manual checks.
+ports. Google/OpenCode login, noVNC keyboard/clipboard, real payment, Google
+data-center-IP risk, desktop browser discovery, cookie persistence across
+restarts, and remote account switching remain machine checks.
 
 ---
 

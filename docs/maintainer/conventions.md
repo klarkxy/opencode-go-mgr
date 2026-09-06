@@ -44,6 +44,13 @@
   `docs/user/limits.md` or `docs/maintainer/known-debt.md`, and claim browser,
   billable inference, or installed-desktop behavior only when that exact check
   was run.
+- Write current facts in the affirmative. Open a section with what the product
+  does or what the reader should do. Add a negation only when a first-time
+  reader of that page would reasonably assume the opposite — silent discard, a
+  control that looks present, a platform that looks supported, or a credential
+  that would leak. Historical corrections, rejected designs, and
+  implementation debates live in `limits.md`, `known-debt.md`, or this
+  conventions page; other chapters link there instead of restating the denial.
 - Keep the documentation index as an audience router. Its source ownership and
   editing guidance belongs here, not in another long index table.
 - Repository documentation, `AGENTS.md`, and `.agents/skills/` contain shared

@@ -68,10 +68,10 @@ desktop-specific steps need a real machine.
       non-loopback dashboard, verify the mapping API returns `401` without a
       valid session. Confirm the retired V2
       `PUT /dashboard/api/claude-desktop/models` is authenticated `410`.
-- [ ] Open the **Applications** view and confirm all 17 guides are present
-      and selectable. Spot-check that copied results contain no masked key,
-      and actually launch Claude Desktop and Gemini CLI once each for a text
-      and a tool call.
+- [ ] Confirm all 17 guides in `src/views/application-guides.ts` are present
+      with unique IDs. Spot-check that display snippets mask the Key and that
+      copied results contain the real key. Launch Claude Desktop and Gemini
+      CLI once each for a text and a tool call.
 - [ ] Cover schema v16 migration, schema v27 (`access_keys`, pre-v3 backup +
       SHA-256 sidecar, dropped `sub_gateway_keys` and `accounts.usage_sync_*`,
       ciphertext validated not rewritten), v29 SCNet removal, v30/v31 contract
@@ -90,13 +90,14 @@ desktop-specific steps need a real machine.
       `GET /dashboard/api/v3/application-models` are local reads and make no
       upstream request. `/v1/models` is currently routeable published aliases
       plus eligible Custom IDs; `application-models` is Go routeable aliases ∩
-      the active pricing snapshot (highspeed inherits the base row) and must
-      not include Custom. Unknown models return `400` on Chat / Responses /
+      the active pricing snapshot (highspeed inherits the base row) and
+      excludes Custom. Unknown models return `400` on Chat / Responses /
       Messages / Gemini unless they match that `/v1/models` list. Command
       Code catalog refresh is public and keyless; GOAT preset rows start on,
       extra discovered rows start off, and all-off scopes disappear from
-      `/v1/models`. These local-list checks do not require live provider keys;
-      do not perform billable inference as part of the release smoke.
+      `/v1/models`. These local-list checks use saved local state and need no
+      live provider keys; do not perform billable inference as part of the
+      release smoke.
 - [ ] Bounded fake-upstream Custom API smoke (no live provider key): URL
       credentials are rejected; a valid new account defaults enabled while
       verification remains optional; a `2xx` JSON object marks verification

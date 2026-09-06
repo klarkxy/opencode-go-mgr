@@ -139,8 +139,8 @@ bump 该进程的 `settings_revision`。它不能创建 Custom 账号、子 Key 
 数量、唯一 ID、协议端点、display/copy 脱敏差异，以及 Claude Desktop 三个角色
 模型的持久化行为。
 
-侧栏是仪表盘、接入 Key、账号、供应商、别名、应用、日志、设置。`pricing` 查询是供应
-商页的遗留别名。`BrowserSession` 是会话层，不是第九个侧栏项。
+`BrowserSession` 是会话层；侧栏是仪表盘、接入 Key、账号、供应商、别名、日志、
+设置。`pricing` 查询是供应商页的遗留别名。别名页是既有合约与能力的只读聚合。
 
 ## 本地发布冒烟构建（Windows）
 

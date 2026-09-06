@@ -2,7 +2,8 @@
 
 # Install And First Run
 
-A local gateway that lives on your machine, not in the cloud — install it, launch it, and close the browser tab when you're done. The rest is mostly convincing your OS that small developers exist.
+Install the local gateway, launch it, and close the browser tab when you're
+done. The rest is mostly convincing your OS that small developers exist.
 
 ## Windows 10/11 x64
 

@@ -6,28 +6,23 @@ For a client that is not listed here, see [Add an Application](add-application.m
 
 ## Application Guides
 
-The **Applications** view contains copy-ready configuration snippets for 17
-tools that all believe they are special. The connection panel shows the current
-client's request URL, a Key selector (the primary Key plus enabled sub keys),
-and model pickers. Node addresses and the upstream URL stay on Dashboard. Each
-guide lists the protocol the tool speaks, the official documentation URL,
-step-by-step instructions, and editable code blocks with a **Copy** button. The
-displayed block masks the Key; copying restores the real key, so screenshots
-remain shareable without producing an unusable configuration.
+This chapter has copy-ready configuration for 17 clients. Copy the **Key** and
+URLs from **Connection Center**, then follow the matching guide. Each guide
+lists the protocol, the official documentation URL, setup steps, and example
+snippets. The registry lives in `src/views/application-guides.ts`.
 
-Before overwriting any existing configuration file, back up the original file. The code blocks
-in Applications are editable, but keep a recoverable copy before copying or manually merging
-their contents.
+Before overwriting any existing configuration file, back up the original.
 
 ### Local Desktop connection
 
-The installed Desktop app exposes eight local connectors. Claude Code, Codex,
-Gemini CLI, OpenCode, OpenClaw, and Hermes use managed field-level configuration;
-Pi uses a client-native plugin, while DeepSeek Harness (DSH) uses a companion
-plugin plus one field-owned `.env` assignment. Claude Desktop is not
-part of this local connector surface. This control is available only through the loopback
-Dashboard served by the same Desktop process. CLI, Docker, public listeners,
-and remote nodes keep the manual guides and cannot write client files.
+Automatic Desktop connectors remain in `src/views/Applications.vue` and the
+Desktop Host. They are not on the dashboard rail; the current user path is
+manual configuration from Connection Center and this chapter. Claude Code,
+Codex, Gemini CLI, OpenCode, OpenClaw, and Hermes use managed field-level
+configuration; Pi uses a client-native plugin, while DeepSeek Harness (DSH)
+uses a companion plugin plus one field-owned `.env` assignment. Claude Desktop
+uses the manual guide only. CLI, Docker, public listeners, and remote nodes
+also use the manual path.
 
 All connectors support redacted preview and a reversible operation. Managed
 configuration connectors use field-level writes and restore. Codex writes only the OCG-owned provider fields in user-level
@@ -39,12 +34,10 @@ DSH additionally stores the selected Key only in the dedicated
 
 The phase-one installed-client acceptance gate covers five clients end to end:
 Codex, Claude Code, OpenCode, Pi, and DSH. Gemini CLI, OpenClaw, and Hermes keep
-their managed connector and manual guide, but are not part of this phase's
-real-machine release gate.
+their managed connector and manual guide.
 
-The connector does not switch whole provider profiles. It previews a fixed,
-field-level OCG patch, then rechecks both the Dashboard revision and target
-file fingerprint before committing. A per-client ownership record keeps the
+The connector previews a fixed, field-level OCG patch, then rechecks both the
+Dashboard revision and target file fingerprint before committing. A per-client ownership record keeps the
 original values of only the fields OCG changed. Restore removes or restores
 those fields while preserving unrelated edits; an OCG-owned field changed by
 another program is reported as a conflict instead of being overwritten.
@@ -70,8 +63,7 @@ Each client has its own idea of where the API lives:
   `/claude-desktop/v1/messages` and `/claude-desktop/v1/models`.
 - Gemini CLI uses the root URL with `GOOGLE_GENAI_API_VERSION=v1beta`. Its
   remote Base URL must use HTTPS; only `localhost`, `127.0.0.1`, and `[::1]`
-  may use HTTP. The Applications view disables Gemini configuration copying
-  when the resolved root violates this client-side rule.
+  may use HTTP. A non-loopback HTTP root violates this client-side rule.
 - Pi, Kimi Code CLI, OpenCode, OpenClaw, Hermes, Cline, Roo Code, and Continue
   use the API Base URL ending in `/v1`.
 - VS Code Copilot Chat and WorkBuddy need the full `/v1/chat/completions` URL.
@@ -111,20 +103,16 @@ Uninstall removes only the OCG-owned package.
 The picker list comes from protected `GET /dashboard/api/v3/application-models`:
 currently routeable OpenCode Go aliases intersected with the active OpenCode Go
 pricing snapshot. Highspeed variants inherit the base model's pricing row. An
-empty intersection is `[]`, not an error. This is **not** authenticated
-`GET /v1/models`, which lists routeable code-owned Go and sealed Provider
+empty intersection is `[]`. Authenticated
+`GET /v1/models` lists routeable code-owned Go and sealed Provider
 Aliases plus eligible Custom declared IDs. Saved Zen `-free` rows publish the suffix-stripped Alias;
 Command catalogs may join any code-owned Alias; saved MiniMax/Kimi
 rows activate only exact sealed mappings. Both
-endpoints are local reads: no request-time upstream discovery or account
-selection.
+endpoints are local reads.
 They publish only currently routable models that have an
-effective enabled protocol. Zen Free catalog refresh is an explicit
+effective enabled protocol. Catalog refresh is an explicit
 **Providers** action. A pricing refresh there can change which Go aliases
-appear here. The view reloads the list whenever you return. Per-app model
-selections and edited snippets live only in the current page session; a reload
-resets them. **Restore defaults** resets the active application's model
-selection and snippet drafts.
+appear in that intersection.
 
 ## Model capabilities
 

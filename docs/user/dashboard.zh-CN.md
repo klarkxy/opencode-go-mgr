@@ -2,19 +2,19 @@
 
 # 管理面板
 
-管理面板是 Gateway 提供的单页 Vue 3 应用。左侧边栏（宽度低于 1024px 时改为顶部横向菜单）有八个固定核心页面：**仪表盘**、**接入 Key**、**账号**、**供应商**、**别名**、**应用**、**日志**、**设置**。设置下方的分界线之后是可选的 **扩展** 分组；CPA 是其中仅本机使用的入口。Windows x64、macOS 和 Linux x64 的桌面应用或 CLI 还可以在该页安装并手动启动由 OCG 拥有的 CPA 运行时；其他平台仍只支持连接外部 CPA。顶栏右侧是主题切换、语言切换、退出登录。面板原生支持十种语言：简体中文、繁體中文、English、日本語、한국어、Español、 Français、Deutsch、Português (Brasil)、Русский，默认简体中文。语言选择持久化在 `localStorage` 的 `ocg-manager.locale`；浏览器拒绝持久化时，当前会话仍正常工作——隐私窗口不会把面板怎么样。
+管理面板是 Gateway 提供的单页 Vue 3 应用。左侧边栏（宽度低于 1024px 时改为顶部横向菜单）有七个固定核心页面：**仪表盘**、**接入 Key**、**账号**、**供应商**、**别名**、**日志**、**设置**。设置下方的分界线之后是可选的 **扩展** 分组；CPA 是其中仅本机使用的入口。Windows x64、macOS 和 Linux x64 的桌面应用或 CLI 还可以在该页安装并手动启动由 OCG 拥有的 CPA 运行时；其他平台仍只支持连接外部 CPA。顶栏右侧是主题切换、语言切换、退出登录。面板原生支持十种语言：简体中文、繁體中文、English、日本語、한국어、Español、 Français、Deutsch、Português (Brasil)、Русский，默认简体中文。语言选择持久化在 `localStorage` 的 `ocg-manager.locale`；浏览器拒绝持久化时，当前会话仍正常工作。
 
 ## 面板 V3
 
-当前 SPA **只** 访问 `/dashboard/api/v3`。接入中心、接入 Key、账号、供应商、别名、应用、日志、设置，以及登录、注册、退出，全部走这条路径。写入携带 `expectedRevision` 与 `processGeneration` 做 CAS；若同一进程的另一个标签页先保存，服务端返回 HTTP 409，错误码 `revisionConflict`。SPA 会刷新控制 token 与受影响资源，但不会自动重放被拒绝的变更；确认当前值后再次提交即可。这些 token 只属于当前进程；多个进程共用一个数据目录时，并不构成统一的 CAS 域。OpenCode Go 价格快照使用独立的 `pricingRevision`，与设置 token 无关。
+当前 SPA **只** 访问 `/dashboard/api/v3`。接入中心、接入 Key、账号、供应商、别名、日志、设置，以及登录、注册、退出，全部走这条路径。写入携带 `expectedRevision` 与 `processGeneration` 做 CAS；若同一进程的另一个标签页先保存，服务端返回 HTTP 409，错误码 `revisionConflict`。SPA 会刷新控制 token 与受影响资源，但不会自动重放被拒绝的变更；确认当前值后再次提交即可。这些 token 只属于当前进程；多个进程共用一个数据目录时，并不构成统一的 CAS 域。OpenCode Go 价格快照使用独立的 `pricingRevision`，与设置 token 无关。
 
 明文 Key 只出现在接入中心载荷（`GET /dashboard/api/v3/connection`）里。Settings 资源从不包含 Key 值。浏览器只把秘密留在内存；退出登录或 401 会话失效会立即清除。
 
 切换标签时视图保持缓存（`KeepAlive`），返回时刷新服务端数据；**仪表盘** 视图在浏览器标签回到前台时也会刷新。目录、价格与供应商模型列表不会自动轮询；官方用量同步由服务端调度。**设置** 页开始签名桌面安装后，可能会轮询安装进度，直到进程重启。
 
-仍调用已退役 `/dashboard/api` REST 的缓存页面会收到 HTTP 410，错误码 `dashboardV2Removed`，提示先刷新页面，不够再升级。未登录的退役 REST 会先返回 401。两类 V2 路径仅作兼容例外保留，**不是**当前 SPA 数据路径：`/dashboard/api/auth/status`、`/dashboard/api/auth/register`、`/dashboard/api/auth/login`、`/dashboard/api/auth/logout`，以及 `/dashboard/api/browser/sessions/{token}/ws`。当前面板改用 V3 的鉴权与浏览器 WebSocket 路由。
+仍调用已退役 `/dashboard/api` REST 的缓存页面会收到 HTTP 410，错误码 `dashboardV2Removed`，提示先刷新页面，不够再升级。未登录的退役 REST 会先返回 401。两类 V2 路径仅作为缓存旧页面的兼容例外保留：`/dashboard/api/auth/status`、`/dashboard/api/auth/register`、`/dashboard/api/auth/login`、`/dashboard/api/auth/logout`，以及 `/dashboard/api/browser/sessions/{token}/ws`。当前面板改用 V3 的鉴权与浏览器 WebSocket 路由。
 
-面板上没有 **Ping** 按钮。要探测 OpenCode Go Key，请用 CLI `key ping` 或发一次真实客户端请求。Custom 卡片仍有 **验证连接**；托管注册仍有 Key 验证。
+要探测 OpenCode Go Key，请用 CLI `key ping` 或发一次真实客户端请求。Custom 卡片仍有 **验证连接**；托管注册仍有 Key 验证。
 
 ## 接入中心
 
@@ -42,7 +42,7 @@
 - **主 Key** 始终有效，不能停用或删除，通过重置生成新值。其 id 为 `00000000-0000-0000-0000-000000000001`，也是客户端教程默认展示的凭证。没有自定义值输入框。
 - **子 Key** 是额外创建的凭证，可命名、重命名、启用/停用、重新生成或删除，适合每台设备分发一把。删除子 Key 是软删除：立即失效且明文被清除，但转发日志仍能按名称归因。子 Key 的值不能与主 Key 或其他子 Key 相同；未删除的子 Key 最多 64 把。
 
-接入中心和应用页只消费已启用的 Key。按 Key 看用量在日志页过滤。
+接入中心只复制已启用的 Key。按 Key 看用量在日志页过滤。各客户端配置见[应用教程](applications.zh-CN.md)。
 
 ---
 

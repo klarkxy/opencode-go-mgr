@@ -4,7 +4,7 @@
 
 OCG Manager 在一个端口上提供五种客户端协议，再把每份请求转换成上游 Plan 所需的格式。转换过程是确定性的：解析 Alias、检查账号资格、应用适配器上限与已保存的供应商合约、检查按模型/按协议的 effective 状态，然后决定透传或转换。强制关闭或全局关闭的协议优先于模型声明。
 
-每个已知 OpenCode Go 模型从硬编码的 **推荐协议** 与 **已验证可用协议集合** 起步，由测试账号探测后写入代码；请求路径不做协议试探。在 **供应商** 页探测成功只能在该适配器上限内确认或新增支持，失败会被记录，但不会删除静态能力。客户端协议在集合内且 effective 启用时透传；否则 **请求体** 转到推荐上游协议，**响应体** 或 SSE 流转回客户端协议。Custom API 同样转到该账号声明的上游协议，再遵守该端点的合约与按模型覆盖。转换覆盖文本、system、图像、工具调用与结果、推理内容、完成状态、错误与 usage 字段。`grok-4.6`、`grok-4.5` 与 `gpt-5.6-luna` 均仅支持 Responses；`glm-5.3` 与 `glm-5.2` 均仅支持 Chat。其他客户端格式（包括 Gemini）会转换，不会触发上游协议试探。
+每个已知 OpenCode Go 模型从硬编码的 **推荐协议** 与 **已验证可用协议集合** 起步，由测试账号探测后写入代码。协议选择使用已保存的合约。在 **供应商** 页探测成功只能在该适配器上限内确认或新增支持，失败会被记录，但不会删除静态能力。客户端协议在集合内且 effective 启用时透传；否则 **请求体** 转到推荐上游协议，**响应体** 或 SSE 流转回客户端协议。Custom API 同样转到该账号声明的上游协议，再遵守该端点的合约与按模型覆盖。转换覆盖文本、system、图像、工具调用与结果、推理内容、完成状态、错误与 usage 字段。`grok-4.6`、`grok-4.5` 与 `gpt-5.6-luna` 均仅支持 Responses；`glm-5.3` 与 `glm-5.2` 均仅支持 Chat。其他客户端格式（包括 Gemini）会转换，不会触发上游协议试探。
 
 | 推荐上游协议 | 模型 |
 | --- | --- |
@@ -60,7 +60,7 @@ OCG Manager 在一个端口上提供五种客户端协议，再把每份请求�
 | `qwen3.6-plus` | Messages | | | ✓ |
 | `qwen3.5-plus` | Messages | | | ✓ |
 
-未知模型名在所有支持的客户端格式上直接返回 `400`——Chat Completions、Responses、Messages，以及 Gemini `generateContent` / `streamGenerateContent`——未知 Claude Desktop 别名也一样。Gateway 不靠试探选协议——那会把同一请求计两次费。见 [别名](gateway.zh-CN.md#别名)。
+未知模型名在所有支持的客户端格式上直接返回 `400`——Chat Completions、Responses、Messages，以及 Gemini `generateContent` / `streamGenerateContent`——未知 Claude Desktop 别名也一样。见 [别名](gateway.zh-CN.md#别名)。
 
 Gateway 协议端点最多接受 16 MiB 的 JSON 请求体；这是传输上限，不是上下文窗口。若 OCG Manager 前面还有反向代理，需把请求体上限设为至少 16 MiB，否则请求可能还没到达 Gateway 就被代理以 `413 Payload Too Large` 拒绝。
 
@@ -78,9 +78,9 @@ function、custom、namespace 工具正常转换。`web_search`、`web_search_pr
 
 ## Gemini 是客户端兼容层
 
-Gateway 不会把 Gemini 线格式数据发往上游。它把 `contents`、纯文本 `systemInstruction`、受支持的 `inlineData` 图片、`functionDeclarations`、函数调用/结果、JSON Schema 输出、生成选项、Google 错误信封、usage 元数据和 SSE 帧，转换到已知模型的 Chat Completions 或 Messages 原生协议并转回。`v1beta` 与 `v1` 两种 URL 形式都接受。
+Gemini 是客户端格式：Gateway 把 `contents`、纯文本 `systemInstruction`、受支持的 `inlineData` 图片、`functionDeclarations`、函数调用/结果、JSON Schema 输出、生成选项、Google 错误信封、usage 元数据和 SSE 帧，转换到已知模型的 Chat Completions 或 Messages 原生协议并转回。`v1beta` 与 `v1` 两种 URL 形式都接受。
 
-兼容边界——不会静默假装等价：
+无法转换的字段返回 `400`：
 
 - 非空 `safetySettings` 无法跨协议执行同一套内容安全阈值，直接返回 `400 INVALID_ARGUMENT`；省略、`null` 或空数组可以使用。`safetySettings` 只影响 Gateway 是否接受请求，不会作为上游执行的提示生效。
 - `generationConfig.topK` 与 `generationConfig.thinkingConfig` 只作为跨协议兼容提示接受；采样、推理预算和 thoughts 展示不保证与 Google Gemini 等价，实际能力由所选 OpenCode-Go 模型决定。
@@ -90,7 +90,7 @@ Gateway 不会把 Gemini 线格式数据发往上游。它把 `contents`、纯�
 
 ## Claude Desktop 别名
 
-专用入口只接受服务端公布的 `claude-sonnet-4-6`、`claude-opus-4-6`、 `claude-haiku-4-5-20251001` 三个别名。Gateway 在进入现有 Messages 转换链前，把别名替换成“应用”视图保存的实际模型；响应中的模型能力、工具支持和上下文限制仍以实际模型为准。`sonnet`、`opus`、`haiku` 映射序列化在 `AppConfig` 中；留空角色继承第一个已配置角色，面板返回补全后的三角色映射。
+专用入口只接受服务端公布的 `claude-sonnet-4-6`、`claude-opus-4-6`、 `claude-haiku-4-5-20251001` 三个别名。Gateway 在进入现有 Messages 转换链前，把别名替换成已保存的 `sonnet` / `opus` / `haiku` 实际模型；响应中的模型能力、工具支持和上下文限制仍以实际模型为准。映射序列化在 `AppConfig` 中，通过 `PUT /dashboard/api/v3/claude-desktop/models` 更新；留空角色继承第一个已配置角色，面板返回补全后的三角色映射。
 
 ---
 

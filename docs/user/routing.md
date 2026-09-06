@@ -4,8 +4,8 @@
 
 ## Account Selection And Failover
 
-The gateway is not sentimental: accounts are tried in **list order**, which
-you can drag into shape and persist from the Accounts view. The selector skips:
+Accounts are tried in **list order**, which you can drag into shape and persist
+from the Accounts view. The selector skips:
 
 - Disabled accounts.
 - Accounts that are cooling down.
@@ -110,10 +110,9 @@ explains what actually stops traffic.
 
 ## Zen Free models
 
-Zen Free is one credentialless account card with one enable switch. There is
-no Deny / Explicit / Prefer policy — disable the card if you do not want Free
-traffic, or leave it enabled and let its position in the account list decide
-its routing priority.
+Zen Free is one credentialless account card with one enable switch. Disable
+the card if you do not want Free traffic, or leave it enabled and let its
+position in the account list decide its routing priority.
 
 **Refresh model catalog** on **Providers** calls the official keyless Zen
 model directory only on user request. The backend keeps only IDs ending in

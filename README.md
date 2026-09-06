@@ -11,9 +11,8 @@ Each account belongs to one Provider/Plan (`provider_id`) and, when required,
 one credential. Clients send local aliases; the gateway converts requests to
 the Plan's upstream protocol and converts responses back. Built-in routes cover
 OpenCode Go, OpenCode Zen Free, Command Code GOAT, MiniMax CN Token Plan, Kimi
-Code CN, and Custom API. Typed user-defined Providers use Configurable HTTP
-without loading plugin code; CPA is an optional local Extension. OCG Manager
-has no telemetry or remote sync.
+Code CN, and Custom API. Typed user-defined Providers bind Configurable HTTP as persisted data. CPA is
+an optional local Extension. Each node stores credentials locally.
 
 ## Highlights
 
@@ -62,8 +61,8 @@ Auth:    Authorization: Bearer <key>
 2. In **Accounts**, add a Plan and its credential when needed. Copy a client
    **Key** from **Access Keys**; it is the only OCG Manager credential your
    client needs.
-3. Point your client at `http://127.0.0.1:9042/v1`. **Applications** has
-   per-client setup guides.
+3. Point your client at `http://127.0.0.1:9042/v1`. Per-client setup is in
+   [Application guides](docs/user/applications.md).
 
 ```bash
 curl http://127.0.0.1:9042/v1/chat/completions \
@@ -82,7 +81,8 @@ image pins, and Compose instructions are in the [Docker guide](docs/user/docker.
 ## Preferred Protocol Groups
 
 OpenCode Go models have a preferred upstream protocol. Matching supported
-client protocols pass through; other supported clients are converted. The gateway never probes protocols on a request path.
+client protocols pass through; other supported clients are converted. Request
+routing uses the saved preferred/supported contract.
 
 | Preferred upstream | Group |
 | --- | --- |

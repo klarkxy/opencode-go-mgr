@@ -37,8 +37,9 @@
       映射，用同一数据目录重启后确认映射仍在；非回环面板上确认无会话时映射 API
       返回 `401`。确认已退役 V2 `PUT /dashboard/api/claude-desktop/models` 在
       已鉴权时为 `410`。
-- [ ] 打开 **应用** 视图，确认 17 个教程完整可选；逐项抽查复制结果不含掩码
-      Key，并实际启动 Claude Desktop 与 Gemini CLI 各完成一次文本和工具调用。
+- [ ] 确认 `src/views/application-guides.ts` 中 17 个教程齐全且 ID 唯一；抽查
+      展示片段已脱敏、复制结果含真实 Key。实际启动 Claude Desktop 与 Gemini CLI
+      各完成一次文本和工具调用。
 - [ ] 覆盖 schema v16 迁移、schema v27（`access_keys`、pre-v3 备份 + SHA-256
       sidecar、删除 `sub_gateway_keys` 与 `accounts.usage_sync_*`、密文只校验
       不重加密）、v29 SCNet 清理、v30/v31 合约兼容、v32 Custom 单协议转换、v33 上游模型身份、v34 CPA 单例状态、v35 Provider/Plan 身份迁移及其预检备份、别名 / 上游日志身份、可选原生成本、历史 GOAT 验证状态统一为 `not_required`、Zen Free 模型
@@ -51,10 +52,10 @@
       `GET /dashboard/api/v3/application-models` 是本地读取，GET 本身不访问
       上游。`/v1/models` 是当前可路由已公布别名加上合格 Custom ID；
       `application-models` 是 Go 可路由别名 ∩ 当前价格快照（highspeed 继承基价
-      行），不返回 Custom ID。未知模型在 Chat / Responses / Messages / Gemini
+      行），不含 Custom。未知模型在 Chat / Responses / Messages / Gemini
       上返回 `400`，除非命中该 `/v1/models` 列表。Command Code 目录刷新公开且不需要 Key；GOAT
       预设行默认开启，额外发现行默认关闭，供应商全关后会从 `/v1/models` 撤下。
-      这些本地列表检查不需要真实供应商 Key；发版冒烟不得执行可能计费的推理。
+      这些本地列表检查使用已保存的本地状态，不需要真实供应商 Key；发版冒烟不得执行可能计费的推理。
 - [ ] 有界假上游 Custom API 冒烟（不需要真实供应商 Key）：拒绝 URL 内嵌凭据；
       合法新账号默认启用且验证保持可选；`2xx` JSON object 会把验证标记为成功，
       但不会改变启用状态；声明的模型/协议可转发；拒绝重定向；不转发

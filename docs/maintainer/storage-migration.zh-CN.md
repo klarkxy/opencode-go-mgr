@@ -15,7 +15,7 @@
 | CLI | `~/.ocg-mgr-cli`，或 `--data-dir <path>` | 优先级：`--encryption-key` > `OCG_MANAGER_ENCRYPTION_KEY` > `<data-dir>/.encryption-key`。 |
 | Docker | 容器内 `--data-dir /data`（Compose 卷 `ocg-data`） | 同 CLI 解析。可选 `OCG_MANAGER_ENCRYPTION_KEY` 是显式恢复覆盖；正常卷保留 `.encryption-key`。`/data` 内文件必须保持 UID/GID `10001` 可写。 |
 
-这些身份不能混用：
+每种形态使用自己的加密身份：
 
 - Windows 桌面数据无法在另一个 Windows 用户或机器上解密账号密文，也无法在 CLI/Docker 静态 cipher 下解密。
 - 把 GUI 目录拷到 CLI 默认路径（或反向）会用不同的目录，且在 Windows 上是不同的 cipher。
@@ -37,7 +37,7 @@ GUI 或 CLI 启动时会原地执行 SQLite 迁移。打开新版二进制前：
 
 ## Schema v31 — 按模型/按协议覆盖
 
-v31 创建 `provider_contract_model_protocol_overrides` 表。每行对应一个合约范围 × 模型 × 协议，`state` 取值 `force_on` / `force_off`；无行即表示“自动”。复合主键为 `(scope_kind, scope_id, model_id, protocol)`。`provider_contract_scopes` 的开关列仍保留在数据库中以保证向后兼容，但 effective 合约推导不再读取它们。
+v31 创建 `provider_contract_model_protocol_overrides` 表。每行对应一个合约范围 × 模型 × 协议，`state` 取值 `force_on` / `force_off`；无行即表示“自动”。复合主键为 `(scope_kind, scope_id, model_id, protocol)`。`provider_contract_scopes` 的开关列仍保留在数据库中以保证向后兼容。effective 合约推导读取 `provider_contract_model_protocol_overrides`。
 
 ## Schema v32 — Custom 单协议完整 Endpoint
 
@@ -70,7 +70,7 @@ v36 创建 `ollama_cloud_usage_state` 表。每个已配置账号一行，包含
 - `snapshot` — 最近一次成功抓取的脱敏 JSON（5h/7d 窗口、按模型请求数、可选套餐/余额）。仅成功时写入；失败只更新状态列，不清空快照。
 - `last_error`、`last_success_at`、`last_attempt_at`、`next_eligible_at`、`failure_streak` — 手动刷新 30 秒限速与最近一次尝试的元数据。
 
-该行以 `account_id` 为键并 `ON DELETE CASCADE`，删除账号会带走用量状态；清除 Cookie 会删除该行并回到未配置。该迁移只做加法：不改现有表、行或路由事实，也不新增备份族。回滚仍是既有的整目录恢复。
+该行以 `account_id` 为键并 `ON DELETE CASCADE`，删除账号会带走用量状态；清除 Cookie 会删除该行并回到未配置。该迁移只做加法：现有表、行和路由事实保持不变。它不新增备份族。回滚仍是既有的整目录恢复。
 
 ## Schema v37 — Ollama Cloud 计费档位
 
@@ -112,7 +112,7 @@ Windows 上用 `Get-FileHash -Algorithm SHA256` 与 sidecar 第一个字段比�
 3. 把校验过的 `.bak` 复制覆盖 `data.sqlite`，并删除前一个活库留下的 `data.sqlite-wal` / `data.sqlite-shm`。
 4. 用同一加密身份启动具备 v26 能力的二进制，或在恢复出的 v26 文件上重试 v27 升级。在 v27 成功打开之后再恢复会丢弃快照之后的全部写入。
 
-失败的 v27 事务会回滚：活库必须仍是 schema 26 且 `sub_gateway_keys` 完好。已有的 pre-v3 文件留在原地；之后成功的 open 会再建一个唯一文件名，而不是覆盖第一份。错误或缺失的 Host cipher 会 fail closed，不会改写 `key_cipher` / `password_cipher`。`ocg-manager-cli status` 会打开数据库并尝试 v27，它不是只读的 schema 检查工具。
+失败的 v27 事务会回滚：活库必须仍是 schema 26 且 `sub_gateway_keys` 完好。已有的 pre-v3 文件留在原地；之后成功的 open 会再建一个唯一文件名，而不是覆盖第一份。错误或缺失的 Host cipher 会 fail closed，不会改写 `key_cipher` / `password_cipher`。`ocg-manager-cli status` 会打开数据库并尝试 v27，因此会执行迁移，而不是只读检查 schema。
 
 ---
 

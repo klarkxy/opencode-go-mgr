@@ -26,9 +26,9 @@ ocg-manager/
 │   ├── components/    Account cards, managed wizard, pricing catalog, …
 │   ├── i18n/          i18n setup + per-locale message tables + tests
 │   ├── styles/        Theme tokens, design-system overrides
-│   └── views/         Dashboard, Keys, Accounts, Providers, Applications, Logs, Settings, BrowserSession
+│   └── views/         Dashboard, Keys, Accounts, Providers, Aliases, Applications, Logs, Settings, BrowserSession
 ├── src-tauri/         Tray host: Native Browser, Gateway Lifecycle, Desktop Settings, Updater
-│   └── src/host/      Process-owned capabilities; no `invoke` commands
+│   └── src/host/      Process-owned capabilities registered into CoreState
 ├── schema/            Frozen Dashboard V3 JSON Schema (`dashboard-api-v3.schema.json`)
 ├── docs/              USER / MAINTAINER / anti-abuse (EN+ZH), CONTRIBUTORS, index, v27 recovery note
 ├── scripts/           release, updater manifest, dashboard-v3-contract, smokes, …
@@ -42,9 +42,9 @@ ocg-manager/
 └── compose.example.yaml  Pull-only Compose example attached to each Release
 ```
 
-Workspace 成员在根目录 `Cargo.toml` 声明：`ocg-domain`、`ocg-gateway`、`ocg-infra`、`ocg-core`、`ocg-cli`、`ocg-browser-worker`、`src-tauri`（包名 `ocg-manager`）。二进制名：`ocg-manager-cli` 与 Tauri 应用。当前 workspace 版本为 `2.1.0`；`rust-version` 为 `1.85.0`；edition 为 `2024`。
+Workspace 成员在根目录 `Cargo.toml` 声明：`ocg-domain`、`ocg-gateway`、`ocg-infra`、`ocg-core`、`ocg-cli`、`ocg-browser-worker`、`src-tauri`（包名 `ocg-manager`）。二进制名：`ocg-manager-cli` 与 Tauri 应用。当前 workspace 版本为 `2.2.0`；`rust-version` 为 `1.85.0`；edition 为 `2024`。
 
-生产面板使用 HTTP Dashboard V3（`src/api/dashboard-v3.ts` 以及 `src/api/dashboard.ts` / `src/api/providers.ts` 的 presenter）。不存在 `src-tauri/src/commands/` 模块，也没有 `#[tauri::command]` 表面；面板不调用 `invoke()`。
+生产面板使用 HTTP Dashboard V3（`src/api/dashboard-v3.ts` 以及 `src/api/dashboard.ts` / `src/api/providers.ts` 的 presenter）。Desktop Host capability 注册进 `CoreState`。
 
 ---
 

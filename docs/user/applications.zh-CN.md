@@ -6,19 +6,19 @@
 
 ## 应用教程
 
-**应用** 视图给 17 个客户端各自备好了一份配置片段——它们都觉得自己该有独享待遇。接入区展示当前客户端的请求地址、Key 选择器（主 Key 与已启用子 Key）和模型选择；节点地址与上游地址仍在仪表盘。每个教程列出协议、官方文档链接、操作步骤，以及一个或多个带 **复制** 按钮的可编辑代码块。屏幕上的代码块中 Key 已脱敏，复制出来的才是真实 Key，方便分享截图。
+本章提供 17 个客户端的可复制配置。从 **接入中心** 复制 **Key** 与地址，再按对应教程操作。每个教程列出协议、官方文档链接、步骤和示例片段。注册表在 `src/views/application-guides.ts`。
 
-覆盖任何现有配置文件前，请先备份原文件。应用页的代码块可以编辑，但复制或手动合并之前都应保留一份可恢复的原始配置。
+覆盖任何现有配置文件前，请先备份原文件。
 
 ### 本机 Desktop 自动接入
 
-安装版 Desktop 提供八类本机接入。Claude Code、Codex、Gemini CLI、OpenCode、OpenClaw 与 Hermes 使用字段级受管配置；Pi 使用客户端原生插件；DeepSeek Harness（DSH）使用 companion 插件，并由 OCG 字段级管理一个专属 `.env` 变量。Claude Desktop 不属于本机接入范围。这个控制只在同一个 Desktop 进程提供的回环 Dashboard 中可用；CLI、Docker、公共监听和远程节点仍保留手动教程，但不能修改客户端文件。
+自动 Desktop 连接器仍在 `src/views/Applications.vue` 与 Desktop Host 中；它们不在面板侧栏。当前用户路径是从接入中心和本章手动配置。Claude Code、Codex、Gemini CLI、OpenCode、OpenClaw 与 Hermes 使用字段级受管配置；Pi 使用客户端原生插件；DeepSeek Harness（DSH）使用 companion 插件，并由 OCG 字段级管理一个专属 `.env` 变量。Claude Desktop 只走手动教程。CLI、Docker、公共监听和远程节点同样使用手动路径。
 
 所有连接器都支持脱敏预览和可逆操作。受管配置连接器使用字段级写入与恢复；Codex 只写用户级 `config.toml` 中 OCG 自有的 Provider 字段；Hermes 只写 `config.yaml` 中四个 `model` 字段与 `.env` 中一个专用变量。Pi 与 DSH 只通过客户端自己的包管理器安装或卸载 OCG 自有包，Key 不会写入插件源码；DSH 的所选 Key 只保存到其主目录 `.env` 的专属 `OCG_MANAGER_API_KEY` 行。
 
-第一阶段的实机发布门槛只覆盖五个客户端：Codex、Claude Code、OpenCode、Pi 与 DSH。Gemini CLI、OpenClaw 和 Hermes 仍保留受管连接器与手动教程，但不属于本阶段的实机验收范围。
+第一阶段的实机发布门槛只覆盖五个客户端：Codex、Claude Code、OpenCode、Pi 与 DSH。Gemini CLI、OpenClaw 和 Hermes 仍保留受管连接器与手动教程。
 
-连接器不会来回切换整份 Provider 配置。它先展示固定的字段级 OCG 补丁，提交前同时复核 Dashboard revision 与目标文件指纹。每个客户端只记录 OCG 实际修改字段的初始值；恢复时只撤销这些字段并保留其他编辑。如果其他程序改动了 OCG 持有的字段，系统会报告冲突，不会覆盖。
+连接器先展示固定的字段级 OCG 补丁，提交前同时复核 Dashboard revision 与目标文件指纹。每个客户端只记录 OCG 实际修改字段的初始值；恢复时只撤销这些字段并保留其他编辑。如果其他程序改动了 OCG 持有的字段，系统会报告冲突，不会覆盖。
 
 写入使用跨进程锁、同目录临时文件、替换与回读校验；多文件中途失败时会补偿，无法完全补偿则留下可恢复的“部分完成”状态。预览、错误、日志和所有权记录都不会暴露所选 Key。
 
@@ -28,7 +28,7 @@
 
 - Claude Code、Cherry Studio、Chatbox 使用不带 `/v1` 的根地址。
 - Claude Desktop 使用根地址加 `/claude-desktop`，由客户端继续请求 `/claude-desktop/v1/messages` 与 `/claude-desktop/v1/models`。
-- Gemini CLI 使用根地址，并设置 `GOOGLE_GENAI_API_VERSION=v1beta`。远端 Base URL 必须使用 HTTPS；只有 `localhost`、`127.0.0.1` 与 `[::1]` 可用 HTTP。解析出的根地址不符合该客户端限制时，应用页会禁用 Gemini 配置复制。
+- Gemini CLI 使用根地址，并设置 `GOOGLE_GENAI_API_VERSION=v1beta`。远端 Base URL 必须使用 HTTPS；只有 `localhost`、`127.0.0.1` 与 `[::1]` 可用 HTTP。非回环 HTTP 根地址不符合该客户端限制。
 - Pi、Kimi Code CLI、OpenCode、OpenClaw、Hermes、Cline、Roo Code、Continue 使用带 `/v1` 的 API Base URL。
 - VS Code Copilot Chat 与 WorkBuddy 使用完整 `/v1/chat/completions` 端点。Codex 使用带 `/v1` 的 API Base URL，且必须 `wire_api = "responses"`。CLI 用 `~/.codex/ocg.config.toml` + `codex --profile ocg`，Desktop 或常驻默认则合并进用户级 `~/.codex/config.toml`。`~/.codex/ocg-model-catalog.json` 可选：不写也能请求；只有需要选择器、真实上下文窗口和推理档位时才启用 `model_catalog_json`。启用后会整份替换 Codex 内置目录，且必须包含当前必填字段。不写 catalog 时，未知 slug 按 Codex 的 272K 回退元数据。请求始终走 OCG Manager 的 Responses 入口。
 
@@ -38,7 +38,7 @@ Hermes 把所选 Key 仅保存到 `.env` 的 `OCG_MANAGER_API_KEY`，并由 `mod
 
 Pi 通过自己的包管理器安装 `ocg-manager-pi`，并通过 Provider 原生登录保存所选 Key。DSH 把 `ocg-manager-dsh` 作为 OCG 自有的 companion 插件安装到 `web` profile；插件只注册固定路由，OCG 仅字段级管理 DSH 主目录 `.env` 中的 `OCG_MANAGER_API_KEY`，保留其他行，并在卸载时恢复原值。基础 profile 或其他 bundle 已注册的 Provider 不会被覆盖。第一阶段不会自动安装到 TUI、headless 或自定义 profile。卸载只移除 OCG 自有包和上述专属变量写入。
 
-选择器列表来自受保护的 `GET /dashboard/api/v3/application-models`：当前可路由的 OpenCode Go 别名与当前价格快照求交。highspeed 变体继承基价行。空交集是 `[]`，不是错误。它 **不是** 带鉴权的 `GET /v1/models`：后者公布代码持有且当前可路由的 Go 与密封供应商 Alias，以及合格 Custom 声明 ID；保存的 Zen `-free` 行会公布去掉后缀后的 Alias，Command 目录可以加入任一代码持有的 Alias，保存的 MiniMax/Kimi 行只激活精确密封映射。两条路径都是本地读取，不在上游实时抓目录或挑账号，只返回当前可路由且协议有效启用的模型。目录刷新是 **供应商** 页上的显式动作；价格刷新后，这里的 Go 别名可能变化。每次返回应用页都会重新加载这份本地列表。模型选择和编辑过的代码片段按应用缓存在当前页面会话里，刷新即重置。**恢复默认** 重置当前应用的模型选择与片段草稿。
+选择器列表来自受保护的 `GET /dashboard/api/v3/application-models`：当前可路由的 OpenCode Go 别名与当前价格快照求交。highspeed 变体继承基价行。空交集是 `[]`。带鉴权的 `GET /v1/models` 公布代码持有且当前可路由的 Go 与密封供应商 Alias，以及合格 Custom 声明 ID；保存的 Zen `-free` 行会公布去掉后缀后的 Alias，Command 目录可以加入任一代码持有的 Alias，保存的 MiniMax/Kimi 行只激活精确密封映射。两条路径都是本地读取，只返回当前可路由且协议有效启用的模型。目录刷新是 **供应商** 页上的显式动作；价格刷新后，这里的 Go 别名可能变化。
 
 ## 模型能力
 

@@ -33,8 +33,8 @@ SHA256SUMS
 ```
 
 Each CLI archive ships with its executable, a `dist/` directory, and `LICENSE`.
-Do not distribute the executable by itself — `serve` needs the sibling dashboard
-assets. Windows has no portable GUI artifact.
+`serve` needs the sibling dashboard assets, so distribute the whole archive.
+Windows has no portable GUI artifact.
 
 The `linux/amd64` and `linux/arm64` containers are published separately as
 `ghcr.io/klarkxy/opencode-go-mgr`. A GitHub Release contains the seven platform
@@ -60,7 +60,7 @@ the assembled `release/` directory exactly. The runtime image places `LICENSE` a
 3. When a signing key is configured, merges `src-tauri/tauri.updater.conf.json`
    plus an ephemeral public-key config and enables Tauri updater artifacts.
    `TAURI_SIGNING_PRIVATE_KEY` accepts either the private-key content or its
-   secure path outside the repository; there is no separate path variable.
+   secure path outside the repository.
    With no signing key, the script preserves the ordinary local build and
    prints that the result is for smoke testing, not an updater-enabled
    published release.
