@@ -110,7 +110,7 @@ pub(crate) fn linux_desktop_body(executable: &std::path::Path) -> anyhow::Result
     let path = unicode_path(executable)?;
     let exec = desktop_exec(&path);
     Ok(format!(
-        "[Desktop Entry]\nType=Application\nName=OCG Manager\nExec={exec}\nX-GNOME-Autostart-enabled=true\nHidden=false\n"
+        "[Desktop Entry]\nType=Application\nName=Open Console Gateway\nExec={exec}\nX-GNOME-Autostart-enabled=true\nHidden=false\n"
     ))
 }
 
@@ -231,22 +231,31 @@ fn linux_sync(
 #[cfg(windows)]
 const RUN_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
 #[cfg(windows)]
-const RUN_VALUE: &str = "OCG Manager";
+const RUN_VALUE: &str = "Open Console Gateway";
+#[cfg(windows)]
+const LEGACY_RUN_VALUE: &str = "OCG Manager";
 
 #[cfg(windows)]
 fn enable() -> anyhow::Result<()> {
     let value = startup_value(&std::env::current_exe()?);
     run_reg(&[
         "add", RUN_KEY, "/v", RUN_VALUE, "/t", "REG_SZ", "/d", &value, "/f",
-    ])
+    ])?;
+    delete_run_value(LEGACY_RUN_VALUE)
 }
 
 #[cfg(windows)]
 fn disable() -> anyhow::Result<()> {
-    if !reg_succeeds(&["query", RUN_KEY, "/v", RUN_VALUE])? {
+    delete_run_value(RUN_VALUE)?;
+    delete_run_value(LEGACY_RUN_VALUE)
+}
+
+#[cfg(windows)]
+fn delete_run_value(name: &str) -> anyhow::Result<()> {
+    if !reg_succeeds(&["query", RUN_KEY, "/v", name])? {
         return Ok(());
     }
-    run_reg(&["delete", RUN_KEY, "/v", RUN_VALUE, "/f"])
+    run_reg(&["delete", RUN_KEY, "/v", name, "/f"])
 }
 
 #[cfg(windows)]

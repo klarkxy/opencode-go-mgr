@@ -106,6 +106,9 @@ function Invoke-Installer {
   Write-Host "Completed $Label"
 }
 
+$CurrentRunValue = 'Open Console Gateway'
+$LegacyRunValue = 'OCG Manager'
+
 function Test-RegistryValue {
   param(
     [string]$Path,
@@ -119,6 +122,22 @@ function Test-RegistryValue {
   return [bool]($key -and ($key.GetValueNames() -contains $Name))
 }
 
+function Get-StartupEntryName {
+  param([string]$RunKey)
+  foreach ($name in @($CurrentRunValue, $LegacyRunValue)) {
+    if (Test-RegistryValue -Path $RunKey -Name $name) { return $name }
+  }
+  return $null
+}
+
+function Get-StartupEntryValue {
+  param(
+    [string]$RunKey,
+    [string]$Name
+  )
+  return (Get-ItemProperty -LiteralPath $RunKey -Name $Name).$Name
+}
+
 function Wait-UninstallComplete {
   param(
     [string]$ExecutablePath,
@@ -127,7 +146,7 @@ function Wait-UninstallComplete {
     [int]$Attempts = 90
   )
   foreach ($attempt in 1..$Attempts) {
-    $startupEntryPresent = Test-RegistryValue -Path $RunKey -Name 'OCG Manager'
+    $startupEntryPresent = [bool](Get-StartupEntryName -RunKey $RunKey)
     if (
       !(Test-Path -LiteralPath $ExecutablePath) -and
       !(Test-Path -LiteralPath $UninstallerPath) -and
@@ -164,7 +183,9 @@ try {
     Set-Content $sentinel $sentinelValue
     Set-V3AutoStart -Enabled $true
     $expectedStartupValue = "`"$guiPath`" --startup"
-    $startupValue = (Get-ItemProperty -LiteralPath $runKey -Name 'OCG Manager').'OCG Manager'
+    $previousRunName = Get-StartupEntryName -RunKey $runKey
+    if (!$previousRunName) { throw 'Published install did not write a startup entry' }
+    $startupValue = Get-StartupEntryValue -RunKey $runKey -Name $previousRunName
     if ($startupValue -ne $expectedStartupValue) { throw "Published install wrote unexpected startup value: $startupValue" }
 
     $previousPid = $process.Id
@@ -186,7 +207,9 @@ try {
     if ((Get-Content $sentinel -Raw).Trim() -ne $sentinelValue) {
       throw 'Overwrite update did not preserve the data sentinel'
     }
-    $startupValue = (Get-ItemProperty -LiteralPath $runKey -Name 'OCG Manager').'OCG Manager'
+    $updatedRunName = Get-StartupEntryName -RunKey $runKey
+    if (!$updatedRunName) { throw 'Overwrite update removed the startup entry' }
+    $startupValue = Get-StartupEntryValue -RunKey $runKey -Name $updatedRunName
     if ($startupValue -ne $expectedStartupValue) { throw "Overwrite update changed startup value: $startupValue" }
   } else {
     Invoke-Installer -Path $CandidateInstaller -Arguments @('/S', "/D=$installDir") -Label 'candidate install'
@@ -200,16 +223,19 @@ try {
   }
 
   Set-V3AutoStart -Enabled $true
-  $startupValue = (Get-ItemProperty -LiteralPath $runKey -Name 'OCG Manager').'OCG Manager'
+  $startupValue = Get-StartupEntryValue -RunKey $runKey -Name $CurrentRunValue
   $expectedStartupValue = "`"$guiPath`" --startup"
   if ($startupValue -ne $expectedStartupValue) { throw "Unexpected startup value: $startupValue" }
+  if (Test-RegistryValue -Path $runKey -Name $LegacyRunValue) {
+    throw 'Enabling auto-start left the legacy startup entry behind'
+  }
 
   Set-V3AutoStart -Enabled $false
-  if (Test-RegistryValue -Path $runKey -Name 'OCG Manager') {
+  if (Get-StartupEntryName -RunKey $runKey) {
     throw 'Disabling auto-start left the startup entry behind'
   }
   Set-V3AutoStart -Enabled $true
-  $startupValue = (Get-ItemProperty -LiteralPath $runKey -Name 'OCG Manager').'OCG Manager'
+  $startupValue = Get-StartupEntryValue -RunKey $runKey -Name $CurrentRunValue
   if ($startupValue -ne $expectedStartupValue) { throw "Unexpected restored startup value: $startupValue" }
 } finally {
   if ($process -and !$process.HasExited) {
@@ -223,7 +249,7 @@ $uninstaller = Get-ChildItem $installDir -Recurse -Filter uninstall.exe | Select
 if (!$uninstaller) { throw 'Uninstaller is missing' }
 Invoke-Installer -Path $uninstaller.FullName -Arguments @('/S') -Label 'candidate uninstall'
 Wait-UninstallComplete -ExecutablePath $guiPath -UninstallerPath $uninstaller.FullName -RunKey $runKey
-if (Test-RegistryValue -Path $runKey -Name 'OCG Manager') {
+if (Get-StartupEntryName -RunKey $runKey) {
   throw 'Uninstall left the startup entry behind'
 }
 if (!(Test-Path $sentinel)) { throw 'Silent uninstall deleted user data' }
