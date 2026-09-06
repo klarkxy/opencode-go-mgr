@@ -147,14 +147,8 @@ bump 该进程的 `settings_revision`。它不能创建 Custom 账号、子 Key 
 本地冒烟构建步骤如下。完整发布流程、CI 矩阵与签名密钥见
 `docs/maintainer/releasing.md` 与 `docs/maintainer/ci.md`。
 
-1. 确保 `pnpm` 可用（`packageManager: pnpm@10.29.2`）。如果 PATH 中没有 pnpm，请在用户目录创建一个 shim。
-2. 退出已安装的 release 版本，释放单实例锁与 `9042`：
-
-   ```powershell
-   Get-NetTCPConnection -LocalPort 9042 -ErrorAction SilentlyContinue |
-     Select-Object OwningProcess | Get-Process | Stop-Process -Force
-   ```
-
+1. 确保 PATH 中的 `pnpm` 可用（`packageManager: pnpm@10.29.2`）。
+2. 从托盘菜单退出已安装的 release 版本，释放单实例锁和监听端口。
 3. 版本对齐：`package.json`、`src-tauri/tauri.conf.json`、workspace `Cargo.toml`、`src-tauri/Cargo.toml`，以及 `compose.example.yaml` 中的 title/default image。
 4. 运行 `pnpm run build`（调用 `scripts/release.mjs`）。
 
@@ -167,11 +161,8 @@ bump 该进程的 `settings_revision`。它不能创建 Custom 账号、子 Key 
 
 **没有 `TAURI_SIGNING_PRIVATE_KEY` 时只生成普通本地包，不能用于应用内升级，仅供本地冒烟测试。**
 
-在 Windows 上，Tauri 可能把 `src-tauri/Cargo.toml` 与 `src-tauri/gen/schemas/*.json` 的换行符转为 CRLF；构建后若要干净的工作树：
-
-```powershell
-git checkout -- src-tauri/Cargo.toml src-tauri/gen/schemas/desktop-schema.json src-tauri/gen/schemas/windows-schema.json
-```
+在 Windows 上，Tauri 可能把 `src-tauri/Cargo.toml` 与 `src-tauri/gen/schemas/*.json` 的换行符转为 CRLF。
+构建后检查差异，只清理构建引入的无关变化，保留版本更新和其他有意修改。
 
 ---
 

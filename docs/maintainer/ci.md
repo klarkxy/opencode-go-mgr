@@ -36,9 +36,8 @@ write the Rust cache so a follow-up fix can reuse the compile.
   all three platforms and intentionally produces unsigned smoke artifacts,
   even when a manual dispatch selects a tag as its ref.
 - Only a `push` event for a `v*` tag forces the complete three-platform
-  matrix and supplies the repository signing secrets. For this
-  single-maintainer repository, pushing that tag is the explicit publication
-  authorization.
+  matrix and supplies the repository signing secrets. Pushing that tag
+  triggers the production release pipeline.
 - On a production tag push the quality gate runs in parallel with an
   Ubuntu preflight that parses the extracted installer smoke under `pwsh`,
   runs the release-helper tests, validates all version manifests, and proves
@@ -124,7 +123,7 @@ previous stable release.
 
 ## publish-release — publish only the verified tag build
 
-The `v*` tag push is the single maintainer's release authorization.
+A `v*` tag push triggers production publication after verification.
 `publish-release` runs automatically after `verify-release` succeeds. It
 compares the current asset/digest-set fingerprint with the verified fingerprint
 and rejects any draft that changed after verification. Manual candidates cannot

@@ -7,7 +7,6 @@ OCG Manager is a local multi-Plan console: Rust workspace, Vue 3 dashboard, and 
 - The dashboard uses HTTP `/dashboard/api/v3`; mutations use CAS. Contract changes belong in `schema/dashboard-api-v3.schema.json` and generated types. Do not revive retired V2 REST or add Tauri `invoke` commands.
 - Provider and Plan share `provider_id`. Adapter implementations stay static/sealed; user-defined Provider data binds Configurable HTTP. Custom API is account-owned; CPA is a separate static external integration.
 - Preserve authentication, Key obfuscation/redaction, URL validation, cooldown state writes, SSE pass-through, data integrity, and supported compatibility. Do not reintroduce remote sync or an Admin API.
-- Frontend implementation uses Kimi K3 through Agent Bridge, including copy and style edits. If unavailable, keep that slice pending and continue independent work; do not substitute a different writer.
 - Changes to user-visible facts update paired English and `.zh-CN.md` guides. Keep capability tables in `docs/user/`, not the root README.
 - Rust tests belong in sibling `tests.rs` modules. Test behavior, not source text, documentation wording, or workflow spelling.
 
@@ -22,6 +21,6 @@ OCG Manager is a local multi-Plan console: Rust workspace, Vue 3 dashboard, and 
 - Known limits: [known debt](docs/maintainer/known-debt.md).
 - User docs: [docs/USER.md](docs/USER.md). Maintainer index: [docs/MAINTAINER.md](docs/MAINTAINER.md).
 
-Use checks that can expose a failure in the changed behavior. Documentation-only work needs link/content checks, not a Rust or frontend build. V3 contract changes require `pnpm run contract:v3:check`; Vue changes require `pnpm run build:web`. Fix change-caused failures and rerun affected checks within the existing authorization.
+Use checks that can expose a failure in the changed behavior. Documentation-only work needs link/content checks, not a Rust or frontend build. V3 contract changes require `pnpm run contract:v3:check`; Vue changes require `pnpm run build:web`. Fix change-caused failures and rerun affected checks.
 
-Quit the release tray app before local Tauri development. Live client configuration, release publication, and git commits each require their own explicit authorization. Report source checks, builds, and real desktop use as distinct evidence.
+Quit the release tray app before local Tauri development to avoid single-instance conflicts. Report source checks, builds, and real desktop use as distinct evidence.

@@ -185,16 +185,9 @@ Providers. `BrowserSession` is a session overlay, not a ninth rail item.
 Local smoke build steps below. Full release process, CI matrix, and signing
 keys: `docs/maintainer/releasing.md` and `docs/maintainer/ci.md`.
 
-1. Make sure `pnpm` is available (`packageManager: pnpm@10.29.2`). If PATH
-   has no pnpm, create a shim in your user directory.
-2. Quit the installed release version to release the single-instance lock
-   and `9042`:
-
-   ```powershell
-   Get-NetTCPConnection -LocalPort 9042 -ErrorAction SilentlyContinue |
-     Select-Object OwningProcess | Get-Process | Stop-Process -Force
-   ```
-
+1. Make sure `pnpm` is available on PATH (`packageManager: pnpm@10.29.2`).
+2. Quit the installed release version from its tray menu to release the
+   single-instance lock and its listening port.
 3. Version alignment: `package.json`, `src-tauri/tauri.conf.json`, workspace
    `Cargo.toml`, `src-tauri/Cargo.toml`, and the title/default image in
    `compose.example.yaml`.
@@ -215,12 +208,9 @@ produced, which cannot be used for in-app upgrades and are only for local
 smoke tests.**
 
 On Windows, Tauri may convert line endings of `src-tauri/Cargo.toml` and
-`src-tauri/gen/schemas/*.json` to CRLF; to get a clean working tree after
-the build:
-
-```powershell
-git checkout -- src-tauri/Cargo.toml src-tauri/gen/schemas/desktop-schema.json src-tauri/gen/schemas/windows-schema.json
-```
+`src-tauri/gen/schemas/*.json` to CRLF. Inspect the diff after building and
+discard only incidental build changes, preserving version updates and other
+intentional edits.
 ---
 
 [Maintainer guide index](../MAINTAINER.md) · [简体中文](development.zh-CN.md) · [Docs index](../README.md)

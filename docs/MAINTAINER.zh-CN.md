@@ -19,7 +19,7 @@
 - [CI 工作流](maintainer/ci.zh-CN.md) — quality、release 与 container 工作流。
 - [发布流程](maintainer/releasing.zh-CN.md) — 版本 bump、tag、构建与发布检查清单。
 - [已知缺口与明确非目标](maintainer/known-debt.zh-CN.md) — 已记录的缺口与 deliberate non-goals。
-- [编码约定](maintainer/conventions.zh-CN.md) — Ponytail 原则、crate DAG 与安全边界。
+- [编码约定](maintainer/conventions.zh-CN.md) — crate DAG、安全边界与文档归属。
 
 ## 阅读路径
 

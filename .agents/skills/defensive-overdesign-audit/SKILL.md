@@ -1,6 +1,6 @@
 ---
 name: defensive-overdesign-audit
-description: "Assess a suspected defensive mechanism as removable duplication, replacement-first coverage, or necessary protection. Review is read-only unless changes are requested."
+description: "Review suspected defensive overdesign in OCG Manager using runtime, compatibility, and test evidence. Review is read-only unless changes are requested."
 ---
 
 # Defensive Overdesign Audit
@@ -10,9 +10,11 @@ uniquely expose or contain a current failure; remove or merge defenses that
 only mirror implementation shape, repeat another owner, or maintain a second
 truth that changes in lockstep with the code.
 
-This skill is a narrow decision gate, not a second general simplification
-framework. It classifies a suspected defense. If the user explicitly
-authorizes implementation, pass accepted cuts to the active implementation workflow for editing, recovery, and validation.
+Use this skill for a requested defense audit in OCG Manager. It does not
+add a mandatory review stage to ordinary maintenance. Read the affected
+[runtime invariants](../../../docs/maintainer/runtime-invariants.md) and
+[testing conventions](../../../docs/maintainer/development.md) when evaluating
+the mechanism. Implementation requires an explicit request to make changes.
 
 ## Set the boundary
 
@@ -132,7 +134,9 @@ failure and consumer evidence decides.
 
 ## Report the decision
 
-Lead with the result, then use one record per candidate:
+Lead with the result. For each candidate, include the failure it addresses,
+current consumers, decision, surviving protection, and supporting evidence.
+For a larger audit, this optional record can help compare candidates:
 
 ```text
 Mechanism:
@@ -145,15 +149,15 @@ Minimum verification:
 Evidence and confidence:
 ```
 
-Finish with:
+For multiple candidates, summarize:
 
 - the total candidates in each class;
 - transitive files or dependencies affected by accepted cuts;
 - important rejected deletions and why they remain defenses;
 - unresolved facts and the next evidence needed.
 
-For an authorized change, hand only `GREEN CUT` records to
-the active implementation workflow. Preserve the `YELLOW HOLD` and `RED KEEP` boundaries as
-explicit constraints in that implementation brief.
+For an authorized change, implement only accepted `GREEN CUT` candidates
+and verify the surviving behavior. Preserve `YELLOW HOLD` and `RED KEEP`
+protections.
 
 Historical calibration, when useful: [OCG examples](references/ocg-examples.md).

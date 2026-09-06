@@ -2,9 +2,6 @@
 
 # Coding Conventions
 
-- **Ponytail principle — delete before adding.** Reuse existing helpers; add
-  abstractions only for real needs. Keep call sites flat, but keep required
-  CAS, tombstones, and fail-closed checks.
 - **Keep the crate DAG.** Domain and gateway stay I/O-free. Facades reexport
   item-by-item. Adapters return `AttemptSpec`. `forward_once` is one upstream
   call. Dashboard V3 does not import `gateway`.
@@ -39,7 +36,7 @@
   maintenance procedures in `docs/maintainer/`.
 - User-visible workflows belong to paired `docs/user/*.md` and
   `*.zh-CN.md` guides. Keep their heading structure, links, and TOC anchors
-  aligned; write English first, then synchronize Chinese.
+  aligned in both languages.
 - `DESIGN.md` and `src/theme.ts` own visual tokens and the user-facing **Key**
   name. Package manifests and `compose.example.yaml` own release version pins;
   update matching Docker examples in the same release change.
@@ -49,6 +46,11 @@
   was run.
 - Keep the documentation index as an audience router. Its source ownership and
   editing guidance belongs here, not in another long index table.
+- Repository documentation, `AGENTS.md`, and `.agents/skills/` contain shared
+  project facts and maintenance procedures. Keep personal model choices,
+  agent delegation, response style, approval preferences, and local tool paths
+  in user-level configuration rather than repository instructions. Repository
+  skills must work without a maintainer's private plugins or agent roles.
 
 ---
 

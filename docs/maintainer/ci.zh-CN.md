@@ -20,7 +20,7 @@
 `.github/workflows/release.yml` 由 `workflow_dispatch` 和 `v*` tag 触发。
 
 - 手动候选可选 Windows x64、macOS Universal、Linux x64 或全部平台，刻意只生成未签名冒烟产物；即使手动运行选择 tag 作为 ref，也不会获得生产签名权限。
-- 只有 `v*` tag 的 `push` 事件才会强制走完整三平台矩阵并注入 repository signing secrets。对这个单维护者仓库，推送该 tag 就是明确的公开发布授权。
+- 只有 `v*` tag 的 `push` 事件才会强制走完整三平台矩阵并注入 repository signing secrets。推送该 tag 会触发生产发布流水线。
 - 生产 tag push 时，质量门与 Ubuntu 预检并行：预检在 `pwsh` 下解析抽出的安装器冒烟脚本、运行发布辅助测试、校验所有版本清单，并在任何原生 runner 启动前验证签名公私钥和已提交公钥指纹。手动候选跳过质量门，预检中得到空签名值。
 
 预检通过后，每个选中的原生 runner 恢复对应 Rust 缓存并安装依赖。工作流只在 plan
@@ -68,7 +68,7 @@ Beta tag 隐藏。
 
 ## publish-release —— 只公开已验证的 tag 构建
 
-`v*` tag push 是单维护者的发版授权，因此 `verify-release` 成功后会自动运行
+`v*` tag push 会触发验证后的生产发布，因此 `verify-release` 成功后会自动运行
 `publish-release`。发布 job 会比对当前资产/digest 集合指纹与已验证指纹；验证后
 draft 有任何变化都会拒绝发布。手动候选无法进入 draft、验证或公开发布 job。缺少
 签名密钥、冒烟失败或验证失败时，Release 都不会公开。
