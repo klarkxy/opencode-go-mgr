@@ -2805,6 +2805,7 @@ dependencies = [
  "flate2",
  "futures-util",
  "getrandom 0.3.4",
+ "nix",
  "ocg-domain",
  "ocg-gateway",
  "ocg-infra",
@@ -2822,6 +2823,7 @@ dependencies = [
  "tower-http",
  "uuid",
  "windows",
+ "windows-sys 0.61.2",
  "zeroize",
  "zip",
 ]

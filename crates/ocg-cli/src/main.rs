@@ -182,6 +182,7 @@ async fn start_serve(
     dashboard_dir: Option<PathBuf>,
 ) -> Result<Arc<CoreStateInner>> {
     let state = build_state(data_dir, cipher)?;
+    ocg_core::cpa_runtime::host::register_owned_host(&state);
     let executable = if dashboard_dir.is_none() {
         std::env::current_exe().ok()
     } else {
@@ -217,6 +218,7 @@ async fn start_serve(
 }
 
 async fn stop_serve(state: &CoreStateInner) {
+    state.stop_owned_cpa_runtime();
     let handle = state.gateway.lock().take();
     if let Some(handle) = handle {
         let _ = GatewayLifecycle::stop_and_wait(handle).await;

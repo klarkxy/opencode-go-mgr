@@ -10,7 +10,7 @@ CPA（CLI Proxy API）是本机订阅运行时。OCG Manager 可管理其当前�
 
 只支持以下本机部署：
 
-- **已安装的 Windows x64、macOS 或 Linux x64 桌面版：** OCG 可以下载对应该操作系统和 CPU 的官方 CLIProxyAPI 资源，放在 OCG 数据目录下，并作为 OCG 拥有的子进程启动。启动只能手动；OCG 退出时子进程停止。OCG 从不停止它没有启动的 CPA。
+- **Windows x64、macOS 或 Linux x64 的桌面版或 CLI：** OCG 可以下载对应该操作系统和 CPU 的官方 CLIProxyAPI 资源，放在 OCG 数据目录下，并作为 OCG 拥有的子进程启动。启动只能手动；OCG 退出时子进程停止。OCG 从不停止它没有启动的 CPA。其他操作系统/CPU 没有官方资源，安装会以明确原因失败。
 - **桌面版或 CLI：** 在同一台机器运行 CPA，并配置回环地址，例如 `http://127.0.0.1:8317`。
 - **Docker：** 启用 [Docker](docker.zh-CN.md) 中的可选 Compose 并列服务。OCG 使用只读的 `http://cpa:8317` 服务地址；面板不接受局域网、互联网或跨节点 CPA 地址。
 
@@ -18,7 +18,7 @@ CPA 有意不做远程接入。包含内嵌凭据、query、fragment、重定向
 
 ### 连接与运维
 
-1. 在已安装的 Windows x64、macOS 或 Linux x64 桌面版上，从 **扩展 → CPA** 安装或启动托管 CPA 运行时；也可以自行在回环上安装并启动 CPA，再保存其 **Management Key** 与 **Inference Key**。托管运行时由 OCG 生成这两把 Key；额外的直连客户端 Key 只显示指纹，新生成的密钥只返回一次。OCG 保护的 Inference Key 不能删除。Management Key 不会写入 CPA 的 `config.yaml`；Inference Key 与直连客户端 Key 会写入，因为 CPA 要求该文件包含 `api-keys`。
+1. 在 Windows x64、macOS 或 Linux x64 上（桌面版或 CLI），从 **扩展 → CPA** 安装或启动托管 CPA 运行时；也可以自行在回环上安装并启动 CPA，再保存其 **Management Key** 与 **Inference Key**。托管运行时由 OCG 生成这两把 Key；额外的直连客户端 Key 只显示指纹，新生成的密钥只返回一次。OCG 保护的 Inference Key 不能删除。Management Key 不会写入 CPA 的 `config.yaml`；Inference Key 与直连客户端 Key 会写入，因为 CPA 要求该文件包含 `api-keys`。
 2. 打开 **扩展 → CPA**，在连接外部 CPA 时保存本地地址和两把 Key，再运行连接检测。它分别显示可达性、受支持的 CPA 版本、Management 鉴权和 Inference 鉴权。OCG 要求 CPA 7.1.0 或更高版本；更高 major 仍继续接受相同的 typed 响应与精确账号校验，不会只因版本号被拒绝。
 3. 全新托管安装可以在模型目录为空时正常启动；这表示 CPA 与本机鉴权正常，并不意味着已有可路由模型。在 CPA 账号表中发起 OAuth。浏览器回调类 provider 使用 CPA 自己的回环回调端口；Kimi 与 xAI 使用设备码流程。OCG 不会运行 OAuth 回调服务器，刷新页面或重启后也不会恢复旧流程。
 4. 刷新 CPA 模型目录，并在就绪后启用 CPA 订阅池。Accounts 页中的 **CPA 订阅池** 单例卡可像其他路由候选一样排序、启停，但不会暴露 Key、不能删除，也不会把 CPA 内部 OAuth 账号伪装成 OCG 账号。

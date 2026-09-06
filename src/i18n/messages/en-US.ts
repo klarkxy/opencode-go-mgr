@@ -864,7 +864,7 @@ export const enUSMessages = {
   "客户端 Key": "Client keys",
   "CPA 由 OCG 在本机托管安装与运行。OAuth 凭据始终由 CPA 保存。": "CPA is installed and run locally under OCG management. OAuth credentials always remain in CPA.",
   "当前环境不支持托管 CPA 运行时": "This environment does not support a managed CPA runtime",
-  "仅已安装的 Windows x64、macOS 和 Linux x64 桌面端可以托管 CPA；请改用外部连接。": "Only an installed desktop app on Windows x64, macOS, or Linux x64 can manage CPA; use an external connection instead.",
+  "当前平台没有官方 CLIProxyAPI 构建（支持 Windows x64、macOS、Linux x64）；请改用外部连接。": "This platform has no official CLIProxyAPI build (supported: Windows x64, macOS, Linux x64); use an external connection instead.",
   "托管运行时": "Managed runtime",
   "运行状态": "Runtime status",
   "运行中": "Running",

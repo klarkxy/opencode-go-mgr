@@ -43,7 +43,7 @@ fn unix_command_rejects_missing_executable() {
         executable: PathBuf::from("/no/such/cpa-binary"),
         config_path: PathBuf::from("/tmp/config.yaml"),
         working_dir: PathBuf::from("/tmp"),
-        management_password: ocg_core::cpa_runtime::CpaRuntimeSecret::new("secret"),
+        management_password: CpaRuntimeSecret::new("secret"),
         log_secrets: Vec::new(),
     };
     let error = spawn_unix_owned(&spec)
@@ -70,10 +70,8 @@ fn owned_sleep_process_is_group_contained_and_stoppable() {
         executable: script,
         config_path: config,
         working_dir: dir.clone(),
-        management_password: ocg_core::cpa_runtime::CpaRuntimeSecret::new("cpa-test-secret"),
-        log_secrets: vec![ocg_core::cpa_runtime::CpaRuntimeSecret::new(
-            "cpa-test-secret",
-        )],
+        management_password: CpaRuntimeSecret::new("cpa-test-secret"),
+        log_secrets: vec![CpaRuntimeSecret::new("cpa-test-secret")],
     };
     let session = spawn_unix_owned(&spec).expect("sleep child should start");
     session
@@ -101,7 +99,7 @@ fn owned_process_ignoring_term_is_killed_reaped_and_returns_logs() {
         executable: script,
         config_path: config,
         working_dir: dir.clone(),
-        management_password: ocg_core::cpa_runtime::CpaRuntimeSecret::new("test-secret"),
+        management_password: CpaRuntimeSecret::new("test-secret"),
         log_secrets: Vec::new(),
     };
     let session = spawn_unix_owned(&spec).unwrap();

@@ -1,10 +1,11 @@
-//! OCG-owned CPA runtime: installed-desktop install/lifecycle, bounded logs,
+//! OCG-owned CPA runtime: desktop/CLI install/lifecycle, bounded logs,
 //! and managed client inference keys.
 //!
 //! External user-operated CPA remains a connect-only integration. This module
 //! never stops, replaces, or deletes a process OCG did not start.
 
 mod extract;
+pub mod host;
 
 use crate::cpa::{CpaClient, CpaError};
 use crate::db::{CpaCatalogRecord, CpaIntegrationRecord};
@@ -33,7 +34,7 @@ pub const WINDOWS_AMD64_ASSET_MARKER: &str = "_windows_amd64.zip";
 pub const DARWIN_AMD64_ASSET_MARKER: &str = "_darwin_amd64.tar.gz";
 pub const DARWIN_AARCH64_ASSET_MARKER: &str = "_darwin_aarch64.tar.gz";
 pub const LINUX_AMD64_ASSET_MARKER: &str = "_linux_amd64.tar.gz";
-pub const UNAVAILABLE_REASON: &str = "CPA runtime management is available only in an installed desktop app on Windows x64, macOS, or Linux x64";
+pub const UNAVAILABLE_REASON: &str = "CPA runtime management needs an official CLIProxyAPI build for this OS/CPU (supported: Windows x64, macOS, Linux x64)";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CpaReleaseAsset {

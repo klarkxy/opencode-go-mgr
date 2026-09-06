@@ -102,8 +102,9 @@ pub struct CoreStateInner {
     /// Serializes typed operations against the one local CPA integration.
     /// Network calls may hold this async gate but never the SQLite mutex.
     pub cpa_operations: tokio::sync::Mutex<()>,
-    /// Process-owned CPA runtime Host. Unset outside installed Windows x64
-    /// desktop. Dashboard CPA mutations are serialized by `cpa_operations`.
+    /// Process-owned CPA runtime Host. Registered by the desktop app and CLI
+    /// at startup on Windows/Unix; unset only on other targets. Dashboard CPA
+    /// mutations are serialized by `cpa_operations`.
     pub(crate) cpa_runtime: crate::cpa_runtime::CpaRuntimeCapabilities,
     provider_contracts: RwLock<Arc<crate::provider_contracts::EffectiveContractSet>>,
     dynamic_providers: RwLock<Arc<Vec<crate::dynamic::DynamicProviderRuntime>>>,
