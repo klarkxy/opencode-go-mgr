@@ -2,49 +2,25 @@
 
 # 仓库结构
 
-仓库结构，以及各 crate、面板与宿主的边界。
-
 ```
-ocg-manager/
-├── crates/
-│   ├── ocg-domain/     Pure identities, catalogs, protocol policy, Zen normalize
-│   ├── ocg-gateway/    I/O-free alias, AttemptSpec, classify, selector, JSON convert
-│   ├── ocg-infra/      Catalog-stripped crypto, proxy HTTP, inference HTTP, SQLite log SQL
-│   ├── ocg-core/       Composition / control plane: state, SQLite, Dashboard V3, adapters, executor
-│   ├── ocg-cli/        Headless CLI (`ocg-manager-cli`): serve / key / status
-│   └── ocg-browser-worker/  Linux Chromium sidecar control service (independent of ocg-core)
-├── browser/           Xvfb, Openbox, x11vnc, and noVNC startup script
-├── src/               Vue 3 dashboard (TypeScript, naive-ui, Vite, Pinia)
-│   ├── App.vue        Shell, auth, side rail, header
-│   ├── api/
-│   │   ├── dashboard-v3.ts            Hand-written `/dashboard/api/v3` client
-│   │   ├── generated/dashboard-v3.ts  Types generated from the frozen JSON Schema
-│   │   ├── dashboard.ts               Presenter over V3 for existing pages
-│   │   ├── providers.ts               Provider-page presenter (Zen Free, pricing, model-protocol overrides)
-│   │   └── dashboard-presenters.ts    Field projection (camelCase wire → page shapes)
-│   ├── stores/        session, controlPlane (CAS tokens), connection, accounts, providers, settings
-│   ├── components/    Account cards, managed wizard, pricing catalog, …
-│   ├── i18n/          i18n setup + per-locale message tables + tests
-│   ├── styles/        Theme tokens, design-system overrides
-│   └── views/         Dashboard, Keys, Accounts, Providers, Aliases, Applications, Logs, Settings, BrowserSession
-├── src-tauri/         Tray host: Native Browser, Gateway Lifecycle, Desktop Settings, Updater
-│   └── src/host/      Process-owned capabilities registered into CoreState
-├── schema/            Frozen Dashboard V3 JSON Schema (`dashboard-api-v3.schema.json`)
-├── docs/              USER / MAINTAINER / anti-abuse (EN+ZH), CONTRIBUTORS, index, v27 recovery note
-├── scripts/           release, updater manifest, dashboard-v3-contract, smokes, …
-├── AGENTS.md          Facts and constraints for AI coding assistants
-├── DESIGN.md          Design system source of truth (linted in CI)
-├── .github/workflows/ quality.yml, release.yml, container.yml
-├── docker-bake.hcl    Parallel container smoke targets used by container.yml
-├── Dockerfile         Multi-stage headless gateway image
-├── Dockerfile.browser Chromium/noVNC sidecar image
-├── compose.yaml       Source-build and image Compose service definition
-└── compose.example.yaml  Pull-only Compose example attached to each Release
+crates/ocg-domain          ID、目录、协议策略
+crates/ocg-gateway         无 I/O 的 alias、AttemptSpec、selector、JSON 转换
+crates/ocg-infra           加密、代理/推理 HTTP、日志 SQL
+crates/ocg-core            SQLite、Dashboard V3、适配器、执行器
+crates/ocg-cli             ocg-manager-cli：serve / key / status
+crates/ocg-browser-worker  Linux Chromium sidecar（不依赖 ocg-*）
+src/                       Vue 3 面板（只走 HTTP Dashboard V3）
+src-tauri/                 Desktop Host capability，注册进 CoreState
+schema/                    冻结的 dashboard-api-v3.schema.json
+docs/                      USER / MAINTAINER / 防滥用
+scripts/                   发版、契约、冒烟
 ```
 
-Workspace 成员在根目录 `Cargo.toml` 声明：`ocg-domain`、`ocg-gateway`、`ocg-infra`、`ocg-core`、`ocg-cli`、`ocg-browser-worker`、`src-tauri`（包名 `ocg-manager`）。二进制名：`ocg-manager-cli` 与 Tauri 应用。当前 workspace 版本为 `2.2.0`；`rust-version` 为 `1.85.0`；edition 为 `2024`。
-
-生产面板使用 HTTP Dashboard V3（`src/api/dashboard-v3.ts` 以及 `src/api/dashboard.ts` / `src/api/providers.ts` 的 presenter）。Desktop Host capability 注册进 `CoreState`。
+Workspace 成员和 `rust-version` 在根目录 `Cargo.toml`。面板 HTTP 客户端：
+`src/api/dashboard-v3.ts`，以及 `src/api/dashboard.ts` /
+`src/api/providers.ts` 的 presenter。镜像相关：`Dockerfile`、
+`Dockerfile.browser`、`compose.yaml`、`compose.example.yaml`、
+`docker-bake.hcl`。
 
 ---
 

@@ -19,7 +19,6 @@ repository = ""
 rust-version = "1.85.0"
 
 [profile.release]
-opt-level = 3
 lto = "thin"
 strip = true
 panic = "abort"

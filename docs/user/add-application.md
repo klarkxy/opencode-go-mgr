@@ -67,7 +67,7 @@ Implementation ownership is split deliberately:
 - Add the static connector identity and secret-free DTO behavior in `crates/ocg-core/src/application_connectors.rs`.
 - Implement fixed target detection, field-level merge, preview, atomic commit, restore, permissions, and failure recovery in `src-tauri/src/host/application_connectors.rs`, then register the Host capability in `CoreState`.
 - Keep the explicit connector sets and UI state handling in `src/views/Applications.vue` synchronized. Native Pi/DSH packages belong under `integrations/` and follow their client-native credential rules.
-- Add Core/V3, Desktop Host, and frontend tests. Run `cargo test -p ocg-core`, `cargo test -p ocg-manager --lib`, `pnpm run test:web`, and `pnpm run build:web`; run `pnpm run contract:v3:check` if the frozen DTO contract changes.
+- Add Core/V3, Desktop Host, and frontend tests. Run the checks in [Development](../maintainer/development.md) for those surfaces.
 
 The supported path is a static Desktop connector over those session-protected V3 preview and commit endpoints. The manual guide remains available whenever automatic detection or writing is unsupported. Repository constraints live in [Extending OCG Manager](../maintainer/extending.md) and [Coding conventions](../maintainer/conventions.md).
 

@@ -19,5 +19,4 @@ OCG Manager 文档按读者拆分。先打开与你角色匹配的指南，再�
 
 ## 编辑文档
 
-成对的英文和中文指南保持相同结构。事实归属、当前事实规则、版本钉更新与文档编辑
-约定见[maintainer/conventions.zh-CN.md](maintainer/conventions.zh-CN.md)。
+成对指南的约定见 [maintainer/conventions.zh-CN.md](maintainer/conventions.zh-CN.md)。

@@ -85,7 +85,7 @@ A built-in integration is appropriate only when the Provider needs product-owned
 3. Add code-owned client Alias mappings in `crates/ocg-gateway/src/alias.rs`. Preserve exact upstream IDs and reject ambiguous raw IDs; a discovered row must not silently invent a public Alias.
 4. Implement the host route resolver in `ocg-core`. The adapter returns an `AttemptSpec`; database access, Key decryption, proxy selection, and outbound HTTP remain host-owned.
 5. Add the account and **Providers** control-plane/UI workflow, including catalog refresh, enablement, verification, errors, cooldown, pricing, and usage only where the Provider actually supports them. Dashboard writes use `/dashboard/api/v3` CAS.
-6. Update the paired user guides and tests. At minimum run `cargo test -p ocg-domain`, `cargo test -p ocg-gateway`, `cargo test -p ocg-core`, the relevant frontend tests, and `pnpm run build:web`. Contract changes also require `pnpm run contract:v3:check`.
+6. Update the paired user guides and tests. Run the checks in [Development](../maintainer/development.md) for the crates and UI you touched.
 
 Before opening a contribution, write down the upstream origin, auth scheme, catalog source, supported model/protocol pairs, streaming behavior, error semantics, quota/price source, and a non-billable validation plan. Keep the new family fail-closed until its complete routing and control-plane path exists.
 

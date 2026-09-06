@@ -85,7 +85,7 @@ OCG 根据协议派生鉴权。它不会同时发送两类鉴权头，不会在 
 3. 在 `crates/ocg-gateway/src/alias.rs` 添加由代码持有的客户端 Alias 映射。保留准确上游 ID，拒绝有歧义的 raw ID；发现的新目录行不能擅自创造公开 Alias。
 4. 在 `ocg-core` 实现宿主路由 resolver。适配器只返回 `AttemptSpec`；数据库访问、Key 解密、代理选择和出站 HTTP 继续由宿主持有。
 5. 补齐账号与 **供应商** 控制面/UI 流程；只在该供应商真实支持时加入目录刷新、启停、验证、错误、冷却、价格和用量。Dashboard 变更统一走带 CAS 的 `/dashboard/api/v3`。
-6. 更新成对用户文档与测试。至少运行 `cargo test -p ocg-domain`、`cargo test -p ocg-gateway`、`cargo test -p ocg-core`、相关前端测试与 `pnpm run build:web`。契约变化还要运行 `pnpm run contract:v3:check`。
+6. 更新成对用户文档与测试。按[开发](../maintainer/development.zh-CN.md)对改动的 crate 与 UI 跑对应检查。
 
 提交贡献前，请写清上游来源、鉴权方式、目录来源、支持的模型/协议组合、流式行为、错误语义、额度/价格来源，以及不产生费用的验证方案。在完整路由与控制面路径真正存在前，让新家族保持 fail closed。
 

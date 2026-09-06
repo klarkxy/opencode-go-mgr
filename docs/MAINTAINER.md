@@ -7,7 +7,7 @@ This guide is for people changing code, cutting releases, debugging the gateway,
 ## Chapters
 
 - [Layout](maintainer/layout.md) — Crate and directory layout.
-- [Development](maintainer/development.md) — Prerequisites, dev loop, checks, and builds.
+- [Development](maintainer/development.md) — Dev loop and checks.
 - [Architecture](maintainer/architecture.md) — Four-layer crates, adapter identity, request flow, and text diagrams.
 - [Dashboard API](maintainer/dashboard-api.md) — V3 contract, CAS tokens, and mutation rules.
 - [State, Credentials, And Lifecycle](maintainer/state-and-lifecycle.md) — `CoreState`, locks, credentials, and persistence.

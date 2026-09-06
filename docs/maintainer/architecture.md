@@ -30,9 +30,7 @@ are typed data bound to Configurable HTTP.
 | `ocg-cli` / `src-tauri` | Process composition for CLI and Desktop | A second control plane or direct WebView mutation path |
 
 Compatibility facades remain in `ocg-core`, but new no-I/O catalog, selector,
-alias, and conversion behavior belongs in the lower crates. Production
-dependency guards require a DAG with no multi-node strongly connected
-component.
+alias, and conversion behavior belongs in the lower crates.
 
 ## HTTP composition
 

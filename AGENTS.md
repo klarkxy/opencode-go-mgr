@@ -1,6 +1,6 @@
 # OCG Manager — agent guidance
 
-OCG Manager is a local multi-Plan console: Rust workspace, Vue 3 dashboard, and Tauri desktop Host. Treat current code as authoritative. Start with `git status --short` and preserve unrelated changes.
+OCG Manager is a local multi-Plan console: Rust workspace, Vue 3 dashboard, and Tauri desktop Host. Treat current code as authoritative. Preserve unrelated changes.
 
 ## Boundaries that affect changes
 
@@ -17,10 +17,10 @@ OCG Manager is a local multi-Plan console: Rust workspace, Vue 3 dashboard, and 
 - SQLite/schema: [storage migration](docs/maintainer/storage-migration.md).
 - Commands and checks: [development](docs/maintainer/development.md).
 - Release: [releasing](docs/maintainer/releasing.md).
-- Connectors or specialized maintenance: [.agents/skills/maintain-ocg-manager/SKILL.md](.agents/skills/maintain-ocg-manager/SKILL.md).
+- Extension paths: [extending](docs/maintainer/extending.md).
 - Known limits: [known debt](docs/maintainer/known-debt.md).
 - User docs: [docs/USER.md](docs/USER.md). Maintainer index: [docs/MAINTAINER.md](docs/MAINTAINER.md).
 
-Use checks that can expose a failure in the changed behavior. Documentation-only work needs link/content checks, not a Rust or frontend build. V3 contract changes require `pnpm run contract:v3:check`; Vue changes require `pnpm run build:web`. Fix change-caused failures and rerun affected checks.
+Use checks that can expose a failure in the changed behavior. Documentation-only work needs link/content checks, not a Rust or frontend build. V3 contract changes require `pnpm run contract:v3:check`; Vue changes require `pnpm run build:web`.
 
-Quit the release tray app before local Tauri development to avoid single-instance conflicts. Report source checks, builds, and real desktop use as distinct evidence.
+Quit the release tray app before local Tauri development. Report source checks, builds, and real desktop use as distinct evidence.

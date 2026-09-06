@@ -29,7 +29,7 @@ Vue SPA              静态资源；只走 HTTP Dashboard V3
 | `ocg-cli` / `src-tauri` | CLI 与 Desktop 进程组合 | 第二套控制面或 WebView 直接变更路径 |
 
 兼容 facade 继续留在 `ocg-core`，但新的无 I/O 目录、selector、Alias 与转换行为应进入
-下层 crate。生产依赖检查要求 DAG 中不存在多节点强连通分量。
+下层 crate。
 
 ## HTTP 组合
 

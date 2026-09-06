@@ -20,6 +20,4 @@ implementation, code is authoritative.
 
 ## Editing documentation
 
-Keep paired English and Chinese guides structurally aligned. Source ownership,
-current-fact rules, version-pin updates, and documentation editing conventions
-are in [maintainer/conventions.md](maintainer/conventions.md).
+Paired-guide rules are in [maintainer/conventions.md](maintainer/conventions.md).

@@ -2,347 +2,99 @@
 
 # CI Workflows
 
-## quality.yml — the reusable quality gate
+Workflows live in `.github/workflows/`. This page records the splits that are
+not obvious from the YAML.
 
-`.github/workflows/quality.yml` runs directly for pull requests and pushes to
-`main`, and is also reusable through `workflow_call`. `release.yml` invokes it
-for a production tag release, while manual candidate dispatches skip it. Its
-three jobs run in parallel, and Windows does not rebuild the dashboard:
+## quality.yml
 
-- **Web** — `pnpm run contract:v3:check`, `pnpm run typecheck`,
-  `pnpm run test:web` (only `src/**/*.test.ts`), Vite production build, and
-  `DESIGN.md` lint, followed by `docker compose -f compose.example.yaml config
-  --quiet`. Release-tooling tests are deliberately separate under `pnpm run
-  test:tooling`.
-- **Rust** — `cargo fmt`, locked workspace tests, and Clippy. The desktop
-  crate is excluded (`--exclude ocg-manager`): only it needs WebKit headers
-  and a stub `dist/index.html`, and the Windows job already covers it, so
-  this leg installs no system packages at all. Linux compile coverage of
-  `src-tauri` lives in the release build matrix.
-- **Windows Tauri** — `cargo test -p ocg-manager --lib` / `clippy` against a
-  stub `dist/index.html`. This is the only quality job that compiles the
-  desktop crate; it also covers Windows auto-start registry sync without pnpm
-  or Vite.
+Runs on pull requests and `main`, and via `workflow_call` from a production
+tag. Manual release candidates skip it. Three parallel jobs:
 
-Node/pnpm and Rust build caches are shared across compatible runs. Pull
-requests restore the Rust cache but do not write it; failed non-PR runs still
-write the Rust cache so a follow-up fix can reuse the compile.
+- **Web** — `contract:v3:check`, `typecheck`, `test:web`, Vite production
+  build, `DESIGN.md` lint, and
+  `docker compose -f compose.example.yaml config --quiet`.
+  `pnpm run test:tooling` is not in this job.
+- **Rust** — `cargo fmt --all -- --check`, locked workspace tests and Clippy
+  `-D warnings` with `--exclude ocg-manager` (the desktop crate needs WebKit
+  headers and a `dist/index.html` stub; Windows covers it; Linux `src-tauri`
+  compile is the release matrix).
+- **Windows Tauri** — `cargo test -p ocg-manager --lib` and Clippy `-D warnings`
+  against a stub `dist/index.html`. Also covers Windows auto-start registry
+  sync.
 
-## release.yml — candidates and tag releases
+## release.yml
 
-`.github/workflows/release.yml` runs on `workflow_dispatch` and on `v*` tags.
+Triggers: `workflow_dispatch` and `v*` tags.
 
-- A manual candidate can select Windows x64, macOS Universal, Linux x64, or
-  all three platforms and intentionally produces unsigned smoke artifacts,
-  even when a manual dispatch selects a tag as its ref.
-- Only a `push` event for a `v*` tag forces the complete three-platform
-  matrix and supplies the repository signing secrets. Pushing that tag
-  triggers the production release pipeline.
-- On a production tag push the quality gate runs in parallel with an
-  Ubuntu preflight that parses the extracted installer smoke under `pwsh`,
-  runs the release-helper tests, validates all version manifests, and proves
-  the signing pair and committed public-key fingerprint before any native
-  runner starts. Manual candidates skip the quality job and receive empty
-  signing values in preflight.
+- Manual dispatch: unsigned smoke artifacts for the selected platforms,
+  even if the ref is a tag.
+- `v*` tag **push**: full three-platform matrix, repository signing
+  secrets, quality gate plus Ubuntu preflight (version manifests, release
+  helper tests, signing pair vs `src-tauri/updater-public-key.sha256`).
+  Then native builds, CLI/GUI smokes, `draft-release` → `verify-release`
+  → `publish-release`.
 
-After preflight, each selected native runner restores its platform Rust cache
-and installs dependencies. The workflow injects signing secrets only when its
-plan proves the event is an actual `v*` tag push; manual jobs receive empty
-signing values and run the ordinary unsigned build. Both paths run CLI/GUI
-smokes and upload `release-<platform>` with seven-day retention. The generic
-test/type/lint suite is not repeated on all three native runners.
+`verify-release` requires GitHub asset names to match the assembled
+`release/` set (currently 16 files). The draft job passes a numeric
+Release ID because the tag lookup endpoint does not expose drafts.
+Publication is serialized on `release-moving-channels`. `latest` advances
+only for a strictly newer stable SemVer. Prerelease tags set
+`prerelease=true` and `make_latest=false`.
 
-## Per-runner smoke flows
+Windows GUI smoke is `scripts/smoke-windows-release.ps1` (V3 CAS for
+auto-start and the in-place NSIS `/UPDATE` path). macOS checks universal
+`lipo` plus ad-hoc `codesign`. Linux launches the AppImage under Xvfb.
 
-- **Windows CLI** — verifies `SHA256SUMS`, expands the ZIP, runs
-  `key add` / `key list` / `key disable` / `key enable` / `status` /
-  `key remove` against a temp data dir, then starts `serve --port=19042` and
-  waits for `id="app"` to appear in the dashboard HTML.
-- **macOS / Linux CLI** — the same `key` and `serve` flow plus a
-  `lipo -archs` check that the macOS CLI is a universal binary.
-- **Windows GUI** — downloads the current published installer, silently
-  installs and launches it, writes a data sentinel, and enables `auto_start`.
-  It then runs the candidate NSIS package through `/UPDATE /P /R /ARGS
-  --startup` without uninstalling, verifies the old PID exits, the candidate
-  version returns through `/settings/update-status`, and both the sentinel
-  and `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\OCG Manager`
-  survive. Installer processes have an explicit timeout and are waited
-  independently from the `/R`-launched GUI process so a successful restart
-  cannot hang CI; uninstall completion is bounded and checked through removal
-  postconditions. It then runs the existing off/on cleanup checks, silently
-  uninstalls, and confirms user data remains. The PowerShell implementation
-  lives in `scripts/smoke-windows-release.ps1` instead of an inline YAML
-  block. A manual dispatch whose candidate is already the latest release may
-  use the candidate-only install path.
-- **macOS GUI** — mount the DMG, `codesign --verify --deep --strict`, check
-  the binary is universal with `lipo -archs`, launch with `--startup`, wait
-  for the dashboard.
-- **Linux GUI** — `dpkg-deb --info` / `dpkg-deb --contents` on the deb,
-  `file` on the AppImage, then launch under `dbus-run-session -- xvfb-run -a
-  env APPIMAGE_EXTRACT_AND_RUN=1 WEBKIT_DISABLE_COMPOSITING_MODE=1` and wait
-  for the dashboard.
+## Updater signing
 
-`scripts/smoke-windows-release.ps1` uses Dashboard V3 for both the published
-baseline and the candidate. Auto-start writes obtain the live `revision` /
-`processGeneration` pair from `GET /dashboard/api/v3/settings` and send a
-CAS-aware V3 `PUT`.
-
-## draft-release and verify-release
-
-On a `v*` tag push, `draft-release` downloads the three per-runner artifacts,
-assembles their payloads, signatures, `compose.example.yaml`, and
-`cpa-config.example.yaml` into
-`release/`, generates `latest.json` with immutable tag URLs and bundle-aware
-platform keys, regenerates `SHA256SUMS` over the manifest and all attachments,
-and creates or updates a **draft** GitHub Release.
-
-`verify-release` checks that GitHub asset names match the assembled `release/`
-set exactly. The local verifier pins the current 16-file contract, re-derives
-`latest.json`, recomputes every checksum, verifies all four updater signatures,
-and compares each downloaded artifact with the digest reported by GitHub Release
-storage.
-
-The draft job passes its numeric Release ID downstream. Verification and
-publication re-check that exact ID, tag, and draft state, because the tag lookup
-endpoint does not expose draft Releases.
-
-SemVer prerelease tags such as `v1.5.8-beta.1` use the same signed tag path
-and the same immutable attachments. The updater manifest keeps the full
-prerelease identifier in payload names and download URLs; the Windows packaged
-smoke accepts that same prerelease `CandidateVersion`.
-
-Generated notes begin with a Beta warning that managed account registration and
-isolated browser profiles are still unverified. The warning also lists the
-unverified Google/OpenCode signup and payment flows, noVNC keyboard/clipboard,
-and first-public GHCR paths, and notes that gateway, redaction, and release
-changes are included. The preview is not production-ready.
-
-When a later stable tag is released, automatic notes skip same-version
-prerelease tags as their baseline, preserving the full feature scope since the
-previous stable release.
-
-## publish-release — publish only the verified tag build
-
-A `v*` tag push triggers production publication after verification.
-`publish-release` runs automatically after `verify-release` succeeds. It
-compares the current asset/digest-set fingerprint with the verified fingerprint
-and rejects any draft that changed after verification. Manual candidates cannot
-reach the draft, verification, or publication jobs. A missing signing key,
-failed smoke, or failed verification leaves the Release unpublished.
-
-Publication is serialized through the repository-wide
-`release-moving-channels` queue. Before publishing, the job compares the
-candidate with the current GitHub latest release and advances `latest` only for
-a strictly newer stable SemVer. A delayed older run can still publish its
-immutable release without rolling `latest` back.
-
-Prerelease tags mark both draft and public Release as `prerelease=true`,
-force `make_latest=false`, and skip the stable-only latest-channel comparison.
-Stable tag behavior is unchanged.
-
-## Updater signing key
-
-Generate the production updater key once on a trusted workstation and write it
-outside the checkout:
+Generate the key once outside the checkout:
 
 ```powershell
-node node_modules/@tauri-apps/cli/tauri.js signer generate -w <secure-path-outside-repository>/ocg-updater.key
+node node_modules/@tauri-apps/cli/tauri.js signer generate -w <secure-path>/ocg-updater.key
 ```
 
-- Store the private-key content and password as repository Actions secrets
-  named `TAURI_SIGNING_PRIVATE_KEY` and
-  `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. The release workflow references them
-  only when the event-derived plan identifies an actual `v*` tag push; manual
-  candidates receive empty values and remain unsigned.
-- Repository secrets are not isolated by an Environment. If another
-  write-capable maintainer is added, reassess a protected signing Environment
-  or tag ruleset before the next release.
-- Keep at least two independently stored encrypted backups of both the
-  private key and its password. If they are lost, already-installed clients
-  that trust the matching public key cannot receive another in-app update and
-  will need a new direct-install bootstrap.
-- The public key is safe to share; this project injects its content through
-  the `TAURI_UPDATER_PUBLIC_KEY` repository Actions variable instead of
-  committing it. Store the generated key contents, not local filesystem
-  paths, in GitHub.
-- Updater signatures prove that a payload was issued by this project, but are
-  separate from operating-system code signing.
+Store private key and password as repository secrets
+`TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
+Store public-key **content** in the `TAURI_UPDATER_PUBLIC_KEY` variable.
+`src-tauri/updater-public-key.sha256` is the committed trust anchor;
+rotation is break-glass (new pair, direct-install bootstrap for existing
+clients, reviewed fingerprint change). Keep two independent encrypted
+backups. Updater signatures are not OS code signing. Windows installers
+are unsigned; macOS uses ad-hoc (`-`).
 
-## Key continuity and rotation
+## container.yml
 
-`src-tauri/updater-public-key.sha256` is the production trust anchor. Normal
-CI has no override: a mismatched repository variable fails both signing
-preflight and release verification. Key rotation is a break-glass recovery,
-not a routine secret update. Generate and back up the new pair, prepare a
-direct-install bootstrap for every existing client, and update the committed
-fingerprint in an explicitly reviewed security change. Changing the variable
-or fingerprint alone leaves old installed clients unable to trust releases
-signed only by the replacement key.
+A Release published with `github.token` does not start this workflow.
+After the signed tag pipeline, dispatch it for that tag
+(`publish_latest=true` for stable).
 
-## container.yml — the image pipeline
+Native builds: amd64 on `ubuntu-24.04`, arm64 on `ubuntu-24.04-arm`.
+Smoke (main + browser) runs on amd64 only. Images push by digest first;
+user-visible tags are created only after local OCI-index preflight,
+anonymous pull of both exact version tags, and GitHub provenance.
+`X.Y.Z` and `sha-*` are immutable; `X.Y` and `latest` are monotonic
+moving channels. Browser is a GHCR package, not a Release asset.
 
-`.github/workflows/container.yml` accepts a published-Release event, but a
-Release published by `release.yml` with `github.token` does not recursively
-start another workflow. After the signed tag pipeline publishes, explicitly
-dispatch `container.yml` for that tag with `publish_latest=true` for a stable
-release.
+A new browser package is private until someone sets it **Public**; the
+first run is expected to stop at the anonymous-pull gate, then a
+same-digest rerun completes publication. Later releases must pass that
+gate on the first run.
 
-The workflow checks out the release tag and builds each architecture natively:
-amd64 on `ubuntu-24.04`, arm64 on `ubuntu-24.04-arm`. Release artifacts are
-never built under QEMU emulation. Only the amd64 leg builds smoke images via
-`docker-bake.hcl` and runs the smoke suite for the main
-`ghcr.io/klarkxy/opencode-go-mgr` service and the
-`ghcr.io/klarkxy/opencode-go-mgr-browser` sidecar. The main smoke checks the
-dashboard, authentication, and license. The browser smoke starts Xvfb/noVNC
-under a read-only root with zero capabilities, a Chromium-compatible seccomp
-profile, and no host-published port, then uses the token-protected control API
-to launch an ordinary Chromium process with a persistent profile. The arm64
-leg builds and pushes both images without smoke.
+## pages.yml
 
-Verified results — two images per architecture — are pushed by digest without
-a mutable name, then enter the repository-wide serialized tag queue. Only
-`resolve` interprets the requested tag or optional `source_ref`; both native
-build legs check out that resolved full commit SHA and fail if `HEAD` differs.
-The publishing job uses the immutable `github.workflow_sha`, so the privileged
-registry helper matches the reviewed workflow definition, not executable files
-from a hotfix ref.
+Publishes `docs/` to GitHub Pages (`docs/index.html`). Set the repository
+Pages source to **GitHub Actions** before the first deployment.
 
-Before writing a user-visible tag, the publishing job runs `docker buildx
-imagetools create --dry-run` to assemble each candidate OCI index locally. It
-hashes the returned JSON and validates both architecture children plus the
-index version/revision annotations. The main and browser `X.Y.Z` and
-`sha-<12-character-commit>` tags are preflighted against locally known digests
-before the browser tags, then the main tags, are created and verified. Existing
-immutable tags are accepted only at the exact candidate digest.
+## What CI does not cover
 
-An empty Docker credential directory must then anonymously pull both exact
-version tags, and GitHub must publish signed provenance for both final index
-digests. Only then does the same serialized job re-read every remote moving
-channel and preflight the pair again. Stable `X.Y` and opted-in `latest`
-converge both images to the candidate or retain an already-aligned newer pair;
-the browser moves before the main image, and a split pair fails closed. Each
-architecture image records an SPDX SBOM and BuildKit SLSA provenance.
-`X.Y.Z` and `sha-*` are release-specific immutable tags; `X.Y` and `latest`
-are monotonic moving channels. The browser image is a GHCR package, not a
-GitHub Release asset, so the native release keeps only the assembled GitHub
-attachments. The workflow compares that exact set, and the local verifier pins
-the current 16-file contract.
+Quality covers frontend + Linux Rust excluding the desktop crate + Windows
+desktop unit tests. Native installer smokes run on candidates and tags.
+Container smoke is amd64 only.
 
-Package visibility is managed separately from the linked repository, so the
-workflow cannot use its repository token to make a package public. A new
-browser package does not exist until its first digest is pushed. The first
-`container.yml` run that creates it is therefore expected to stop at the
-anonymous-pull gate while the package still has GitHub's default private
-visibility.
-
-This is the only bootstrap exception: set the new browser package to
-**Public** (and confirm the main package is also Public), then manually rerun
-`container.yml` for the same tag. Immutable-tag replay is accepted only at the
-same digests, so the rerun completes the original publication without
-replacing artifacts. Do not treat the container distribution as complete until
-that rerun is green. Every later release must pass the anonymous gate on its
-first run.
-
-Before the first stable release on this dual-architecture path, publish a
-temporary SemVer prerelease and dispatch `container.yml` with
-`publish_latest=false`. Use that rehearsal to prove both native runners,
-package visibility, anonymous pulls, exact index children, and both signed
-provenance records. Do not use a stable tag as the rehearsal, and do not
-advance `X.Y` or `latest` until the prerelease run is fully green.
-
-After tag publication, the gate pulls both exact-version tags with an empty
-Docker credential directory. A private or inaccessible package therefore fails
-`container.yml` instead of appearing as a successful public Compose
-dependency.
-
-A manual dispatch can backfill an existing release tag, but it must opt in
-before updating `latest`. `resolve` checks out the exact `refs/tags/<tag>` ref
-or the explicit hotfix `source_ref`, verifies the release tag and repository
-version, and emits one full SHA; no downstream job re-resolves the symbolic
-input. Rebuilding different bytes for an existing full-version or `sha-*` tag
-fails instead of overwriting it; only an exact-digest replay is accepted. Its
-GitHub signing certificate identifies the workflow ref that triggered the
-dispatch, even though the build checks out the resolved release commit. Normal
-`release.published` runs use the release tag context.
-
-After publication, record the digest and verify the OCI index and GitHub
-attestation against this signer workflow:
-
-```bash
-docker buildx imagetools inspect ghcr.io/klarkxy/opencode-go-mgr:X.Y.Z
-docker buildx imagetools inspect ghcr.io/klarkxy/opencode-go-mgr-browser:X.Y.Z
-docker buildx imagetools inspect --raw \
-  ghcr.io/klarkxy/opencode-go-mgr@sha256:<digest>
-docker buildx imagetools inspect --format '{{json .SBOM}}' \
-  ghcr.io/klarkxy/opencode-go-mgr@sha256:<digest> > sbom.json
-gh attestation verify \
-  oci://ghcr.io/klarkxy/opencode-go-mgr@sha256:<digest> \
-  --repo klarkxy/opencode-go-mgr \
-  --signer-workflow klarkxy/opencode-go-mgr/.github/workflows/container.yml
-gh attestation verify \
-  oci://ghcr.io/klarkxy/opencode-go-mgr-browser@sha256:<browser-digest> \
-  --repo klarkxy/opencode-go-mgr \
-  --signer-workflow klarkxy/opencode-go-mgr/.github/workflows/container.yml
-```
-
-SBOM and provenance are supply-chain metadata, not vulnerability scanning.
-The GitHub attestation signs the provenance statement; this project does not
-currently add a separate Cosign image signature.
-
-Current Windows installers are unsigned; macOS uses ad-hoc signing (`-`), not
-Developer ID notarization. Review native candidate smoke results and these
-platform warnings before pushing the release tag, because a successful tag
-workflow publishes automatically. Windows/Linux ARM64, 32-bit x86, RPM, Snap,
-and app stores remain unsupported. Signed in-app update is limited to
-updater-enabled installed desktop builds; 1.4.1, development builds, CLI, and
-Docker keep the direct/manual path.
-
-## pages.yml — architecture gallery
-
-`.github/workflows/pages.yml` publishes the static `docs/` tree to GitHub
-Pages after relevant changes reach `main`; maintainers can also run it through
-`workflow_dispatch`. The site entry point is `docs/index.html`. Clean diagram
-URLs under `/diagrams/<name>/` wrap the checked-in Archify HTML, while PNG
-previews remain usable in GitHub and offline docs. `scripts/build-pages.mjs`
-stages the artifact and removes the optional Google Fonts links from the
-published copies; diagram source and checked-in validation artifacts stay
-unchanged.
-
-The workflow is independent from quality, release, and container jobs. It has
-only `contents: read`, `pages: write`, and `id-token: write`, deploys through
-the `github-pages` environment, and pins every official Pages action. The
-repository must select **GitHub Actions** as its Pages source before the first
-deployment. A successful workflow deployment is the live-site proof; a local
-HTML preview alone is not.
-
-## CI Coverage Boundaries
-
-The reusable quality gate covers frontend checks (including the Dashboard V3
-contract), Linux workspace Rust tests and Clippy excluding the Tauri desktop
-crate, and Windows desktop-crate compilation and unit tests. It runs directly
-for pull requests and `main` pushes, and is called by production tag releases;
-native installer and package smokes run only on manual release candidates or
-tag runs. The
-container workflow covers `linux/amd64` and `linux/arm64`, each built on its
-native runner and smoke-tested on amd64 only; it runs after a release is
-published or is manually dispatched.
-
-CI evidence covers those quality-gate jobs, native installer and package
-smokes on candidate or tag runs, and the container amd64 smoke suite. Rust
-tests cover Gemini/Claude Desktop routing, authentication, alias rewriting,
-non-stream conversion, SSE event shapes, Dashboard V3 CAS, the V2 410
-tombstone, v27 open/backup, and host lifecycle source contracts. Real desktop
-UI, Claude Desktop, Gemini CLI, backup/restore, database downgrade, migration
-rollback, upstream accounts, real gateway requests, and third-party client
-acceptance of generated configuration remain machine checks.
-
-The main container smoke checks TCP health, dashboard HTML, auth status, the
-bundled license, and a protected settings request returning `401`. The browser
-smoke launches real Chromium and verifies its profile and absence of public
-ports. Google/OpenCode login, noVNC keyboard/clipboard, real payment, Google
-data-center-IP risk, desktop browser discovery, cookie persistence across
-restarts, and remote account switching remain machine checks.
-
+Still machine checks: real desktop UI, Claude Desktop, Gemini CLI,
+backup/restore, database downgrade, live upstream accounts, third-party
+client config, Google/OpenCode login, noVNC input, real payment, and
+cookie persistence across restart.
 ---
 
 [Maintainer guide index](../MAINTAINER.md) · [简体中文](ci.zh-CN.md) · [Docs index](../README.md)
