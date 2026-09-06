@@ -691,28 +691,18 @@ async fn forward_request_impl(
             upstream_headers.insert(name.clone(), value.clone());
         }
     }
-    if account.provider_id == crate::provider::OPENCODE_PROVIDER_ID {
-        let session = headers
-            .get("x-opencode-session")
-            .or_else(|| headers.get("x-session-id"))
-            .or_else(|| headers.get("x-session-affinity"))
-            .cloned()
-            .or_else(|| {
-                resolve_conversation_key(
-                    plan.client,
-                    plan.log_requested_model(),
-                    &headers,
-                    client_body,
-                )
-                .and_then(|key| format!("ocg-{key}").parse().ok())
-            })
-            .unwrap_or_else(|| {
-                trace
-                    .request_id
-                    .parse()
-                    .expect("generated request id must be a valid header value")
-            });
-        upstream_headers.insert("x-opencode-session", session);
+    if carries_opencode_session_header(&account.provider_id) {
+        let session = resolve_opencode_session_header(
+            &headers,
+            plan.client,
+            plan.log_requested_model(),
+            client_body,
+            &trace.request_id,
+        );
+        upstream_headers.insert("x-opencode-session", session.clone());
+        if account.provider_id == crate::provider::OPENCODE_ZEN_FREE_PROVIDER_ID {
+            apply_zen_free_identity_headers(&mut upstream_headers, &session, &trace.request_id);
+        }
     }
     // Match the attempt's authentication contract. The client wire protocol
     // alone is not an authentication decision. The executor constructs the
@@ -3607,6 +3597,68 @@ mod host_credential_resolver_tests {
     }
 }
 
+const OPENCODE_ZEN_FREE_CLIENT: &str = "cli";
+const OPENCODE_ZEN_FREE_USER_AGENT: &str = "opencode";
+
+fn carries_opencode_session_header(provider_id: &str) -> bool {
+    provider_id == crate::provider::OPENCODE_PROVIDER_ID
+        || provider_id == crate::provider::OPENCODE_ZEN_FREE_PROVIDER_ID
+}
+
+fn resolve_opencode_session_header(
+    headers: &HeaderMap,
+    client: ApiFormat,
+    model: &str,
+    client_body: &[u8],
+    request_id: &str,
+) -> reqwest::header::HeaderValue {
+    headers
+        .get("x-opencode-session")
+        .or_else(|| headers.get("x-session-id"))
+        .or_else(|| headers.get("x-session-affinity"))
+        .cloned()
+        .or_else(|| {
+            resolve_conversation_key(client, model, headers, client_body)
+                .and_then(|key| format!("ocg-{key}").parse().ok())
+        })
+        .unwrap_or_else(|| {
+            request_id
+                .parse()
+                .expect("generated request id must be a valid header value")
+        })
+}
+
+fn apply_zen_free_identity_headers(
+    headers: &mut reqwest::header::HeaderMap,
+    session: &reqwest::header::HeaderValue,
+    request_id: &str,
+) {
+    if headers.get("x-opencode-client").is_none() {
+        headers.insert(
+            "x-opencode-client",
+            reqwest::header::HeaderValue::from_static(OPENCODE_ZEN_FREE_CLIENT),
+        );
+    }
+    if headers.get("x-opencode-request").is_none()
+        && let Ok(value) = request_id.parse()
+    {
+        headers.insert("x-opencode-request", value);
+    }
+    if headers.get("x-opencode-project").is_none() {
+        headers.insert("x-opencode-project", session.clone());
+    }
+    let ua_is_opencode = headers
+        .get(reqwest::header::USER_AGENT)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.to_ascii_lowercase().contains("opencode"));
+    if !ua_is_opencode {
+        headers.insert(
+            reqwest::header::USER_AGENT,
+            reqwest::header::HeaderValue::from_static(OPENCODE_ZEN_FREE_USER_AGENT),
+        );
+    }
+}
+
 #[cfg(test)]
 mod forward_once_tests {
     use super::*;
@@ -3658,5 +3710,54 @@ mod forward_once_tests {
             "{}",
             connect_timeout.message
         );
+    }
+
+    #[test]
+    fn zen_free_identity_fills_missing_headers_and_keeps_official_user_agent() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            reqwest::header::USER_AGENT,
+            "opencode/1.17.7".parse().unwrap(),
+        );
+        let session = reqwest::header::HeaderValue::from_static("ses_1");
+        apply_zen_free_identity_headers(&mut headers, &session, "req_1");
+        assert_eq!(headers.get("x-opencode-client").unwrap(), "cli");
+        assert_eq!(headers.get("x-opencode-request").unwrap(), "req_1");
+        assert_eq!(headers.get("x-opencode-project").unwrap(), "ses_1");
+        assert_eq!(
+            headers.get(reqwest::header::USER_AGENT).unwrap(),
+            "opencode/1.17.7"
+        );
+    }
+
+    #[test]
+    fn zen_free_identity_replaces_foreign_user_agent_and_preserves_client_fields() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(reqwest::header::USER_AGENT, "reqwest/0.12".parse().unwrap());
+        headers.insert("x-opencode-client", "cli".parse().unwrap());
+        headers.insert("x-opencode-request", "keep-me".parse().unwrap());
+        headers.insert("x-opencode-project", "proj_keep".parse().unwrap());
+        let session = reqwest::header::HeaderValue::from_static("ses_1");
+        apply_zen_free_identity_headers(&mut headers, &session, "req_1");
+        assert_eq!(
+            headers.get(reqwest::header::USER_AGENT).unwrap(),
+            "opencode"
+        );
+        assert_eq!(headers.get("x-opencode-client").unwrap(), "cli");
+        assert_eq!(headers.get("x-opencode-request").unwrap(), "keep-me");
+        assert_eq!(headers.get("x-opencode-project").unwrap(), "proj_keep");
+    }
+
+    #[test]
+    fn opencode_session_header_is_go_and_zen_free_only() {
+        assert!(carries_opencode_session_header(
+            crate::provider::OPENCODE_PROVIDER_ID
+        ));
+        assert!(carries_opencode_session_header(
+            crate::provider::OPENCODE_ZEN_FREE_PROVIDER_ID
+        ));
+        assert!(!carries_opencode_session_header(
+            crate::provider::COMMAND_CODE_PROVIDER_ID
+        ));
     }
 }

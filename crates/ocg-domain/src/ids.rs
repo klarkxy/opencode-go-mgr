@@ -68,12 +68,8 @@ pub fn normalize_model_name(name: &str) -> String {
 
 /// True for the Zen catalog naming contract. The discovered catalog remains
 /// the routing allowlist; this helper classifies materialized `-free` routes.
-///
-/// Go catalog ids can contain `free` (currently `ox-alpha-free` / Ox Alpha Free)
-/// and still uses `/zen/go`, so it remains the one explicit exception.
 pub fn is_free_model(model: &str) -> bool {
-    let normalized = normalize_model_name(model);
-    normalized.ends_with("-free") && normalized != "ox-alpha-free"
+    normalize_model_name(model).ends_with("-free")
 }
 
 /// Slash, underscore, or whitespace means "treat as a raw ID": never fold those
@@ -118,10 +114,9 @@ mod tests {
     }
 
     #[test]
-    fn is_free_model_follows_zen_suffix_except_ox_alpha_free() {
+    fn is_free_model_follows_zen_suffix() {
         assert!(is_free_model("mimo-v2.5-free"));
         assert!(is_free_model("brand-new-promo-free"));
-        assert!(!is_free_model("ox-alpha-free"));
         assert!(!is_free_model("deepseek-v4-flash"));
         assert!(!is_free_model("big-pickle"));
     }

@@ -8,13 +8,13 @@ OCG Manager 在一个端口上提供五种客户端协议，再把每份请求�
 
 | 推荐上游协议 | 模型 |
 | --- | --- |
-| OpenAI Chat Completions | `glm-5.3-flash`、`glm-5.3`、`glm-5.2`、`glm-5.1`、`glm-5`、`kimi-k3`、`kimi-k2.7-code`、`kimi-k2.6`、`kimi-k2.5`、`deepseek-v4-pro`、`deepseek-v4-flash`、`deepseek-v4-flash-vision-exp`、`mimo-v2.5`、`mimo-v2.5-pro`、`hy3`、`longcat-2.0`、`ox-alpha-free`、`big-pickle`、`hy3-free`、`deepseek-v4-flash-free`、`mimo-v2.5-free`、`ling-3.0-flash-free`、`laguna-s-2.1-free`、`longcat-2.0-free`、`north-mini-code-free`、`nemotron-3-ultra-free`、`nemotron-3.5-lightning-free`、`ling-3.0-flash-fin-free`、`hy4-preview` |
-| OpenAI Responses | `grok-4.6`、`grok-4.5`、`gpt-5.6-luna`、`muse-spark-1.2`、`muse-spark-1.2-contributor`、`muse-spark-1.2-contributor-free` |
+| OpenAI Chat Completions | `glm-5.3-flash`、`glm-5.3`、`glm-5.2`、`glm-5.1`、`glm-5`、`kimi-k3`、`kimi-k2.7-code`、`kimi-k2.6`、`kimi-k2.5`、`deepseek-v4-pro`、`deepseek-v4-flash`、`deepseek-v4-flash-vision-exp`、`mimo-v2.5`、`mimo-v2.5-pro`、`hy3`、`longcat-2.0`、`big-pickle`、`deepseek-v4-flash-free`、`mimo-v2.5-free`、`nemotron-3-ultra-free`、`nemotron-3.5-lightning-free`、`ling-3.0-flash-fin-free`、`hy4-preview` |
+| OpenAI Responses | `grok-4.6`、`grok-4.5`、`gpt-5.6-luna`、`muse-spark-1.2`、`muse-spark-1.2-contributor`、`muse-spark-1.2-contributor-free`、`muse-spark-1.3-contributor-free` |
 | Anthropic Messages | `minimax-m3`、`minimax-m2.7`、`minimax-m2.7-highspeed`、`minimax-m2.5`、`minimax-m2.5-highspeed`、`qwen3.8-max`、`qwen3.8-flash`、`qwen3.7-max`、`qwen3.7-plus`、`qwen3.6-plus`、`qwen3.5-plus` |
 
-透传矩阵（检入的官方基线，2026-09-01）。✓ = 客户端协议原样转发；空 = 基线没有该协议的直接透传证据。模型是否可路由仍由 Provider 目录与 effective 合约决定；已知但不符合准入条件的模型会在本机被拒绝，不会转换或发送到上游。权威来源：`crates/ocg-domain/src/protocol.rs` 的 `MODEL_PROTOCOLS`。
+透传矩阵（检入的官方基线，2026-09-06）。✓ = 客户端协议原样转发；空 = 基线没有该协议的直接透传证据。模型是否可路由仍由 Provider 目录与 effective 合约决定；已知但不符合准入条件的模型会在本机被拒绝，不会转换或发送到上游。权威来源：`crates/ocg-domain/src/protocol.rs` 的 `MODEL_PROTOCOLS`。
 
-`reasoning.effort` 别名（转发或转换前应用）：`muse-spark-1.2`、 `muse-spark-1.2-contributor` 与 `muse-spark-1.2-contributor-free` 把 `max` 映射为 `xhigh`（上游拒绝 `max`）；其他模型的 `reasoning.effort` 原样透传。
+`reasoning.effort` 别名（转发或转换前应用）：`muse-spark-1.2`、 `muse-spark-1.2-contributor`、`muse-spark-1.2-contributor-free` 与 `muse-spark-1.3-contributor-free` 把 `max` 映射为 `xhigh`（上游拒绝 `max`）；其他模型的 `reasoning.effort` 原样透传。
 
 | 模型 | 推荐 | Chat | Responses | Messages |
 | --- | --- | :---: | :---: | :---: |
@@ -29,6 +29,7 @@ OCG Manager 在一个端口上提供五种客户端协议，再把每份请求�
 | `muse-spark-1.2` | Responses | | ✓ | |
 | `muse-spark-1.2-contributor` | Responses | | ✓ | |
 | `muse-spark-1.2-contributor-free` | Responses | | ✓ | |
+| `muse-spark-1.3-contributor-free` | Responses | | ✓ | |
 | `kimi-k3` | Chat | ✓ | | |
 | `kimi-k2.7-code` | Chat | ✓ | | |
 | `kimi-k2.6` | Chat | ✓ | | |
@@ -40,15 +41,9 @@ OCG Manager 在一个端口上提供五种客户端协议，再把每份请求�
 | `mimo-v2.5-pro` | Chat | ✓ | | |
 | `hy3` | Chat | ✓ | | |
 | `longcat-2.0` | Chat | ✓ | | |
-| `ox-alpha-free` | Chat | | | |
 | `big-pickle` | Chat | ✓ | | |
-| `hy3-free` | Chat | ✓ | | |
 | `deepseek-v4-flash-free` | Chat | | | |
 | `mimo-v2.5-free` | Chat | ✓ | | |
-| `ling-3.0-flash-free` | Chat | | | |
-| `laguna-s-2.1-free` | Chat | | | |
-| `longcat-2.0-free` | Chat | | | |
-| `north-mini-code-free` | Chat | | | |
 | `nemotron-3-ultra-free` | Chat | ✓ | | |
 | `nemotron-3.5-lightning-free` | Chat | ✓ | | |
 | `ling-3.0-flash-fin-free` | Chat | ✓ | | |

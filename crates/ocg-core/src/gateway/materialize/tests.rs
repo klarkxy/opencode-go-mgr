@@ -334,7 +334,7 @@ fn mixed_case_go_alias_preserves_requested_casing() {
 fn zen_free_alias_materializes_anonymous_channel() {
     let config = AppConfig::default();
     let set = routes_for(
-        "hy3-free",
+        "mimo-v2.5-free",
         &[go_account("go-1"), zen_account()],
         &config,
         true,
@@ -343,27 +343,32 @@ fn zen_free_alias_materializes_anonymous_channel() {
     assert_eq!(set.routes.len(), 1);
     assert_eq!(set.routes[0].routing.account.id, ZEN_FREE_ACCOUNT_ID);
     assert_eq!(set.routes[0].plan.channel, UpstreamChannel::Free);
-    assert_eq!(set.routes[0].plan.model, "hy3-free");
+    assert_eq!(set.routes[0].plan.model, "mimo-v2.5-free");
     assert!(set.routes[0].plan.upstream_base_override.is_some());
 }
 
 #[test]
 fn shared_alias_builds_go_and_free_candidates_in_account_order() {
     let config = AppConfig::default();
-    let set = routes_for("hy3", &[go_account("go-1"), zen_account()], &config, true);
+    let set = routes_for(
+        "mimo-v2.5",
+        &[go_account("go-1"), zen_account()],
+        &config,
+        true,
+    );
     assert_eq!(set.routes.len(), 2);
     assert_eq!(set.routes[0].routing.account.id, "go-1");
     assert_eq!(set.routes[0].plan.channel, UpstreamChannel::Go);
     assert_eq!(set.routes[1].routing.account.id, ZEN_FREE_ACCOUNT_ID);
     assert_eq!(set.routes[1].plan.channel, UpstreamChannel::Free);
-    assert_eq!(set.routes[1].plan.model, "hy3-free");
-    assert_eq!(set.routes[1].plan.client_model, "hy3");
+    assert_eq!(set.routes[1].plan.model, "mimo-v2.5-free");
+    assert_eq!(set.routes[1].plan.client_model, "mimo-v2.5");
     assert!(set.routes[1].plan.original_model.is_none());
     assert!(!set.routes[1].plan.allow_go_fallback);
     let free_identity = native_log_identity(&set.routes[1].plan);
-    assert_eq!(free_identity.requested_model, "hy3");
-    assert_eq!(free_identity.resolved_alias.as_deref(), Some("hy3"));
-    assert_eq!(free_identity.upstream_model, "hy3-free");
+    assert_eq!(free_identity.requested_model, "mimo-v2.5");
+    assert_eq!(free_identity.resolved_alias.as_deref(), Some("mimo-v2.5"));
+    assert_eq!(free_identity.upstream_model, "mimo-v2.5-free");
 }
 
 #[test]
@@ -424,7 +429,7 @@ fn mapping_plans_follow_registry_order_while_candidates_keep_account_order() {
             crate::alias::ProviderMapping {
                 provider_id: OPENCODE_ZEN_FREE_PROVIDER_ID.to_string(),
 
-                upstream_model: "hy3-free".into(),
+                upstream_model: "mimo-v2.5-free".into(),
                 routeable: true,
             },
             crate::alias::ProviderMapping {
@@ -457,7 +462,7 @@ fn mapping_plans_follow_registry_order_while_candidates_keep_account_order() {
     assert_eq!(set.routes[0].plan.model, "glm-5.2");
     assert_eq!(set.routes[1].routing.account.id, ZEN_FREE_ACCOUNT_ID);
     assert_eq!(set.routes[1].plan.channel, UpstreamChannel::Free);
-    assert_eq!(set.routes[1].plan.model, "hy3-free");
+    assert_eq!(set.routes[1].plan.model, "mimo-v2.5-free");
 }
 
 #[test]

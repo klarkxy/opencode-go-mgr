@@ -50,7 +50,7 @@ For the built-in **OpenCode Go**, **Zen Free**, **Command Code GOAT**,
 **MiniMax CN**, and **Kimi Code CN** scopes, the catalog header offers
 **Restore official protocol baseline**. It makes no upstream request, keeps the
 current model catalog, clears manual switches and probe evidence, and restores
-the development-time official baseline reviewed on **2026-09-01**. OpenCode
+the development-time official baseline reviewed on **2026-09-06**. OpenCode
 Go and known Zen rows default to the one upstream endpoint documented for each
 model. GOAT uses Messages for Anthropic model IDs and Chat Completions for the
 other Provider families, with newly discovered non-preset models still off by
@@ -105,9 +105,9 @@ removes the Provider namespace and reuses an existing code-owned Alias; known
 plan suffixes are removed only when the shorter name is already authorized.
 For example, `nvidia/nemotron-3-ultra-550b-a55b` uses Alias
 `nemotron-3-ultra`. Saved CN rows activate only their exact sealed map.
-Unmatched built-in rows remain exact raw model IDs and are not advertised as
+Unmatched Command/MiniMax/Kimi rows remain exact raw model IDs and are not advertised as
 new Aliases; CN mappings keep the upstream ID's exact spelling. A Zen Free row
-gains its suffix-stripped Alias only when that Alias is already Go-authorized;
+publishes its suffix-stripped Alias from the official `-free` suffix;
 the original `-free` ID remains an exact raw pin,
 as described under
 [Zen Free models](routing.md#zen-free-models).

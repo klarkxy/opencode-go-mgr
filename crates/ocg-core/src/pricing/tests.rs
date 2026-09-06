@@ -624,7 +624,7 @@ fn unknown_model_is_unpriced() {
 fn zen_free_models_do_not_enter_go_quota() {
     for model_id in [
         "mimo-v2.5-free",
-        "hy3-free",
+        "muse-spark-1.3-contributor-free",
         "muse-spark-1.2-contributor-free",
     ] {
         let estimate = embedded_seed().estimate(model_id, 1000, 100, 0, 0, None);
@@ -638,9 +638,6 @@ fn zen_free_models_do_not_enter_go_quota() {
     let paid = embedded_seed().estimate("deepseek-v4-flash", 1000, 100, 0, 0, None);
     assert_eq!(paid.cost_state, "priced");
     assert!(paid.cost.is_some());
-    let go_named_free = embedded_seed().estimate("ox-alpha-free", 1000, 100, 0, 0, None);
-    assert_eq!(go_named_free.cost_state, "unpriced");
-    assert_ne!(go_named_free.cost_state, "free");
     let suffix_follows_zen_catalog_naming =
         embedded_seed().estimate("brand-new-promo-free", 1000, 100, 0, 0, None);
     assert_eq!(suffix_follows_zen_catalog_naming.cost_state, "free");

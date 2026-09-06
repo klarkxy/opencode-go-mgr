@@ -1019,7 +1019,7 @@ async fn go_model_refresh_filters_zen_free_models_before_persisting() {
     force_direct_proxy(&harness);
     let go_origin = start_origin(
         StatusCode::OK,
-        r#"{"object":"list","data":[{"id":"glm-5.3"},{"id":"hy3-free"},{"id":"ox-alpha-free"}]}"#,
+        r#"{"object":"list","data":[{"id":"glm-5.3"},{"id":"hy3-free"}]}"#,
         Duration::ZERO,
     )
     .await;
@@ -1038,8 +1038,8 @@ async fn go_model_refresh_filters_zen_free_models_before_persisting() {
     assert_eq!(status, StatusCode::OK, "{go_models}");
     assert_eq!(
         go_models["models"],
-        json!(["glm-5.3", "ox-alpha-free"]),
-        "Zen Free ids must be filtered out; ox-alpha-free stays a Go model"
+        json!(["glm-5.3"]),
+        "Zen Free ids must be filtered out of the persisted Go catalog"
     );
 
     // The persisted catalog (and therefore the reloaded routing view) is
@@ -1049,10 +1049,7 @@ async fn go_model_refresh_filters_zen_free_models_before_persisting() {
         .providers
         .get(OPENCODE_PROVIDER_ID)
         .expect("go scope");
-    assert_eq!(
-        go_scope.catalog.models,
-        vec!["glm-5.3".to_string(), "ox-alpha-free".to_string()]
-    );
+    assert_eq!(go_scope.catalog.models, vec!["glm-5.3".to_string()]);
     assert!(!go_scope.models.contains_key("hy3-free"));
     harness.stop();
 }

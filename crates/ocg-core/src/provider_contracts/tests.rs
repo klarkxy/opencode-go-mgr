@@ -643,11 +643,11 @@ fn sanitize_probe_error_strips_userinfo_and_truncates() {
 fn official_protocol_baselines_cover_every_builtin_provider_shape() {
     assert_eq!(
         static_protocol_snapshot_date(OPENCODE_PROVIDER_ID),
-        Some("2026-09-01")
+        Some("2026-09-06")
     );
     assert_eq!(
         static_protocol_snapshot_date(MINIMAX_PROVIDER_ID),
-        Some("2026-09-01")
+        Some("2026-09-06")
     );
     assert_eq!(
         static_verified_protocols(ProviderAdapterKind::OpenCodeGo, "deepseek-v4-flash", &[],),

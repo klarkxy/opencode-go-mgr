@@ -327,15 +327,6 @@ fn command_catalog_uses_go_canonical_aliases_and_keeps_raw_ids_pinned() {
         Ok(ResolvedModel::PinnedRaw { mapping, .. })
             if mapping.is_command_code_goat() && mapping.upstream_model == "hy3-paid"
     ));
-    match resolve_with_all_catalogs("ox-alpha-free", &go, &zen, &[], &command).unwrap() {
-        ResolvedModel::Alias { mappings, .. } => {
-            assert!(mappings.iter().any(ProviderMapping::is_opencode_go));
-            assert!(mappings.iter().any(|mapping| {
-                mapping.is_command_code_goat() && mapping.upstream_model == "stealth/ox-alpha"
-            }));
-        }
-        other => panic!("expected Ox Alpha to share the Go baseline Alias, got {other:?}"),
-    }
     assert!(matches!(
         resolve_with_all_catalogs("stealth/ox-alpha", &go, &zen, &[], &command),
         Ok(ResolvedModel::PinnedRaw { mapping, .. })
@@ -466,7 +457,7 @@ fn command_catalog_reuses_sealed_cn_aliases_and_known_plan_suffixes() {
 }
 
 #[test]
-fn refreshed_zen_models_without_static_authority_stay_raw_only() {
+fn refreshed_zen_models_derive_stripped_aliases_from_the_free_suffix() {
     let models = vec!["brand-new-coder-free".to_string()];
     match resolve_with_provider_models("brand-new-coder-free", &models, &[]).unwrap() {
         ResolvedModel::PinnedRaw { mapping, .. } => {
@@ -475,33 +466,29 @@ fn refreshed_zen_models_without_static_authority_stay_raw_only() {
         }
         other => panic!("expected dynamic Zen raw pin, got {other:?}"),
     }
-    assert!(matches!(
-        resolve_with_provider_models("brand-new-coder", &models, &[]),
-        Err(ResolveError::Unknown { .. })
-    ));
+    match resolve_with_provider_models("brand-new-coder", &models, &[]).unwrap() {
+        ResolvedModel::Alias {
+            alias, mappings, ..
+        } => {
+            assert_eq!(alias, "brand-new-coder");
+            assert_eq!(mappings.len(), 1);
+            assert!(mappings[0].is_zen_free());
+            assert_eq!(mappings[0].upstream_model, "brand-new-coder-free");
+        }
+        other => panic!("expected stripped Zen Alias, got {other:?}"),
+    }
     let published = published_routeable_aliases_with_zen(&models);
     assert!(
-        !published
+        published
             .iter()
-            .any(|entry| entry.alias == "brand-new-coder")
+            .any(|entry| entry.alias == "brand-new-coder"
+                && entry.owned_by == OPENCODE_ZEN_FREE_PROVIDER_ID)
     );
     assert!(
         !published
             .iter()
             .any(|entry| entry.alias == "brand-new-coder-free")
     );
-}
-
-#[test]
-fn refreshed_catalog_cannot_steal_go_only_ox_alpha_free() {
-    let models = vec!["ox-alpha-free".to_string()];
-    match resolve_with_provider_models("ox-alpha-free", &models, &[]).unwrap() {
-        ResolvedModel::Alias { mappings, .. } => {
-            assert!(mappings.iter().all(ProviderMapping::is_opencode_go));
-        }
-        other => panic!("expected Go alias, got {other:?}"),
-    }
-    assert!(resolve_with_provider_models("ox-alpha", &models, &[]).is_err());
 }
 
 #[test]
@@ -523,11 +510,10 @@ fn registry_covers_every_opencode_protocol_id() {
         );
     }
     for id in &free_models {
-        let statically_authorized = supported_model_ids().any(|known| known == id);
-        assert_eq!(
-            stripped_free_alias(id).is_some_and(|alias| aliases.iter().any(|item| item == alias)),
-            statically_authorized,
-            "only a statically authorized free model may have a stripped alias: `{id}`"
+        let alias = stripped_free_alias(id).expect("seeded Zen ids end in -free");
+        assert!(
+            aliases.iter().any(|item| item == alias),
+            "Zen `-free` catalog rows must publish the stripped alias `{alias}`"
         );
         assert!(resolve(id).unwrap().routeable_mappings()[0].is_zen_free());
     }
@@ -902,11 +888,13 @@ fn catalog_aliases_are_routeable_mappings_in_registry_order() {
     assert!(!go.iter().any(|alias| alias == "deepseek-v4-flash-free"));
     assert!(!zen.iter().any(|alias| alias == "glm-5.2"));
     assert!(zen.iter().any(|alias| alias == "deepseek-v4-flash"));
+    assert!(
+        zen.iter()
+            .any(|alias| alias == "muse-spark-1.3-contributor"),
+        "Zen-only `-free` rows still publish a stripped Alias"
+    );
     assert!(!zen.iter().any(|alias| alias.ends_with("-free")));
-    for id in free_models
-        .iter()
-        .filter(|id| supported_model_ids().any(|known| known == id.as_str()))
-    {
+    for id in &free_models {
         let alias = stripped_free_alias(id).expect("seeded Zen ids end in -free");
         assert!(
             zen.iter().any(|item| item == alias),

@@ -15,13 +15,12 @@ pub(crate) const MAX_MODEL_ID_CHARS: usize = 200;
 
 const SEEDED_FREE_MODELS: &[&str] = &[
     "deepseek-v4-flash-free",
-    "hy3-free",
-    "laguna-s-2.1-free",
+    "ling-3.0-flash-fin-free",
     "mimo-v2.5-free",
     "muse-spark-1.2-contributor-free",
+    "muse-spark-1.3-contributor-free",
     "nemotron-3-ultra-free",
     "nemotron-3.5-lightning-free",
-    "x-preview-f-free",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -49,9 +48,7 @@ impl ZenFreeModelCatalog {
         let mut aliases = Vec::with_capacity(self.models.len() * 2);
         for model in &self.models {
             aliases.push(model.clone());
-            if let Some(alias) = stripped_free_alias(model)
-                && static_alias_authorized(alias)
-            {
+            if let Some(alias) = stripped_free_alias(model) {
                 aliases.push(alias.to_string());
             }
         }
@@ -74,22 +71,10 @@ pub fn model_views(catalog: &ZenFreeModelCatalog) -> Vec<ZenFreeModelView> {
         .filter_map(|model_id| {
             stripped_free_alias(model_id).map(|alias| ZenFreeModelView {
                 model_id: model_id.clone(),
-                alias: if static_alias_authorized(alias) {
-                    alias.to_string()
-                } else {
-                    String::new()
-                },
+                alias: alias.to_string(),
             })
         })
         .collect()
-}
-
-fn static_alias_authorized(alias: &str) -> bool {
-    crate::protocol::supported_model_ids().any(|id| {
-        id.eq_ignore_ascii_case(alias)
-            || stripped_free_alias(id)
-                .is_some_and(|candidate| candidate.eq_ignore_ascii_case(alias))
-    })
 }
 
 pub fn stripped_free_alias(model: &str) -> Option<&str> {
@@ -139,9 +124,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn catalog_keeps_free_rows_but_only_derives_statically_authorized_aliases() {
+    fn catalog_keeps_free_rows_and_derives_stripped_aliases() {
         let models = parse_catalog(
-            br#"{"object":"list","data":[{"id":"paid"},{"id":"MIMO-V2.5-FREE"},{"id":"big-pickle"},{"id":"ox-alpha-free"},{"id":"hy3-free"},{"id":"hy3-free"},{"id":"new-coder-free"}]}"#,
+            br#"{"object":"list","data":[{"id":"paid"},{"id":"MIMO-V2.5-FREE"},{"id":"big-pickle"},{"id":"hy3-free"},{"id":"hy3-free"},{"id":"new-coder-free"}]}"#,
         )
         .unwrap();
         assert_eq!(models, vec!["hy3-free", "mimo-v2.5-free", "new-coder-free"]);
@@ -157,6 +142,7 @@ mod tests {
                 "hy3-free",
                 "mimo-v2.5",
                 "mimo-v2.5-free",
+                "new-coder",
                 "new-coder-free",
             ]
         );
@@ -173,7 +159,7 @@ mod tests {
                 },
                 ZenFreeModelView {
                     model_id: "new-coder-free".into(),
-                    alias: String::new(),
+                    alias: "new-coder".into(),
                 },
             ]
         );

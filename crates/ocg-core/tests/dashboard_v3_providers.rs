@@ -768,7 +768,6 @@ async fn dashboard_v3_provider_contracts_hide_zen_free_models_from_go_scope() {
                 "glm-5.3".to_string(),
                 "hy3-free".to_string(),
                 "deepseek-v4-flash-free".to_string(),
-                "ox-alpha-free".to_string(),
             ],
             Some(now),
             CATALOG_SOURCE_OPENCODE_MODELS,
@@ -798,10 +797,6 @@ async fn dashboard_v3_provider_contracts_hide_zen_free_models_from_go_scope() {
         .find(|group| group.provider_id == OPENCODE_PROVIDER_ID)
         .expect("go group");
     assert!(go.catalog.models.contains(&"glm-5.3".to_string()));
-    assert!(
-        go.catalog.models.contains(&"ox-alpha-free".to_string()),
-        "ox-alpha-free is a Go model, not a Zen Free model"
-    );
     assert!(
         !go.catalog.models.iter().any(|id| is_free_model(id)),
         "{:?}",

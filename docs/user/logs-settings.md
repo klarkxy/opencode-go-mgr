@@ -42,9 +42,8 @@ changes the quota-debit multiplier; it does not make a model or provider routabl
   routing. Existing rows are not retroactively repriced. Registered
   Zen free models (`big-pickle`, `mimo-v2.5-free`, and other ids on the Zen
   allowlist) record tokens with `cost_state=free` and do not enter Go quota
-  totals. Go models whose names contain `free` (currently `ox-alpha-free`) stay
-  on Go and are unpriced while the official table lists dash rates. Custom API
-  rows record `cost_state=unknown` with no provider quota debit. Expand a row to
+  totals. Custom API rows record `cost_state=unknown` with no provider quota
+  debit. Expand a row to
   see the request ID and diagnostic
   detail.
 - An `outcome_unknown` row means the upstream may already have completed and

@@ -62,7 +62,7 @@ const NO_PROTOCOLS: &[ApiFormat] = &[];
 /// Date on which the checked-in official protocol defaults were reviewed.
 /// Probe observations are persisted separately and never redefine this
 /// development-time baseline.
-pub const OFFICIAL_PROTOCOL_BASELINE_DATE: &str = "2026-09-01";
+pub const OFFICIAL_PROTOCOL_BASELINE_DATE: &str = "2026-09-06";
 
 const CHAT_ONLY: &[ApiFormat] = &[ApiFormat::ChatCompletions];
 const RESPONSES_ONLY: &[ApiFormat] = &[ApiFormat::Responses];
@@ -136,6 +136,12 @@ const MODEL_PROTOCOLS: &[ModelProtocol] = &[
         effort_aliases: MUSE_SPARK_EFFORT_ALIASES,
     },
     ModelProtocol {
+        id: "muse-spark-1.3-contributor-free",
+        preferred: ApiFormat::Responses,
+        supported: RESPONSES_ONLY,
+        effort_aliases: MUSE_SPARK_EFFORT_ALIASES,
+    },
+    ModelProtocol {
         id: "kimi-k3",
         preferred: ApiFormat::ChatCompletions,
         supported: CHAT_ONLY,
@@ -199,14 +205,6 @@ const MODEL_PROTOCOLS: &[ModelProtocol] = &[
         id: "longcat-2.0",
         preferred: ApiFormat::ChatCompletions,
         supported: CHAT_ONLY,
-        effort_aliases: NO_EFFORT_ALIASES,
-    },
-    ModelProtocol {
-        // Legacy Go identity retained for compatibility. It is absent from the
-        // current official baseline, so it must not become routable by default.
-        id: "ox-alpha-free",
-        preferred: ApiFormat::ChatCompletions,
-        supported: NO_PROTOCOLS,
         effort_aliases: NO_EFFORT_ALIASES,
     },
     ModelProtocol {
@@ -282,12 +280,6 @@ const MODEL_PROTOCOLS: &[ModelProtocol] = &[
         effort_aliases: NO_EFFORT_ALIASES,
     },
     ModelProtocol {
-        id: "hy3-free",
-        preferred: ApiFormat::ChatCompletions,
-        supported: CHAT_ONLY,
-        effort_aliases: NO_EFFORT_ALIASES,
-    },
-    ModelProtocol {
         id: "deepseek-v4-flash-free",
         preferred: ApiFormat::ChatCompletions,
         supported: NO_PROTOCOLS,
@@ -297,30 +289,6 @@ const MODEL_PROTOCOLS: &[ModelProtocol] = &[
         id: "mimo-v2.5-free",
         preferred: ApiFormat::ChatCompletions,
         supported: CHAT_ONLY,
-        effort_aliases: NO_EFFORT_ALIASES,
-    },
-    ModelProtocol {
-        id: "ling-3.0-flash-free",
-        preferred: ApiFormat::ChatCompletions,
-        supported: NO_PROTOCOLS,
-        effort_aliases: NO_EFFORT_ALIASES,
-    },
-    ModelProtocol {
-        id: "laguna-s-2.1-free",
-        preferred: ApiFormat::ChatCompletions,
-        supported: NO_PROTOCOLS,
-        effort_aliases: NO_EFFORT_ALIASES,
-    },
-    ModelProtocol {
-        id: "longcat-2.0-free",
-        preferred: ApiFormat::ChatCompletions,
-        supported: NO_PROTOCOLS,
-        effort_aliases: NO_EFFORT_ALIASES,
-    },
-    ModelProtocol {
-        id: "north-mini-code-free",
-        preferred: ApiFormat::ChatCompletions,
-        supported: NO_PROTOCOLS,
         effort_aliases: NO_EFFORT_ALIASES,
     },
     ModelProtocol {

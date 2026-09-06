@@ -38,7 +38,7 @@ Hermes 把所选 Key 仅保存到 `.env` 的 `OCG_MANAGER_API_KEY`，并由 `mod
 
 Pi 通过自己的包管理器安装 `ocg-manager-pi`，并通过 Provider 原生登录保存所选 Key。DSH 把 `ocg-manager-dsh` 作为 OCG 自有的 companion 插件安装到 `web` profile；插件只注册固定路由，OCG 仅字段级管理 DSH 主目录 `.env` 中的 `OCG_MANAGER_API_KEY`，保留其他行，并在卸载时恢复原值。基础 profile 或其他 bundle 已注册的 Provider 不会被覆盖。第一阶段不会自动安装到 TUI、headless 或自定义 profile。卸载只移除 OCG 自有包和上述专属变量写入。
 
-选择器列表来自受保护的 `GET /dashboard/api/v3/application-models`：当前可路由的 OpenCode Go 别名与当前价格快照求交。highspeed 变体继承基价行。空交集是 `[]`，不是错误。它 **不是** 带鉴权的 `GET /v1/models`：后者公布代码持有且当前可路由的 Go 与密封供应商 Alias，以及合格 Custom 声明 ID；保存的 Zen 目录只能加入 Go Alias，Command 目录可以加入任一代码持有的 Alias，保存的 MiniMax/Kimi 行只激活精确密封映射。两条路径都是本地读取，不在上游实时抓目录或挑账号，只返回当前可路由且协议有效启用的模型。目录刷新是 **供应商** 页上的显式动作；价格刷新后，这里的 Go 别名可能变化。每次返回应用页都会重新加载这份本地列表。模型选择和编辑过的代码片段按应用缓存在当前页面会话里，刷新即重置。**恢复默认** 重置当前应用的模型选择与片段草稿。
+选择器列表来自受保护的 `GET /dashboard/api/v3/application-models`：当前可路由的 OpenCode Go 别名与当前价格快照求交。highspeed 变体继承基价行。空交集是 `[]`，不是错误。它 **不是** 带鉴权的 `GET /v1/models`：后者公布代码持有且当前可路由的 Go 与密封供应商 Alias，以及合格 Custom 声明 ID；保存的 Zen `-free` 行会公布去掉后缀后的 Alias，Command 目录可以加入任一代码持有的 Alias，保存的 MiniMax/Kimi 行只激活精确密封映射。两条路径都是本地读取，不在上游实时抓目录或挑账号，只返回当前可路由且协议有效启用的模型。目录刷新是 **供应商** 页上的显式动作；价格刷新后，这里的 Go 别名可能变化。每次返回应用页都会重新加载这份本地列表。模型选择和编辑过的代码片段按应用缓存在当前页面会话里，刷新即重置。**恢复默认** 重置当前应用的模型选择与片段草稿。
 
 ## 模型能力
 

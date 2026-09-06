@@ -2,9 +2,11 @@
 //!
 //! Outbound clients should send stable lowercase kebab-case aliases. The
 //! original OpenCode Go protocol table plus sealed Provider adapter maps are
-//! the built-in Alias authority. Refreshed Provider catalogs may join only
-//! those code-owned names and never create arbitrary new ones. Case-folded
-//! kebab spellings such as `GLM-5.2` are accepted. Names containing `/`, `_`,
+//! the built-in Alias authority for Go/CN/GOAT names. Saved Zen Free rows use
+//! the official `-free` suffix: the original ID stays an exact raw pin, and
+//! the suffix-stripped name is published as an Alias
+//! (`muse-spark-1.3-contributor-free` → `muse-spark-1.3-contributor`).
+//! Case-folded kebab spellings such as `GLM-5.2` are accepted. Names containing `/`, `_`,
 //! or whitespace are treated as raw IDs and never folded onto a kebab alias
 //! (`glm/5.2` is not `glm-5.2`). A raw upstream model ID is accepted only
 //! when it uniquely selects one provider mapping; ambiguity returns
@@ -13,8 +15,7 @@
 //! Command Code GOAT rows join a code-owned Alias by leaf name where possible.
 //! Known plan suffixes are stripped only when the shorter Alias is authorized;
 //! selected verbose implementation IDs use a sealed exact map. The unique
-//! slash raw ID still pins to GOAT. Statically authorized Zen `*-free` IDs likewise
-//! stay exact raw pins while joining only their stripped Go-table Alias. Eligible Custom capabilities
+//! slash raw ID still pins to GOAT. Eligible Custom capabilities
 //! overlay published aliases and resolve otherwise unknown IDs without
 //! stealing Go/Zen mappings.
 //! Later host adapters consume [`ProviderMapping`]: parse the client protocol
@@ -242,11 +243,6 @@ fn build_builtin_registry() -> Registry {
 
 fn build_registry(zen_free_models: &[String]) -> Registry {
     let mut specs = Vec::new();
-    let static_zen_aliases = supported_model_ids()
-        .filter(|id| is_free_model(id))
-        .filter_map(stripped_free_alias)
-        .map(|alias| alias.to_ascii_lowercase())
-        .collect::<std::collections::HashSet<_>>();
     for id in supported_model_ids() {
         if id == "big-pickle" || is_free_model(id) {
             continue;
@@ -262,13 +258,10 @@ fn build_registry(zen_free_models: &[String]) -> Registry {
         if !is_free_model(model) {
             continue;
         }
+        let mapping = zen_mapping(model);
+        insert_raw_mapping(&mut registry, mapping.clone());
         if let Some(alias) = stripped_free_alias(model) {
-            let mapping = zen_mapping(model);
-            insert_raw_mapping(&mut registry, mapping.clone());
-            let key = alias.to_ascii_lowercase();
-            if registry.aliases.contains_key(&key) || static_zen_aliases.contains(&key) {
-                insert_mapping(&mut registry, alias, mapping);
-            }
+            insert_mapping(&mut registry, alias, mapping);
         }
     }
     registry
@@ -406,7 +399,6 @@ fn goat_catalog_hit_for_resolved(
 }
 
 const COMMAND_ALIAS_SUFFIX_EXCEPTIONS: &[&str] = &["-paid", "-free"];
-const COMMAND_ALIAS_EXACT_EXCEPTIONS: &[(&str, &str)] = &[("ox-alpha", "ox-alpha-free")];
 
 fn command_catalog_hit_for_alias(
     goat_model_ids: &[String],
@@ -1205,11 +1197,6 @@ fn command_alias_for_catalog(upstream_model: &str, registry: &Registry) -> Strin
     if let Some(alias) = command_catalog_alias(upstream_model) {
         return alias.to_string();
     }
-    for (command_leaf, go_alias) in COMMAND_ALIAS_EXACT_EXCEPTIONS {
-        if leaf.eq_ignore_ascii_case(command_leaf) && is_authorized_alias(go_alias) {
-            return (*go_alias).to_string();
-        }
-    }
     for suffix in COMMAND_ALIAS_SUFFIX_EXCEPTIONS {
         if let Some(candidate) = leaf.strip_suffix(suffix) {
             if is_authorized_alias(candidate) {
@@ -1220,9 +1207,9 @@ fn command_alias_for_catalog(upstream_model: &str, registry: &Registry) -> Strin
     leaf
 }
 
-/// Canonical client Alias for one Provider catalog row. The original OpenCode
-/// Go table and sealed Provider adapter maps are authoritative; an empty result means
-/// the row is raw-only.
+/// Canonical client Alias for one Provider catalog row. Go and sealed Provider
+/// maps stay code-owned. Zen Free derives the Alias by stripping `-free`.
+/// An empty result means the row is raw-only.
 pub fn canonical_alias_for_provider_model(
     provider_id: &str,
     upstream_model: &str,

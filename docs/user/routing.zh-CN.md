@@ -48,9 +48,9 @@ Gateway 不讲感情：账号按 **列表顺序** 尝试，你可以在账号页
 
 Zen Free 是一张不需要 Key 的账号卡，只有一个启用开关，没有 Deny / Explicit / Prefer 三态。不需要 Free 流量就关掉；启用时，它在账号列表里的位置就是优先级。
 
-在 **供应商** 页点击 **刷新模型目录** 才会请求官方无鉴权 Zen 模型目录。后端只保留 ID 以 `-free` 结尾的模型并持久化成功结果；原始 ID 始终可以作为精确 raw pin。只有当去掉 `-free` 后的名称已经存在于最早 OpenCode Go 静态表时，Zen 行才会加入该 Alias，刷新本身不会创建新 Alias。例如静态表已授权 `mimo-v2.5` 时，`mimo-v2.5-free` 既可以按原 ID 请求，也可以按 `mimo-v2.5` 请求；共享 Alias 按账号卡顺序选择。**供应商** 页展示已保存目录与各模型合约。刷新失败或过滤结果为空时，继续使用上一次成功快照。保留的 Go 模型 `ox-alpha-free` 会从 Zen 发现结果中排除，继续只走 Go 且按无价格处理。
+在 **供应商** 页点击 **刷新模型目录** 才会请求官方无鉴权 Zen 模型目录。后端只保留 ID 以 `-free` 结尾的模型并持久化成功结果；原始 ID 始终可以作为精确 raw pin。去掉官方 `-free` 后缀后会公布对应 Alias，不要求该短名已经出现在 Go 静态表里。例如 `mimo-v2.5-free` 既可以按原 ID 请求，也可以按 `mimo-v2.5` 请求；共享 Alias 按账号卡顺序选择。仅有 Zen 行的模型（例如 `muse-spark-1.3-contributor-free`）同样公布 `muse-spark-1.3-contributor`。**供应商** 页展示已保存目录与各模型合约。刷新失败或过滤结果为空时，继续使用上一次成功快照。
 
-Free 与 Go 使用**独立冷却窗口**。Zen Free 不发送鉴权头，促销额度按出口 IP 共享； Free `429` 会冷却整条 Free 通道，不换 Key，并继续尝试账号顺序中后续兼容卡片；只有 Free 映射的模型则返回共享冷却。成功的 Free 请求会记录 token，使用 `cost_state=free`，且不计入 Go 额度。Free 为限时促销，请求数据可能用于改进模型，机密内容请谨慎处理。
+Free 与 Go 使用**独立冷却窗口**。Zen Free 不发送鉴权头。每次 Free 推理会带上官方 TUI 使用的同一组 OpenCode 客户端身份头（`User-Agent`、`x-opencode-session`、`x-opencode-client`、`x-opencode-request`、`x-opencode-project`），以便会话粘滞和按出口 IP 共享的免费池生效。客户端已提供的 OpenCode 值优先，否则由 Gateway 补齐。促销额度按出口 IP 共享； Free `429` 会冷却整条 Free 通道，不换 Key，并继续尝试账号顺序中后续兼容卡片；只有 Free 映射的模型则返回共享冷却。成功的 Free 请求会记录 token，使用 `cost_state=free`，且不计入 Go 额度。Free 为限时促销，请求数据可能用于改进模型，机密内容请谨慎处理。
 
 ---
 

@@ -118,17 +118,21 @@ its routing priority.
 **Refresh model catalog** on **Providers** calls the official keyless Zen
 model directory only on user request. The backend keeps only IDs ending in
 `-free` and saves the successful snapshot. The original ID is always available
-as an exact raw pin. Removing the suffix joins an Alias only when that name is
-already authorized by the original OpenCode Go static table; otherwise the
-refresh does not create a new Alias. For an authorized `mimo-v2.5` Alias,
-`mimo-v2.5-free` is accepted both as itself and as `mimo-v2.5`, and requests for
-the shared Alias follow account-card order across Go and Zen. **Providers**
+as an exact raw pin. Stripping the official `-free` suffix publishes that
+shorter name as an Alias, whether or not the Go table already has it. For
+`mimo-v2.5-free`, both `mimo-v2.5-free` and `mimo-v2.5` work; a shared Alias
+follows account-card order across Go and Zen. A Zen-only row such as
+`muse-spark-1.3-contributor-free` likewise publishes `muse-spark-1.3-contributor`. **Providers**
 shows the saved catalog and each model contract. A failed or empty refresh
-leaves the last saved snapshot active. The reserved Go model `ox-alpha-free`
-is excluded from Zen discovery so it remains Go-only and unpriced.
+leaves the last saved snapshot active.
 
 Free and Go cooldowns are **independent**. Zen Free sends no authentication
-headers. Its promo quota is shared per egress IP, so a Free `429` cools the
+headers. Each Free inference attempt identifies the official anonymous
+channel with the same OpenCode client headers the TUI uses (`User-Agent`,
+`x-opencode-session`, `x-opencode-client`, `x-opencode-request`,
+`x-opencode-project`) so session stickiness and the shared egress-IP free
+pool apply. Client-supplied OpenCode values win; otherwise the gateway fills
+them in. Its promo quota is shared per egress IP, so a Free `429` cools the
 whole Free channel and does not rotate keys. Routing then continues to later
 compatible account cards in saved order; a Free-only model returns the shared
 cooldown. Successful Free rows keep token counts, use `cost_state=free`, and

@@ -28,11 +28,11 @@ upstream protocol trial.
 
 | Preferred upstream | Models |
 | --- | --- |
-| OpenAI Chat Completions | `glm-5.3-flash`, `glm-5.3`, `glm-5.2`, `glm-5.1`, `glm-5`, `kimi-k3`, `kimi-k2.7-code`, `kimi-k2.6`, `kimi-k2.5`, `deepseek-v4-pro`, `deepseek-v4-flash`, `deepseek-v4-flash-vision-exp`, `mimo-v2.5`, `mimo-v2.5-pro`, `hy3`, `longcat-2.0`, `ox-alpha-free`, `big-pickle`, `hy3-free`, `deepseek-v4-flash-free`, `mimo-v2.5-free`, `ling-3.0-flash-free`, `laguna-s-2.1-free`, `longcat-2.0-free`, `north-mini-code-free`, `nemotron-3-ultra-free`, `nemotron-3.5-lightning-free`, `ling-3.0-flash-fin-free`, `hy4-preview` |
-| OpenAI Responses | `grok-4.6`, `grok-4.5`, `gpt-5.6-luna`, `muse-spark-1.2`, `muse-spark-1.2-contributor`, `muse-spark-1.2-contributor-free` |
+| OpenAI Chat Completions | `glm-5.3-flash`, `glm-5.3`, `glm-5.2`, `glm-5.1`, `glm-5`, `kimi-k3`, `kimi-k2.7-code`, `kimi-k2.6`, `kimi-k2.5`, `deepseek-v4-pro`, `deepseek-v4-flash`, `deepseek-v4-flash-vision-exp`, `mimo-v2.5`, `mimo-v2.5-pro`, `hy3`, `longcat-2.0`, `big-pickle`, `deepseek-v4-flash-free`, `mimo-v2.5-free`, `nemotron-3-ultra-free`, `nemotron-3.5-lightning-free`, `ling-3.0-flash-fin-free`, `hy4-preview` |
+| OpenAI Responses | `grok-4.6`, `grok-4.5`, `gpt-5.6-luna`, `muse-spark-1.2`, `muse-spark-1.2-contributor`, `muse-spark-1.2-contributor-free`, `muse-spark-1.3-contributor-free` |
 | Anthropic Messages | `minimax-m3`, `minimax-m2.7`, `minimax-m2.7-highspeed`, `minimax-m2.5`, `minimax-m2.5-highspeed`, `qwen3.8-max`, `qwen3.8-flash`, `qwen3.7-max`, `qwen3.7-plus`, `qwen3.6-plus`, `qwen3.5-plus` |
 
-Passthrough matrix (checked-in official baseline, 2026-09-01). ✓ = the client
+Passthrough matrix (checked-in official baseline, 2026-09-06). ✓ = the client
 protocol is forwarded as-is; empty = the baseline has no direct-passthrough
 evidence for that protocol. Provider catalogs and effective contracts still
 decide whether the model is routeable; a known but inadmissible model is
@@ -40,9 +40,10 @@ rejected locally rather than converted or sent upstream. Source of truth:
 `MODEL_PROTOCOLS` in `crates/ocg-domain/src/protocol.rs`.
 
 `reasoning.effort` aliases (applied before forwarding or conversion):
-`muse-spark-1.2`, `muse-spark-1.2-contributor`, and
-`muse-spark-1.2-contributor-free` map `max` → `xhigh` (upstream rejects
-`max`). Other models pass `reasoning.effort` through unchanged.
+`muse-spark-1.2`, `muse-spark-1.2-contributor`,
+`muse-spark-1.2-contributor-free`, and `muse-spark-1.3-contributor-free`
+map `max` → `xhigh` (upstream rejects `max`). Other models pass
+`reasoning.effort` through unchanged.
 
 | Model | Preferred | Chat | Responses | Messages |
 | --- | --- | :---: | :---: | :---: |
@@ -57,6 +58,7 @@ rejected locally rather than converted or sent upstream. Source of truth:
 | `muse-spark-1.2` | Responses | | ✓ | |
 | `muse-spark-1.2-contributor` | Responses | | ✓ | |
 | `muse-spark-1.2-contributor-free` | Responses | | ✓ | |
+| `muse-spark-1.3-contributor-free` | Responses | | ✓ | |
 | `kimi-k3` | Chat | ✓ | | |
 | `kimi-k2.7-code` | Chat | ✓ | | |
 | `kimi-k2.6` | Chat | ✓ | | |
@@ -68,15 +70,9 @@ rejected locally rather than converted or sent upstream. Source of truth:
 | `mimo-v2.5-pro` | Chat | ✓ | | |
 | `hy3` | Chat | ✓ | | |
 | `longcat-2.0` | Chat | ✓ | | |
-| `ox-alpha-free` | Chat | | | |
 | `big-pickle` | Chat | ✓ | | |
-| `hy3-free` | Chat | ✓ | | |
 | `deepseek-v4-flash-free` | Chat | | | |
 | `mimo-v2.5-free` | Chat | ✓ | | |
-| `ling-3.0-flash-free` | Chat | | | |
-| `laguna-s-2.1-free` | Chat | | | |
-| `longcat-2.0-free` | Chat | | | |
-| `north-mini-code-free` | Chat | | | |
 | `nemotron-3-ultra-free` | Chat | ✓ | | |
 | `nemotron-3.5-lightning-free` | Chat | ✓ | | |
 | `ling-3.0-flash-fin-free` | Chat | ✓ | | |

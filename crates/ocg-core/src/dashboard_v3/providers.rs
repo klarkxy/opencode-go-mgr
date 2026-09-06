@@ -388,7 +388,6 @@ async fn refresh_go_or_command_catalog(
     }
     // Zen Free owns every `-free` id; keep them out of the persisted Go
     // catalog so they never reach the Go provider-contracts surface.
-    // (`ox-alpha-free` is a Go model; `is_free_model` excludes it.)
     let models = if provider_id == OPENCODE_PROVIDER_ID {
         let filtered: Vec<String> = models.into_iter().filter(|id| !is_free_model(id)).collect();
         if filtered.is_empty() {
