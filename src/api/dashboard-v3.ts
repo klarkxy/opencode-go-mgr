@@ -396,6 +396,7 @@ export const dashboardV3 = {
       method: "POST",
       body: json(input),
     }),
+  getCpaModels: () => requestV3<CpaModels>("/external-integrations/cpa/models"),
   refreshCpaModels: (expectation: MutationExpectation) =>
     requestV3<CpaModels>("/external-integrations/cpa/models/refresh", {
       method: "POST",

@@ -1729,6 +1729,7 @@ const CPA_CATALOG_TYPES: &[&str] = &[
     "CpaIntegrationUpdate",
     "CpaTestRequest",
     "CpaConnectionReport",
+    "CpaModel",
     "CpaModels",
     "CpaAccounts",
     "CpaAccount",

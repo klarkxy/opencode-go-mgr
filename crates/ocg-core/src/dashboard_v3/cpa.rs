@@ -20,10 +20,11 @@ use crate::state::CoreState;
 
 use super::types::{
     CpaAccount, CpaAccountDelete, CpaAccountStatusUpdate, CpaAccounts, CpaConnectionReport,
-    CpaIntegration, CpaIntegrationUpdate, CpaModels, CpaOAuthProvider, CpaOAuthSessionDelete,
-    CpaOAuthStart, CpaOAuthStartRequest, CpaOAuthStatus, CpaQuotaReset, CpaRuntime,
-    CpaRuntimeCheck, CpaRuntimeInstall, CpaRuntimeKey, CpaRuntimeKeyCreated, CpaRuntimeKeys,
-    CpaRuntimeLogs, CpaRuntimePhase, CpaTestRequest, MutationAck, MutationExpectation,
+    CpaIntegration, CpaIntegrationUpdate, CpaModel, CpaModels, CpaOAuthProvider,
+    CpaOAuthSessionDelete, CpaOAuthStart, CpaOAuthStartRequest, CpaOAuthStatus, CpaQuotaReset,
+    CpaRuntime, CpaRuntimeCheck, CpaRuntimeInstall, CpaRuntimeKey, CpaRuntimeKeyCreated,
+    CpaRuntimeKeys, CpaRuntimeLogs, CpaRuntimePhase, CpaTestRequest, MutationAck,
+    MutationExpectation,
 };
 use super::{V3ApiError, check_expectation, parse_json, parse_mutation_json};
 
@@ -269,6 +270,16 @@ pub(super) async fn test_connection(
     }))
 }
 
+pub(super) async fn get_models(
+    State(state): State<CoreState>,
+) -> Result<Json<CpaModels>, V3ApiError> {
+    let catalog = {
+        let db = state.db.lock();
+        db.cpa_model_catalog().map_err(V3ApiError::internal)?
+    };
+    Ok(Json(models_payload(&state, catalog.as_ref())))
+}
+
 pub(super) async fn refresh_models(
     State(state): State<CoreState>,
     body: Bytes,
@@ -292,7 +303,8 @@ pub(super) async fn refresh_models(
         .map_err(V3ApiError::internal)?;
     let revision = state.bump_settings_revision();
     Ok(Json(CpaModels {
-        models,
+        models: models.iter().map(cpa_model_view).collect(),
+        source_url: Some(base_url),
         refreshed_at: Some(refreshed_at.to_rfc3339()),
         revision,
         process_generation: state.process_generation(),
@@ -682,6 +694,27 @@ pub(super) async fn cancel_oauth(
         .await
         .map_err(|error| map_cpa_error(&state, error))?;
     Ok(Json(committed_ack(&state)))
+}
+
+fn cpa_model_view(model: &crate::db::CpaCatalogModel) -> CpaModel {
+    CpaModel {
+        id: model.id.clone(),
+        owned_by: model.owned_by.clone(),
+    }
+}
+
+fn models_payload(state: &CoreState, catalog: Option<&crate::db::CpaCatalogRecord>) -> CpaModels {
+    CpaModels {
+        models: catalog
+            .map(|item| item.models.iter().map(cpa_model_view).collect())
+            .unwrap_or_default(),
+        source_url: catalog.map(|item| item.source_url.clone()),
+        refreshed_at: catalog
+            .and_then(|item| item.refreshed_at)
+            .map(|value| value.to_rfc3339()),
+        revision: state.settings_revision(),
+        process_generation: state.process_generation(),
+    }
 }
 
 fn integration_view(state: &CoreState) -> Result<CpaIntegration, V3ApiError> {

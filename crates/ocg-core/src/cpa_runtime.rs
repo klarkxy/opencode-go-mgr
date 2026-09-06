@@ -8,7 +8,7 @@ mod extract;
 pub mod host;
 
 use crate::cpa::{CpaClient, CpaError};
-use crate::db::{CpaCatalogRecord, CpaIntegrationRecord};
+use crate::db::{CpaCatalogModel, CpaCatalogRecord, CpaIntegrationRecord};
 use crate::http_client;
 use crate::models::{Account as ModelAccount, AccountSetupStep, AccountType, AppConfig};
 use crate::provider::{
@@ -1571,7 +1571,7 @@ impl CoreStateInner {
         port: u16,
         management_key: &str,
         inference_key: &str,
-    ) -> Result<Vec<String>, CpaRuntimeError> {
+    ) -> Result<Vec<CpaCatalogModel>, CpaRuntimeError> {
         // `/v1/models` is CPA's strongest non-billable Inference-Key check.
         // A real completion would prove provider usability but could consume a
         // subscription, so installation separately proves health, Management
@@ -1807,7 +1807,7 @@ impl CoreStateInner {
         port: u16,
         management_key: &str,
         inference_key: &str,
-        models: Vec<String>,
+        models: Vec<CpaCatalogModel>,
     ) -> Result<(), CpaRuntimeError> {
         let base_url = format!("http://127.0.0.1:{port}");
         let management_key_cipher = self

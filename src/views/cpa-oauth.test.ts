@@ -222,6 +222,7 @@ function oauthComponentApi(overrides: CpaApi): CpaApi {
     getCpaRuntime: async () => runtime(),
     getCpaAccounts: async () => ({ accounts: [] }),
     getCpaRuntimeKeys: async () => ({ keys: [], processGeneration: 1, revision: 1 }),
+    getCpaModels: async () => ({ models: [], sourceUrl: null, refreshedAt: null, processGeneration: 1, revision: 1 }),
     cancelCpaOAuth: async () => ({ revision: 1, processGeneration: 1 }),
     ...overrides,
   };

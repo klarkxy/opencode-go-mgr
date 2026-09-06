@@ -83,10 +83,10 @@ pub use types::{
     CapabilitySummary, CardCapabilitySummary, ClaudeDesktopModels, ClaudeDesktopModelsUpdate,
     ConnectionInfo, ConnectionSubKey, ContractScopeKind, ControlRevision, CpaAccount,
     CpaAccountDelete, CpaAccountStatusUpdate, CpaAccounts, CpaConnectionReport, CpaIntegration,
-    CpaIntegrationUpdate, CpaModels, CpaOAuthProvider, CpaOAuthSessionDelete, CpaOAuthStart,
-    CpaOAuthStartRequest, CpaOAuthStatus, CpaQuotaReset, CpaRuntime, CpaRuntimeCheck,
-    CpaRuntimeInstall, CpaRuntimeKey, CpaRuntimeKeyCreated, CpaRuntimeKeys, CpaRuntimeLogs,
-    CpaRuntimePhase, CpaTestRequest, CreditBalance, CustomEndpointContract,
+    CpaIntegrationUpdate, CpaModel, CpaModels, CpaOAuthProvider, CpaOAuthSessionDelete,
+    CpaOAuthStart, CpaOAuthStartRequest, CpaOAuthStatus, CpaQuotaReset, CpaRuntime,
+    CpaRuntimeCheck, CpaRuntimeInstall, CpaRuntimeKey, CpaRuntimeKeyCreated, CpaRuntimeKeys,
+    CpaRuntimeLogs, CpaRuntimePhase, CpaTestRequest, CreditBalance, CustomEndpointContract,
     CustomModelDiscoveryRequest, CustomModelDiscoveryResponse, DailyModelTokens,
     DailyTokensByModel, DailyTokensQuery, DashboardSummary, DesktopUpdate, DesktopUpdatePhase,
     DynamicProvider, DynamicProviderAuthKind, DynamicProviderCreate,
@@ -161,6 +161,7 @@ pub fn api_router(state: CoreState) -> Router<CoreState> {
             "/external-integrations/cpa/test",
             post(cpa::test_connection),
         )
+        .route("/external-integrations/cpa/models", get(cpa::get_models))
         .route(
             "/external-integrations/cpa/models/refresh",
             post(cpa::refresh_models),

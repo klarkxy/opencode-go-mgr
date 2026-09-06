@@ -6634,18 +6634,63 @@ fn cpa_singleton_upsert_catalog_and_disconnect_are_idempotent_and_atomic() {
     );
 
     db.replace_cpa_model_catalog(
-        &["gpt-5.6-sol".into(), "unknown-cpa-model".into()],
+        &[
+            CpaCatalogModel {
+                id: "gpt-5.6-sol".into(),
+                owned_by: Some("openai".into()),
+            },
+            "unknown-cpa-model".into(),
+        ],
         "http://127.0.0.1:9317",
         now,
     )
     .unwrap();
-    assert_eq!(db.cpa_model_catalog().unwrap().unwrap().models.len(), 2);
+    let catalog = db.cpa_model_catalog().unwrap().unwrap();
+    assert_eq!(catalog.models.len(), 2);
+    assert_eq!(catalog.models[0].id, "gpt-5.6-sol");
+    assert_eq!(catalog.models[0].owned_by.as_deref(), Some("openai"));
+    assert!(catalog.models[1].owned_by.is_none());
 
     db.delete_cpa_integration().unwrap();
     db.delete_cpa_integration().unwrap();
     assert!(db.cpa_integration().unwrap().is_none());
     assert!(db.cpa_model_catalog().unwrap().is_none());
     assert!(db.get_account(CPA_ACCOUNT_ID).unwrap().is_none());
+    drop(db);
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn cpa_model_catalog_reads_legacy_id_arrays() {
+    let dir = temp_data_dir("cpa-catalog-legacy-ids");
+    let db = open_with_host_cipher(dir.clone()).unwrap();
+    db.conn
+        .execute(
+            "INSERT INTO provider_model_catalogs
+                 (provider_id, models_json, refreshed_at, source_url)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![
+                CPA_PROVIDER_ID,
+                r#"["gpt-5","claude"]"#,
+                Utc::now().to_rfc3339(),
+                "http://127.0.0.1:8317",
+            ],
+        )
+        .unwrap();
+    let catalog = db.cpa_model_catalog().unwrap().unwrap();
+    assert_eq!(
+        catalog.models,
+        [
+            CpaCatalogModel {
+                id: "gpt-5".into(),
+                owned_by: None,
+            },
+            CpaCatalogModel {
+                id: "claude".into(),
+                owned_by: None,
+            },
+        ]
+    );
     drop(db);
     fs::remove_dir_all(dir).unwrap();
 }

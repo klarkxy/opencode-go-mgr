@@ -1,6 +1,6 @@
 use super::*;
 use crate::crypto::{KeyCipher, StaticKeyCipher};
-use crate::db::Database;
+use crate::db::{CpaCatalogModel, Database};
 use sha2::{Digest, Sha256};
 use std::io::{Cursor, Write};
 use std::sync::Arc;
@@ -723,7 +723,7 @@ async fn candidate_probe_checks_health_management_version_and_inference_key_with
         .probe_candidate(address.port(), "management-key", "inference-key")
         .await
         .unwrap();
-    assert_eq!(models, ["model"]);
+    assert_eq!(CpaCatalogModel::ids(&models), ["model"]);
     drop(state);
     fs::remove_dir_all(dir).unwrap();
 }

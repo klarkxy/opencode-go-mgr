@@ -23,6 +23,8 @@ use rusqlite::{
     params_from_iter,
     types::{Type, Value},
 };
+use serde::de::Error as SerdeError;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
     collections::HashSet,
@@ -46,11 +48,93 @@ pub struct CpaIntegrationRecord {
     pub management_key_cipher: String,
 }
 
+/// One row from the persisted CPA `/v1/models` snapshot.
+/// `owned_by` is CPA's reported source when present; legacy ID-only snapshots
+/// keep it empty until the next explicit refresh.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CpaCatalogModel {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owned_by: Option<String>,
+}
+
+impl From<String> for CpaCatalogModel {
+    fn from(id: String) -> Self {
+        Self { id, owned_by: None }
+    }
+}
+
+impl From<&str> for CpaCatalogModel {
+    fn from(id: &str) -> Self {
+        Self {
+            id: id.to_string(),
+            owned_by: None,
+        }
+    }
+}
+
+impl CpaCatalogModel {
+    pub fn ids(models: &[Self]) -> Vec<String> {
+        models.iter().map(|model| model.id.clone()).collect()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CpaCatalogRecord {
-    pub models: Vec<String>,
+    pub models: Vec<CpaCatalogModel>,
     pub refreshed_at: Option<DateTime<Utc>>,
     pub source_url: String,
+}
+
+/// Accepts both the current `[{id, owned_by}]` snapshot and the legacy
+/// `["id"]` array written before sources were persisted.
+fn parse_cpa_catalog_models(models_json: &str) -> Result<Vec<CpaCatalogModel>, serde_json::Error> {
+    let value: serde_json::Value = serde_json::from_str(models_json)?;
+    let Some(rows) = value.as_array() else {
+        return Err(SerdeError::custom("CPA catalog must be a JSON array"));
+    };
+    let mut models = Vec::new();
+    let mut seen = HashSet::new();
+    for row in rows {
+        let model = match row {
+            serde_json::Value::String(id) => {
+                let id = id.trim();
+                if id.is_empty() {
+                    continue;
+                }
+                CpaCatalogModel {
+                    id: id.to_string(),
+                    owned_by: None,
+                }
+            }
+            serde_json::Value::Object(object) => {
+                let Some(id) = object
+                    .get("id")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                else {
+                    continue;
+                };
+                let owned_by = object
+                    .get("owned_by")
+                    .or_else(|| object.get("ownedBy"))
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_string);
+                CpaCatalogModel {
+                    id: id.to_string(),
+                    owned_by,
+                }
+            }
+            _ => continue,
+        };
+        if seen.insert(model.id.clone()) {
+            models.push(model);
+        }
+    }
+    Ok(models)
 }
 
 /// One fully validated account definition ready for an atomic migration import.
@@ -5619,7 +5703,7 @@ impl Database {
                 |row| {
                     let models_json: String = row.get(0)?;
                     let refreshed_at: Option<String> = row.get(1)?;
-                    let models = serde_json::from_str(&models_json).map_err(|error| {
+                    let models = parse_cpa_catalog_models(&models_json).map_err(|error| {
                         rusqlite::Error::FromSqlConversionFailure(0, Type::Text, Box::new(error))
                     })?;
                     let refreshed_at = refreshed_at
@@ -5648,7 +5732,7 @@ impl Database {
 
     pub fn replace_cpa_model_catalog(
         &self,
-        models: &[String],
+        models: &[CpaCatalogModel],
         source_url: &str,
         refreshed_at: DateTime<Utc>,
     ) -> Result<()> {

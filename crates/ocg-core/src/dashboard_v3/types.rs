@@ -183,6 +183,7 @@ pub const CATALOG_TYPE_NAMES: &[&str] = &[
     "CpaIntegrationUpdate",
     "CpaTestRequest",
     "CpaConnectionReport",
+    "CpaModel",
     "CpaModels",
     "CpaAccounts",
     "CpaAccount",
@@ -2767,8 +2768,17 @@ pub struct CpaConnectionReport {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 #[schemars(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CpaModel {
+    pub id: String,
+    pub owned_by: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CpaModels {
-    pub models: Vec<String>,
+    pub models: Vec<CpaModel>,
+    pub source_url: Option<String>,
     pub refreshed_at: Option<String>,
     pub revision: u64,
     pub process_generation: u64,
@@ -3241,6 +3251,7 @@ pub fn contract_schema() -> Value {
     include_type::<ApplicationConnectorCommitResult>(&mut serialize);
     include_type::<CpaIntegration>(&mut serialize);
     include_type::<CpaConnectionReport>(&mut serialize);
+    include_type::<CpaModel>(&mut serialize);
     include_type::<CpaModels>(&mut serialize);
     include_type::<CpaAccounts>(&mut serialize);
     include_type::<CpaAccount>(&mut serialize);

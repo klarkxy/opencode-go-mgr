@@ -145,6 +145,7 @@ export type DashboardApiV3 =
   | CpaIntegrationUpdate
   | CpaTestRequest
   | CpaConnectionReport
+  | CpaModel
   | CpaModels
   | CpaAccounts
   | CpaAccount
@@ -1847,11 +1848,16 @@ export interface CpaConnectionReport {
   revision: number;
   version: string | null;
 }
+export interface CpaModel {
+  id: string;
+  ownedBy: string | null;
+}
 export interface CpaModels {
-  models: string[];
+  models: CpaModel[];
   processGeneration: number;
   refreshedAt: string | null;
   revision: number;
+  sourceUrl: string | null;
 }
 export interface CpaAccounts {
   accounts: CpaAccount[];

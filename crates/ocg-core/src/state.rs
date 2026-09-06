@@ -318,7 +318,7 @@ impl CoreStateInner {
         let zen_free_models = db.zen_free_model_catalog()?.unwrap_or_default();
         let cpa_models = db
             .cpa_model_catalog()?
-            .map(|catalog| catalog.models)
+            .map(|catalog| crate::db::CpaCatalogModel::ids(&catalog.models))
             .unwrap_or_default();
         let custom_runtimes = db.list_custom_account_runtimes()?;
         let dynamic_providers = db.list_dynamic_providers()?;
@@ -463,13 +463,14 @@ impl CoreStateInner {
 
     pub fn activate_cpa_model_catalog(
         &self,
-        models: Vec<String>,
+        models: Vec<crate::db::CpaCatalogModel>,
         source_url: &str,
         refreshed_at: chrono::DateTime<chrono::Utc>,
     ) -> crate::Result<()> {
+        let ids = crate::db::CpaCatalogModel::ids(&models);
         let zen = self.zen_free_model_catalog();
         let contracts = self.provider_contracts();
-        let provider_models = sealed_proxy_model_ids(&contracts, &models);
+        let provider_models = sealed_proxy_model_ids(&contracts, &ids);
         let route_set = crate::http_client::build_route_set_with_provider_models(
             &self.config(),
             &zen,
@@ -481,7 +482,7 @@ impl CoreStateInner {
             let mut active = self.cpa_models.write();
             db.replace_cpa_model_catalog(&models, source_url, refreshed_at)?;
             *http_client = Arc::new(route_set);
-            *active = Arc::new(models);
+            *active = Arc::new(ids);
         }
         self.routing.reset();
         Ok(())

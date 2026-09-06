@@ -2303,12 +2303,31 @@
       ],
       "type": "object"
     },
+    "CpaModel": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "ownedBy": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "ownedBy"
+      ],
+      "type": "object"
+    },
     "CpaModels": {
       "additionalProperties": false,
       "properties": {
         "models": {
           "items": {
-            "type": "string"
+            "$ref": "#/$defs/CpaModel"
           },
           "type": "array"
         },
@@ -2327,10 +2346,17 @@
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
+        },
+        "sourceUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
         "models",
+        "sourceUrl",
         "refreshedAt",
         "revision",
         "processGeneration"
@@ -7214,6 +7240,9 @@
     },
     {
       "$ref": "#/$defs/CpaConnectionReport"
+    },
+    {
+      "$ref": "#/$defs/CpaModel"
     },
     {
       "$ref": "#/$defs/CpaModels"
