@@ -974,6 +974,7 @@ const OLLAMA_PRICING_HTML: &str = r#"
   <tr><td>glm-5.3-flash</td><td>$0.15</td><td>$0.03</td><td>$0.50</td></tr>
   <tr><td>gpt-oss:20b</td><td>$0.07</td><td>$0.035</td><td>$0.30</td></tr>
   <tr><td>gpt-oss:120b</td><td>$0.15</td><td>$0.014</td><td>$0.60</td></tr>
+  <tr><td>mistral-large-3</td><td>$0.50</td><td>-</td><td>$1.50</td></tr>
 </table>
 "#;
 
@@ -982,7 +983,7 @@ fn ollama_parser_reads_official_table_and_pins_multiplier_to_one() {
     let snapshot = parse_ollama_html(OLLAMA_PRICING_HTML).unwrap();
     assert_eq!(snapshot.provider_id(), OLLAMA_PROVIDER_ID);
     assert_eq!(snapshot.source_url(), OLLAMA_SOURCE_URL);
-    assert_eq!(snapshot.values().len(), 3);
+    assert_eq!(snapshot.values().len(), 4);
     let flash = snapshot
         .values()
         .iter()
@@ -1033,6 +1034,24 @@ fn ollama_estimate_matches_runtime_tags_and_uses_cached_price_only_when_reported
     );
     let oss = snapshot.estimate("gpt-oss:20b:cloud", 1_000_000, 0, 0, 0, at);
     assert_eq!(oss.raw_cost_usd, Some(0.07));
+}
+
+#[test]
+fn ollama_dash_cached_price_bills_cached_tokens_at_the_input_rate() {
+    let snapshot = parse_ollama_html(OLLAMA_PRICING_HTML).unwrap();
+    let mistral = snapshot
+        .values()
+        .iter()
+        .find(|value| value.model_id() == "mistral-large-3")
+        .unwrap();
+    assert_eq!(mistral.cache_read_per_million(), None);
+
+    let at = DateTime::parse_from_rfc3339("2026-09-01T00:00:00Z")
+        .unwrap()
+        .with_timezone(&Utc);
+    let estimate = snapshot.estimate("mistral-large-3", 1_000_000, 1_000_000, 400_000, 0, at);
+    assert_eq!(estimate.cost_state, "priced");
+    assert_eq!(estimate.raw_cost_usd, Some(0.50 + 1.50));
 }
 
 #[test]

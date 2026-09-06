@@ -223,9 +223,12 @@ impl ProviderScopedPricingSnapshot {
         if matches!(rates, (None, None, None)) && value.cache_write_per_million().is_none() {
             return PricingEstimate::free(&self.revision);
         }
-        let (Some(input), Some(output), Some(cache_read)) = rates else {
+        let (Some(input), Some(output), ..) = rates else {
             return PricingEstimate::unpriced(&self.revision);
         };
+        // A model without a published cache rate bills cached traffic at the
+        // input rate, matching how cache writes already fall back.
+        let cache_read = value.cache_read_per_million().unwrap_or(input);
         let cache_write = value.cache_write_per_million().unwrap_or(input);
         let raw_cost = (uncached * input
             + completion * output
@@ -673,7 +676,7 @@ pub fn parse_ollama_html(html: &str) -> Result<ProviderScopedPricingSnapshot> {
             bail!("Ollama Cloud model pricing table contains an invalid or duplicate model");
         }
         let input = parse_ollama_money(&row[1])?;
-        let cached = parse_ollama_money(&row[2])?;
+        let cached = parse_ollama_cached(&row[2])?;
         let output = parse_ollama_money(&row[3])?;
         values.push(
             ProviderPricingValue::new(
@@ -681,7 +684,7 @@ pub fn parse_ollama_html(html: &str) -> Result<ProviderScopedPricingSnapshot> {
                 model_id,
                 Some(input),
                 Some(output),
-                Some(cached),
+                cached,
                 None,
                 None,
                 None,
@@ -718,6 +721,10 @@ pub fn parse_ollama_html(html: &str) -> Result<ProviderScopedPricingSnapshot> {
 fn parse_ollama_money(value: &str) -> Result<f64> {
     parse_dollar(value.trim(), false)?
         .ok_or_else(|| anyhow!("Ollama Cloud pricing cell is missing a USD value: {value}"))
+}
+
+fn parse_ollama_cached(value: &str) -> Result<Option<f64>> {
+    parse_dollar(value.trim(), true)
 }
 
 fn parse_count_before(plain: &str, marker: &str) -> Result<usize> {
