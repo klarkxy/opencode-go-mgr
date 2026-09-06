@@ -161,8 +161,7 @@ bump 该进程的 `settings_revision`。它不能创建 Custom 账号、子 Key 
 
 **没有 `TAURI_SIGNING_PRIVATE_KEY` 时只生成普通本地包，不能用于应用内升级，仅供本地冒烟测试。**
 
-在 Windows 上，Tauri 可能把 `src-tauri/Cargo.toml` 与 `src-tauri/gen/schemas/*.json` 的换行符转为 CRLF。
-构建后检查差异，只清理构建引入的无关变化，保留版本更新和其他有意修改。
+换行符跟随 Git 默认的 `core.autocrlf`。Git for Windows 默认为 `true`：检出为 CRLF，提交时存 LF。本地 Tauri 构建可能改写 `src-tauri/Cargo.toml` 与 `src-tauri/gen/schemas/*.json`——检查差异，保留版本更新和其他有意修改。
 
 ---
 

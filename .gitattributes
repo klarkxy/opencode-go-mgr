@@ -1,18 +1,3 @@
-# Keep git hooks executable and LF-only on all platforms.
-.githooks/** text eol=lf
-
-# Tauri / Cargo tooling rewrites these with CRLF on Windows; force LF so
-# `git status` stays clean under core.autocrlf=true.
-*.toml text eol=lf
-*.rs text eol=lf
-*.json text eol=lf
-*.yaml text eol=lf
-*.yml text eol=lf
-*.ts text eol=lf
-*.mts text eol=lf
-*.vue text eol=lf
-*.css text eol=lf
-*.mjs text eol=lf
-*.sh text eol=lf
-*.md text eol=lf
-*.lock text eol=lf
+# Detect text and let core.autocrlf own working-tree endings.
+# Git for Windows defaults to autocrlf=true: checkout CRLF, commit LF.
+* text=auto

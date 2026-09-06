@@ -208,10 +208,10 @@ Signing-related environment variables (same as CI / MAINTAINER):
 produced, which cannot be used for in-app upgrades and are only for local
 smoke tests.**
 
-On Windows, Tauri may convert line endings of `src-tauri/Cargo.toml` and
-`src-tauri/gen/schemas/*.json` to CRLF. Inspect the diff after building and
-discard only incidental build changes, preserving version updates and other
-intentional edits.
+Line endings follow Git's default `core.autocrlf`. Git for Windows sets it
+to `true`: checkout is CRLF, commits store LF. A local Tauri build may
+rewrite `src-tauri/Cargo.toml` and `src-tauri/gen/schemas/*.json` —
+inspect the diff and keep version updates and other intentional edits.
 ---
 
 [Maintainer guide index](../MAINTAINER.md) · [简体中文](development.zh-CN.md) · [Docs index](../README.md)
