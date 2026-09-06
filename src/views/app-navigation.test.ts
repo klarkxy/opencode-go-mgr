@@ -14,7 +14,7 @@ import {
 test("navigation metadata keeps the fixed core order and exposes CPA under Extensions", () => {
   assert.deepEqual(
     CORE_APP_NAVIGATION.map(({ key }) => key),
-    ["dashboard", "keys", "accounts", "providers", "aliases", "apps", "logs", "settings"],
+    ["dashboard", "keys", "accounts", "providers", "aliases", "logs", "settings"],
   );
   assert.deepEqual(EXTENSION_APP_NAVIGATION.map(({ key }) => key), ["cpa"]);
   assert.equal(APP_NAVIGATION_GROUPS.extensions.label, "扩展");

@@ -12,7 +12,6 @@ export type AppNavigationIcon =
   | "accounts"
   | "providers"
   | "aliases"
-  | "apps"
   | "logs"
   | "settings"
   | "cpa";
@@ -32,7 +31,6 @@ export const APP_NAVIGATION = [
   { key: "accounts", label: "账号", icon: "accounts", group: "core" },
   { key: "providers", label: "供应商", icon: "providers", group: "core" },
   { key: "aliases", label: "别名", icon: "aliases", group: "core" },
-  { key: "apps", label: "应用", icon: "apps", group: "core" },
   { key: "logs", label: "日志", icon: "logs", group: "core" },
   { key: "settings", label: "设置", icon: "settings", group: "core" },
   { key: "cpa", label: "CPA", icon: "cpa", group: "extensions" },

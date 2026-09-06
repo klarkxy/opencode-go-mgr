@@ -200,7 +200,6 @@
               <Accounts v-else-if="activeKey === 'accounts'" />
               <Providers v-else-if="activeKey === 'providers'" />
               <Aliases v-else-if="activeKey === 'aliases'" />
-              <Applications v-else-if="activeKey === 'apps'" />
               <Logs v-else-if="activeKey === 'logs'" />
               <Settings
                 v-else-if="activeKey === 'settings'"
@@ -243,7 +242,6 @@ import {
 } from "naive-ui";
 import type { DropdownMenuProps, DropdownOption, MenuOption } from "naive-ui";
 import {
-  AppstoreOutlined,
   ApiOutlined,
   BgColorsOutlined,
   CheckOutlined,
@@ -295,7 +293,6 @@ type ViewKey = AppViewKey;
 const Dashboard = defineAsyncComponent(() => import("./views/Dashboard.vue"));
 const Keys = defineAsyncComponent(() => import("./views/Keys.vue"));
 const Accounts = defineAsyncComponent(() => import("./views/Accounts.vue"));
-const Applications = defineAsyncComponent(() => import("./views/Applications.vue"));
 const Providers = defineAsyncComponent(() => import("./views/Providers.vue"));
 const Aliases = defineAsyncComponent(() => import("./views/Aliases.vue"));
 const Logs = defineAsyncComponent(() => import("./views/Logs.vue"));
@@ -350,7 +347,6 @@ const navigationIcons: Record<AppNavigationItem["icon"], Component> = {
   accounts: TeamOutlined,
   providers: CloudServerOutlined,
   aliases: LinkOutlined,
-  apps: AppstoreOutlined,
   logs: FileTextOutlined,
   settings: SettingOutlined,
   cpa: ApiOutlined,
