@@ -9,6 +9,12 @@ and verify them against the release's `SHA256SUMS`:
 on macOS, or `sha256sum <file>` on Linux. Backups, restores, and removal are
 the kind of operations that are boring right up until they aren't.
 
+On Windows, the in-app updater preserves the existing installation directory
+when upgrading from OCG Manager to Open Console Gateway. A manual installer
+should use the existing directory to replace the old installation. The upgrade
+keeps the data directory and auto-start setting, and replaces the old installed-app
+registration with the new product name.
+
 ## Database Migration And Access Keys (Schema v37)
 
 The database schema is **v37**; historical databases migrate in place on

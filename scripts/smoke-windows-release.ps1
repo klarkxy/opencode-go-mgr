@@ -211,6 +211,14 @@ try {
     if (!$updatedRunName) { throw 'Overwrite update removed the startup entry' }
     $startupValue = Get-StartupEntryValue -RunKey $runKey -Name $updatedRunName
     if ($startupValue -ne $expectedStartupValue) { throw "Overwrite update changed startup value: $startupValue" }
+    if ($previousRunName -eq $LegacyRunValue) {
+      if (Test-Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\OCG Manager') {
+        throw 'Overwrite update left the legacy installed-app registration behind'
+      }
+      if (Test-Path 'HKCU:\Software\klarkxy\OCG Manager') {
+        throw 'Overwrite update left the legacy installation location behind'
+      }
+    }
   } else {
     Invoke-Installer -Path $CandidateInstaller -Arguments @('/S', "/D=$installDir") -Label 'candidate install'
     $gui = Get-ChildItem $installDir -Recurse -Filter ocg-manager.exe | Select-Object -First 1
