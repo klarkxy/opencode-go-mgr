@@ -80,7 +80,9 @@ jobs:
           echo "stable=$stable" >> "$GITHUB_OUTPUT"
           echo "minor=$minor" >> "$GITHUB_OUTPUT"
           echo "publish_latest=$publish_latest" >> "$GITHUB_OUTPUT"
-          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          # GHCR package names are independent of the renamed source repository.
+          # Keep existing public packages and Compose installs on the same channels.
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/opencode-go-mgr"
           echo "image=$image" >> "$GITHUB_OUTPUT"
           echo "browser_image=${image}-browser" >> "$GITHUB_OUTPUT"
 

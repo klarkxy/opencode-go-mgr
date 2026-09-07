@@ -28,9 +28,9 @@
 
 ## Settings 变更流程
 
-[![Dashboard V3 Settings 变更流程](../diagrams/dashboard-v3-mutation.visual-check.1440x900.light.png)](https://klarkxy.github.io/opencode-go-mgr/diagrams/dashboard-v3-mutation/)
+[![Dashboard V3 Settings 变更流程](../diagrams/dashboard-v3-mutation.visual-check.1440x900.light.png)](https://klarkxy.github.io/open-console-gateway/diagrams/dashboard-v3-mutation/)
 
-[在 GitHub Pages 打开交互式流程图](https://klarkxy.github.io/opencode-go-mgr/diagrams/dashboard-v3-mutation/)。
+[在 GitHub Pages 打开交互式流程图](https://klarkxy.github.io/open-console-gateway/diagrams/dashboard-v3-mutation/)。
 
 这条流程只描述受 CAS 保护的 Settings 写入；发现、诊断和读取操作可能按上文所述跳过 CAS。客户端提交 `expectedRevision` 与 `processGeneration`。令牌不匹配时返回 `409`；客户端刷新令牌与受影响资源，但不会自动重放写入。
 

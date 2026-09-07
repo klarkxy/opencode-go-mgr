@@ -8,8 +8,8 @@ Docker 版在同一个端口 `9042` 上无头提供 Dashboard 和 Gateway。镜�
 的仓库：
 
 ```bash
-git clone --branch v2.2.0 --depth 1 https://github.com/klarkxy/opencode-go-mgr.git
-cd opencode-go-mgr
+git clone --branch v2.2.1 --depth 1 https://github.com/klarkxy/open-console-gateway.git
+cd open-console-gateway
 cp .env.example .env
 # PowerShell: Copy-Item .env.example .env
 # Edit .env before exposing the service outside the host.
@@ -20,12 +20,17 @@ docker compose ps
 
 镜像标签会动；先决定是跟车还是钉死。
 
+源码仓库现为 `klarkxy/open-console-gateway`。已发布的 GHCR 镜像继续使用
+`ghcr.io/klarkxy/opencode-go-mgr` 和 `ghcr.io/klarkxy/opencode-go-mgr-browser`；
+仓库改名不会同步更改镜像包名。Compose 和容器发布工作流保留这些现有名称，
+使已有安装继续沿用同一升级通道。
+
 ## 选择镜像
 
 - 仓库源码里的 `compose.yaml` 默认用 `latest`；Release 的
   `compose.example.yaml` 钉死对应完整版本。
 - 生产部署建议在 `.env` 中用 `OCG_IMAGE` 固定完整版本标签，例如
-  `ghcr.io/klarkxy/opencode-go-mgr:2.2.0`。
+  `ghcr.io/klarkxy/opencode-go-mgr:2.2.1`。
 - 完整版本与 `sha-<commit>` 标签指向单次发布，按策略不应移动；
   `1.5` 与 `latest` 会继续移动。技术上只有 digest
   `ghcr.io/klarkxy/opencode-go-mgr@sha256:...` 真正不可变。
@@ -172,14 +177,14 @@ curl --fail http://127.0.0.1:9042/dashboard/
 的 provenance attestation。可这样检查发布版本：
 
 ```bash
-docker buildx imagetools inspect ghcr.io/klarkxy/opencode-go-mgr:2.2.0
-docker buildx imagetools inspect ghcr.io/klarkxy/opencode-go-mgr-browser:2.2.0
+docker buildx imagetools inspect ghcr.io/klarkxy/opencode-go-mgr:2.2.1
+docker buildx imagetools inspect ghcr.io/klarkxy/opencode-go-mgr-browser:2.2.1
 gh attestation verify \
-  oci://ghcr.io/klarkxy/opencode-go-mgr:2.2.0 \
-  --repo klarkxy/opencode-go-mgr
+  oci://ghcr.io/klarkxy/opencode-go-mgr:2.2.1 \
+  --repo klarkxy/open-console-gateway
 gh attestation verify \
-  oci://ghcr.io/klarkxy/opencode-go-mgr-browser:2.2.0 \
-  --repo klarkxy/opencode-go-mgr
+  oci://ghcr.io/klarkxy/opencode-go-mgr-browser:2.2.1 \
+  --repo klarkxy/open-console-gateway
 ```
 
 两条 `gh attestation verify` 命令都要求 GitHub CLI 已登录。公开镜像可匿名

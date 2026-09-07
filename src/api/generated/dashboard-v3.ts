@@ -157,6 +157,10 @@ export type DashboardApiV3 =
   | CpaOAuthStart
   | CpaOAuthStatus
   | CpaOAuthSessionDelete
+  | CpaCliImportSource
+  | CpaCliImports
+  | CpaCliImportRequest
+  | CpaCliImportResult
   | CpaRuntime
   | CpaRuntimePhase
   | CpaRuntimeCheck
@@ -290,6 +294,7 @@ export type ApplicationConnectorAction = "connect" | "restore";
 export type ApplicationConnectorStatus =
   "unsupported_runtime" | "not_detected" | "manual_only" | "ready" | "connected" | "conflict" | "partial";
 export type CpaOAuthProvider = "codex" | "anthropic" | "antigravity" | "kimi" | "xai";
+export type CpaCliImportOutcome = "imported" | "alreadyImported" | "unconfirmed";
 export type CpaRuntimePhase = "idle" | "checking" | "downloading" | "installing" | "starting" | "failed";
 /**
  * Auth kind owned by a dynamic Provider. Independent of protocol.
@@ -1928,6 +1933,10 @@ export interface CpaQuotaReset {
  */
 export interface CpaOAuthStartRequest {
   expectedRevision: number;
+  /**
+   * Browser is the backward-compatible default; device is managed Codex only.
+   */
+  method?: "browser" | "device";
   processGeneration: number;
   provider: CpaOAuthProvider;
 }
@@ -1959,6 +1968,38 @@ export interface CpaOAuthSessionDelete {
   expectedRevision: number;
   processGeneration: number;
   state: string;
+}
+export interface CpaCliImportSource {
+  /**
+   * File presence only. Credentials are read exclusively on explicit import.
+   */
+  available: boolean;
+  provider: CpaOAuthProvider;
+  reason: string | null;
+  source: string;
+  supported: boolean;
+}
+export interface CpaCliImports {
+  sources: CpaCliImportSource[];
+}
+/**
+ * Required process-scoped mutation precondition.
+ *
+ * Both fields travel at the top level of every mutation request. The random
+ * process generation prevents a revision captured before restart from being
+ * accepted by a fresh process whose in-memory counter reused the same value.
+ */
+export interface CpaCliImportRequest {
+  expectedRevision: number;
+  processGeneration: number;
+  provider: CpaOAuthProvider;
+}
+export interface CpaCliImportResult {
+  name: string;
+  outcome: CpaCliImportOutcome;
+  processGeneration: number;
+  provider: CpaOAuthProvider;
+  revision: number;
 }
 /**
  * Secret-free CPA runtime snapshot. `supported` is true only on an

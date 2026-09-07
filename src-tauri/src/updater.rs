@@ -7,7 +7,7 @@ use tauri::AppHandle;
 use tauri_plugin_updater::{UpdaterBuilder, UpdaterExt};
 
 const UPDATE_ENDPOINT: &str =
-    "https://github.com/klarkxy/opencode-go-mgr/releases/latest/download/latest.json";
+    "https://github.com/klarkxy/open-console-gateway/releases/latest/download/latest.json";
 const UPDATE_CHECK_TIMEOUT: Duration = Duration::from_secs(30);
 const UPDATE_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 

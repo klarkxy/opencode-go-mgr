@@ -69,9 +69,9 @@ Windows 全量运行发现了免费模型别名的诊断入口问题，修正后
 
 ## CI 证据与剩余门槛
 
-- [草稿 PR #57](https://github.com/klarkxy/opencode-go-mgr/pull/57)。
-- [`b72a82fb` 的 Quality](https://github.com/klarkxy/opencode-go-mgr/actions/runs/34081349089)：通过。
-- [最终 Windows 候选](https://github.com/klarkxy/opencode-go-mgr/actions/runs/34081353017)：`b72a82fb` 通过。
-- [macOS Universal](https://github.com/klarkxy/opencode-go-mgr/actions/runs/34079065269/job/101610886207) 与 [Linux x64](https://github.com/klarkxy/opencode-go-mgr/actions/runs/34079065269/job/101610886205)：`917984b9` 通过。此后的源码修改仅影响 Windows 安装器及其冒烟检查，另有配套指南更新。
+- [草稿 PR #57](https://github.com/klarkxy/open-console-gateway/pull/57)。
+- [`b72a82fb` 的 Quality](https://github.com/klarkxy/open-console-gateway/actions/runs/34081349089)：通过。
+- [最终 Windows 候选](https://github.com/klarkxy/open-console-gateway/actions/runs/34081353017)：`b72a82fb` 通过。
+- [macOS Universal](https://github.com/klarkxy/open-console-gateway/actions/runs/34079065269/job/101610886207) 与 [Linux x64](https://github.com/klarkxy/open-console-gateway/actions/runs/34079065269/job/101610886205)：`917984b9` 通过。此后的源码修改仅影响 Windows 安装器及其冒烟检查，另有配套指南更新。
 
 源码评审、网关检查和三平台候选验收已通过，结果仅覆盖上文列出的范围。发布决策应依据[正式发布流程](../../../maintainer/releasing.zh-CN.md)，结合待发布改动评估未执行的检查。手动候选流程不会创建 Release，也不接收 updater 签名密钥，因此签名与分发仍由发布阶段检查。本次未合并、打标签、正式发布或部署。

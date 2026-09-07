@@ -179,6 +179,10 @@ pub fn api_router(state: CoreState) -> Router<CoreState> {
             post(cpa::reset_quota),
         )
         .route(
+            "/external-integrations/cpa/cli-imports",
+            get(cpa::cli_import_sources).post(cpa::import_cli_account),
+        )
+        .route(
             "/external-integrations/cpa/oauth/start",
             post(cpa::start_oauth),
         )

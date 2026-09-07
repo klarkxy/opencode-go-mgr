@@ -15,10 +15,14 @@ use nix::unistd::{getpgrp, getpid};
 const MARKER: &str = "--ocg-internal-cpa-supervisor";
 static STOP_REQUESTED: AtomicBool = AtomicBool::new(false);
 
-pub(super) fn command(executable: &Path, config: &Path) -> std::io::Result<Command> {
+pub(super) fn command(executable: &Path, config: &Path, device: bool) -> std::io::Result<Command> {
     let mut command = Command::new(std::env::current_exe()?);
     #[cfg(not(test))]
     command.arg(MARKER).arg(executable).arg(config);
+    #[cfg(not(test))]
+    if device {
+        command.arg("--codex-device-login");
+    }
     // Rust's unit-test executable has its own main. Re-enter one exact test
     // instead; it calls the identical supervisor loop without an app runtime.
     #[cfg(test)]
@@ -29,7 +33,8 @@ pub(super) fn command(executable: &Path, config: &Path) -> std::io::Result<Comma
             "--nocapture",
         ])
         .env("OCG_CPA_TEST_EXECUTABLE", executable)
-        .env("OCG_CPA_TEST_CONFIG", config);
+        .env("OCG_CPA_TEST_CONFIG", config)
+        .env("OCG_CPA_TEST_DEVICE", if device { "1" } else { "0" });
     Ok(command)
 }
 
@@ -41,17 +46,22 @@ pub(super) fn run_if_requested() {
     let (Some(executable), Some(config)) = (args.next(), args.next()) else {
         std::process::exit(2);
     };
+    let device = match args.next() {
+        None => false,
+        Some(arg) if arg == "--codex-device-login" => true,
+        _ => std::process::exit(2),
+    };
     if args.next().is_some() {
         std::process::exit(2);
     }
-    run(Path::new(&executable), Path::new(&config));
+    run(Path::new(&executable), Path::new(&config), device);
 }
 
 extern "C" fn request_stop(_: nix::libc::c_int) {
     STOP_REQUESTED.store(true, Ordering::Relaxed);
 }
 
-pub(super) fn run(executable: &Path, config: &Path) -> ! {
+pub(super) fn run(executable: &Path, config: &Path, device: bool) -> ! {
     // Refuse a manual invocation in an existing shell/app group. From here to
     // SIGKILL we ourselves keep the group ID alive, even after reaping CPA.
     if getpid() != getpgrp() {
@@ -70,7 +80,11 @@ pub(super) fn run(executable: &Path, config: &Path) -> ! {
         }
     }
 
-    let mut child = match Command::new(executable)
+    let mut command = Command::new(executable);
+    if device {
+        command.args(["--codex-device-login", "--no-browser"]);
+    }
+    let mut child = match command
         .arg("--config")
         .arg(config)
         .stdin(Stdio::null())

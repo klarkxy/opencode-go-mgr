@@ -38,6 +38,9 @@ import type {
   CpaAccountDelete,
   CpaAccountStatusUpdate,
   CpaAccounts,
+  CpaCliImportRequest,
+  CpaCliImportResult,
+  CpaCliImports,
   CpaConnectionReport,
   CpaIntegration,
   CpaIntegrationUpdate,
@@ -433,6 +436,14 @@ export const dashboardV3 = {
   }),
   getCpaOAuthStatus: (state: string) =>
     requestV3<CpaOAuthStatus>(`/external-integrations/cpa/oauth/status?state=${encode(state)}`),
+  getCpaCliImports: () => requestV3<CpaCliImports>("/external-integrations/cpa/cli-imports"),
+  importCpaCliAccount: (
+    input: WithoutExpectation<CpaCliImportRequest>,
+    expectation: MutationExpectation,
+  ) => requestV3<CpaCliImportResult>("/external-integrations/cpa/cli-imports", {
+    method: "POST",
+    body: withExpectation(input, expectation),
+  }),
   cancelCpaOAuth: (
     input: WithoutExpectation<CpaOAuthSessionDelete>,
     expectation: MutationExpectation,

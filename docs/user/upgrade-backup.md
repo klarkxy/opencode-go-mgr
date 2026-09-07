@@ -3,7 +3,7 @@
 # Upgrade, Backup, Restore, And Uninstall
 
 Download upgrades from the
-[latest GitHub Release](https://github.com/klarkxy/opencode-go-mgr/releases/latest)
+[latest GitHub Release](https://github.com/klarkxy/open-console-gateway/releases/latest)
 and verify them against the release's `SHA256SUMS`:
 `Get-FileHash <file> -Algorithm SHA256` on PowerShell, `shasum -a 256 <file>`
 on macOS, or `sha256sum <file>` on Linux. Backups, restores, and removal are

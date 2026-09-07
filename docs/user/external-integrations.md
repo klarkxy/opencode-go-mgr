@@ -81,6 +81,53 @@ installation, its local runtime configuration, and the CPA OAuth credentials
 under the managed `auth/` directory. It never deletes files belonging to an
 externally operated CPA.
 
+### Codex login methods
+
+Codex offers **browser login** and **device login**. Device login requires an
+installed, running OCG-managed CPA with `--codex-device-login` support (verified
+with CPA 7.2.152). Open the authorization page and enter the displayed code;
+enable device-code login in ChatGPT security or workspace settings.
+
+Device login does not listen on port 1455, so it also works when Windows reserves
+that port. OCG starts a separate contained CPA login process; CPA exchanges and
+saves credentials without interrupting the gateway. Cancel, expiry (about 15
+minutes), OCG exit, or a managed runtime lifecycle operation stops the helper.
+Cancelling does not delete credentials already saved by CPA. External CPA
+connections retain browser login: this CPA version has no Codex device-login
+Management API.
+
+### Import a local CLI login
+
+The CPA account page offers **new login** and **import from local CLI**. Detection
+checks file presence only; clicking a provider's import button reads that one
+credential file and sends an allowlisted conversion to CPA. This works with both
+managed CPA and a connected local CPA. Open OCG's local dashboard on the machine
+that runs the CLI; remote dashboards cannot access these sources.
+
+| CLI | Supported source | Boundary |
+| --- | --- | --- |
+| Codex | `$CODEX_HOME/auth.json`, default `~/.codex/auth.json` | ChatGPT OAuth with refresh token; API-key, external, and keychain-only logins are not imported |
+| Claude Code | `$CLAUDE_CONFIG_DIR/.credentials.json`, default `~/.claude/.credentials.json` | OAuth with refresh token and `user:inference`; macOS Keychain requires fresh login unless the CLI already uses its file fallback |
+| Kimi Code | `$KIMI_CODE_HOME/credentials/kimi-code.json`, default `~/.kimi-code/credentials/kimi-code.json` | Official Kimi Code OAuth file format |
+| Grok CLI | `$GROK_HOME/auth.json`, default `~/.grok/auth.json` | Standard `https://auth.x.ai` OIDC entry with CPA's matching client ID; other keys/issuers are rejected |
+| Antigravity | Not supported | No stable compatible local credential storage contract is established; use CPA login |
+
+Import is a one-time copy. OCG does not edit the CLI source, persist OAuth tokens
+in its database, display them, or keep the two stores synchronized. CPA owns the
+imported copy and refreshes it. Both copies share an authorization grant; refresh
+or revocation can require another login. Existing matching imports are not
+overwritten; remove an obsolete CPA entry explicitly before replacing it. Avoid
+managing CPA accounts in another client while importing. When
+CPA does not confirm an upload, OCG reports an unconfirmed result; refresh the
+account list before retrying. Stable import filenames allow retries to reconcile
+the same source identity or unchanged grant instead of blindly creating another file.
+
+The formats were checked against CPA 7.2.152, official Codex storage, Claude
+Code's documented file storage, Kimi Code commit `f9ca333`, and Grok CLI 1.0.13.
+See [Codex storage](https://github.com/openai/codex/blob/main/codex-rs/login/src/auth/storage.rs),
+[Claude storage](https://code.claude.com/docs/en/authentication#credential-management),
+and [Kimi storage](https://github.com/MoonshotAI/kimi-code/blob/f9ca33376604ae91ea35a4ac1d6f1d4425a5aead/packages/oauth/src/storage.ts).
+
 ## Adding another integration
 
 Static external integrations appear in **Extensions**. Contributions include

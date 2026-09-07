@@ -80,9 +80,9 @@ errors remains at `key_verification`.
 
 ### Managed account setup lifecycle
 
-[![Managed account setup lifecycle](../diagrams/managed-account-lifecycle.visual-check.1440x900.light.png)](https://klarkxy.github.io/opencode-go-mgr/diagrams/managed-account-lifecycle/)
+[![Managed account setup lifecycle](../diagrams/managed-account-lifecycle.visual-check.1440x900.light.png)](https://klarkxy.github.io/open-console-gateway/diagrams/managed-account-lifecycle/)
 
-[Open the interactive diagram on GitHub Pages](https://klarkxy.github.io/opencode-go-mgr/diagrams/managed-account-lifecycle/).
+[Open the interactive diagram on GitHub Pages](https://klarkxy.github.io/open-console-gateway/diagrams/managed-account-lifecycle/).
 
 The ordinary setup PATCH may advance exactly one step or return to an earlier
 unfinished step; it never writes `ready`. A separate key-verification request

@@ -39,6 +39,19 @@ pub fn register_owned_host(state: &CoreState) {
     let _ = state;
 }
 
+pub(super) fn new_device_host() -> Result<super::CpaRuntimeHost, CpaRuntimeError> {
+    #[cfg(any(windows, unix))]
+    {
+        Ok(Arc::new(OwnedCpaRuntimeHost::new()))
+    }
+    #[cfg(not(any(windows, unix)))]
+    {
+        Err(CpaRuntimeError::Unavailable(
+            super::UNAVAILABLE_REASON.into(),
+        ))
+    }
+}
+
 #[cfg(windows)]
 type OwnedCpaRuntimeHost = WindowsCpaRuntimeHost;
 #[cfg(unix)]
@@ -223,7 +236,12 @@ fn spawn_owned(spec: &CpaRuntimeProcessSpec) -> Result<OwnedSession, CpaRuntimeE
         ));
     }
     let application = wide_z(&spec.executable);
-    let command_line = windows_command_line(&spec.executable, &spec.config_path)?;
+    let mut command_line = windows_command_line(&spec.executable, &spec.config_path)?;
+    if spec.codex_device_login {
+        command_line.pop();
+        command_line.extend(" --codex-device-login --no-browser".encode_utf16());
+        command_line.push(0);
+    }
     let environment = windows_environment(spec.management_password.expose_to_host());
     let secrets = spec
         .log_secrets
@@ -593,9 +611,9 @@ fn spawn_unix_owned(spec: &CpaRuntimeProcessSpec) -> Result<UnixOwnedSession, Cp
         ));
     }
     let mut command =
-        supervisor::command(&spec.executable, &spec.config_path).map_err(|error| {
-            CpaRuntimeError::Failed(format!("failed to locate CPA supervisor: {error}"))
-        })?;
+        supervisor::command(&spec.executable, &spec.config_path, spec.codex_device_login).map_err(
+            |error| CpaRuntimeError::Failed(format!("failed to locate CPA supervisor: {error}")),
+        )?;
     command
         .current_dir(&spec.working_dir)
         .env(
@@ -734,13 +752,16 @@ impl StreamRedactor {
         const REDACTED: &[u8] = b"[REDACTED]";
         let mut output = Vec::new();
         let secrets = self.secrets.lock().clone();
-        let hold = secrets
-            .iter()
-            .map(Vec::len)
-            .max()
-            .unwrap_or(1)
-            .saturating_sub(1);
-        while !self.pending.is_empty() && (finish || self.pending.len() > hold) {
+        while !self.pending.is_empty() {
+            // Hold only a possible split secret, not an arbitrary tail. CPA's
+            // device prompt must be available while it waits silently for login.
+            if !finish
+                && secrets.iter().any(|secret| {
+                    secret.len() > self.pending.len() && secret.starts_with(&self.pending)
+                })
+            {
+                break;
+            }
             if let Some(secret) = secrets
                 .iter()
                 .find(|secret| self.pending.starts_with(secret))

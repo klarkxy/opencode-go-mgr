@@ -285,28 +285,122 @@
 
         <n-card size="small" :title="t('CPA OAuth 账号')" class="cpa-card">
           <template #header-extra>
-            <span class="cpa-muted">{{ t("由 CPA 管理；OCG 不读取或保存 OAuth Token。") }}</span>
+            <span class="cpa-muted">{{ t("OAuth 凭据由 CPA 保存；本机导入仅临时读取。") }}</span>
           </template>
+          <div class="cpa-cli-import-head"><strong>{{ t("新登录") }}</strong></div>
           <n-space wrap class="oauth-providers">
-            <n-button
-              v-for="provider in CPA_OAUTH_PROVIDERS"
-              :key="provider.id"
-              secondary
-              :disabled="!integration.configured || !!oauth || !!oauthStartingProvider"
-              :loading="oauthStartingProvider === provider.id"
-              @click="startOAuth(provider.id)"
-            >{{ t("登录 {provider}", { provider: provider.label }) }}</n-button>
+            <template v-for="provider in CPA_OAUTH_PROVIDERS" :key="provider.id">
+              <template v-if="provider.id === 'codex'">
+                <n-button
+                  secondary
+                  :disabled="!integration.configured || !!oauth || !!oauthStartingAction || !!cliImporting"
+                  :loading="oauthStartingAction === 'codex:browser'"
+                  @click="startOAuth('codex', 'browser')"
+                >{{ t("Codex 浏览器登录") }}</n-button>
+                <n-button
+                  secondary
+                  :disabled="!integration.configured || !codexDeviceLoginAvailable || !!oauth || !!oauthStartingAction || !!cliImporting"
+                  :loading="oauthStartingAction === 'codex:device'"
+                  @click="startOAuth('codex', 'device')"
+                >{{ t("Codex 设备码登录") }}</n-button>
+              </template>
+              <n-button
+                v-else
+                secondary
+                :disabled="!integration.configured || !!oauth || !!oauthStartingAction || !!cliImporting"
+                :loading="oauthStartingAction === `${provider.id}:browser`"
+                @click="startOAuth(provider.id, 'browser')"
+              >{{ t("登录 {provider}", { provider: provider.label }) }}</n-button>
+            </template>
           </n-space>
-          <n-alert v-if="oauth" type="info" class="cpa-oauth-status" :show-icon="false">
-            <p>{{ t("正在等待 CPA 完成授权…") }}</p>
-            <n-space align="center" wrap>
-              <n-button v-if="oauth.url" size="small" type="primary" tag="a" :href="oauth.url" target="_blank" rel="noopener noreferrer">
-                {{ t("打开授权页面") }}
-              </n-button>
-              <n-tag v-if="oauth.userCode" type="warning">{{ t("设备码：{code}", { code: oauth.userCode }) }}</n-tag>
-              <n-button size="small" secondary :loading="oauthCancelling" @click="cancelOAuth">{{ t("取消当前授权") }}</n-button>
-            </n-space>
+          <p v-if="!codexDeviceLoginAvailable" class="cpa-help">
+            {{ t("设备码登录需要托管 CPA 运行中；外部连接请使用浏览器登录。") }}
+          </p>
+          <n-alert v-if="codexBrowserFailure" type="warning" class="cpa-oauth-status" :title="t('Codex 浏览器登录失败')">
+            <p>{{ codexBrowserFailure }}</p>
+            <template v-if="codexDeviceLoginAvailable">
+              <p>{{ t("如果本机授权回调服务不可用，可改用设备码登录完成授权。") }}</p>
+              <n-button
+                size="small"
+                :disabled="!!oauth || !!oauthStartingAction || !!cliImporting"
+                :loading="oauthStartingAction === 'codex:device'"
+                @click="startOAuth('codex', 'device')"
+              >{{ t("改用设备码登录") }}</n-button>
+            </template>
+            <p v-else>{{ t("设备码登录需要托管 CPA 运行中。") }}</p>
           </n-alert>
+          <n-alert v-if="oauth" type="info" class="cpa-oauth-status" :show-icon="false">
+            <template v-if="oauth.flow === 'device'">
+              <p v-if="oauth.provider === 'codex'">{{ t("打开授权页面并输入下方设备码；请确认 ChatGPT 账号的安全设置或工作区允许设备登录。") }}</p>
+              <p v-else>{{ t("打开授权页面并输入下方设备码完成授权。") }}</p>
+              <div v-if="oauth.userCode" class="cpa-device-code-row">
+                <code class="mono cpa-device-code">{{ oauth.userCode }}</code>
+                <n-button size="small" @click="copyDeviceCode">
+                  {{ copiedTarget === "cpa-device-code" ? t("已复制设备码") : t("复制设备码") }}
+                </n-button>
+              </div>
+              <n-space align="center" wrap>
+                <n-button v-if="oauth.url" size="small" type="primary" tag="a" :href="oauth.url" target="_blank" rel="noopener noreferrer">
+                  {{ t("打开授权页面") }}
+                </n-button>
+                <span v-if="deviceCodeExpiryMinutes" class="cpa-muted">
+                  {{ t("设备码约 {minutes} 分钟后过期", { minutes: deviceCodeExpiryMinutes }) }}
+                </span>
+                <n-button size="small" secondary :loading="oauthCancelling" @click="cancelOAuth">{{ t("取消当前授权") }}</n-button>
+              </n-space>
+            </template>
+            <template v-else>
+              <p>{{ t("正在等待 CPA 完成授权…") }}</p>
+              <n-space align="center" wrap>
+                <n-button v-if="oauth.url" size="small" type="primary" tag="a" :href="oauth.url" target="_blank" rel="noopener noreferrer">
+                  {{ t("打开授权页面") }}
+                </n-button>
+                <n-tag v-if="oauth.userCode" type="warning">{{ t("设备码：{code}", { code: oauth.userCode }) }}</n-tag>
+                <n-button size="small" secondary :loading="oauthCancelling" @click="cancelOAuth">{{ t("取消当前授权") }}</n-button>
+              </n-space>
+            </template>
+          </n-alert>
+
+          <div class="cpa-cli-import">
+            <div class="cpa-cli-import-head">
+              <strong>{{ t("导入本机 CLI 已登录账号") }}</strong>
+              <n-button size="small" quaternary :loading="cliImportsLoading" @click="loadCliImports">{{ t("重新检测") }}</n-button>
+            </div>
+            <p class="cpa-help">
+              {{ t("仅在点击导入时读取本机 CLI 的登录信息并一次性复制到 CPA，源文件不会被修改。导入后与源 CLI 共享同一份授权，令牌刷新失败时可能需要重新登录。") }}
+            </p>
+            <n-alert v-if="cliImportsError" type="warning" :title="t('检测本机 CLI 账号失败: {error}', { error: cliImportsError })">
+              <n-button size="small" secondary :loading="cliImportsLoading" @click="loadCliImports">{{ t("重试") }}</n-button>
+            </n-alert>
+            <div v-else-if="cliImportsLoading && cliImports.length === 0" class="cpa-state"><n-spin size="small" /></div>
+            <div v-else-if="cliImports.length" class="cpa-key-list">
+              <article v-for="source in cliImports" :key="source.provider" class="cpa-key-row">
+                <div class="cpa-account-main">
+                  <strong>{{ cliImportProviderLabel(source.provider) }}</strong>
+                  <span class="cpa-muted mono">{{ source.source }}</span>
+                  <span v-if="!source.supported" class="cpa-muted">{{ source.reason ?? t("暂不支持导入该来源") }}</span>
+                  <span v-else-if="!source.available" class="cpa-muted">{{ source.reason ?? t("未检测到本机登录信息") }}</span>
+                </div>
+                <n-button
+                  size="small"
+                  :disabled="!integration.configured || !source.supported || !source.available || !!oauth || !!oauthStartingAction || (!!cliImporting && cliImporting !== source.provider)"
+                  :loading="cliImporting === source.provider"
+                  @click="importCliAccount(source)"
+                >{{ t("导入") }}</n-button>
+              </article>
+            </div>
+            <p v-else class="cpa-help">{{ t("未检测到可导入的本机 CLI 账号。") }}</p>
+            <n-alert v-if="cliImportNotice" :type="cliImportNotice.type" class="cpa-oauth-status" :show-icon="false">
+              <p>{{ cliImportNotice.text }}</p>
+              <n-button
+                v-if="cliImportNotice.type === 'warning'"
+                size="small"
+                secondary
+                :loading="accountsLoading"
+                @click="refreshAccountsAfterImport"
+              >{{ t("刷新账号列表") }}</n-button>
+            </n-alert>
+          </div>
 
           <div v-if="accountsLoading" class="cpa-state"><n-spin size="small" /></div>
           <n-alert v-else-if="accountsError" type="error" :title="t('CPA 账号操作失败: {error}', { error: accountsError })">
@@ -430,6 +524,7 @@ import {
 } from "naive-ui";
 import type {
   CpaAccount,
+  CpaCliImports,
   CpaConnectionReport,
   CpaIntegration,
   CpaModel,
@@ -486,10 +581,26 @@ const accountsError = ref("");
 const accountAction = ref("");
 const disconnecting = ref(false);
 const oauth = ref<CpaOAuthStart | null>(null);
-const oauthStartingProvider = ref<CpaOAuthProvider | null>(null);
+// Single-flight key `${provider}:${method}` for the start request in flight.
+const oauthStartingAction = ref<string | null>(null);
 const oauthCancelling = ref(false);
+// Last Codex browser-flow failure, kept so the page can offer the device
+// alternative without ever switching flows on its own.
+const codexBrowserFailure = ref<string | null>(null);
 let oauthTimer: number | null = null;
 let oauthPollGeneration = 0;
+
+type CpaOAuthMethod = "browser" | "device";
+
+// CLI import discovery is metadata-only: provider, source label, and support
+// flags. No credential text or arbitrary path ever enters the browser.
+type CpaCliImportSource = CpaCliImports["sources"][number];
+const cliImports = ref<CpaCliImportSource[]>([]);
+const cliImportsLoading = ref(false);
+const cliImportsError = ref("");
+// Single-flight provider key, mutually exclusive with any OAuth flow.
+const cliImporting = ref<string | null>(null);
+const cliImportNotice = ref<{ type: "success" | "warning"; text: string } | null>(null);
 
 const runtime = ref<CpaRuntime | null>(null);
 const runtimeError = ref("");
@@ -523,6 +634,17 @@ const managedRuntimeAvailable = computed(() => (
   integration.value ? cpaManagedRuntimeConfirmed(integration.value, runtime.value) : false
 ));
 const showClientKeys = computed(() => cpaClientKeysAvailable(runtime.value));
+// Device sign-in rides on the managed runtime's local auth flow; an external
+// CPA stays browser-only.
+const codexDeviceLoginAvailable = computed(() => (
+  mode.value === "managed"
+  && integration.value?.runtimeOwned === true
+  && integration.value.runtimeRunning === true
+));
+const deviceCodeExpiryMinutes = computed(() => {
+  const seconds = oauth.value?.flow === "device" ? oauth.value.expiresIn : null;
+  return seconds ? Math.max(1, Math.ceil(seconds / 60)) : null;
+});
 const controls = computed(() => cpaRuntimeControls({
   runtime: runtime.value,
   busy: runtimeAction.value !== "",
@@ -595,6 +717,7 @@ async function runMutation<T>(run: (expectation: MutationExpectation) => Promise
 
 async function load(): Promise<void> {
   bumpRuntimePollGeneration();
+  bumpCliImportGeneration();
   const generation = runtimePollGeneration;
   loading.value = true;
   loadError.value = "";
@@ -623,9 +746,12 @@ async function load(): Promise<void> {
     if (value.configured) {
       await loadAccounts();
       await loadCatalog();
+      // Discovery failures surface inline and never break the page or OAuth.
+      await loadCliImports();
     } else {
       cpaAccounts.value = [];
       resetCatalog();
+      resetCliImports();
     }
     if (generation !== runtimePollGeneration) return;
     if (cpaClientKeysAvailable(runtime.value)) await loadRuntimeKeys();
@@ -807,14 +933,16 @@ async function deleteAccount(account: CpaAccount): Promise<void> {
   }
 }
 
-async function startOAuth(provider: CpaOAuthProvider): Promise<void> {
-  if (oauth.value || oauthStartingProvider.value) return;
+async function startOAuth(provider: CpaOAuthProvider, method: CpaOAuthMethod): Promise<void> {
+  if (oauth.value || oauthStartingAction.value) return;
+  if (method === "device" && !codexDeviceLoginAvailable.value) return;
   // A new flow invalidates any poll still in flight from a previous one.
   bumpOAuthPollGeneration();
   const generation = oauthPollGeneration;
-  oauthStartingProvider.value = provider;
+  oauthStartingAction.value = `${provider}:${method}`;
+  codexBrowserFailure.value = null;
   try {
-    const started = await runMutation((expectation) => dashboardV3.startCpaOAuth({ provider }, expectation));
+    const started = await runMutation((expectation) => dashboardV3.startCpaOAuth({ provider, method }, expectation));
     if (generation !== oauthPollGeneration) {
       // The page left or the flow was superseded while the start was in flight:
       // never adopt the session, but release it server-side on a best-effort basis.
@@ -822,13 +950,19 @@ async function startOAuth(provider: CpaOAuthProvider): Promise<void> {
       return;
     }
     oauth.value = started;
-    if (started.url) window.open(started.url, "_blank", "noopener,noreferrer");
+    // Device sign-in needs the short code read first; only browser flows auto-open.
+    if (method === "browser" && started.url) window.open(started.url, "_blank", "noopener,noreferrer");
     scheduleOAuthPoll();
   } catch (error) {
     if (generation !== oauthPollGeneration) return;
-    message.error(t("CPA 账号操作失败: {error}", { error: dashboardErrorDetail(error) }));
+    const detail = dashboardErrorDetail(error);
+    // A Codex browser start that fails before any state exists (for example the
+    // local callback server never came up) gets the same device alternative as
+    // a mid-flow failure.
+    if (provider === "codex" && method === "browser") codexBrowserFailure.value = detail;
+    message.error(t("CPA 账号操作失败: {error}", { error: detail }));
   } finally {
-    oauthStartingProvider.value = null;
+    oauthStartingAction.value = null;
   }
 }
 
@@ -860,17 +994,26 @@ async function pollOAuth(): Promise<void> {
     if (generation !== oauthPollGeneration || oauth.value?.state !== flowState) return;
     if (isCpaOAuthTerminalStatus(status.status)) {
       bumpOAuthPollGeneration();
+      const finished = oauth.value;
       oauth.value = null;
       if (isCpaOAuthSuccessStatus(status.status)) await loadAccounts();
-      else if (status.error) message.warning(status.error);
+      else {
+        if (status.error) message.warning(status.error);
+        if (finished?.provider === "codex" && finished.flow !== "device") {
+          codexBrowserFailure.value = status.error ?? t("授权未完成");
+        }
+      }
     } else {
       scheduleOAuthPoll();
     }
   } catch (error) {
     if (generation !== oauthPollGeneration || oauth.value?.state !== flowState) return;
     bumpOAuthPollGeneration();
+    const failed = oauth.value;
     oauth.value = null;
-    message.error(t("CPA 账号操作失败: {error}", { error: dashboardErrorDetail(error) }));
+    const detail = dashboardErrorDetail(error);
+    if (failed?.provider === "codex" && failed.flow !== "device") codexBrowserFailure.value = detail;
+    message.error(t("CPA 账号操作失败: {error}", { error: detail }));
   }
 }
 
@@ -893,11 +1036,104 @@ async function cancelOAuth(): Promise<void> {
   }
 }
 
+async function copyDeviceCode(): Promise<void> {
+  const code = oauth.value?.flow === "device" ? oauth.value.userCode : null;
+  if (!code) return;
+  try {
+    await copy("cpa-device-code", code, t("设备码"));
+    message.success(t("已复制设备码"));
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : t("复制失败"));
+  }
+}
+
 function cancelOAuthOnLeave(): void {
   // Bump even with no visible flow so a pending start resolves into a no-op.
   bumpOAuthPollGeneration();
   if (!oauth.value) return;
   void cancelOAuth();
+}
+
+// --- CLI import ---
+
+function cliImportProviderLabel(provider: CpaOAuthProvider): string {
+  return CPA_OAUTH_PROVIDERS.find((entry) => entry.id === provider)?.label ?? provider;
+}
+
+function resetCliImports(): void {
+  cliImports.value = [];
+  cliImportsError.value = "";
+  cliImportNotice.value = null;
+}
+
+// Discovery and import responses older than the latest load, disconnect, or
+// page exit are ignored: they must not mutate UI state, and an import that may
+// already be committed server-side is never "undone" from here.
+let cliImportGeneration = 0;
+
+function bumpCliImportGeneration(): void {
+  cliImportGeneration += 1;
+  // Discovery is read-only and idempotent; letting a superseding load re-issue
+  // it is fine, the generation check keeps only the newest response.
+  cliImportsLoading.value = false;
+}
+
+async function loadCliImports(): Promise<void> {
+  if (cliImportsLoading.value) return;
+  const generation = cliImportGeneration;
+  cliImportsLoading.value = true;
+  cliImportsError.value = "";
+  try {
+    const result = await dashboardV3.getCpaCliImports();
+    if (generation !== cliImportGeneration) return;
+    cliImports.value = result.sources;
+  } catch (error) {
+    if (generation !== cliImportGeneration) return;
+    cliImportsError.value = dashboardErrorDetail(error);
+  } finally {
+    cliImportsLoading.value = false;
+  }
+}
+
+// Import runs only on an explicit click and only one flow of any kind at a time.
+async function importCliAccount(source: CpaCliImportSource): Promise<void> {
+  if (cliImporting.value || oauth.value || oauthStartingAction.value) return;
+  if (!integration.value?.configured || !source.supported || !source.available) return;
+  const generation = cliImportGeneration;
+  cliImporting.value = source.provider;
+  cliImportNotice.value = null;
+  try {
+    const result = await runMutation((expectation) => dashboardV3.importCpaCliAccount({ provider: source.provider }, expectation));
+    if (generation !== cliImportGeneration) return;
+    if (result.outcome === "unconfirmed") {
+      cliImportNotice.value = {
+        type: "warning",
+        text: t("导入结果未确认：请先刷新账号列表确认是否已导入，再决定是否重试；重复导入会按生成的文件名幂等处理，不会产生重复账号。"),
+      };
+    } else {
+      // Product copy names the provider, never the hashed implementation file.
+      const provider = cliImportProviderLabel(result.provider);
+      cliImportNotice.value = {
+        type: "success",
+        text: result.outcome === "alreadyImported"
+          ? t("{provider} 账号已存在，无需重复导入。", { provider })
+          : t("已导入 {provider} 账号。", { provider }),
+      };
+      await loadAccounts();
+    }
+  } catch (error) {
+    if (generation !== cliImportGeneration) return;
+    message.error(t("CPA 账号操作失败: {error}", { error: dashboardErrorDetail(error) }));
+  } finally {
+    cliImporting.value = null;
+  }
+}
+
+// The unconfirmed warning offers this as its only follow-up: a plain account
+// list refresh. It never re-runs or retries the import.
+async function refreshAccountsAfterImport(): Promise<void> {
+  if (accountsLoading.value) return;
+  await loadAccounts();
 }
 
 function confirmDisconnect(): void {
@@ -911,12 +1147,14 @@ function confirmDisconnect(): void {
 }
 
 async function disconnect(): Promise<void> {
+  bumpCliImportGeneration();
   disconnecting.value = true;
   try {
     await runMutation((expectation) => dashboardV3.deleteCpaIntegration(expectation));
     integration.value = await dashboardV3.getCpaIntegration();
     cpaAccounts.value = [];
     resetCatalog();
+    resetCliImports();
     report.value = null;
     draft.value = { baseUrl: integration.value.baseUrl, inferenceKey: "", managementKey: "" };
     message.success(t("CPA 已断开"));
@@ -1001,9 +1239,11 @@ async function refreshAfterRuntimeSettled(): Promise<void> {
   if (integration.value.configured) {
     await loadAccounts();
     await loadCatalog();
+    await loadCliImports();
   } else {
     cpaAccounts.value = [];
     resetCatalog();
+    resetCliImports();
   }
   if (generation !== runtimePollGeneration) return;
   if (cpaClientKeysAvailable(runtime.value)) await loadRuntimeKeys();
@@ -1212,11 +1452,13 @@ onActivated(() => { if (!loading.value) void load(); });
 onDeactivated(() => {
   cancelOAuthOnLeave();
   bumpRuntimePollGeneration();
+  bumpCliImportGeneration();
 });
 onBeforeUnmount(() => {
   window.removeEventListener("pagehide", cancelOAuthOnLeave);
   cancelOAuthOnLeave();
   bumpRuntimePollGeneration();
+  bumpCliImportGeneration();
   cleanupClipboard();
 });
 </script>
@@ -1254,6 +1496,21 @@ onBeforeUnmount(() => {
 }
 .cpa-oauth-status { margin-top: 14px; }
 .cpa-oauth-status p { margin-top: 0; }
+.cpa-device-code-row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 10px 0 14px; }
+.cpa-device-code {
+  padding: 8px 14px;
+  border: 1px solid var(--ocg-divider);
+  border-radius: 6px;
+  background: var(--ocg-surface);
+  color: var(--ocg-ink);
+  font-size: var(--ocg-font-lg);
+  letter-spacing: 0.08em;
+  overflow-wrap: anywhere;
+}
+.cpa-cli-import { display: grid; gap: 8px; margin-top: 16px; }
+.cpa-cli-import-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 2px; color: var(--ocg-ink); }
+.cpa-cli-import .cpa-key-list { margin-top: 0; }
+.cpa-cli-import .cpa-help { margin: 0; }
 .cpa-state { display: grid; justify-content: center; padding: 20px; }
 .cpa-catalog-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .cpa-catalog-meta { display: flex; flex-wrap: wrap; gap: 8px 16px; color: var(--ocg-muted); font-size: var(--ocg-font-sm); }

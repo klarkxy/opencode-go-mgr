@@ -59,9 +59,9 @@ handlers. Retired `/dashboard/api/...` REST paths are tombstoned in
 
 ## Settings mutation workflow
 
-[![Dashboard V3 settings mutation workflow](../diagrams/dashboard-v3-mutation.visual-check.1440x900.light.png)](https://klarkxy.github.io/opencode-go-mgr/diagrams/dashboard-v3-mutation/)
+[![Dashboard V3 settings mutation workflow](../diagrams/dashboard-v3-mutation.visual-check.1440x900.light.png)](https://klarkxy.github.io/open-console-gateway/diagrams/dashboard-v3-mutation/)
 
-[Open the interactive diagram on GitHub Pages](https://klarkxy.github.io/opencode-go-mgr/diagrams/dashboard-v3-mutation/).
+[Open the interactive diagram on GitHub Pages](https://klarkxy.github.io/open-console-gateway/diagrams/dashboard-v3-mutation/).
 
 This sequence is specific to CAS-protected Settings writes; discovery,
 diagnostic, and read operations may skip CAS as described above. The client

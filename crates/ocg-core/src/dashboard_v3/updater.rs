@@ -35,10 +35,10 @@ use super::{V3ApiError, check_expectation, parse_mutation_json};
 
 /// Outbound GitHub latest-release API. Never copied onto `UpdateCheck.releaseUrl`.
 pub const GITHUB_LATEST_RELEASE_API: &str =
-    "https://api.github.com/repos/klarkxy/opencode-go-mgr/releases/latest";
+    "https://api.github.com/repos/klarkxy/open-console-gateway/releases/latest";
 /// Public latest-release page returned to clients.
 pub const GITHUB_LATEST_RELEASE_URL: &str =
-    "https://github.com/klarkxy/opencode-go-mgr/releases/latest";
+    "https://github.com/klarkxy/open-console-gateway/releases/latest";
 const UPDATE_CHECK_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[cfg(debug_assertions)]
@@ -526,7 +526,7 @@ mod tests {
     #[test]
     fn sanitize_update_detail_redacts_secrets_and_control_urls() {
         let detail = sanitize_update_detail(
-            "failed to check GitHub releases (request failed): sk-secret at http://user:pass@127.0.0.1:9/ via https://api.github.com/repos/klarkxy/opencode-go-mgr/releases/latest",
+            "failed to check GitHub releases (request failed): sk-secret at http://user:pass@127.0.0.1:9/ via https://api.github.com/repos/klarkxy/open-console-gateway/releases/latest",
             &["sk-secret"],
         );
         assert!(!detail.contains("sk-secret"));
@@ -581,7 +581,7 @@ mod target_override_tests {
         assert!(parse_loopback_http_url("http://:pass@127.0.0.1:9/").is_none());
         assert!(
             parse_loopback_http_url(
-                "https://api.github.com/repos/klarkxy/opencode-go-mgr/releases/latest"
+                "https://api.github.com/repos/klarkxy/open-console-gateway/releases/latest"
             )
             .is_none()
         );

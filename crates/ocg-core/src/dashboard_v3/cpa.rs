@@ -5,12 +5,13 @@
 use axum::Json;
 use axum::body::Bytes;
 use axum::extract::{Path as AxumPath, Query, State};
-use axum::http::{HeaderValue, header};
+use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::{IntoResponse, Response};
 use chrono::Utc;
 use serde::Deserialize;
 
 use crate::cpa::{self, CpaClient};
+use crate::cpa_cli_import::CliRoots;
 use crate::cpa_runtime::{self, CpaRuntimeError};
 use crate::models::{Account as ModelAccount, AccountSetupStep, AccountType};
 use crate::provider::{
@@ -19,12 +20,13 @@ use crate::provider::{
 use crate::state::CoreState;
 
 use super::types::{
-    CpaAccount, CpaAccountDelete, CpaAccountStatusUpdate, CpaAccounts, CpaConnectionReport,
-    CpaIntegration, CpaIntegrationUpdate, CpaModel, CpaModels, CpaOAuthProvider,
-    CpaOAuthSessionDelete, CpaOAuthStart, CpaOAuthStartRequest, CpaOAuthStatus, CpaQuotaReset,
-    CpaRuntime, CpaRuntimeCheck, CpaRuntimeInstall, CpaRuntimeKey, CpaRuntimeKeyCreated,
-    CpaRuntimeKeys, CpaRuntimeLogs, CpaRuntimePhase, CpaTestRequest, MutationAck,
-    MutationExpectation,
+    CpaAccount, CpaAccountDelete, CpaAccountStatusUpdate, CpaAccounts, CpaCliImportOutcome,
+    CpaCliImportRequest, CpaCliImportResult, CpaCliImportSource, CpaCliImports,
+    CpaConnectionReport, CpaIntegration, CpaIntegrationUpdate, CpaModel, CpaModels, CpaOAuthMethod,
+    CpaOAuthProvider, CpaOAuthSessionDelete, CpaOAuthStart, CpaOAuthStartRequest, CpaOAuthStatus,
+    CpaQuotaReset, CpaRuntime, CpaRuntimeCheck, CpaRuntimeInstall, CpaRuntimeKey,
+    CpaRuntimeKeyCreated, CpaRuntimeKeys, CpaRuntimeLogs, CpaRuntimePhase, CpaTestRequest,
+    MutationAck, MutationExpectation,
 };
 use super::{V3ApiError, check_expectation, parse_json, parse_mutation_json};
 
@@ -373,6 +375,130 @@ pub(super) async fn reset_quota(
     Ok(Json(committed_ack(&state)))
 }
 
+fn require_local_cli_import(state: &CoreState, headers: &HeaderMap) -> Result<(), V3ApiError> {
+    if !crate::dashboard_session::is_local_dashboard_request(state.dashboard_local_mode(), headers)
+    {
+        return Err(V3ApiError::forbidden_at(
+            state,
+            "CLI account import is only available in the local OCG dashboard.",
+        ));
+    }
+    Ok(())
+}
+
+fn cli_import_response(value: impl serde::Serialize) -> Response {
+    let mut response = Json(value).into_response();
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
+}
+
+pub(super) async fn cli_import_sources(
+    State(state): State<CoreState>,
+    headers: HeaderMap,
+) -> Result<Response, V3ApiError> {
+    require_local_cli_import(&state, &headers)?;
+    let roots =
+        CliRoots::from_env().map_err(|message| V3ApiError::invalid_request_at(&state, message))?;
+    let sources = roots
+        .discover()
+        .into_iter()
+        .map(|source| CpaCliImportSource {
+            provider: match source.provider {
+                cpa::CpaOAuthProvider::Codex => CpaOAuthProvider::Codex,
+                cpa::CpaOAuthProvider::Anthropic => CpaOAuthProvider::Anthropic,
+                cpa::CpaOAuthProvider::Antigravity => CpaOAuthProvider::Antigravity,
+                cpa::CpaOAuthProvider::Kimi => CpaOAuthProvider::Kimi,
+                cpa::CpaOAuthProvider::Xai => CpaOAuthProvider::Xai,
+            },
+            source: source.source.into(),
+            supported: source.supported,
+            available: source.available,
+            reason: source.reason.map(str::to_owned),
+        })
+        .collect();
+    Ok(cli_import_response(CpaCliImports { sources }))
+}
+
+pub(super) async fn import_cli_account(
+    State(state): State<CoreState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response, V3ApiError> {
+    require_local_cli_import(&state, &headers)?;
+    let input = parse_mutation_json::<CpaCliImportRequest>(&body)?;
+    let _operation = state.cpa_operations.lock().await;
+    check_before_external_write(&state, &input.expectation)?;
+    let (client, _) = saved_client(&state)?;
+    let roots =
+        CliRoots::from_env().map_err(|message| V3ApiError::invalid_request_at(&state, message))?;
+    let credential = roots
+        .read(cpa_provider(input.provider))
+        .map_err(|message| V3ApiError::invalid_request_at(&state, message))?;
+    import_cli_credential(&state, &client, input, credential).await
+}
+
+async fn import_cli_credential(
+    state: &CoreState,
+    client: &CpaClient,
+    input: CpaCliImportRequest,
+    credential: crate::cpa_cli_import::ImportedCredential,
+) -> Result<Response, V3ApiError> {
+    let (_, accounts) = client
+        .accounts()
+        .await
+        .map_err(|error| map_cpa_error(state, error))?;
+    let existing = accounts
+        .iter()
+        .find(|account| account.name.eq_ignore_ascii_case(&credential.name));
+    check_before_external_write(state, &input.expectation)?;
+    let outcome = if let Some(existing) = existing {
+        if existing.provider != credential.cpa_provider || existing.runtime_only {
+            return Err(V3ApiError::invalid_request_at(
+                state,
+                "CPA import filename conflicts with an existing account.",
+            ));
+        }
+        CpaCliImportOutcome::AlreadyImported
+    } else {
+        // A failed response can follow a committed upstream file write. Keep the
+        // same deterministic name and reconcile instead of blindly creating again.
+        let uploaded = client.upload_cli_credential(&credential).await;
+        let confirmed = client.accounts().await.is_ok_and(|(_, accounts)| {
+            accounts.iter().any(|account| {
+                account.name.eq_ignore_ascii_case(&credential.name)
+                    && account.provider == credential.cpa_provider
+                    && !account.runtime_only
+            })
+        });
+        if !confirmed
+            && let Err(
+                error @ cpa::CpaError::Http {
+                    status: 400..=499, ..
+                },
+            ) = uploaded
+        {
+            return Err(map_cpa_error(state, error));
+        }
+        // Even uncertain writes invalidate the consumed CAS token; status is
+        // explicit and a retry of the same identity will reconcile by filename.
+        state.bump_settings_revision();
+        if confirmed {
+            CpaCliImportOutcome::Imported
+        } else {
+            CpaCliImportOutcome::Unconfirmed
+        }
+    };
+    Ok(cli_import_response(CpaCliImportResult {
+        provider: input.provider,
+        name: credential.name.clone(),
+        outcome,
+        revision: state.settings_revision(),
+        process_generation: state.process_generation(),
+    }))
+}
+
 pub(super) async fn start_oauth(
     State(state): State<CoreState>,
     body: Bytes,
@@ -380,12 +506,32 @@ pub(super) async fn start_oauth(
     let input = parse_mutation_json::<CpaOAuthStartRequest>(&body)?;
     let _operation = state.cpa_operations.lock().await;
     check_before_external_write(&state, &input.expectation)?;
-    let (client, _) = saved_client(&state)?;
-    let provider = cpa_provider(input.provider);
-    let started = client
-        .start_oauth(provider)
-        .await
-        .map_err(|error| map_cpa_error(&state, error))?;
+    let started = match input.method {
+        CpaOAuthMethod::Browser => {
+            let (client, _) = saved_client(&state)?;
+            client
+                .start_oauth(cpa_provider(input.provider))
+                .await
+                .map_err(|error| map_cpa_error(&state, error))?
+        }
+        CpaOAuthMethod::Device => {
+            if input.provider != CpaOAuthProvider::Codex {
+                return Err(V3ApiError::invalid_request_at(
+                    &state,
+                    "Device method is only supported for managed Codex login.",
+                ));
+            }
+            let started = state
+                .start_cpa_device_oauth()
+                .await
+                .map_err(|error| map_runtime_error(&state, error))?;
+            if let Err(error) = check_before_external_write(&state, &input.expectation) {
+                let _ = state.cancel_cpa_device_oauth(&started.state);
+                return Err(error);
+            }
+            started
+        }
+    };
     let revision = state.bump_settings_revision();
     Ok(Json(CpaOAuthStart {
         provider: input.provider,
@@ -404,11 +550,15 @@ pub(super) async fn oauth_status(
     Query(query): Query<OAuthStatusQuery>,
 ) -> Result<Json<CpaOAuthStatus>, V3ApiError> {
     let _operation = state.cpa_operations.lock().await;
-    let (client, _) = saved_client(&state)?;
-    let status = client
-        .oauth_status(&query.state)
-        .await
-        .map_err(|error| map_cpa_error(&state, error))?;
+    let status = if let Some(status) = state.cpa_device_oauth_status(&query.state) {
+        status.map_err(|error| map_runtime_error(&state, error))?
+    } else {
+        let (client, _) = saved_client(&state)?;
+        client
+            .oauth_status(&query.state)
+            .await
+            .map_err(|error| map_cpa_error(&state, error))?
+    };
     Ok(Json(CpaOAuthStatus {
         state: query.state,
         status: status.status,
@@ -688,6 +838,14 @@ pub(super) async fn cancel_oauth(
     let input = parse_mutation_json::<CpaOAuthSessionDelete>(&body)?;
     let _operation = state.cpa_operations.lock().await;
     check_before_external_write(&state, &input.expectation)?;
+    if let Some(cancelled) = state.cancel_cpa_device_oauth(&input.state) {
+        let cancelled = cancelled.map_err(|error| map_runtime_error(&state, error))?;
+        return Ok(Json(if cancelled {
+            committed_ack(&state)
+        } else {
+            current_ack(&state)
+        }));
+    }
     let (client, _) = saved_client(&state)?;
     client
         .cancel_oauth(&input.state)
@@ -990,6 +1148,14 @@ fn redact_cpa_message(message: &str, secrets: &[&str]) -> String {
             message.replace(secret, "[REDACTED]")
         })
 }
+
+#[cfg(test)]
+#[path = "cpa/device_tests.rs"]
+mod device_tests;
+
+#[cfg(test)]
+#[path = "cpa/cli_import_tests.rs"]
+mod cli_import_tests;
 
 #[cfg(test)]
 mod tests {

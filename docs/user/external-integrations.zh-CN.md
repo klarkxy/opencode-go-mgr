@@ -27,6 +27,28 @@ CPA（CLI Proxy API）是本机订阅运行时。Open Console Gateway 可管理�
 
 移除由 OCG 托管的 CPA 运行时则不同：它会删除该托管安装、本地运行时配置，以及托管 `auth/` 目录中的 CPA OAuth 凭据；外部运行的 CPA 文件始终不会被删除。
 
+### Codex 两种登录方式
+
+Codex 提供**浏览器登录**和**设备码登录**。设备码登录需要已安装并运行的 OCG 托管 CPA，且该版本支持 `--codex-device-login`（已核对 CPA 7.2.152）。打开授权页面并输入页面显示的设备码；ChatGPT 账号的安全设置或工作区须允许设备码登录。
+
+设备码通道不监听 1455，因此可以避开 Windows 保留该端口的问题。OCG 启动独立的受控 CPA 登录子进程，令牌兑换和凭据保存仍由 CPA 完成，不中断现有网关。取消、约 15 分钟后过期、OCG 退出或托管运行时生命周期操作都会停止登录子进程；取消不会删除 CPA 已经保存的凭据。外部 CPA 仍使用浏览器登录：当前 CPA 版本没有 Codex 设备码登录管理 API。
+
+### 从本机 CLI 导入登录态
+
+CPA 账号页同时提供**新登录**和**从本机 CLI 导入**。检测仅检查文件是否存在；点击某个 CLI 的导入按钮后，才读取该凭据文件并将转换后的必要字段发送给 CPA。托管 CPA 和已连接的本机 CPA 均可使用。请在运行 CLI 的那台机器上打开 OCG 本机面板；远程面板不能读取这些来源。
+
+| CLI | 支持的来源 | 范围 |
+| --- | --- | --- |
+| Codex | `$CODEX_HOME/auth.json`，默认 `~/.codex/auth.json` | 含刷新令牌的 ChatGPT OAuth；不导入 API Key、外部登录模式或仅存于系统凭据库的登录态 |
+| Claude Code | `$CLAUDE_CONFIG_DIR/.credentials.json`，默认 `~/.claude/.credentials.json` | 含刷新令牌及 `user:inference` 权限的 OAuth；macOS Keychain 登录需重新授权，除非 CLI 已使用文件回退 |
+| Kimi Code | `$KIMI_CODE_HOME/credentials/kimi-code.json`，默认 `~/.kimi-code/credentials/kimi-code.json` | 官方 Kimi Code OAuth 文件格式 |
+| Grok CLI | `$GROK_HOME/auth.json`，默认 `~/.grok/auth.json` | `https://auth.x.ai` 下与 CPA 客户端 ID 一致的标准 OIDC 条目；拒绝其他 Key 或签发方 |
+| Antigravity | 暂不支持 | 尚无可靠的兼容本机凭据存储约定；继续使用 CPA 登录 |
+
+导入是一次性复制。OCG 不修改 CLI 源文件、不将 OAuth Token 存入自身数据库或显示到页面，也不持续同步两边的状态。CPA 保存和刷新导入后的副本。两份凭据共享同一授权，刷新或撤销可能导致另一端需要重新登录。已有匹配导入不会被覆盖；需要替换时，请先明确删除 CPA 中的旧条目。导入期间请避免在其他客户端同时管理 CPA 账号。上传结果无法确认时，页面会提示先刷新账号列表；固定导入文件名用于核对相同来源身份或未变化的授权，避免盲目创建新文件。
+
+格式已对照 CPA 7.2.152、Codex 官方存储实现、Claude Code 文件存储文档、Kimi Code `f9ca333` 和 Grok CLI 1.0.13 核查。参考 [Codex 存储实现](https://github.com/openai/codex/blob/main/codex-rs/login/src/auth/storage.rs)、[Claude 凭据存储](https://code.claude.com/docs/en/authentication#credential-management)及 [Kimi 存储实现](https://github.com/MoonshotAI/kimi-code/blob/f9ca33376604ae91ea35a4ac1d6f1d4425a5aead/packages/oauth/src/storage.ts)。
+
 ## 新增其他接入
 
 静态外部接入出现在 **扩展** 分组。贡献时应提供 typed Dashboard V3 adapter 和有文档的本机边界，供代码评审核对。贡献路径见[扩展 Open Console Gateway](../maintainer/extending.zh-CN.md)。

@@ -15,7 +15,7 @@ import { verifyReleaseAssets } from "./verify-release-assets.mjs";
 
 const VERSION = "1.4.2";
 const TAG = `v${VERSION}`;
-const REPOSITORY = "klarkxy/opencode-go-mgr";
+const REPOSITORY = "klarkxy/open-console-gateway";
 
 function sha256(path) {
   return createHash("sha256").update(readFileSync(path)).digest("hex");

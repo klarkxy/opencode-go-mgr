@@ -5,6 +5,7 @@ pub mod auth;
 pub mod browser;
 pub(crate) mod control;
 pub mod cpa;
+pub(crate) mod cpa_cli_import;
 pub mod cpa_runtime;
 pub mod crypto;
 pub mod custom;

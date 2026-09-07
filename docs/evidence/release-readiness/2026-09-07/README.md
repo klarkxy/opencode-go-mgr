@@ -119,10 +119,10 @@ and the two application startup registry entries were checked/restored.
 
 ## CI evidence and remaining gates
 
-- [Draft PR #57](https://github.com/klarkxy/opencode-go-mgr/pull/57).
-- [Quality on b72a82fb](https://github.com/klarkxy/opencode-go-mgr/actions/runs/34081349089): passed.
-- [Final Windows candidate](https://github.com/klarkxy/opencode-go-mgr/actions/runs/34081353017): passed on `b72a82fb`.
-- [macOS Universal](https://github.com/klarkxy/opencode-go-mgr/actions/runs/34079065269/job/101610886207) and [Linux x64](https://github.com/klarkxy/opencode-go-mgr/actions/runs/34079065269/job/101610886205): passed on `917984b9`. Subsequent source changes affect only the Windows installer and its smoke; paired guides were also updated.
+- [Draft PR #57](https://github.com/klarkxy/open-console-gateway/pull/57).
+- [Quality on b72a82fb](https://github.com/klarkxy/open-console-gateway/actions/runs/34081349089): passed.
+- [Final Windows candidate](https://github.com/klarkxy/open-console-gateway/actions/runs/34081353017): passed on `b72a82fb`.
+- [macOS Universal](https://github.com/klarkxy/open-console-gateway/actions/runs/34079065269/job/101610886207) and [Linux x64](https://github.com/klarkxy/open-console-gateway/actions/runs/34079065269/job/101610886205): passed on `917984b9`. Subsequent source changes affect only the Windows installer and its smoke; paired guides were also updated.
 
 Code review, gateway checks, and three-platform candidate acceptance passed.
 These results cover the boundaries listed above. For a release decision, use

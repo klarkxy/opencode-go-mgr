@@ -200,6 +200,9 @@ async function mount(componentApi: CpaApi): Promise<{ app: App; root: HostNode; 
   const testWindow = installWindow();
   api = {
     getCpaModels: async () => ({ models: [], sourceUrl: null, refreshedAt: null, processGeneration: 1, revision: 1 }),
+    // Default to a valid empty discovery so the CLI import section stays quiet;
+    // tests that care about discovery override this explicitly.
+    getCpaCliImports: async () => ({ sources: [] }),
     ...componentApi,
   };
   (globalThis as { __cpaComponentApi?: CpaApi }).__cpaComponentApi = api;

@@ -743,7 +743,7 @@ async fn dashboard_v3_install_unsupported_busy_failure_and_concurrency() {
     harness
         .state
         .set_desktop_update_starter(Arc::new(move |_| {
-            anyhow::bail!("starter failed for {leak} at https://api.github.com/repos/klarkxy/opencode-go-mgr/releases/latest")
+            anyhow::bail!("starter failed for {leak} at https://api.github.com/repos/klarkxy/open-console-gateway/releases/latest")
         }));
     let before = snapshot_identity(&harness);
     let (status, body) = post_json(

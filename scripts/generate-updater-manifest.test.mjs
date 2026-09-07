@@ -50,7 +50,7 @@ test("buildUpdaterManifest emits exact bundle-aware platform keys and immutable 
     const manifest = buildUpdaterManifest({
       releaseDir: directory,
       tag: "v1.4.2",
-      repository: "klarkxy/opencode-go-mgr",
+      repository: "klarkxy/open-console-gateway",
     });
 
     assert.equal(manifest.version, "1.4.2");
@@ -63,15 +63,15 @@ test("buildUpdaterManifest emits exact bundle-aware platform keys and immutable 
     ]);
     assert.deepEqual(manifest.platforms["windows-x86_64-nsis"], {
       signature: "signature-0",
-      url: "https://github.com/klarkxy/opencode-go-mgr/releases/download/v1.4.2/ocg-manager_1.4.2_windows-x64-setup.exe",
+      url: "https://github.com/klarkxy/open-console-gateway/releases/download/v1.4.2/ocg-manager_1.4.2_windows-x64-setup.exe",
     });
     assert.deepEqual(manifest.platforms["linux-x86_64-appimage"], {
       signature: "signature-1",
-      url: "https://github.com/klarkxy/opencode-go-mgr/releases/download/v1.4.2/ocg-manager_1.4.2_linux-x64.AppImage",
+      url: "https://github.com/klarkxy/open-console-gateway/releases/download/v1.4.2/ocg-manager_1.4.2_linux-x64.AppImage",
     });
     assert.deepEqual(manifest.platforms["linux-x86_64-deb"], {
       signature: "signature-2",
-      url: "https://github.com/klarkxy/opencode-go-mgr/releases/download/v1.4.2/ocg-manager_1.4.2_linux-x64.deb",
+      url: "https://github.com/klarkxy/open-console-gateway/releases/download/v1.4.2/ocg-manager_1.4.2_linux-x64.deb",
     });
     assert.deepEqual(
       manifest.platforms["darwin-x86_64"],
@@ -79,7 +79,7 @@ test("buildUpdaterManifest emits exact bundle-aware platform keys and immutable 
     );
     assert.deepEqual(manifest.platforms["darwin-x86_64"], {
       signature: "signature-3",
-      url: "https://github.com/klarkxy/opencode-go-mgr/releases/download/v1.4.2/ocg-manager_1.4.2_macos-universal.app.tar.gz",
+      url: "https://github.com/klarkxy/open-console-gateway/releases/download/v1.4.2/ocg-manager_1.4.2_macos-universal.app.tar.gz",
     });
   });
 });
@@ -89,7 +89,7 @@ test("writeUpdaterManifest creates latest.json", () => {
     const output = writeUpdaterManifest({
       releaseDir: directory,
       tag: "v1.4.2",
-      repository: "klarkxy/opencode-go-mgr",
+      repository: "klarkxy/open-console-gateway",
     });
     assert.equal(output, join(directory, "latest.json"));
   });
@@ -100,14 +100,14 @@ test("prerelease manifests use immutable prerelease filenames, version, and URLs
     const manifest = buildUpdaterManifest({
       releaseDir: directory,
       tag: `v${version}`,
-      repository: "klarkxy/opencode-go-mgr",
+      repository: "klarkxy/open-console-gateway",
     });
 
     assert.equal(manifest.version, "1.5.8-beta.1");
     assert.ok(assets.every((asset) => asset.includes("1.5.8-beta.1")));
     assert.deepEqual(manifest.platforms["windows-x86_64-nsis"], {
       signature: "signature-0",
-      url: "https://github.com/klarkxy/opencode-go-mgr/releases/download/v1.5.8-beta.1/ocg-manager_1.5.8-beta.1_windows-x64-setup.exe",
+      url: "https://github.com/klarkxy/open-console-gateway/releases/download/v1.5.8-beta.1/ocg-manager_1.5.8-beta.1_windows-x64-setup.exe",
     });
     assert.match(
       manifest.platforms["darwin-aarch64"].url,
@@ -123,7 +123,7 @@ test("missing signature fails closed", () => {
       () => buildUpdaterManifest({
         releaseDir: directory,
         tag: "v1.4.2",
-        repository: "klarkxy/opencode-go-mgr",
+        repository: "klarkxy/open-console-gateway",
       }),
       /Missing updater signature/,
     );

@@ -11,10 +11,9 @@
     <main v-if="authState !== 'ready'" class="auth-page">
       <section class="auth-panel">
         <div class="auth-panel-head">
-          <div class="auth-brand"><span>OCG</span> Gateway</div>
+          <div class="auth-brand"><span>Open</span> Console Gateway</div>
           <LocaleSwitcher />
         </div>
-        <p class="auth-kicker">Open Console Gateway</p>
         <h1>{{ authState === "register" ? t("创建管理员") : t("管理员登录") }}</h1>
         <p v-if="authState === 'checking'" class="auth-copy">{{ t("正在连接管理服务…") }}</p>
         <n-form
@@ -88,8 +87,8 @@
           @expand="collapsed = false"
         >
           <div class="brand" :class="{ collapsed }" aria-label="Open Console Gateway">
-            <span class="brand-mark">OCG</span>
-            <span v-if="!collapsed" class="brand-name">Gateway</span>
+            <span v-if="collapsed" class="brand-mark">OCG</span>
+            <span v-else class="brand-name"><span class="brand-name-primary">Open Console</span><br />Gateway</span>
           </div>
           <n-menu
             :collapsed="collapsed"
@@ -105,7 +104,7 @@
           <n-layout-header bordered class="app-header">
             <div class="desktop-title">{{ currentTitle }}</div>
             <div class="mobile-nav">
-              <span class="brand-mark">OCG</span>
+              <span class="brand-mark" role="img" aria-label="Open Console Gateway">OCG</span>
               <n-dropdown
                 class="mobile-nav-dropdown"
                 trigger="click"
@@ -742,16 +741,8 @@ onUnmounted(() => {
 .brand-mark {
   color: var(--ocg-primary);
 }
-.auth-kicker {
-  margin: 20px 0 6px;
-  color: var(--ocg-primary);
-  font-size: var(--ocg-font-sm);
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-}
 .auth-panel h1 {
-  margin: 0 0 22px;
+  margin: 20px 0 22px;
   font-family: "Bahnschrift", "Segoe UI Variable Display", sans-serif;
   font-size: var(--ocg-font-xl);
 }
@@ -805,6 +796,11 @@ onUnmounted(() => {
   color: var(--ocg-ink);
   font-size: var(--ocg-font-md);
   font-weight: 650;
+  line-height: 1.25;
+  min-width: 0;
+}
+.brand-name-primary {
+  color: var(--ocg-primary);
 }
 .app-header {
   height: 58px;

@@ -3,6 +3,34 @@ use super::*;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+#[test]
+fn stream_redaction_flushes_prompt_without_waiting_for_more_output() {
+    let secrets = Arc::new(Mutex::new(vec![b"management-secret".to_vec()]));
+    let mut redactor = StreamRedactor::new(secrets);
+    let prompt = b"Codex device code: ABCD-1234\n";
+    assert_eq!(redactor.push(prompt), prompt);
+}
+
+#[test]
+fn stream_redaction_protects_every_chunk_boundary_and_overlapping_prefix() {
+    let text = b"x management-secret y abcdef z";
+    for split in 0..=text.len() {
+        let secrets = Arc::new(Mutex::new(normalize_secrets(vec![
+            b"management-secret".to_vec(),
+            b"abc".to_vec(),
+            b"abcdef".to_vec(),
+        ])));
+        let mut redactor = StreamRedactor::new(secrets);
+        let output = [
+            redactor.push(&text[..split]),
+            redactor.push(&text[split..]),
+            redactor.finish(),
+        ]
+        .concat();
+        assert_eq!(output, b"x [REDACTED] y [REDACTED] z", "split {split}");
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn unix_supervisor_entry() {
@@ -13,6 +41,7 @@ fn unix_supervisor_entry() {
     supervisor::run(
         std::path::Path::new(&executable),
         std::path::Path::new(&config),
+        std::env::var("OCG_CPA_TEST_DEVICE").as_deref() == Ok("1"),
     );
 }
 
@@ -26,6 +55,7 @@ fn unix_fixture(dir: &std::path::Path, body: &str) -> CpaRuntimeProcessSpec {
     std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
     std::fs::write(&config_path, "host: 127.0.0.1\n").unwrap();
     CpaRuntimeProcessSpec {
+        codex_device_login: false,
         executable,
         config_path,
         working_dir: dir.to_owned(),
@@ -240,6 +270,7 @@ fn environment_block_sets_management_password() {
 #[test]
 fn unix_command_rejects_missing_executable() {
     let spec = CpaRuntimeProcessSpec {
+        codex_device_login: false,
         executable: PathBuf::from("/no/such/cpa-binary"),
         config_path: PathBuf::from("/tmp/config.yaml"),
         working_dir: PathBuf::from("/tmp"),
@@ -267,6 +298,7 @@ fn owned_sleep_process_is_group_contained_and_stoppable() {
     let config = dir.join("config.yaml");
     std::fs::write(&config, "host: \"127.0.0.1\"\n").unwrap();
     let spec = CpaRuntimeProcessSpec {
+        codex_device_login: false,
         executable: script,
         config_path: config,
         working_dir: dir.clone(),
@@ -296,6 +328,7 @@ fn owned_process_ignoring_term_is_killed_reaped_and_returns_logs() {
     let config = dir.join("config.yaml");
     std::fs::write(&config, "host: 127.0.0.1\n").unwrap();
     let spec = CpaRuntimeProcessSpec {
+        codex_device_login: false,
         executable: script,
         config_path: config,
         working_dir: dir.clone(),

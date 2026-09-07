@@ -478,6 +478,32 @@ impl CpaClient {
         Ok(())
     }
 
+    /// Only normalized server-read CLI credentials can reach this write. Never
+    /// forward an upstream error body: it may echo the uploaded OAuth fields.
+    pub(crate) async fn upload_cli_credential(
+        &self,
+        credential: &crate::cpa_cli_import::ImportedCredential,
+    ) -> Result<(), CpaError> {
+        let mut url = reqwest::Url::parse(&self.url("v0/management/auth-files"))
+            .map_err(|_| CpaError::Invalid("Invalid CPA import endpoint".into()))?;
+        url.query_pairs_mut().append_pair("name", &credential.name);
+        self.send_json_url(
+            Method::POST,
+            url,
+            Some(&self.management_key),
+            Some(credential.payload.clone()),
+        )
+        .await
+        .map(|_| ())
+        .map_err(|error| match error {
+            CpaError::Http { status, .. } => CpaError::Http {
+                status,
+                message: "CPA did not confirm the credential import".into(),
+            },
+            _ => CpaError::Unreachable("CPA did not confirm the credential import".into()),
+        })
+    }
+
     async fn require_mutable_account(
         &self,
         name: &str,

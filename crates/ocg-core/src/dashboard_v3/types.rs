@@ -195,6 +195,10 @@ pub const CATALOG_TYPE_NAMES: &[&str] = &[
     "CpaOAuthStart",
     "CpaOAuthStatus",
     "CpaOAuthSessionDelete",
+    "CpaCliImportSource",
+    "CpaCliImports",
+    "CpaCliImportRequest",
+    "CpaCliImportResult",
     "CpaRuntime",
     "CpaRuntimePhase",
     "CpaRuntimeCheck",
@@ -2861,6 +2865,17 @@ pub struct CpaOAuthStartRequest {
     #[serde(flatten)]
     pub expectation: MutationExpectation,
     pub provider: CpaOAuthProvider,
+    /// Browser is the backward-compatible default; device is managed Codex only.
+    #[serde(default)]
+    pub method: CpaOAuthMethod,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CpaOAuthMethod {
+    #[default]
+    Browser,
+    Device,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -2895,6 +2910,53 @@ pub struct CpaOAuthSessionDelete {
     #[serde(flatten)]
     pub expectation: MutationExpectation,
     pub state: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CpaCliImportSource {
+    pub provider: CpaOAuthProvider,
+    pub source: String,
+    pub supported: bool,
+    /// File presence only. Credentials are read exclusively on explicit import.
+    pub available: bool,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CpaCliImports {
+    pub sources: Vec<CpaCliImportSource>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[schemars(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CpaCliImportRequest {
+    #[serde(flatten)]
+    pub expectation: MutationExpectation,
+    pub provider: CpaOAuthProvider,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum CpaCliImportOutcome {
+    Imported,
+    AlreadyImported,
+    Unconfirmed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CpaCliImportResult {
+    pub provider: CpaOAuthProvider,
+    pub name: String,
+    pub outcome: CpaCliImportOutcome,
+    pub revision: u64,
+    pub process_generation: u64,
 }
 
 /// Secret-free CPA runtime snapshot. `supported` is true only on an
@@ -3258,6 +3320,9 @@ pub fn contract_schema() -> Value {
     include_type::<CpaOAuthProvider>(&mut serialize);
     include_type::<CpaOAuthStart>(&mut serialize);
     include_type::<CpaOAuthStatus>(&mut serialize);
+    include_type::<CpaCliImportSource>(&mut serialize);
+    include_type::<CpaCliImports>(&mut serialize);
+    include_type::<CpaCliImportResult>(&mut serialize);
     include_type::<CpaRuntime>(&mut serialize);
     include_type::<CpaRuntimePhase>(&mut serialize);
     include_type::<CpaRuntimeCheck>(&mut serialize);
@@ -3325,6 +3390,7 @@ pub fn contract_schema() -> Value {
     include_type::<CpaQuotaReset>(&mut deserialize);
     include_type::<CpaOAuthStartRequest>(&mut deserialize);
     include_type::<CpaOAuthSessionDelete>(&mut deserialize);
+    include_type::<CpaCliImportRequest>(&mut deserialize);
     include_type::<CpaRuntimeInstall>(&mut deserialize);
     include_type::<DynamicProviderCreate>(&mut deserialize);
     include_type::<DynamicProviderUpdate>(&mut deserialize);

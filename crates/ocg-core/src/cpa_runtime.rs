@@ -4,6 +4,7 @@
 //! External user-operated CPA remains a connect-only integration. This module
 //! never stops, replaces, or deletes a process OCG did not start.
 
+mod device;
 mod extract;
 pub mod host;
 
@@ -236,6 +237,7 @@ impl std::fmt::Debug for CpaRuntimeSecret {
 }
 
 pub struct CpaRuntimeProcessSpec {
+    pub codex_device_login: bool,
     pub executable: PathBuf,
     pub config_path: PathBuf,
     pub working_dir: PathBuf,
@@ -256,6 +258,7 @@ pub type CpaRuntimeHost = Arc<dyn CpaRuntimeProcessHost>;
 pub struct CpaRuntimeCapabilities {
     host: OnceLock<CpaRuntimeHost>,
     status: Mutex<RuntimeStatus>,
+    device: Mutex<Option<Arc<device::DeviceSession>>>,
 }
 
 struct RuntimeStatus {
@@ -270,6 +273,7 @@ impl CpaRuntimeCapabilities {
     pub fn new() -> Self {
         Self {
             host: OnceLock::new(),
+            device: Mutex::new(None),
             status: Mutex::new(RuntimeStatus {
                 phase: CpaRuntimePhase::Idle,
                 error: None,
@@ -313,6 +317,7 @@ impl CpaRuntimeCapabilities {
     }
 
     fn begin_lifecycle_operation(&self, operation: &str) -> RuntimeOperationGuard<'_> {
+        self.cancel_device_login();
         let mut status = self.status.lock();
         status.current_operation = Some(operation.to_string());
         status.failure_logs = None;
@@ -622,6 +627,7 @@ impl CoreStateInner {
     }
 
     pub fn stop_owned_cpa_runtime(&self) {
+        self.cpa_runtime.cancel_device_login();
         if let Some(host) = self.cpa_runtime.host.get() {
             let _ = host.stop_owned();
         }
@@ -1422,6 +1428,7 @@ impl CoreStateInner {
             .map(CpaRuntimeSecret::new)
             .collect();
         host.start_owned(&CpaRuntimeProcessSpec {
+            codex_device_login: false,
             executable: executable.clone(),
             config_path: config_path.to_path_buf(),
             working_dir,

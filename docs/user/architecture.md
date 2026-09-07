@@ -8,9 +8,9 @@ Each node stores its own data locally.
 
 ## One local node
 
-[![Open Console Gateway local-node architecture](../diagrams/local-node.visual-check.1440x900.light.png)](https://klarkxy.github.io/opencode-go-mgr/diagrams/local-node/)
+[![Open Console Gateway local-node architecture](../diagrams/local-node.visual-check.1440x900.light.png)](https://klarkxy.github.io/open-console-gateway/diagrams/local-node/)
 
-[Open the interactive diagram on GitHub Pages](https://klarkxy.github.io/opencode-go-mgr/diagrams/local-node/) to switch themes,
+[Open the interactive diagram on GitHub Pages](https://klarkxy.github.io/open-console-gateway/diagrams/local-node/) to switch themes,
 trace relationships, or export another format.
 
 The Dashboard and inference endpoints share port `9042`, but they use different

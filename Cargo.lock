@@ -2777,7 +2777,7 @@ dependencies = [
 
 [[package]]
 name = "ocg-browser-worker"
-version = "2.2.0"
+version = "2.2.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -2793,7 +2793,7 @@ dependencies = [
 
 [[package]]
 name = "ocg-core"
-version = "2.2.0"
+version = "2.2.1"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -2830,7 +2830,7 @@ dependencies = [
 
 [[package]]
 name = "ocg-domain"
-version = "2.2.0"
+version = "2.2.1"
 dependencies = [
  "chrono",
  "serde",
@@ -2839,7 +2839,7 @@ dependencies = [
 
 [[package]]
 name = "ocg-gateway"
-version = "2.2.0"
+version = "2.2.1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -2850,7 +2850,7 @@ dependencies = [
 
 [[package]]
 name = "ocg-infra"
-version = "2.2.0"
+version = "2.2.1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -2862,7 +2862,7 @@ dependencies = [
 
 [[package]]
 name = "ocg-manager"
-version = "2.2.0"
+version = "2.2.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2887,7 +2887,7 @@ dependencies = [
 
 [[package]]
 name = "ocg-manager-cli"
-version = "2.2.0"
+version = "2.2.1"
 dependencies = [
  "anyhow",
  "chrono",

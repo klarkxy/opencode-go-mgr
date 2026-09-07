@@ -11,7 +11,7 @@ conflicts with the current implementation, code is authoritative.
 | Audience | English | 简体中文 | Use |
 | --- | --- | --- | --- |
 | Product overview | [../README.md](../README.md) | [../README.zh-CN.md](../README.zh-CN.md) | Positioning, downloads, and quick start |
-| Architecture gallery | [GitHub Pages](https://klarkxy.github.io/opencode-go-mgr/) | [GitHub Pages](https://klarkxy.github.io/opencode-go-mgr/) | Interactive architecture and workflow diagrams |
+| Architecture gallery | [GitHub Pages](https://klarkxy.github.io/open-console-gateway/) | [GitHub Pages](https://klarkxy.github.io/open-console-gateway/) | Interactive architecture and workflow diagrams |
 | End users | [USER.md](USER.md) | [USER.zh-CN.md](USER.zh-CN.md) | Setup, accounts, Providers, clients, and operations |
 | Maintainers | [MAINTAINER.md](MAINTAINER.md) | [MAINTAINER.zh-CN.md](MAINTAINER.zh-CN.md) | Architecture, development, runtime, storage, CI, and releases |
 | Usage boundary | [OPENCODE_GO_ANTI_ABUSE.md](OPENCODE_GO_ANTI_ABUSE.md) | [OPENCODE_GO_ANTI_ABUSE.zh-CN.md](OPENCODE_GO_ANTI_ABUSE.zh-CN.md) | OpenCode-Go anti-abuse policy |

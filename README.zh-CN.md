@@ -2,93 +2,70 @@
 
 # Open Console Gateway
 
-一个本地 Gateway：把各 Plan 的访问凭据收进一个 SQLite 数据库，在一个端口（`http://127.0.0.1:9042`）上提供五种客户端协议。机器上的 AI 工具共用路由和访问控制，不必分别维护上游配置。
+**把你的 AI 订阅和 API，接到一起。**
 
-每个账号归属一个 Provider/Plan（`provider_id`），并在需要时保存凭据。客户端发送本地 Alias；Gateway 负责与 Plan 上游协议之间的双向转换。内置路由涵盖 OpenCode Go、OpenCode Zen Free、Command Code GOAT、MiniMax CN Token Plan、Kimi Code CN 与 Custom API。用户定义 Provider 以类型化 Configurable HTTP 数据持久化。CPA 是可选的本机扩展。每个节点把凭据保存在本地。
+多家服务商的账号集中管理，接入你常用的桌面应用和编程工具。
+运行在自己的机器上，账号、用量、请求记录，一个面板就能看清。
 
-## 主要特性
+**[立即下载](https://github.com/klarkxy/open-console-gateway/releases/latest)** ·
+[安装上手](docs/user/install.zh-CN.md) · [Docker 部署](docs/user/docker.zh-CN.md) ·
+[用户指南](docs/USER.zh-CN.md)
 
-- **一个端口，五种线协议**：OpenAI Chat Completions、OpenAI Responses、Anthropic Messages、Gemini `generateContent` / `streamGenerateContent`，以及 Claude Desktop。
-- **拖动即调序**：账号卡片持久保存一个全局顺序；严格优先、粘性、轮询都在能力过滤后复用它。
-- **额度条是警告，不是墙**：本地估算不会停止流量；只有上游 `429` 才会让账号冷却。
-- **桌面端、CLI、Docker**：Tauri v2 托盘应用、`ocg-manager-cli` 与 `ghcr.io/klarkxy/opencode-go-mgr` 都可用于本机运行。
+Windows · macOS · Linux · Docker
 
-## 架构总览
-
-[![Open Console Gateway 单节点架构](https://klarkxy.github.io/opencode-go-mgr/diagrams/local-node.visual-check.1440x900.light.png)](https://klarkxy.github.io/opencode-go-mgr/diagrams/local-node/)
-
-[查看全部交互式架构图与流程图](https://klarkxy.github.io/opencode-go-mgr/)。
-
-## 下载
-
-从 [GitHub 最新 Release](https://github.com/klarkxy/opencode-go-mgr/releases/latest) 下载 GUI 安装包或 CLI 压缩包，并用同一 Release 的 `SHA256SUMS` 校验（PowerShell 用 `Get-FileHash <文件> -Algorithm SHA256`，macOS 用 `shasum -a 256`，Linux 用 `sha256sum`）：
-
-| 平台 | GUI | CLI |
-| --- | --- | --- |
-| Windows 10/11 x64 | `ocg-manager_<version>_windows-x64-setup.exe`（NSIS） | `ocg-manager-cli_<version>_windows-x64.zip` |
-| macOS 11+ Intel 与 Apple Silicon | `ocg-manager_<version>_macos-universal.dmg` | `ocg-manager-cli_<version>_macos-universal.tar.gz` |
-| Linux x64 | `ocg-manager_<version>_linux-x64.AppImage` 和 `.deb` | `ocg-manager-cli_<version>_linux-x64.tar.gz` |
-
-CLI 的 `dist/` 必须与可执行文件同级，否则 `serve` 没有面板可服务。平台注意事项见[安装指南](docs/user/install.zh-CN.md)。
-
-## 快速开始
-
-```text
-Gateway: http://127.0.0.1:9042/v1
-鉴权:    Authorization: Bearer <key>
-```
-
-1. 安装并启动。Gateway 就绪后管理面板会在系统浏览器中打开；托盘图标随时唤回。
-2. 在 **账号** 视图添加 Plan，并在需要时添加凭据。随后到 **访问密钥** 复制客户端 **Key**；客户端只需要这份 Open Console Gateway 凭据。
-3. 把客户端指向 `http://127.0.0.1:9042/v1`。各客户端配置见[手动客户端配置](docs/user/add-application.zh-CN.md)。
-
-```bash
-curl http://127.0.0.1:9042/v1/chat/completions \
-  -H "Authorization: Bearer ocg-xxxxxxxx-xxxxxxxx" \
-  -H "Content-Type: application/json" \
-  -d '{"model":"glm-5.2","messages":[{"role":"user","content":"hello"}],"stream":true}'
-```
-
-安装细节、首个客户端检查、备份与升级见[用户指南](docs/USER.zh-CN.md)。
-
-## Docker
-
-可使用已发布镜像或从源码运行；浏览器 Sidecar、备份、HTTPS、镜像钉与 Compose 说明见 [Docker 指南](docs/user/docker.zh-CN.md)。
-
-## 推荐协议分组
-
-OpenCode Go 模型各有推荐上游协议。匹配且已支持的客户端协议会透传；其他已支持的客户端会转换。请求路由使用已保存的推荐/已支持合约。
-
-| 推荐上游 | 分组 |
-| --- | --- |
-| OpenAI Chat Completions | 通用和免费 OpenCode Go 模型 |
-| OpenAI Responses | 推理和贡献者模型 |
-| Anthropic Messages | MiniMax 和 Qwen 模型 |
-
-Zen Free 使用已保存的官方目录快照。Gemini 是客户端格式，不是上游目的地。当前模型目录与协议支持见[供应商](docs/user/providers.zh-CN.md)和[协议转换](docs/user/protocol-conversion.zh-CN.md)。
-
-## 下一步
-
-[用户指南](docs/USER.zh-CN.md) · [维护者指南](docs/MAINTAINER.zh-CN.md) · [文档索引](docs/README.zh-CN.md) · [Contributors](docs/CONTRIBUTORS.md) · [DESIGN.md](DESIGN.md) · [AGENTS.md](AGENTS.md)
-
-## 交流群
-
-加入 Open Console Gateway QQ 群：**1104321231**。
+![Open Console Gateway 主页：接入中心、账号状态与每日用量](assets/dashboard-home.png)
 
 <p align="center">
-  <img src="assets/qq-group.png" alt="Open Console Gateway QQ 群二维码" width="360" />
+  <a href="https://github.com/klarkxy/open-console-gateway">
+    <img src="assets/star.webp" alt="看板娘：来个 Star 吧！" width="300" />
+  </a>
 </p>
 
-## 许可证
+## 能帮你做什么
 
-见 [LICENSE](LICENSE)。
+- **账号放在一起管。** 多家的订阅账号、自己接入的 API 服务，都能在同一个面板里管理。
+- **常用工具，共用一个入口。** 兼容的聊天应用和编程工具都能接入，用你自己的 Key 管理访问。
+- **先用哪个，你来决定。** 拖动账号就能调整优先级；遇到账号限流时，可以转到其他支持该模型的可用账号。
+- **用量花在哪，看得见。** 查看用量估算、可统计的费用和请求记录，找到出错的请求，也知道哪些账号在忙。
+
+支持 OpenCode Go、Zen Free、Kimi Code CN、MiniMax CN Token Plan、Command Code GOAT，
+也能添加兼容的 API 服务。[了解供应商支持](docs/user/providers.zh-CN.md)。
+
+## 三步开始
+
+1. **下载并启动。** 管理面板会在浏览器里打开。
+2. **添加账号。** 选择供应商，按需填入账号凭据。
+3. **接上常用工具。** 从接入中心复制地址和 **Key**，填到应用里，发出第一条消息。
+
+[连接第一个客户端](docs/user/first-client.zh-CN.md) ·
+[手动配置客户端](docs/user/add-application.zh-CN.md) ·
+[用 Docker 运行](docs/user/docker.zh-CN.md)
+
+## 一起把它变得更好用
+
+日常使用看[用户指南](docs/USER.zh-CN.md)，想看内部怎么工作，可以逛逛[架构图展厅](https://klarkxy.github.io/open-console-gateway/)。
+欢迎[反馈问题](https://github.com/klarkxy/open-console-gateway/issues)、分享你想接入的工具，
+也欢迎从[维护者指南](docs/MAINTAINER.zh-CN.md)开始贡献代码。
+
+QQ 交流群：**1104321231**。用着顺手的话，也请给看板娘投喂一颗 Star。
+
+<details>
+<summary>展开 QQ 群二维码</summary>
+
+<p align="center">
+  <img src="assets/qq-group.png" alt="Open Console Gateway QQ 群二维码" width="280" />
+</p>
+
+</details>
+
+感谢每一位[贡献者](docs/CONTRIBUTORS.md)。[许可证](LICENSE)。
 
 ## Star 历史
 
-<a href="https://www.star-history.com/?type=date&repos=klarkxy%2Fopencode-go-mgr">
+<a href="https://www.star-history.com/?type=date&repos=klarkxy%2Fopen-console-gateway">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=klarkxy/opencode-go-mgr&type=date&theme=dark&legend=top-left&sealed_token=oIYrocSP1u8BIlRFlVg34QKt9W7GAzchQqPbmV-cwy6F84-IJx1RTsYIEG0UYpaFcFPiCY24bdJgYhkONvQgjsIQzgRLf_YXiP7W9BzlHU9rMGGb68O2Tg" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=klarkxy/opencode-go-mgr&type=date&legend=top-left&sealed_token=oIYrocSP1u8BIlRFlVg34QKt9W7GAzchQqPbmV-cwy6F84-IJx1RTsYIEG0UYpaFcFPiCY24bdJgYhkONvQgjsIQzgRLf_YXiP7W9BzlHU9rMGGb68O2Tg" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=klarkxy/opencode-go-mgr&type=date&legend=top-left&sealed_token=oIYrocSP1u8BIlRFlVg34QKt9W7GAzchQqPbmV-cwy6F84-IJx1RTsYIEG0UYpaFcFPiCY24bdJgYhkONvQgjsIQzgRLf_YXiP7W9BzlHU9rMGGb68O2Tg" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=klarkxy/open-console-gateway&type=date&theme=dark&legend=top-left&sealed_token=oIYrocSP1u8BIlRFlVg34QKt9W7GAzchQqPbmV-cwy6F84-IJx1RTsYIEG0UYpaFcFPiCY24bdJgYhkONvQgjsIQzgRLf_YXiP7W9BzlHU9rMGGb68O2Tg" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=klarkxy/open-console-gateway&type=date&legend=top-left&sealed_token=oIYrocSP1u8BIlRFlVg34QKt9W7GAzchQqPbmV-cwy6F84-IJx1RTsYIEG0UYpaFcFPiCY24bdJgYhkONvQgjsIQzgRLf_YXiP7W9BzlHU9rMGGb68O2Tg" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=klarkxy/open-console-gateway&type=date&legend=top-left&sealed_token=oIYrocSP1u8BIlRFlVg34QKt9W7GAzchQqPbmV-cwy6F84-IJx1RTsYIEG0UYpaFcFPiCY24bdJgYhkONvQgjsIQzgRLf_YXiP7W9BzlHU9rMGGb68O2Tg" />
  </picture>
 </a>

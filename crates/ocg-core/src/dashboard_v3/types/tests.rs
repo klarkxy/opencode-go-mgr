@@ -1,4 +1,18 @@
 use super::*;
+
+#[test]
+fn cpa_oauth_method_defaults_to_browser_and_accepts_explicit_device() {
+    let input =
+        serde_json::json!({"provider":"codex", "expectedRevision":1, "processGeneration":1});
+    let parsed: CpaOAuthStartRequest = serde_json::from_value(input.clone()).unwrap();
+    assert_eq!(parsed.method, CpaOAuthMethod::Browser);
+    let mut device = input;
+    device["method"] = serde_json::json!("device");
+    let parsed: CpaOAuthStartRequest = serde_json::from_value(device.clone()).unwrap();
+    assert_eq!(parsed.method, CpaOAuthMethod::Device);
+    device["method"] = serde_json::json!("arbitrary-command");
+    assert!(serde_json::from_value::<CpaOAuthStartRequest>(device).is_err());
+}
 use serde_json::json;
 
 #[test]
@@ -1394,7 +1408,7 @@ fn updater_dtos_use_camel_case_nulls_and_install_requires_cas() {
         current_version: "1.0.0".into(),
         latest_version: "1.1.0".into(),
         update_available: true,
-        release_url: "https://github.com/klarkxy/opencode-go-mgr/releases/latest".into(),
+        release_url: "https://github.com/klarkxy/open-console-gateway/releases/latest".into(),
         install_supported: false,
         revision: 11,
         process_generation: 9,
@@ -1406,7 +1420,7 @@ fn updater_dtos_use_camel_case_nulls_and_install_requires_cas() {
             "currentVersion": "1.0.0",
             "latestVersion": "1.1.0",
             "updateAvailable": true,
-            "releaseUrl": "https://github.com/klarkxy/opencode-go-mgr/releases/latest",
+            "releaseUrl": "https://github.com/klarkxy/open-console-gateway/releases/latest",
             "installSupported": false,
             "revision": 11,
             "processGeneration": 9 })
@@ -1741,6 +1755,10 @@ const CPA_CATALOG_TYPES: &[&str] = &[
     "CpaOAuthStart",
     "CpaOAuthStatus",
     "CpaOAuthSessionDelete",
+    "CpaCliImportSource",
+    "CpaCliImports",
+    "CpaCliImportRequest",
+    "CpaCliImportResult",
     "CpaRuntime",
     "CpaRuntimePhase",
     "CpaRuntimeCheck",

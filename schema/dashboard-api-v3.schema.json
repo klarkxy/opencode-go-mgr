@@ -2072,6 +2072,118 @@
       ],
       "type": "object"
     },
+    "CpaCliImportOutcome": {
+      "enum": [
+        "imported",
+        "alreadyImported",
+        "unconfirmed"
+      ],
+      "type": "string"
+    },
+    "CpaCliImportRequest": {
+      "additionalProperties": false,
+      "description": "Required process-scoped mutation precondition.\n\nBoth fields travel at the top level of every mutation request. The random\nprocess generation prevents a revision captured before restart from being\naccepted by a fresh process whose in-memory counter reused the same value.",
+      "properties": {
+        "expectedRevision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "processGeneration": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "provider": {
+          "$ref": "#/$defs/CpaOAuthProvider"
+        }
+      },
+      "required": [
+        "expectedRevision",
+        "processGeneration",
+        "provider"
+      ],
+      "type": "object"
+    },
+    "CpaCliImportResult": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "outcome": {
+          "$ref": "#/$defs/CpaCliImportOutcome"
+        },
+        "processGeneration": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "provider": {
+          "$ref": "#/$defs/CpaOAuthProvider"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "provider",
+        "name",
+        "outcome",
+        "revision",
+        "processGeneration"
+      ],
+      "type": "object"
+    },
+    "CpaCliImportSource": {
+      "additionalProperties": false,
+      "properties": {
+        "available": {
+          "description": "File presence only. Credentials are read exclusively on explicit import.",
+          "type": "boolean"
+        },
+        "provider": {
+          "$ref": "#/$defs/CpaOAuthProvider"
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "type": "string"
+        },
+        "supported": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "provider",
+        "source",
+        "supported",
+        "available",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "CpaCliImports": {
+      "additionalProperties": false,
+      "properties": {
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/CpaCliImportSource"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "sources"
+      ],
+      "type": "object"
+    },
     "CpaConnectionReport": {
       "additionalProperties": false,
       "properties": {
@@ -2363,6 +2475,13 @@
       ],
       "type": "object"
     },
+    "CpaOAuthMethod": {
+      "enum": [
+        "browser",
+        "device"
+      ],
+      "type": "string"
+    },
     "CpaOAuthProvider": {
       "enum": [
         "codex",
@@ -2458,6 +2577,11 @@
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
+        },
+        "method": {
+          "$ref": "#/$defs/CpaOAuthMethod",
+          "default": "browser",
+          "description": "Browser is the backward-compatible default; device is managed Codex only."
         },
         "processGeneration": {
           "format": "uint64",
@@ -7276,6 +7400,18 @@
     },
     {
       "$ref": "#/$defs/CpaOAuthSessionDelete"
+    },
+    {
+      "$ref": "#/$defs/CpaCliImportSource"
+    },
+    {
+      "$ref": "#/$defs/CpaCliImports"
+    },
+    {
+      "$ref": "#/$defs/CpaCliImportRequest"
+    },
+    {
+      "$ref": "#/$defs/CpaCliImportResult"
     },
     {
       "$ref": "#/$defs/CpaRuntime"

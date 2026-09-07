@@ -31,9 +31,9 @@ schema v16 给账号增加 `account_type`（`key | managed`）与 `setup_step` �
 
 ### 托管账号 setup 生命周期
 
-[![托管账号 setup 生命周期](../diagrams/managed-account-lifecycle.visual-check.1440x900.light.png)](https://klarkxy.github.io/opencode-go-mgr/diagrams/managed-account-lifecycle/)
+[![托管账号 setup 生命周期](../diagrams/managed-account-lifecycle.visual-check.1440x900.light.png)](https://klarkxy.github.io/open-console-gateway/diagrams/managed-account-lifecycle/)
 
-[在 GitHub Pages 打开交互式流程图](https://klarkxy.github.io/opencode-go-mgr/diagrams/managed-account-lifecycle/)。
+[在 GitHub Pages 打开交互式流程图](https://klarkxy.github.io/open-console-gateway/diagrams/managed-account-lifecycle/)。
 
 普通 setup PATCH 只能向前一步，或回到更早的未完成步骤；它不会写入 `ready`。独立的 Key 验证请求在收到 `2xx` 或 `429` 时将账号置为 `ready + enabled`。Key 无效等 `4xx` 与重定向让草稿保持 pending 并返回 `400`；网络、超时与 `5xx` 同样保持 pending，但返回 `502`，用户可重试或回退步骤。
 
