@@ -721,13 +721,13 @@ pub fn sanitize_minimax_chat_usage(
         .and_then(|v| v.get("cached_tokens"))
         .and_then(Value::as_u64)
         .unwrap_or(0);
-    if prompt > 0 && cached == prompt {
-        if let Some(details) = obj
+    if prompt > 0
+        && cached == prompt
+        && let Some(details) = obj
             .get_mut("prompt_tokens_details")
             .and_then(Value::as_object_mut)
-        {
-            details.insert("cached_tokens".into(), json!(0));
-        }
+    {
+        details.insert("cached_tokens".into(), json!(0));
     }
 }
 
@@ -1389,17 +1389,17 @@ fn chat_request_to_messages(body: Value) -> Result<Value, ConversionError> {
             continue;
         }
         let mut blocks = chat_content_to_anthropic(message.get("content"));
-        if role == "assistant" {
-            if let Some(calls) = message.get("tool_calls").and_then(Value::as_array) {
-                for call in calls {
-                    let function = call.get("function").unwrap_or(&Value::Null);
-                    blocks.push(json!({
-                        "type": "tool_use",
-                        "id": call.get("id").and_then(Value::as_str).unwrap_or_default(),
-                        "name": function.get("name").and_then(Value::as_str).unwrap_or_default(),
-                        "input": parse_json(function.get("arguments")).unwrap_or_else(empty_object)
-                    }));
-                }
+        if role == "assistant"
+            && let Some(calls) = message.get("tool_calls").and_then(Value::as_array)
+        {
+            for call in calls {
+                let function = call.get("function").unwrap_or(&Value::Null);
+                blocks.push(json!({
+                    "type": "tool_use",
+                    "id": call.get("id").and_then(Value::as_str).unwrap_or_default(),
+                    "name": function.get("name").and_then(Value::as_str).unwrap_or_default(),
+                    "input": parse_json(function.get("arguments")).unwrap_or_else(empty_object)
+                }));
             }
         }
         if !blocks.is_empty() {
@@ -1677,13 +1677,12 @@ fn chat_response_to_messages(body: &Value) -> Result<Value, ConversionError> {
         .get("reasoning_content")
         .or_else(|| message.get("reasoning"))
         .and_then(Value::as_str)
+        && !reasoning.is_empty()
     {
-        if !reasoning.is_empty() {
-            content.insert(
-                0,
-                json!({ "type": "thinking", "thinking": reasoning, "signature": "" }),
-            );
-        }
+        content.insert(
+            0,
+            json!({ "type": "thinking", "thinking": reasoning, "signature": "" }),
+        );
     }
     if let Some(calls) = message.get("tool_calls").and_then(Value::as_array) {
         for call in calls {
@@ -1717,10 +1716,10 @@ fn messages_response_to_gemini(body: &Value) -> Result<Value, ConversionError> {
     for block in blocks {
         match block.get("type").and_then(Value::as_str) {
             Some("text") => {
-                if let Some(text) = block.get("text").and_then(Value::as_str) {
-                    if !text.is_empty() {
-                        parts.push(json!({ "text": text }));
-                    }
+                if let Some(text) = block.get("text").and_then(Value::as_str)
+                    && !text.is_empty()
+                {
+                    parts.push(json!({ "text": text }));
                 }
             }
             Some("tool_use") => {
@@ -2402,16 +2401,16 @@ fn anthropic_image_url(block: &Value) -> Option<String> {
 }
 
 fn anthropic_image(url: &str) -> Value {
-    if let Some(rest) = url.strip_prefix("data:") {
-        if let Some((media_and_encoding, data)) = rest.split_once(',') {
-            let media_type = media_and_encoding
-                .strip_suffix(";base64")
-                .unwrap_or(media_and_encoding);
-            return json!({
-                "type": "image",
-                "source": { "type": "base64", "media_type": media_type, "data": data }
-            });
-        }
+    if let Some(rest) = url.strip_prefix("data:")
+        && let Some((media_and_encoding, data)) = rest.split_once(',')
+    {
+        let media_type = media_and_encoding
+            .strip_suffix(";base64")
+            .unwrap_or(media_and_encoding);
+        return json!({
+            "type": "image",
+            "source": { "type": "base64", "media_type": media_type, "data": data }
+        });
     }
     json!({ "type": "image", "source": { "type": "url", "url": url } })
 }
@@ -2494,13 +2493,12 @@ fn push_message(messages: &mut Vec<Value>, role: &str, blocks: Vec<Value>) {
     if blocks.is_empty() {
         return;
     }
-    if let Some(last) = messages.last_mut() {
-        if last.get("role").and_then(Value::as_str) == Some(role) {
-            if let Some(content) = last.get_mut("content").and_then(Value::as_array_mut) {
-                content.extend(blocks);
-                return;
-            }
-        }
+    if let Some(last) = messages.last_mut()
+        && last.get("role").and_then(Value::as_str) == Some(role)
+        && let Some(content) = last.get_mut("content").and_then(Value::as_array_mut)
+    {
+        content.extend(blocks);
+        return;
     }
     messages.push(json!({ "role": role, "content": blocks }));
 }

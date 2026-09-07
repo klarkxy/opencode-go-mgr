@@ -40,6 +40,8 @@ pub(crate) struct FakeCall {
     pub opencode_client: Option<String>,
     pub opencode_request: Option<String>,
     pub opencode_project: Option<String>,
+    pub session_id: Option<String>,
+    pub session_affinity: Option<String>,
     pub user_agent: Option<String>,
     /// Verbatim inbound `Cookie` header; tests assert inference egress never
     /// carries one. Not every suite reads it, hence the allow.
@@ -213,6 +215,8 @@ async fn fake_reply(
             opencode_client: header(&headers, "x-opencode-client"),
             opencode_request: header(&headers, "x-opencode-request"),
             opencode_project: header(&headers, "x-opencode-project"),
+            session_id: header(&headers, "x-session-id"),
+            session_affinity: header(&headers, "x-session-affinity"),
             user_agent: header(&headers, axum::http::header::USER_AGENT),
             cookie: header(&headers, "cookie"),
         });

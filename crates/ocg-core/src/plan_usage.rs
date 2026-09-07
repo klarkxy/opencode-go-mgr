@@ -216,10 +216,10 @@ fn parse_kimi(
     now: DateTime<Utc>,
 ) -> Result<Vec<QuotaWindow>, String> {
     let mut rows = Vec::new();
-    if let Some(usage) = value.get("usage").and_then(Value::as_object) {
-        if let Some(row) = kimi_window(account_id, "kimi_usage".to_string(), usage, now) {
-            rows.push(row);
-        }
+    if let Some(usage) = value.get("usage").and_then(Value::as_object)
+        && let Some(row) = kimi_window(account_id, "kimi_usage".to_string(), usage, now)
+    {
+        rows.push(row);
     }
     if let Some(limits) = value.get("limits").and_then(Value::as_array) {
         for (index, item) in limits.iter().enumerate() {

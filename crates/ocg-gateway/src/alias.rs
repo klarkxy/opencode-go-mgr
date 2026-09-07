@@ -1068,10 +1068,9 @@ fn resolve_in(registry: &Registry, requested: &str) -> Result<ResolvedModel, Res
         .aliases
         .get(&folded)
         .is_some_and(|entry| entry.alias != trimmed)
+        && let Some(mappings) = registry.raw_exact.get(trimmed)
     {
-        if let Some(mappings) = registry.raw_exact.get(trimmed) {
-            return pin_or_ambiguous(original, mappings);
-        }
+        return pin_or_ambiguous(original, mappings);
     }
     if let Some(entry) = registry.aliases.get(&folded) {
         return Ok(ResolvedModel::Alias {
@@ -1198,10 +1197,10 @@ fn command_alias_for_catalog(upstream_model: &str, registry: &Registry) -> Strin
         return alias.to_string();
     }
     for suffix in COMMAND_ALIAS_SUFFIX_EXCEPTIONS {
-        if let Some(candidate) = leaf.strip_suffix(suffix) {
-            if is_authorized_alias(candidate) {
-                return candidate.to_string();
-            }
+        if let Some(candidate) = leaf.strip_suffix(suffix)
+            && is_authorized_alias(candidate)
+        {
+            return candidate.to_string();
         }
     }
     leaf

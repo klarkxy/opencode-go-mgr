@@ -533,17 +533,14 @@ fn update_account_locked(
     };
     {
         let db = state.db.lock();
-        db.update_account(
+        db.update_account_with_billing(
             id,
             &update,
             key_cipher.as_deref(),
             password_cipher.as_deref(),
+            ollama_billing,
         )
         .map_err(|error| map_account_write_error(state, error))?;
-        if let Some(tier) = ollama_billing {
-            db.set_ollama_cloud_billing_tier(id, tier)
-                .map_err(V3ApiError::internal)?;
-        }
         let _ = db.log_gateway("info", "account", &format!("updated account {id}"));
     }
     mutation_after_commit(state, id, false)

@@ -2,6 +2,7 @@ use super::*;
 use crate::custom::CustomAccountRuntime;
 use crate::kernel::ids::{
     COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM, KIMI_PROVIDER_ID, MINIMAX_PROVIDER_ID,
+    OPENCODE_ZEN_FREE_PROVIDER_ID,
 };
 use crate::models::{AccountCustomConfig, AccountModelCapability};
 use crate::provider::ConnectionVerificationStatus;
@@ -156,6 +157,52 @@ fn opencode_ceiling_is_constructable_paths_not_static_model_protocols() {
             UpstreamProtocolKind::Responses,
         ));
     }
+}
+
+#[test]
+fn unknown_zen_free_catalog_row_defaults_to_chat_and_honors_force_off() {
+    let catalog = ZenFreeModelCatalog {
+        models: vec!["brand-new-promo-free".into()],
+        refreshed_at: None,
+        source_url: crate::kernel::zen::ZEN_MODELS_SOURCE_URL.to_string(),
+    };
+    let set = build_effective_contracts(&catalog, &[], empty_persisted());
+    let zen = set.providers.get(OPENCODE_ZEN_FREE_PROVIDER_ID).unwrap();
+    let model = zen.model("brand-new-promo-free").unwrap();
+    let chat = model.protocols.get("chat_completions").unwrap();
+    assert_eq!(
+        model.preferred_protocol,
+        UpstreamProtocolKind::ChatCompletions
+    );
+    assert!(chat.available);
+    assert!(chat.enabled);
+    assert_eq!(chat.r#override, ProtocolOverrideState::Auto);
+    assert!(model.routable);
+    assert_eq!(
+        select_upstream_protocol(zen, ApiFormat::ChatCompletions, "brand-new-promo-free").unwrap(),
+        ApiFormat::ChatCompletions
+    );
+
+    let mut persisted = empty_persisted();
+    let scope = ContractScope::provider(OPENCODE_ZEN_FREE_PROVIDER_ID);
+    persisted.overrides.insert(
+        scope.clone(),
+        vec![PersistedModelProtocolOverride {
+            scope,
+            model_id: "brand-new-promo-free".into(),
+            protocol: UpstreamProtocolKind::ChatCompletions,
+            state: ProtocolOverrideState::ForceOff,
+            updated_at: Utc::now(),
+        }],
+    );
+    let set = build_effective_contracts(&catalog, &[], persisted);
+    let zen = set.providers.get(OPENCODE_ZEN_FREE_PROVIDER_ID).unwrap();
+    let model = zen.model("brand-new-promo-free").unwrap();
+    let chat = model.protocols.get("chat_completions").unwrap();
+    assert!(chat.available);
+    assert!(!chat.enabled);
+    assert_eq!(chat.r#override, ProtocolOverrideState::ForceOff);
+    assert!(!model.routable);
 }
 
 #[test]

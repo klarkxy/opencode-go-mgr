@@ -6,7 +6,7 @@ Operator contract for upgrades, backups, and rollback. Schema details are in [Pe
 
 ## Data directories and cipher identity
 
-Every database open uses the Host-resolved cipher (`Database::open_with_cipher` on CLI, desktop, and Docker). A different cipher fails closed; rewriting ciphertext does not fix a mismatch.
+Every database open uses the Host-resolved cipher (`Database::open_with_cipher` on CLI, desktop, and Docker). Stored account ciphertext is probed before migration and decryption errors fail closed. Key storage uses unauthenticated obfuscation: a successful UTF-8 decode alone cannot authenticate cipher identity. Retain the original cipher; rewriting ciphertext does not repair a mismatch.
 
 | Surface | Default data directory | Cipher identity |
 | --- | --- | --- |

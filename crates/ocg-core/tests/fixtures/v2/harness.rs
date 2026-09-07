@@ -630,31 +630,31 @@ fn adapt_v3_response(path: &str, status: StatusCode, body: Value) -> Value {
     if !status.is_success() {
         return body;
     }
-    if path == "/providers" || path == "/providers/catalog" {
-        if let Some(entries) = body.get("entries") {
-            return entries.clone();
-        }
+    if (path == "/providers" || path == "/providers/catalog")
+        && let Some(entries) = body.get("entries")
+    {
+        return entries.clone();
     }
-    if path == "/accounts" {
-        if let Some(accounts) = body.get("accounts").and_then(Value::as_array) {
-            return Value::Array(
-                accounts
-                    .iter()
-                    .cloned()
-                    .map(|account| normalize_account(account, None))
-                    .collect(),
-            );
-        }
+    if path == "/accounts"
+        && let Some(accounts) = body.get("accounts").and_then(Value::as_array)
+    {
+        return Value::Array(
+            accounts
+                .iter()
+                .cloned()
+                .map(|account| normalize_account(account, None))
+                .collect(),
+        );
     }
-    if path == "/application-models" {
-        if let Some(models) = body.get("models") {
-            return models.clone();
-        }
+    if path == "/application-models"
+        && let Some(models) = body.get("models")
+    {
+        return models.clone();
     }
-    if let Some(account) = body.get("account") {
-        if !account.is_null() {
-            return normalize_account(account.clone(), body.get("revision").cloned());
-        }
+    if let Some(account) = body.get("account")
+        && !account.is_null()
+    {
+        return normalize_account(account.clone(), body.get("revision").cloned());
     }
     if body.get("id").is_some() && body.get("provider_id").is_some() {
         return normalize_account(body, None);

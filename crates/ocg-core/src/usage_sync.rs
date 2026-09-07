@@ -720,22 +720,22 @@ fn list_auto_candidates_on(
 
             let active =
                 store.account_has_local_activity_since(&account.id, now - ACTIVITY_LOOKBACK)?;
-            if active {
-                if let Some(proposal) = active_cadence_pull_proposal(
+            if active
+                && let Some(proposal) = active_cadence_pull_proposal(
                     sync_state.and_then(|s| s.last_success_at),
                     next_at,
                     now,
-                ) {
-                    store.pull_account_usage_sync_next_eligible(&account.id, proposal, true)?;
-                    if proposal <= now {
-                        out.push(SyncCandidate {
-                            account_id: account.id.clone(),
-                            action: CandidateAction::Refresh {
-                                trigger: UsageSyncTrigger::Scheduled,
-                            },
-                        });
-                        continue;
-                    }
+                )
+            {
+                store.pull_account_usage_sync_next_eligible(&account.id, proposal, true)?;
+                if proposal <= now {
+                    out.push(SyncCandidate {
+                        account_id: account.id.clone(),
+                        action: CandidateAction::Refresh {
+                            trigger: UsageSyncTrigger::Scheduled,
+                        },
+                    });
+                    continue;
                 }
             }
 

@@ -1163,10 +1163,8 @@ impl CoreStateInner {
         if let Err(error) = self.ensure_cas(expected_revision, expected_generation) {
             return self.rollback_failed(error, restore).await;
         }
-        if !was_running {
-            if let Err(error) = host.stop_owned() {
-                return self.rollback_failed(error, restore).await;
-            }
+        if !was_running && let Err(error) = host.stop_owned() {
+            return self.rollback_failed(error, restore).await;
         }
         if let Err(error) = atomic_write(&previous_config, &current_config_bytes) {
             return self.rollback_failed(error, restore).await;
@@ -1749,35 +1747,35 @@ impl CoreStateInner {
                         &protected,
                         &extras,
                     )?;
-                    if previous_config_path.exists() {
-                        if let Err(error) = write_config_yaml(
+                    if previous_config_path.exists()
+                        && let Err(error) = write_config_yaml(
                             &previous_config_path,
                             managed.port,
                             &runtime_dir(&self.data_dir).join("auth"),
                             &protected,
                             &extras,
-                        ) {
-                            let _ = atomic_write(&config_path, &config_before);
-                            return Err(error);
-                        }
+                        )
+                    {
+                        let _ = atomic_write(&config_path, &config_before);
+                        return Err(error);
                     }
-                    if let Some(new_protected) = new_protected.as_deref() {
-                        if let Err(error) = self.persist_inference_key(new_protected) {
-                            let restore = atomic_write(&config_path, &config_before);
-                            let previous_restore = restore_optional_file(
-                                &previous_config_path,
-                                previous_config_before.as_deref(),
-                            );
-                            return match restore {
-                                Ok(()) if previous_restore.is_ok() => Err(error),
-                                Err(restore) => Err(CpaRuntimeError::Failed(format!(
-                                    "{error}; restoring managed CPA config also failed: {restore}"
-                                ))),
-                                Ok(()) => Err(CpaRuntimeError::Failed(format!(
-                                    "{error}; restoring previous CPA config also failed"
-                                ))),
-                            };
-                        }
+                    if let Some(new_protected) = new_protected.as_deref()
+                        && let Err(error) = self.persist_inference_key(new_protected)
+                    {
+                        let restore = atomic_write(&config_path, &config_before);
+                        let previous_restore = restore_optional_file(
+                            &previous_config_path,
+                            previous_config_before.as_deref(),
+                        );
+                        return match restore {
+                            Ok(()) if previous_restore.is_ok() => Err(error),
+                            Err(restore) => Err(CpaRuntimeError::Failed(format!(
+                                "{error}; restoring managed CPA config also failed: {restore}"
+                            ))),
+                            Ok(()) => Err(CpaRuntimeError::Failed(format!(
+                                "{error}; restoring previous CPA config also failed"
+                            ))),
+                        };
                     }
                     self.bump_settings_revision();
                     Ok(())
@@ -1786,16 +1784,16 @@ impl CoreStateInner {
         if let Err(error) = local_result {
             let _ = atomic_write(&config_path, &config_before);
             let _ = restore_optional_file(&previous_config_path, previous_config_before.as_deref());
-            if let Some(upstream_before) = upstream_before {
-                if let Err(compensation) = client.replace_api_keys(&upstream_before).await {
-                    let mut secrets = next_keys.iter().map(String::as_str).collect::<Vec<_>>();
-                    secrets.extend(upstream_before.iter().map(String::as_str));
-                    secrets.push(saved.management_key.as_str());
-                    let compensation = redact_text(&compensation.to_string(), &secrets);
-                    return Err(CpaRuntimeError::Failed(format!(
-                        "{error}; restoring CPA client keys also failed: {compensation}"
-                    )));
-                }
+            if let Some(upstream_before) = upstream_before
+                && let Err(compensation) = client.replace_api_keys(&upstream_before).await
+            {
+                let mut secrets = next_keys.iter().map(String::as_str).collect::<Vec<_>>();
+                secrets.extend(upstream_before.iter().map(String::as_str));
+                secrets.push(saved.management_key.as_str());
+                let compensation = redact_text(&compensation.to_string(), &secrets);
+                return Err(CpaRuntimeError::Failed(format!(
+                    "{error}; restoring CPA client keys also failed: {compensation}"
+                )));
             }
             return Err(error);
         }

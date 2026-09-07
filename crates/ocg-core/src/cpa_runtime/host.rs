@@ -1,8 +1,8 @@
 //! OCG-owned CPA child lifecycle: desktop Host and CLI registrations.
 //!
 //! Windows starts CREATE_SUSPENDED, assigns a kill-on-close Job Object, then
-//! resumes. Unix starts a fresh process group and tears that group down on
-//! stop/exit. The Management password is passed only as MANAGEMENT_PASSWORD.
+//! resumes. Unix uses a same-executable supervisor whose lifetime pipe closes
+//! on Host exit. The Management password is passed only as MANAGEMENT_PASSWORD.
 //! This Host never inspects ports or PIDs of processes it did not start.
 
 use super::{
@@ -18,6 +18,16 @@ use std::path::Path;
 #[cfg(any(windows, unix))]
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
+
+#[cfg(unix)]
+mod supervisor;
+
+/// Dispatch the private Unix CPA supervisor before initializing any app state.
+/// Ordinary invocations return immediately; internal invocations never return.
+pub fn run_internal_supervisor_if_requested() {
+    #[cfg(unix)]
+    supervisor::run_if_requested();
+}
 
 /// Register the OCG-owned CPA process Host. Every desktop or CLI build on
 /// Windows/Unix can manage a child the same way; platforms without an
@@ -480,6 +490,8 @@ impl CpaRuntimeProcessHost for UnixCpaRuntimeHost {
 #[cfg(unix)]
 struct UnixOwnedSession {
     child: std::process::Child,
+    lifetime: Option<std::process::ChildStdin>,
+    readers_done: Arc<std::sync::atomic::AtomicBool>,
     stdout: Arc<Mutex<String>>,
     stderr: Arc<Mutex<String>>,
     secrets: Arc<Mutex<Vec<Vec<u8>>>>,
@@ -514,53 +526,46 @@ impl UnixOwnedSession {
     }
 
     fn stop(mut self) -> Result<CpaRuntimeLogTail, CpaRuntimeError> {
-        signal_unix_group(&self.child, nix::sys::signal::Signal::SIGTERM)?;
+        self.shutdown()?;
+        Ok(self.logs())
+    }
+
+    fn shutdown(&mut self) -> Result<(), CpaRuntimeError> {
+        // The pipe is the only shutdown authority. Never signal a PID/PGID:
+        // try_wait may already have reaped the supervisor and released its ID.
+        drop(self.lifetime.take());
         let started = std::time::Instant::now();
-        loop {
+        let result = loop {
             match self.child.try_wait() {
-                Ok(Some(_)) => break,
-                Ok(None) if started.elapsed() >= std::time::Duration::from_secs(5) => {
-                    signal_unix_group(&self.child, nix::sys::signal::Signal::SIGKILL)?;
-                    self.child.wait().map_err(|error| {
-                        CpaRuntimeError::Failed(format!("failed to reap owned CPA: {error}"))
-                    })?;
-                    break;
+                Ok(Some(_)) => break Ok(()),
+                Ok(None) if started.elapsed() >= std::time::Duration::from_secs(7) => {
+                    break Err(CpaRuntimeError::Failed(
+                        "owned CPA supervisor did not exit within 7 seconds".into(),
+                    ));
                 }
                 Ok(None) => thread::sleep(std::time::Duration::from_millis(20)),
                 Err(error) => {
-                    return Err(CpaRuntimeError::Failed(format!(
+                    break Err(CpaRuntimeError::Failed(format!(
                         "failed to wait for owned CPA: {error}"
                     )));
                 }
             }
-        }
+        };
+        self.readers_done
+            .store(true, std::sync::atomic::Ordering::Release);
         for reader in self.readers.drain(..) {
             let _ = reader.join();
         }
-        Ok(self.logs())
+        result
     }
 }
 
 #[cfg(unix)]
 impl Drop for UnixOwnedSession {
     fn drop(&mut self) {
-        let _ = signal_unix_group(&self.child, nix::sys::signal::Signal::SIGKILL);
-        let _ = self.child.try_wait();
-    }
-}
-
-#[cfg(unix)]
-fn signal_unix_group(
-    child: &std::process::Child,
-    signal: nix::sys::signal::Signal,
-) -> Result<(), CpaRuntimeError> {
-    use nix::sys::signal::killpg;
-    use nix::unistd::Pid;
-    match killpg(Pid::from_raw(child.id() as i32), signal) {
-        Ok(()) | Err(nix::errno::Errno::ESRCH) => Ok(()),
-        Err(error) => Err(CpaRuntimeError::Failed(format!(
-            "failed to signal owned CPA process group: {error}"
-        ))),
+        if self.lifetime.is_some() || !self.readers.is_empty() {
+            let _ = self.shutdown();
+        }
     }
 }
 
@@ -568,7 +573,7 @@ fn signal_unix_group(
 fn spawn_unix_owned(spec: &CpaRuntimeProcessSpec) -> Result<UnixOwnedSession, CpaRuntimeError> {
     use std::os::unix::fs::FileTypeExt;
     use std::os::unix::process::CommandExt;
-    use std::process::{Command, Stdio};
+    use std::process::Stdio;
 
     if !spec.executable.is_file() {
         return Err(CpaRuntimeError::Invalid("CPA executable is missing".into()));
@@ -587,22 +592,25 @@ fn spawn_unix_owned(spec: &CpaRuntimeProcessSpec) -> Result<UnixOwnedSession, Cp
             "CPA process paths must not be reparse points".into(),
         ));
     }
-    let mut command = Command::new(&spec.executable);
+    let mut command =
+        supervisor::command(&spec.executable, &spec.config_path).map_err(|error| {
+            CpaRuntimeError::Failed(format!("failed to locate CPA supervisor: {error}"))
+        })?;
     command
-        .arg("--config")
-        .arg(&spec.config_path)
         .current_dir(&spec.working_dir)
         .env(
             "MANAGEMENT_PASSWORD",
             spec.management_password.expose_to_host(),
         )
-        .stdin(Stdio::null())
+        // std::process creates this pipe with CLOEXEC, including its Host end.
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .process_group(0);
     let mut child = command
         .spawn()
         .map_err(|error| CpaRuntimeError::Failed(format!("failed to start owned CPA: {error}")))?;
+    let lifetime = child.stdin.take();
     let stdout = child
         .stdout
         .take()
@@ -619,12 +627,25 @@ fn spawn_unix_owned(spec: &CpaRuntimeProcessSpec) -> Result<UnixOwnedSession, Cp
     )));
     let stdout_buf = Arc::new(Mutex::new(String::new()));
     let stderr_buf = Arc::new(Mutex::new(String::new()));
+    let readers_done = Arc::new(std::sync::atomic::AtomicBool::new(false));
     Ok(UnixOwnedSession {
         child,
+        lifetime,
         readers: vec![
-            spawn_unix_reader(stdout, stdout_buf.clone(), secrets.clone()),
-            spawn_unix_reader(stderr, stderr_buf.clone(), secrets.clone()),
+            spawn_unix_reader(
+                stdout,
+                stdout_buf.clone(),
+                secrets.clone(),
+                readers_done.clone(),
+            ),
+            spawn_unix_reader(
+                stderr,
+                stderr_buf.clone(),
+                secrets.clone(),
+                readers_done.clone(),
+            ),
         ],
+        readers_done,
         stdout: stdout_buf,
         stderr: stderr_buf,
         secrets,
@@ -633,21 +654,46 @@ fn spawn_unix_owned(spec: &CpaRuntimeProcessSpec) -> Result<UnixOwnedSession, Cp
 
 #[cfg(unix)]
 fn spawn_unix_reader(
-    mut pipe: impl std::io::Read + Send + 'static,
+    mut pipe: impl std::io::Read + std::os::fd::AsRawFd + Send + 'static,
     buffer: Arc<Mutex<String>>,
     secrets: Arc<Mutex<Vec<Vec<u8>>>>,
+    done: Arc<std::sync::atomic::AtomicBool>,
 ) -> JoinHandle<()> {
     thread::spawn(move || {
         let mut redactor = StreamRedactor::new(secrets);
         let mut chunk = [0u8; 4096];
+        let mut finish_by = None;
         loop {
-            match pipe.read(&mut chunk) {
-                Ok(0) => {
-                    let redacted = redactor.finish();
-                    let text = String::from_utf8_lossy(&redacted);
-                    append_log_tail(&mut buffer.lock(), &text, MAX_LOG_BYTES);
+            // Even a descendant that deliberately leaves the owned group must
+            // not retain a Host log-reader thread forever after shutdown.
+            if done.load(std::sync::atomic::Ordering::Acquire) {
+                let deadline = finish_by.get_or_insert_with(|| {
+                    std::time::Instant::now() + std::time::Duration::from_millis(250)
+                });
+                if std::time::Instant::now() >= *deadline {
                     break;
                 }
+            }
+            let mut poll = nix::libc::pollfd {
+                fd: pipe.as_raw_fd(),
+                events: nix::libc::POLLIN,
+                revents: 0,
+            };
+            let ready = unsafe { nix::libc::poll(&mut poll, 1, 20) };
+            if ready == 0 {
+                if finish_by.is_some() {
+                    break;
+                }
+                continue;
+            }
+            if ready < 0 {
+                if std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted {
+                    continue;
+                }
+                break;
+            }
+            match pipe.read(&mut chunk) {
+                Ok(0) => break,
                 Ok(read) => {
                     let redacted = redactor.push(&chunk[..read]);
                     let text = String::from_utf8_lossy(&redacted);
@@ -656,6 +702,9 @@ fn spawn_unix_reader(
                 Err(_) => break,
             }
         }
+        let redacted = redactor.finish();
+        let text = String::from_utf8_lossy(&redacted);
+        append_log_tail(&mut buffer.lock(), &text, MAX_LOG_BYTES);
     })
 }
 

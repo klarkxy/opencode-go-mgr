@@ -6880,6 +6880,79 @@ fn v27_wrong_cipher_fails_closed_without_claiming_v27() {
 }
 
 #[test]
+fn current_schema_wrong_host_cipher_fails_closed_without_rewriting_ciphertext() {
+    let cipher_a: Arc<dyn KeyCipher + Send + Sync> =
+        Arc::new(StaticKeyCipher::new("alpha-host-secret"));
+    let cipher_b: Arc<dyn KeyCipher + Send + Sync> =
+        Arc::new(StaticKeyCipher::new("omega-host-secret"));
+
+    let empty = temp_data_dir("v37-empty-cipher-open");
+    drop(Database::open_with_cipher(empty.clone(), cipher_b.clone()).unwrap());
+    fs::remove_dir_all(&empty).unwrap();
+
+    let no_auth = temp_data_dir("v37-no-auth-cipher-open");
+    drop(Database::open_with_cipher(no_auth.clone(), cipher_a.clone()).unwrap());
+    drop(Database::open_with_cipher(no_auth.clone(), cipher_b.clone()).unwrap());
+    fs::remove_dir_all(&no_auth).unwrap();
+
+    let dir = temp_data_dir("v37-wrong-host-cipher");
+    let key_plain = "sk-preflight-live-key";
+    let password_plain = "pw-preflight-live-secret";
+    let db = Database::open_with_cipher(dir.clone(), cipher_a.clone()).unwrap();
+    assert_eq!(schema_version_on(&db.conn).unwrap(), CURRENT_SCHEMA_VERSION);
+    let mut enc = account("enc-current");
+    enc.key_cipher = cipher_a.encrypt(key_plain).unwrap();
+    enc.password_cipher = Some(cipher_a.encrypt(password_plain).unwrap());
+    db.create_account(&enc).unwrap();
+    let stored = db.get_account("enc-current").unwrap().unwrap();
+    let key_before = stored.key_cipher.clone();
+    let password_before = stored.password_cipher.clone();
+    drop(db);
+
+    let error = match Database::open_with_cipher(dir.clone(), cipher_b) {
+        Ok(_) => panic!("wrong host cipher must fail closed on current schema"),
+        Err(error) => error,
+    };
+    let message = format!("{error:#}");
+    assert!(
+        message.contains("host cipher rejected") && message.contains("key_cipher"),
+        "{message}"
+    );
+    assert!(
+        !message.contains(&key_before)
+            && !message.contains(password_before.as_deref().unwrap_or_default())
+            && !message.contains(key_plain)
+            && !message.contains(password_plain)
+            && !message.contains("alpha-host-secret")
+            && !message.contains("omega-host-secret"),
+        "probe error must not leak ciphertext, plaintext, or host secrets: {message}"
+    );
+
+    let conn = Connection::open(dir.join("data.sqlite")).unwrap();
+    assert_eq!(schema_version_on(&conn).unwrap(), CURRENT_SCHEMA_VERSION);
+    let (key_after, password_after): (String, Option<String>) = conn
+        .query_row(
+            "SELECT key_cipher, password_cipher FROM accounts WHERE id = ?1",
+            ["enc-current"],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(key_after, key_before);
+    assert_eq!(password_after, password_before);
+    drop(conn);
+
+    Database::open(dir.clone()).expect(
+        "current schema still opens without a host cipher; v27 is the rewrite that requires one",
+    );
+    let recovered = Database::open_with_cipher(dir.clone(), cipher_a).unwrap();
+    let loaded = recovered.get_account("enc-current").unwrap().unwrap();
+    assert_eq!(loaded.key_cipher, key_before);
+    assert_eq!(loaded.password_cipher, password_before);
+    drop(recovered);
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn v27_open_without_cipher_cannot_bypass_ciphertext() {
     let dir = temp_data_dir("v27-open-bypass");
     let cipher: Arc<dyn KeyCipher + Send + Sync> = Arc::new(StaticKeyCipher::new("host-secret"));
@@ -7490,7 +7563,8 @@ fn v35_maps_known_pairs_conserves_rows_and_writes_pre_v35_snapshot() {
 fn v35_unknown_pair_rolls_back_without_mutation() {
     let dir = temp_data_dir("v35-unknown-pair");
     let db = open_with_host_cipher(dir.clone()).unwrap();
-    let leftover = account("v35-unknown");
+    let mut leftover = account("v35-unknown");
+    leftover.key_cipher = fixture_account_key_cipher();
     db.create_account(&leftover).unwrap();
     drop(db);
     reverse_current_to_v34(&dir);
@@ -7820,6 +7894,123 @@ fn ollama_billing_create_failure_rolls_back_the_account_row() {
     );
     assert!(db.get_account("ollama-atomic").unwrap().is_none());
     assert_eq!(db.ollama_cloud_billing_tier("ollama-atomic").unwrap(), None);
+    drop(db);
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn ollama_billing_update_failure_preserves_account_fields_and_key() {
+    let dir = temp_data_dir("ollama-billing-update-atomic");
+    let db = open_with_host_cipher(dir.clone()).unwrap();
+    let original_key = fixture_account_key_cipher();
+    let replacement_key = test_host_cipher()
+        .encrypt("sk-replacement")
+        .expect("replacement key should encrypt");
+    let mut ollama = account("ollama-update-atomic");
+    ollama.provider_id = OLLAMA_PROVIDER_ID.to_string();
+    ollama.name = "original-name".into();
+    ollama.key_cipher = original_key.clone();
+    ollama.purchase_date = "2026-08-01".into();
+    db.create_account_with_contract_and_billing(&ollama, None, &[], Some(OllamaBillingTier::Pro))
+        .unwrap();
+
+    db.conn
+        .execute_batch(
+            "CREATE TRIGGER fail_ollama_billing_update
+                 BEFORE INSERT ON ollama_cloud_billing
+                 BEGIN
+                     SELECT RAISE(ABORT, 'forced ollama billing update failure');
+                 END;",
+        )
+        .unwrap();
+    let rename = AccountUpdate {
+        name: Some("renamed".into()),
+        ..AccountUpdate::default()
+    };
+    let error = db
+        .update_account_with_billing(
+            "ollama-update-atomic",
+            &rename,
+            Some(&replacement_key),
+            None,
+            Some(Some(OllamaBillingTier::Max)),
+        )
+        .expect_err("billing failure should abort the account update");
+    assert!(
+        error
+            .to_string()
+            .contains("forced ollama billing update failure"),
+        "{error}"
+    );
+    let rolled_back = db.get_account("ollama-update-atomic").unwrap().unwrap();
+    assert_eq!(rolled_back.name, "original-name");
+    assert_eq!(rolled_back.key_cipher, original_key);
+    assert_eq!(
+        db.ollama_cloud_billing_tier("ollama-update-atomic")
+            .unwrap(),
+        Some(OllamaBillingTier::Pro)
+    );
+
+    db.conn
+        .execute_batch("DROP TRIGGER fail_ollama_billing_update;")
+        .unwrap();
+    db.update_account_with_billing(
+        "ollama-update-atomic",
+        &rename,
+        Some(&replacement_key),
+        None,
+        Some(Some(OllamaBillingTier::Max)),
+    )
+    .unwrap();
+    let updated = db.get_account("ollama-update-atomic").unwrap().unwrap();
+    assert_eq!(updated.name, "renamed");
+    assert_eq!(updated.key_cipher, replacement_key);
+    assert_eq!(
+        db.ollama_cloud_billing_tier("ollama-update-atomic")
+            .unwrap(),
+        Some(OllamaBillingTier::Max)
+    );
+
+    db.update_account_with_billing(
+        "ollama-update-atomic",
+        &AccountUpdate {
+            name: Some("name-only".into()),
+            ..AccountUpdate::default()
+        },
+        None,
+        None,
+        None,
+    )
+    .unwrap();
+    let name_only = db.get_account("ollama-update-atomic").unwrap().unwrap();
+    assert_eq!(name_only.name, "name-only");
+    assert_eq!(name_only.key_cipher, replacement_key);
+    assert_eq!(
+        db.ollama_cloud_billing_tier("ollama-update-atomic")
+            .unwrap(),
+        Some(OllamaBillingTier::Max)
+    );
+
+    db.update_account_with_billing(
+        "ollama-update-atomic",
+        &AccountUpdate {
+            name: Some("cleared".into()),
+            ..AccountUpdate::default()
+        },
+        None,
+        None,
+        Some(None),
+    )
+    .unwrap();
+    let cleared = db.get_account("ollama-update-atomic").unwrap().unwrap();
+    assert_eq!(cleared.name, "cleared");
+    assert_eq!(cleared.key_cipher, replacement_key);
+    assert_eq!(
+        db.ollama_cloud_billing_tier("ollama-update-atomic")
+            .unwrap(),
+        None
+    );
+
     drop(db);
     fs::remove_dir_all(dir).unwrap();
 }

@@ -6,7 +6,7 @@
 
 ## 数据目录与加密身份
 
-每次打开数据库都使用 Host 解析的 cipher（CLI、桌面、Docker 均为 `Database::open_with_cipher`）。cipher 不匹配会 fail closed；改写密文无法修复不匹配。
+每次打开数据库都使用 Host 解析的 cipher（CLI、桌面、Docker 均为 `Database::open_with_cipher`）。迁移前会检查已有账号密文，解密错误会 fail closed。Key 存储使用非认证混淆，成功解码为 UTF-8 本身不能证明 cipher 身份正确。请保留原 cipher；改写密文无法修复不匹配。
 
 | 形态 | 默认数据目录 | 加密身份 |
 | --- | --- | --- |

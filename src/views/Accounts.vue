@@ -267,7 +267,7 @@ import {
   useMessage,
 } from "naive-ui";
 import { PlusOutlined } from "@vicons/antd";
-import { DashboardRequestError, dashboardApi } from "../api/dashboard";
+import { DashboardRequestError, dashboardApi, isRevisionConflict } from "../api/dashboard";
 import { providerApi } from "../api/providers.ts";
 import { useAccountsStore } from "../stores/accounts.ts";
 import type { ProviderCatalogEntry } from "../api/providers.ts";
@@ -1120,7 +1120,10 @@ async function reloadAfterControlPlaneConflict(): Promise<void> {
 }
 
 async function recoverAccountMutationConflict(error: unknown): Promise<boolean> {
-  if (!(error instanceof DashboardRequestError) || error.status !== 409) return false;
+  // Only a CAS revision conflict reloads the world. Domain 409s (enable before
+  // verify, reorder set mismatch, refresh already running, …) keep the actual
+  // backend message and the user's draft instead of a misleading reload.
+  if (!isRevisionConflict(error)) return false;
   await reloadAfterControlPlaneConflict();
   message.warning(t("账号设置已被其他操作修改，已重新加载最新状态，请重试"));
   return true;

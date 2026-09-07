@@ -1216,13 +1216,13 @@ fn sanitize_config_json_primary_key(json: &str) -> Result<(String, Option<String
         .map(str::trim)
         .filter(|item| !item.is_empty())
         .map(str::to_string);
-    if let Some(object) = value.as_object_mut() {
-        if object.contains_key("gateway_key") {
-            object.insert(
-                "gateway_key".to_string(),
-                serde_json::Value::String(String::new()),
-            );
-        }
+    if let Some(object) = value.as_object_mut()
+        && object.contains_key("gateway_key")
+    {
+        object.insert(
+            "gateway_key".to_string(),
+            serde_json::Value::String(String::new()),
+        );
     }
     Ok((serde_json::to_string(&value)?, primary))
 }
@@ -3179,7 +3179,9 @@ impl Database {
     }
 
     /// Production open path: migrate with the already-resolved Host cipher.
-    /// Account ciphertext is validated in place and never rewritten.
+    /// Persisted account key/password ciphertext is probed in place before
+    /// migration and is never rewritten. Decrypt failure fails closed; the
+    /// XOR obfuscation is not authenticated encryption.
     pub fn open_with_cipher(
         data_dir: PathBuf,
         cipher: Arc<dyn KeyCipher + Send + Sync>,
@@ -3198,6 +3200,14 @@ impl Database {
             "database schema version {existing_version} is newer than this build supports ({CURRENT_SCHEMA_VERSION}); restore a matching data directory and encryption key"
         );
         let is_fresh = is_fresh_empty_database(&conn, existing_version)?;
+        // Host-cipher opens probe persisted account key/password ciphertext
+        // before migrate() can mutate the file. Decrypt failure fails closed.
+        // XOR obfuscation cannot authenticate every wrong-key UTF-8 result.
+        // Database::open (cipher None) skips this; v27 still probes when that
+        // rewrite runs. Empty or no-auth rows have nothing to decrypt.
+        if cipher.is_some() {
+            preflight_ciphertext_probes(&conn, cipher)?;
+        }
         ensure_pre_v22_backup(&conn, &db_path)?;
         ensure_pre_v23_backup(&conn, &db_path)?;
         // WAL keeps request-path log writes off the rollback-journal FULL fsync;
@@ -5441,6 +5451,21 @@ impl Database {
         key_cipher: Option<&str>,
         password_cipher: Option<&str>,
     ) -> Result<()> {
+        self.update_account_with_billing(id, update, key_cipher, password_cipher, None)
+    }
+
+    /// Persist account field updates and an optional Ollama billing write in
+    /// one SQLite transaction. `None` leaves billing unchanged; `Some(None)`
+    /// clears the billing row. A billing-write failure leaves the account row
+    /// and Key ciphertext untouched.
+    pub fn update_account_with_billing(
+        &self,
+        id: &str,
+        update: &AccountUpdate,
+        key_cipher: Option<&str>,
+        password_cipher: Option<&str>,
+        ollama_billing: Option<Option<OllamaBillingTier>>,
+    ) -> Result<()> {
         let existing = self
             .get_account(id)?
             .ok_or_else(|| anyhow::anyhow!("account not found"))?;
@@ -5537,6 +5562,9 @@ impl Database {
             )?;
             refresh_goat_provider_catalog_on(&tx)?;
         }
+        if let Some(tier) = ollama_billing {
+            set_ollama_cloud_billing_tier_on(&tx, id, tier)?;
+        }
         tx.commit()?;
         Ok(())
     }
@@ -5549,10 +5577,10 @@ impl Database {
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             [sanitized],
         )?;
-        if table_exists(&tx, "access_keys")? {
-            if let Some(primary) = primary {
-                upsert_primary_access_key_on(&tx, &primary)?;
-            }
+        if table_exists(&tx, "access_keys")?
+            && let Some(primary) = primary
+        {
+            upsert_primary_access_key_on(&tx, &primary)?;
         }
         tx.commit()?;
         Ok(())

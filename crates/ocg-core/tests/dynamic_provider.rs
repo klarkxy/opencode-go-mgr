@@ -346,6 +346,83 @@ async fn two_keyed_accounts_select_and_fallback() {
 }
 
 #[tokio::test]
+async fn none_auth_dynamic_provider_forwards_without_upstream_auth() {
+    let mut replies = HashMap::new();
+    replies.insert(
+        String::new(),
+        VecDeque::from([FakeReply {
+            status: 200,
+            body: CHAT_OK,
+        }]),
+    );
+    let (upstream, calls, _stop) = start_fake_upstream(replies).await;
+    let harness = start_loopback("dyn-none-auth-forward").await;
+    let mut config = harness.state.config();
+    config.proxy_mode = ProxyMode::Direct;
+    harness.state.set_config(config).unwrap();
+    let (status, created) = send_json(
+        &harness,
+        Method::POST,
+        "/providers",
+        &cas(
+            &harness,
+            create_body(
+                "OpenLab",
+                &format!("{upstream}/v1"),
+                "chat_completions",
+                "none",
+                None,
+            ),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+
+    let response = harness
+        .client
+        .post(format!(
+            "http://127.0.0.1:{}/v1/chat/completions",
+            harness.handle.port
+        ))
+        .header(
+            reqwest::header::AUTHORIZATION,
+            format!("Bearer {}", harness.state.config().gateway_key),
+        )
+        .header("x-opencode-session", "ses_client")
+        .header("x-opencode-client", "cli")
+        .header("x-opencode-request", "req_client")
+        .header("x-opencode-project", "proj_client")
+        .header("x-session-id", "ses_id")
+        .header("x-session-affinity", "ses_aff")
+        .json(&json!({
+            "model": "lab-opus",
+            "messages": [{"role": "user", "content": "ping"}],
+            "max_tokens": 1
+        }))
+        .send()
+        .await
+        .unwrap();
+    let status = response.status();
+    let body = response.text().await.unwrap();
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let captured = calls.lock().expect("fake call log").clone();
+    assert_eq!(captured.len(), 1, "{captured:?}");
+    let call = &captured[0];
+    assert!(call.authorization.is_none(), "{call:?}");
+    assert!(call.x_api_key.is_none(), "{call:?}");
+    assert!(call.x_goog_api_key.is_none(), "{call:?}");
+    assert!(call.key.is_empty(), "{call:?}");
+    assert!(call.opencode_session.is_none(), "{call:?}");
+    assert!(call.opencode_client.is_none(), "{call:?}");
+    assert!(call.opencode_request.is_none(), "{call:?}");
+    assert!(call.opencode_project.is_none(), "{call:?}");
+    assert!(call.session_id.is_none(), "{call:?}");
+    assert!(call.session_affinity.is_none(), "{call:?}");
+    harness.stop();
+}
+
+#[tokio::test]
 async fn raw_ambiguity_makes_zero_outbound_requests() {
     let (upstream, calls, _stop) = start_fake_upstream(HashMap::new()).await;
     let harness = start_loopback("dyn-ambiguous").await;

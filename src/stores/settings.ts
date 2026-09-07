@@ -19,18 +19,27 @@ export const useSettingsStore = defineStore("settings", () => {
   const loading = ref(false);
   const error = ref("");
 
+  // Overlapping loads resolve out of order; only the latest request commits
+  // state. Stale calls still return/throw to their own caller unchanged.
+  let loadGeneration = 0;
+  let claudeDesktopGeneration = 0;
+
   async function load(): Promise<AppConfig> {
+    const generation = ++loadGeneration;
     loading.value = true;
     try {
       const result = await dashboardApi.getSettings();
+      if (generation !== loadGeneration) return result;
       settings.value = result;
       error.value = "";
       return result;
     } catch (e) {
-      error.value = e instanceof Error ? e.message : String(e);
+      if (generation === loadGeneration) {
+        error.value = e instanceof Error ? e.message : String(e);
+      }
       throw e;
     } finally {
-      loading.value = false;
+      if (generation === loadGeneration) loading.value = false;
     }
   }
 
@@ -51,7 +60,9 @@ export const useSettingsStore = defineStore("settings", () => {
   }
 
   async function loadClaudeDesktop(): Promise<ClaudeDesktopModels> {
+    const generation = ++claudeDesktopGeneration;
     const result = await dashboardApi.getClaudeDesktopModels();
+    if (generation !== claudeDesktopGeneration) return result;
     claudeDesktop.value = result;
     return result;
   }
@@ -59,6 +70,7 @@ export const useSettingsStore = defineStore("settings", () => {
   async function putClaudeDesktop(models: ClaudeDesktopModels): Promise<ClaudeDesktopModels> {
     try {
       const result = await dashboardApi.updateClaudeDesktopModels(models);
+      claudeDesktopGeneration += 1;
       claudeDesktop.value = result;
       return result;
     } catch (cause) {

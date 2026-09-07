@@ -122,11 +122,10 @@ fn clamp_ollama_cloud_max_tokens(body: &mut Value) -> bool {
             .get(field)
             .and_then(Value::as_u64)
             .is_some_and(|limit| limit > OLLAMA_CLOUD_MAX_TOKENS_LIMIT)
+            && let Some(value) = object.get_mut(field)
         {
-            if let Some(value) = object.get_mut(field) {
-                *value = Value::from(OLLAMA_CLOUD_MAX_TOKENS_LIMIT);
-                changed = true;
-            }
+            *value = Value::from(OLLAMA_CLOUD_MAX_TOKENS_LIMIT);
+            changed = true;
         }
     }
     changed

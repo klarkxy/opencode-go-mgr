@@ -50,10 +50,10 @@ pub fn dashboard_dir(state: &CoreState) -> PathBuf {
     if let Ok(dir) = std::env::var("OCG_DASHBOARD_DIR") {
         return PathBuf::from(dir);
     }
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(parent) = exe.parent() {
-            return parent.join("dist");
-        }
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(parent) = exe.parent()
+    {
+        return parent.join("dist");
     }
     std::env::current_dir()
         .unwrap_or_else(|_| PathBuf::from("."))

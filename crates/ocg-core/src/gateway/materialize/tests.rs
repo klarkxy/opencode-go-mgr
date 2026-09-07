@@ -825,6 +825,20 @@ fn custom_candidate_diagnostic_passthrough_keeps_client_protocol() {
         diagnostic_forced_upstream(&goat, ApiFormat::Messages),
         Some(ApiFormat::Messages)
     );
+    let zen = resolve_with_catalogs(
+        "brand-new-promo",
+        &["brand-new-promo-free".into()],
+        &[],
+        &[],
+    );
+    assert_eq!(
+        diagnostic_forced_upstream(&zen, ApiFormat::ChatCompletions),
+        Some(ApiFormat::ChatCompletions)
+    );
+    assert_eq!(
+        diagnostic_forced_upstream(&zen, ApiFormat::Messages),
+        Some(ApiFormat::ChatCompletions)
+    );
 }
 
 #[test]

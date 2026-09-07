@@ -1619,13 +1619,13 @@ pub fn validate_plan_key(plan: BuiltinProvider, key: &str) -> Result<(), Provide
     if trimmed.is_empty() {
         return Err(ProviderBindingError::KeyRequired);
     }
-    if let Some(prefix) = plan.key_prefix {
-        if !trimmed.starts_with(prefix) {
-            return Err(ProviderBindingError::KeyPrefixMismatch {
-                provider_id: plan.provider_id.to_string(),
-                prefix: prefix.to_string(),
-            });
-        }
+    if let Some(prefix) = plan.key_prefix
+        && !trimmed.starts_with(prefix)
+    {
+        return Err(ProviderBindingError::KeyPrefixMismatch {
+            provider_id: plan.provider_id.to_string(),
+            prefix: prefix.to_string(),
+        });
     }
     Ok(())
 }

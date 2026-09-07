@@ -308,35 +308,35 @@ async fn main() -> anyhow::Result<()> {
     let go_key = first_key(&go_accounts)?;
     let goat_key = first_key(&goat_accounts)?;
     let mut targets = Vec::new();
-    if enabled_provider(&options, "go") {
-        if let Some(key) = go_key {
-            targets.push(Target {
-                provider_id: OPENCODE_PROVIDER_ID,
-                base_url: go_base,
-                bearer_key: Some(key),
-                models: go_catalog,
-            });
-        }
+    if enabled_provider(&options, "go")
+        && let Some(key) = go_key
+    {
+        targets.push(Target {
+            provider_id: OPENCODE_PROVIDER_ID,
+            base_url: go_base,
+            bearer_key: Some(key),
+            models: go_catalog,
+        });
     }
-    if enabled_provider(&options, "zen") {
-        if let Some(base_url) = free_base {
-            targets.push(Target {
-                provider_id: OPENCODE_ZEN_FREE_PROVIDER_ID,
-                base_url,
-                bearer_key: None,
-                models: free_catalog,
-            });
-        }
+    if enabled_provider(&options, "zen")
+        && let Some(base_url) = free_base
+    {
+        targets.push(Target {
+            provider_id: OPENCODE_ZEN_FREE_PROVIDER_ID,
+            base_url,
+            bearer_key: None,
+            models: free_catalog,
+        });
     }
-    if enabled_provider(&options, "goat") {
-        if let Some(key) = goat_key {
-            targets.push(Target {
-                provider_id: COMMAND_CODE_PROVIDER_ID,
-                base_url: COMMAND_CODE_GOAT_BASE_URL.trim_end_matches('/').to_string(),
-                bearer_key: Some(key),
-                models: goat_catalog,
-            });
-        }
+    if enabled_provider(&options, "goat")
+        && let Some(key) = goat_key
+    {
+        targets.push(Target {
+            provider_id: COMMAND_CODE_PROVIDER_ID,
+            base_url: COMMAND_CODE_GOAT_BASE_URL.trim_end_matches('/').to_string(),
+            bearer_key: Some(key),
+            models: goat_catalog,
+        });
     }
 
     let client = reqwest::Client::builder()

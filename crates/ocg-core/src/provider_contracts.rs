@@ -1161,7 +1161,14 @@ fn merge_model_contract(
     } else {
         safety_ceiling_protocols(probe, model_id)
     };
-    let static_verified = static_verified_protocols(adapter, model_id, declared);
+    let mut static_verified = static_verified_protocols(adapter, model_id, declared);
+    if probe.unknown_zen_free_defaults_to_chat
+        && crate::kernel::ids::is_free_model(model_id)
+        && opencode_profile(model_id).is_none()
+        && !static_verified.contains(&UpstreamProtocolKind::ChatCompletions)
+    {
+        static_verified.push(UpstreamProtocolKind::ChatCompletions);
+    }
     let mut protocols = BTreeMap::new();
     for protocol in UpstreamProtocolKind::ALL {
         let persisted = evidence

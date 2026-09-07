@@ -851,6 +851,32 @@ fn unknown_chat_and_messages_models_fail_closed() {
 }
 
 #[test]
+fn unknown_zen_free_suffix_defaults_to_chat() {
+    let chat = prepare_request(
+        ApiFormat::ChatCompletions,
+        bytes(json!({
+            "model": "brand-new-promo-free",
+            "messages": [{"role": "user", "content": "hi"}],
+            "max_tokens": 1
+        })),
+    )
+    .expect("unknown -free IDs materialize as Chat");
+    assert_eq!(chat.upstream, ApiFormat::ChatCompletions);
+    assert_eq!(chat.model, "brand-new-promo-free");
+
+    let converted = prepare_request(
+        ApiFormat::Messages,
+        bytes(json!({
+            "model": "brand-new-promo-free",
+            "max_tokens": 1,
+            "messages": [{"role": "user", "content": "hi"}]
+        })),
+    )
+    .expect("other client formats convert to Chat for unknown -free IDs");
+    assert_eq!(converted.upstream, ApiFormat::ChatCompletions);
+}
+
+#[test]
 fn messages_upstream_moves_system_roles_to_top_level() {
     let native = prepare_request(
             ApiFormat::Messages,

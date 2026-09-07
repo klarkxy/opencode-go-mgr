@@ -5,7 +5,7 @@
 ## 前置要求
 
 Node.js 22、`package.json` 的 `packageManager` 钉，以及 workspace 的
-`rust-version`。原生依赖以 `.github/workflows/release.yml` 在对应 runner
+`rust-version`（锁定依赖要求 Rust 1.88 或更新版本）。原生依赖以 `.github/workflows/release.yml` 在对应 runner
 上安装的为准。
 
 ## 开发模式

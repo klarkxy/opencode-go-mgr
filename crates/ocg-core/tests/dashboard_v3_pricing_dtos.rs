@@ -97,10 +97,10 @@ fn allows_null(schema: &Value) -> bool {
     if schema.get("type").and_then(Value::as_str) == Some("null") {
         return true;
     }
-    if let Some(types) = schema.get("type").and_then(Value::as_array) {
-        if types.iter().any(|value| value == "null") {
-            return true;
-        }
+    if let Some(types) = schema.get("type").and_then(Value::as_array)
+        && types.iter().any(|value| value == "null")
+    {
+        return true;
     }
     if let Some(any_of) = schema.get("anyOf").and_then(Value::as_array) {
         return any_of.iter().any(allows_null);

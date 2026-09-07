@@ -5,7 +5,7 @@
 ## Prerequisites
 
 Node.js 22, the `packageManager` pin in `package.json`, and the workspace
-`rust-version`. Native packages are whatever
+`rust-version` (Rust 1.88 or newer, as required by the locked dependencies). Native packages are whatever
 `.github/workflows/release.yml` installs on that runner.
 
 ## Dev loop

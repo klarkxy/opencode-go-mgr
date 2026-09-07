@@ -1770,6 +1770,61 @@ async fn unregistered_free_suffix_without_protocol_is_rejected_locally() {
 }
 
 #[tokio::test]
+async fn unknown_zen_catalog_free_id_forwards_as_chat_on_raw_pin_and_stripped_alias() {
+    let p = PreparedFallback::zen_go(&[("", &[ok(), ok()])], &["normal-key"]).await;
+    let mut catalog = (*p.state.zen_free_model_catalog()).clone();
+    catalog.models.push("brand-new-promo-free".into());
+    catalog.refreshed_at = Some(Utc::now());
+    p.state
+        .db
+        .lock()
+        .set_zen_free_model_catalog(&catalog)
+        .unwrap();
+    p.state.reload_provider_contracts().unwrap();
+    p.state.activate_zen_free_model_catalog(catalog).unwrap();
+    let h = p.bind().await;
+
+    for model in ["brand-new-promo-free", "brand-new-promo"] {
+        let (status, body) = h.protocol("/v1/chat/completions", model).await;
+        assert_eq!(status, StatusCode::OK, "{model} {body}");
+    }
+    assert_eq!(
+        h.calls
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|call| call.path.as_str())
+            .collect::<Vec<_>>(),
+        ["/zen/v1/chat/completions", "/zen/v1/chat/completions"]
+    );
+    assert!(
+        h.calls
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|call| call.key.is_empty())
+    );
+
+    let (status, body) = h.models().await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let payload: serde_json::Value = serde_json::from_str(&body).unwrap();
+    let ids = payload["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|item| item["id"].as_str())
+        .collect::<HashSet<_>>();
+    assert!(
+        ids.contains("brand-new-promo"),
+        "stripped Alias missing: {body}"
+    );
+    assert!(
+        !ids.contains("brand-new-promo-free"),
+        "raw pin leaked into /v1/models: {body}"
+    );
+}
+
+#[tokio::test]
 async fn registered_zen_model_401_is_returned_without_credential_fallback_or_breaker() {
     let h = FallbackHarness::zen_go(
         &[
@@ -2663,6 +2718,73 @@ async fn explicit_opencode_session_is_preserved_for_go_and_zen_free() {
             expected
         );
     }
+}
+
+#[tokio::test]
+async fn opencode_identity_headers_are_go_zen_only_and_preserve_explicit_values() {
+    let go = FallbackHarness::go(&[("key-1", &[ok()])], &["key-1"]).await;
+    let zen = FallbackHarness::zen_go(&[("", &[ok()]), ("key-1", &[ok()])], &["key-1"]).await;
+    let (goat, _) = start_goat(
+        &[("goat-key", &[ok()])],
+        &[COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM],
+        true,
+        true,
+    )
+    .await;
+
+    for (h, model) in [
+        (&go, "deepseek-v4-flash"),
+        (&zen, "mimo-v2.5-free"),
+        (&goat, COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM),
+    ] {
+        let response = loopback_client()
+            .post(format!("http://127.0.0.1:{}/v1/chat/completions", h.port))
+            .header(reqwest::header::AUTHORIZATION, "Bearer gw-test")
+            .header("x-opencode-session", "ses_explicit")
+            .header("x-opencode-client", "desktop")
+            .header("x-opencode-request", "req_explicit")
+            .header("x-opencode-project", "proj_explicit")
+            .header("x-session-id", "ses_id_explicit")
+            .header("x-session-affinity", "ses_aff_explicit")
+            .json(&serde_json::json!({
+                "model": model,
+                "messages": [{"role": "user", "content": "ping"}],
+                "stream": false
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "{}",
+            response.text().await.unwrap()
+        );
+    }
+
+    let go_call = go.calls.lock().unwrap()[0].clone();
+    assert_eq!(go_call.opencode_session.as_deref(), Some("ses_explicit"));
+    assert_eq!(go_call.opencode_client.as_deref(), Some("desktop"));
+    assert_eq!(go_call.opencode_request.as_deref(), Some("req_explicit"));
+    assert_eq!(go_call.opencode_project.as_deref(), Some("proj_explicit"));
+    assert!(go_call.session_id.is_none(), "{go_call:?}");
+    assert!(go_call.session_affinity.is_none(), "{go_call:?}");
+
+    let zen_call = zen.calls.lock().unwrap()[0].clone();
+    assert_eq!(zen_call.opencode_session.as_deref(), Some("ses_explicit"));
+    assert_eq!(zen_call.opencode_client.as_deref(), Some("desktop"));
+    assert_eq!(zen_call.opencode_request.as_deref(), Some("req_explicit"));
+    assert_eq!(zen_call.opencode_project.as_deref(), Some("proj_explicit"));
+    assert!(zen_call.session_id.is_none(), "{zen_call:?}");
+    assert!(zen_call.session_affinity.is_none(), "{zen_call:?}");
+
+    let goat_call = goat.calls.lock().unwrap()[0].clone();
+    assert!(goat_call.opencode_session.is_none(), "{goat_call:?}");
+    assert!(goat_call.opencode_client.is_none(), "{goat_call:?}");
+    assert!(goat_call.opencode_request.is_none(), "{goat_call:?}");
+    assert!(goat_call.opencode_project.is_none(), "{goat_call:?}");
+    assert!(goat_call.session_id.is_none(), "{goat_call:?}");
+    assert!(goat_call.session_affinity.is_none(), "{goat_call:?}");
 }
 
 #[tokio::test]

@@ -100,8 +100,13 @@ enum KeyAction {
     },
 }
 
+fn main() -> Result<()> {
+    ocg_core::cpa_runtime::host::run_internal_supervisor_if_requested();
+    run_cli()
+}
+
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn run_cli() -> Result<()> {
     let cli = Cli::parse();
     let data_dir = resolve_data_dir(cli.data_dir);
     let cipher = resolve_cipher(&data_dir, cli.encryption_key)?;

@@ -1117,15 +1117,14 @@ fn validate_payload(payload: PortablePayload) -> Result<ValidatedMigration, Tran
                 prefix()
             )));
         }
-        if let Some(plan) = plan {
-            if plan.singleton_account_id.is_some()
-                || plan.creation_availability == CreationAvailability::Unavailable
-            {
-                return Err(TransferError::Invalid(format!(
-                    "{} uses a Plan that cannot be imported",
-                    prefix()
-                )));
-            }
+        if let Some(plan) = plan
+            && (plan.singleton_account_id.is_some()
+                || plan.creation_availability == CreationAvailability::Unavailable)
+        {
+            return Err(TransferError::Invalid(format!(
+                "{} uses a Plan that cannot be imported",
+                prefix()
+            )));
         }
         let account_type =
             ModelAccountType::try_from(account.account_type.as_str()).map_err(|_| {

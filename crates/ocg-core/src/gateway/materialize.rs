@@ -67,8 +67,10 @@ pub(crate) struct MaterializedRouteSet {
 /// Diagnostics are not a candidate protocol decision. If a resolution can use
 /// Custom, Command Code GOAT, or Ollama Cloud, preserve the client wire format
 /// until each actual mapping/account is materialized. Unique GOAT and Ollama
-/// catalog IDs are not in OpenCode `MODEL_PROTOCOLS`. Pure builtin
-/// resolutions keep their normal early validation.
+/// catalog IDs are not in OpenCode `MODEL_PROTOCOLS`. Zen-only resolutions
+/// default to Chat so unknown catalog `-free` rows (and their stripped Alias)
+/// are not rejected against the Go protocol table. Pure builtin resolutions
+/// keep their normal early validation.
 pub(crate) fn diagnostic_forced_upstream(
     resolved: &ResolvedModel,
     client: ApiFormat,
@@ -81,6 +83,19 @@ pub(crate) fn diagnostic_forced_upstream(
                 .map(|profile| profile.preferred)
                 .unwrap_or(ApiFormat::ChatCompletions),
         );
+    }
+    let zen_only = match resolved {
+        ResolvedModel::PinnedRaw { mapping, .. } => mapping_is_zen_free(mapping),
+        ResolvedModel::Alias { mappings, .. } => {
+            let routeable: Vec<_> = mappings
+                .iter()
+                .filter(|mapping| mapping.routeable)
+                .collect();
+            !routeable.is_empty() && routeable.iter().all(|mapping| mapping_is_zen_free(mapping))
+        }
+    };
+    if zen_only {
+        return Some(ApiFormat::ChatCompletions);
     }
     let preserve_client = match resolved {
         ResolvedModel::PinnedRaw { mapping, .. } => mapping_preserves_client_wire(mapping),

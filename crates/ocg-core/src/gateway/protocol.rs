@@ -1,3 +1,4 @@
+use crate::kernel::ids::is_free_model;
 use crate::kernel::protocol::model_protocol;
 use crate::models::UpstreamChannel;
 use crate::provider::{COMMAND_CODE_GOAT_CHAT_COMPLETIONS_PATH, COMMAND_CODE_GOAT_MESSAGES_PATH};
@@ -710,6 +711,7 @@ fn resolve_upstream_format(client: ApiFormat, model: &str) -> Result<ApiFormat, 
         (ApiFormat::Gemini, Some(profile)) => Ok(profile.preferred),
         (client, Some(profile)) if profile.supported.contains(&client) => Ok(client),
         (_, Some(profile)) => Ok(profile.preferred),
+        (_, None) if is_free_model(model) => Ok(ApiFormat::ChatCompletions),
         (_, None) => Err(ProtocolError::new(format!(
             "unknown model `{model}` cannot be routed from this endpoint"
         ))),
@@ -736,10 +738,9 @@ fn apply_effort_aliases(mut body: Value, model: &str) -> Value {
         .pointer("/reasoning/effort")
         .and_then(Value::as_str)
         .and_then(&rewrite)
+        && let Some(reasoning) = body.get_mut("reasoning").and_then(Value::as_object_mut)
     {
-        if let Some(reasoning) = body.get_mut("reasoning").and_then(Value::as_object_mut) {
-            reasoning.insert("effort".into(), Value::String(replacement));
-        }
+        reasoning.insert("effort".into(), Value::String(replacement));
     }
     if let Some(replacement) = body
         .get("reasoning_effort")
@@ -752,10 +753,9 @@ fn apply_effort_aliases(mut body: Value, model: &str) -> Value {
         .pointer("/output_config/effort")
         .and_then(Value::as_str)
         .and_then(&rewrite)
+        && let Some(output_config) = body.get_mut("output_config").and_then(Value::as_object_mut)
     {
-        if let Some(output_config) = body.get_mut("output_config").and_then(Value::as_object_mut) {
-            output_config.insert("effort".into(), Value::String(replacement));
-        }
+        output_config.insert("effort".into(), Value::String(replacement));
     }
     body
 }

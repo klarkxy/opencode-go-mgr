@@ -19,24 +19,37 @@ export const useProvidersStore = defineStore("providers", () => {
   const loading = ref(false);
   const error = ref("");
 
+  // Overlapping loads resolve out of order; only the latest request commits
+  // state. Mutation responses bump the contracts generation so a slow pending
+  // load cannot clobber fresher post-mutation state. Stale calls still
+  // return/throw to their own caller unchanged.
+  let catalogGeneration = 0;
+  let contractsGeneration = 0;
+
   async function loadCatalog(): Promise<ProviderCatalogEntry[]> {
+    const generation = ++catalogGeneration;
     const result = await providerApi.getProviderCatalog();
+    if (generation !== catalogGeneration) return result;
     catalog.value = result;
     return result;
   }
 
   async function loadContracts(): Promise<ProviderContractsResponse> {
+    const generation = ++contractsGeneration;
     loading.value = true;
     try {
       const result = await providerApi.getProviderContracts();
+      if (generation !== contractsGeneration) return result;
       contracts.value = result;
       error.value = "";
       return result;
     } catch (e) {
-      error.value = e instanceof Error ? e.message : String(e);
+      if (generation === contractsGeneration) {
+        error.value = e instanceof Error ? e.message : String(e);
+      }
       throw e;
     } finally {
-      loading.value = false;
+      if (generation === contractsGeneration) loading.value = false;
     }
   }
 
@@ -45,7 +58,10 @@ export const useProvidersStore = defineStore("providers", () => {
     scopeId: string,
   ): Promise<ProviderContractsResponse> {
     const result = await providerApi.refreshContractCatalog(scopeKind, scopeId);
+    contractsGeneration += 1;
     contracts.value = result;
+    // Release the flag of any superseded in-flight `loadContracts`.
+    loading.value = false;
     return result;
   }
 
@@ -54,7 +70,9 @@ export const useProvidersStore = defineStore("providers", () => {
   ): Promise<ProviderContractsResponse> {
     try {
       const result = await providerApi.resetStaticModelProtocols(scopeId);
+      contractsGeneration += 1;
       contracts.value = result;
+      loading.value = false;
       return result;
     } catch (cause) {
       if (isRevisionConflict(cause)) await loadContracts();
@@ -69,7 +87,9 @@ export const useProvidersStore = defineStore("providers", () => {
   ): Promise<ProviderContractsResponse> {
     try {
       const result = await providerApi.updateModelProtocolOverrides(scopeKind, scopeId, overrides);
+      contractsGeneration += 1;
       contracts.value = result;
+      loading.value = false;
       return result;
     } catch (cause) {
       if (isRevisionConflict(cause)) await loadContracts();

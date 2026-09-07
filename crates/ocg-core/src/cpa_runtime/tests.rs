@@ -1357,10 +1357,11 @@ fn wait_for_http_ok(port: u16) {
                 .is_ok()
             {
                 let mut buf = [0u8; 32];
-                if let Ok(n) = stream.read(&mut buf) {
-                    if n >= 12 && buf.starts_with(b"HTTP/1.1 200") {
-                        return;
-                    }
+                if let Ok(n) = stream.read(&mut buf)
+                    && n >= 12
+                    && buf.starts_with(b"HTTP/1.1 200")
+                {
+                    return;
                 }
             }
         }

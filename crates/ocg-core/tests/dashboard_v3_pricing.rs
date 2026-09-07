@@ -90,12 +90,11 @@ async fn send_json(
     body: &Value,
 ) -> (StatusCode, Value) {
     let mut body = body.clone();
-    if path == "/providers/opencode/pricing/refresh" {
-        if let Some(object) = body.as_object_mut() {
-            if let Some(revision) = object.remove("expectedPricingRevision") {
-                object.insert("expectedProviderPricingRevision".into(), revision);
-            }
-        }
+    if path == "/providers/opencode/pricing/refresh"
+        && let Some(object) = body.as_object_mut()
+        && let Some(revision) = object.remove("expectedPricingRevision")
+    {
+        object.insert("expectedProviderPricingRevision".into(), revision);
     }
     let response = harness
         .client

@@ -94,3 +94,24 @@ test("settings conflict merge keeps local edits and adopts server capability fla
   assert.equal(merged.client_root_url_from_env, true);
   assert.equal(merged.gateway_port_from_env, true);
 });
+
+test("an untouched clone of the saved model list adopts the latest server array", () => {
+  const saved = config({ proxy_list_models: ["m1", "m2"] });
+  // The form clones the array on load: same content, different reference.
+  const current = config({ proxy_list_models: [...saved.proxy_list_models] });
+  const latest = config({ revision: 2, proxy_list_models: ["m1", "m2", "m3"] });
+
+  const merged = mergeUnsavedSettings(latest, current, saved);
+
+  assert.deepEqual(merged.proxy_list_models, ["m1", "m2", "m3"]);
+});
+
+test("a locally edited model list still wins over the server snapshot", () => {
+  const saved = config({ proxy_list_models: ["m1", "m2"] });
+  const current = config({ proxy_list_models: ["m1", "m3"] });
+  const latest = config({ revision: 2, proxy_list_models: ["m1", "m2", "m4"] });
+
+  const merged = mergeUnsavedSettings(latest, current, saved);
+
+  assert.deepEqual(merged.proxy_list_models, ["m1", "m3"]);
+});

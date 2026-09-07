@@ -685,6 +685,11 @@ async fn forward_request_impl(
                 | "x-ocg-conversation-id"
                 | "x-cmdc-zdr"
                 | "x-opencode-session"
+                | "x-opencode-client"
+                | "x-opencode-request"
+                | "x-opencode-project"
+                | "x-session-id"
+                | "x-session-affinity"
         ) || (plan.upstream != ApiFormat::Messages
             && matches!(header.as_str(), "anthropic-version" | "anthropic-beta")))
         {
@@ -700,6 +705,7 @@ async fn forward_request_impl(
             &trace.request_id,
         );
         upstream_headers.insert("x-opencode-session", session.clone());
+        copy_explicit_opencode_identity_headers(&mut upstream_headers, &headers);
         if account.provider_id == crate::provider::OPENCODE_ZEN_FREE_PROVIDER_ID {
             apply_zen_free_identity_headers(&mut upstream_headers, &session, &trace.request_id);
         }
@@ -783,21 +789,25 @@ async fn forward_request_impl(
 
     let model = plan.model.clone();
     let send_headers = if attempt_spec.isolates_client_headers() {
-        let api_key = key
-            .as_deref()
-            .ok_or_else(|| anyhow::anyhow!("isolated route requires a decrypted key"))?;
-        let scheme = match attempt_spec.auth {
-            UpstreamAuth::XApiKey => crate::provider::UpstreamAuthScheme::XApiKey,
-            _ => crate::provider::UpstreamAuthScheme::Bearer,
-        };
-        let mut headers = crate::custom_http::isolated_custom_headers(scheme, api_key)
-            .map_err(|error| anyhow::anyhow!(error))?;
         let extra = json_content_headers(plan.upstream == ApiFormat::Messages)
             .map_err(|error| anyhow::anyhow!(error))?;
-        for (name, value) in &extra {
-            headers.insert(name.clone(), value.clone());
+        if matches!(attempt_spec.wire_auth(), UpstreamAuth::None) {
+            extra
+        } else {
+            let api_key = key
+                .as_deref()
+                .ok_or_else(|| anyhow::anyhow!("isolated route requires a decrypted key"))?;
+            let scheme = match attempt_spec.auth {
+                UpstreamAuth::XApiKey => crate::provider::UpstreamAuthScheme::XApiKey,
+                _ => crate::provider::UpstreamAuthScheme::Bearer,
+            };
+            let mut headers = crate::custom_http::isolated_custom_headers(scheme, api_key)
+                .map_err(|error| anyhow::anyhow!(error))?;
+            for (name, value) in &extra {
+                headers.insert(name.clone(), value.clone());
+            }
+            headers
         }
-        headers
     } else {
         upstream_headers
     };
@@ -3628,6 +3638,21 @@ fn resolve_opencode_session_header(
         })
 }
 
+fn copy_explicit_opencode_identity_headers(
+    upstream: &mut reqwest::header::HeaderMap,
+    client: &HeaderMap,
+) {
+    for name in [
+        "x-opencode-client",
+        "x-opencode-request",
+        "x-opencode-project",
+    ] {
+        if let Some(value) = client.get(name) {
+            upstream.insert(name, value.clone());
+        }
+    }
+}
+
 fn apply_zen_free_identity_headers(
     headers: &mut reqwest::header::HeaderMap,
     session: &reqwest::header::HeaderValue,
@@ -3761,3 +3786,6 @@ mod forward_once_tests {
         ));
     }
 }
+
+#[cfg(test)]
+mod tests;

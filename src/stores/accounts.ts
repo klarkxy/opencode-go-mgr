@@ -19,19 +19,27 @@ export const useAccountsStore = defineStore("accounts", () => {
     return map;
   });
 
+  // Overlapping loads resolve out of order; only the latest request commits
+  // state. Stale calls still return/throw to their own caller unchanged.
+  let loadGeneration = 0;
+
   async function loadPresented(): Promise<Account[]> {
+    const generation = ++loadGeneration;
     loading.value = true;
     try {
       const list = await dashboardApi.getAccounts();
+      if (generation !== loadGeneration) return list;
       accounts.value = list;
       loaded.value = true;
       error.value = "";
       return list;
     } catch (e) {
-      error.value = e instanceof Error ? e.message : String(e);
+      if (generation === loadGeneration) {
+        error.value = e instanceof Error ? e.message : String(e);
+      }
       throw e;
     } finally {
-      loading.value = false;
+      if (generation === loadGeneration) loading.value = false;
     }
   }
 

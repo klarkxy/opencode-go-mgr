@@ -1079,8 +1079,8 @@ async fn dashboard_v3_zen_refresh_persists_on_success_and_preserves_state_on_fai
         vec!["refresh-test-free"]
     );
     assert_eq!(
-        parsed.models[0].alias, "",
-        "a refreshed Zen row cannot create an Alias outside the static Go table"
+        parsed.models[0].alias, "refresh-test",
+        "a refreshed Zen Free row publishes its suffix-stripped Alias"
     );
     assert_eq!(parsed.source_url, ZEN_MODELS_SOURCE_URL);
     assert!(parsed.refreshed_at.is_some());
@@ -1100,7 +1100,7 @@ async fn dashboard_v3_zen_refresh_persists_on_success_and_preserves_state_on_fai
         .find(|entry| entry["providerId"] == OPENCODE_ZEN_FREE_PROVIDER_ID)
         .unwrap();
     let aliases = zen["modelAliases"].as_array().unwrap();
-    assert!(!aliases.iter().any(|alias| alias == "refresh-test"));
+    assert!(aliases.iter().any(|alias| alias == "refresh-test"));
     assert!(!aliases.iter().any(|alias| alias == "mimo-v2.5-free"));
 
     let empty = start_zen_origin(StatusCode::OK, json!({ "data": [{ "id": "paid-only" }] })).await;

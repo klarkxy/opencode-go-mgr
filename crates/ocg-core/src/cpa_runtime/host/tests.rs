@@ -3,6 +3,206 @@ use super::*;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+#[cfg(unix)]
+#[test]
+fn unix_supervisor_entry() {
+    let Some(executable) = std::env::var_os("OCG_CPA_TEST_EXECUTABLE") else {
+        return;
+    };
+    let config = std::env::var_os("OCG_CPA_TEST_CONFIG").unwrap();
+    supervisor::run(
+        std::path::Path::new(&executable),
+        std::path::Path::new(&config),
+    );
+}
+
+#[cfg(unix)]
+fn unix_fixture(dir: &std::path::Path, body: &str) -> CpaRuntimeProcessSpec {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::create_dir_all(dir).unwrap();
+    let executable = dir.join("fake CPA executable");
+    let config_path = dir.join("config with spaces.yaml");
+    std::fs::write(&executable, format!("#!/bin/sh\n{body}\n")).unwrap();
+    std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::write(&config_path, "host: 127.0.0.1\n").unwrap();
+    CpaRuntimeProcessSpec {
+        executable,
+        config_path,
+        working_dir: dir.to_owned(),
+        management_password: CpaRuntimeSecret::new("test-management-secret"),
+        log_secrets: Vec::new(),
+    }
+}
+
+#[cfg(unix)]
+fn unix_wait_until(mut condition: impl FnMut() -> bool) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(9);
+    while !condition() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "Unix lifecycle timed out"
+        );
+        thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
+#[cfg(unix)]
+fn unix_process_exited(pid: &str) -> bool {
+    // Orphaned killed descendants can remain zombies under container PID 1;
+    // they are terminated and cannot hold descriptors, even before reaping.
+    let output = std::process::Command::new("ps")
+        .args(["-o", "stat=", "-p", pid.trim()])
+        .output()
+        .unwrap();
+    let status = String::from_utf8_lossy(&output.stdout);
+    status.trim().is_empty() || status.trim().starts_with('Z')
+}
+
+#[cfg(unix)]
+#[test]
+fn unix_host_fixture_entry() {
+    let Some(dir) = std::env::var_os("OCG_CPA_TEST_HOST_DIR") else {
+        return;
+    };
+    let dir = PathBuf::from(dir);
+    let spec = unix_fixture(
+        &dir,
+        "trap '' TERM\necho $$ > leader.pid\nsleep 60 &\necho $! > descendant.pid\necho ready\nwait",
+    );
+    let session = spawn_unix_owned(&spec).unwrap();
+    unix_wait_until(|| session.logs().stdout.contains("ready"));
+    std::fs::write(dir.join("host-ready"), "ready").unwrap();
+    loop {
+        thread::sleep(std::time::Duration::from_secs(60));
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn unix_host_sigkill_closes_lifetime_pipe_and_kills_cpa_tree() {
+    let dir = std::env::temp_dir().join(format!("ocg host death {}", uuid::Uuid::new_v4()));
+    let mut host = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "cpa_runtime::host::tests::unix_host_fixture_entry",
+            "--nocapture",
+        ])
+        .env("OCG_CPA_TEST_HOST_DIR", &dir)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    unix_wait_until(|| dir.join("host-ready").is_file());
+    let leader = std::fs::read_to_string(dir.join("leader.pid")).unwrap();
+    let descendant = std::fs::read_to_string(dir.join("descendant.pid")).unwrap();
+    assert!(!unix_process_exited(&leader));
+    assert!(!unix_process_exited(&descendant));
+    host.kill().unwrap();
+    host.wait().unwrap();
+    unix_wait_until(|| unix_process_exited(&leader) && unix_process_exited(&descendant));
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn unix_early_leader_exit_cleans_descendant_logs_and_repeated_stop_spares_unrelated_process() {
+    let dir = std::env::temp_dir().join(format!("ocg early exit {}", uuid::Uuid::new_v4()));
+    let spec = unix_fixture(
+        &dir,
+        "(trap '' TERM; exec sleep 60) &\necho $! > descendant.pid\necho leader-done\nexit 0",
+    );
+    let mut unrelated = std::process::Command::new("sleep")
+        .arg("60")
+        .spawn()
+        .unwrap();
+    for _ in 0..2 {
+        let mut session = spawn_unix_owned(&spec).unwrap();
+        unix_wait_until(|| session.logs().stdout.contains("leader-done"));
+        let descendant = std::fs::read_to_string(dir.join("descendant.pid")).unwrap();
+        unix_wait_until(|| !session.is_running()); // Reap before stop and Drop.
+        let started = std::time::Instant::now();
+        assert!(session.stop().unwrap().stdout.contains("leader-done"));
+        assert!(started.elapsed() < std::time::Duration::from_secs(1));
+        unix_wait_until(|| unix_process_exited(&descendant));
+        assert!(unrelated.try_wait().unwrap().is_none());
+    }
+    unrelated.kill().unwrap();
+    unrelated.wait().unwrap();
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn unix_lifetime_writer_is_cloexec_and_eof_stops_while_other_child_lives() {
+    use std::os::fd::AsRawFd;
+    let dir = std::env::temp_dir().join(format!("ocg eof {}", uuid::Uuid::new_v4()));
+    let spec = unix_fixture(&dir, "trap '' TERM\necho ready\nwhile :; do sleep 1; done");
+    let mut session = spawn_unix_owned(&spec).unwrap();
+    let fd = session.lifetime.as_ref().unwrap().as_raw_fd();
+    let flags = unsafe { nix::libc::fcntl(fd, nix::libc::F_GETFD) };
+    assert_ne!(flags, -1);
+    assert_ne!(flags & nix::libc::FD_CLOEXEC, 0);
+    let mut unrelated = std::process::Command::new("sleep")
+        .arg("60")
+        .spawn()
+        .unwrap();
+    unix_wait_until(|| session.logs().stdout.contains("ready"));
+    drop(session.lifetime.take());
+    unix_wait_until(|| !session.is_running());
+    session.stop().unwrap();
+    assert!(unrelated.try_wait().unwrap().is_none());
+    unrelated.kill().unwrap();
+    unrelated.wait().unwrap();
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn unix_supervisor_preserves_spaced_paths_config_argv_and_redacts_secret_logs() {
+    let dir = std::env::temp_dir().join(format!("ocg paths {}", uuid::Uuid::new_v4()));
+    let mut spec = unix_fixture(
+        &dir,
+        "printf 'arg1=%s\\narg2=%s\\n' \"$1\" \"$2\"\nprintf '%s\\n' \"$MANAGEMENT_PASSWORD\"\nprintf '%s\\n' \"$MANAGEMENT_PASSWORD\" >&2\nexit 0",
+    );
+    spec.log_secrets.push(spec.management_password.clone());
+    let mut session = spawn_unix_owned(&spec).unwrap();
+    unix_wait_until(|| !session.is_running());
+    let logs = session.stop().unwrap();
+    assert!(logs.stdout.contains("arg1=--config\n"));
+    assert!(
+        logs.stdout
+            .contains(&format!("arg2={}\n", spec.config_path.display()))
+    );
+    assert!(logs.stdout.contains("[REDACTED]"));
+    assert!(logs.stderr.contains("[REDACTED]"));
+    assert!(!logs.stdout.contains("test-management-secret"));
+    assert!(!logs.stderr.contains("test-management-secret"));
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn unix_log_reader_finishes_when_an_open_writer_survives_shutdown() {
+    use std::io::Write;
+    let (reader, mut writer) = std::os::unix::net::UnixStream::pair().unwrap();
+    let buffer = Arc::new(Mutex::new(String::new()));
+    let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let handle = spawn_unix_reader(
+        reader,
+        buffer.clone(),
+        Arc::new(Mutex::new(Vec::new())),
+        done.clone(),
+    );
+    writer.write_all(b"last log line\n").unwrap();
+    unix_wait_until(|| buffer.lock().contains("last log line"));
+    done.store(true, std::sync::atomic::Ordering::Release);
+    unix_wait_until(|| handle.is_finished());
+    handle.join().unwrap();
+    assert_eq!(&*buffer.lock(), "last log line\n");
+    drop(writer);
+}
+
 #[cfg(windows)]
 fn utf16_to_string(wide: &[u16]) -> String {
     let end = wide

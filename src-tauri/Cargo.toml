@@ -6,7 +6,7 @@ authors = ["ocg-manager"]
 license-file = "../LICENSE"
 repository = ""
 edition = "2024"
-rust-version = "1.85.0"
+rust-version = "1.88.0"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

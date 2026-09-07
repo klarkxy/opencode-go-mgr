@@ -1193,14 +1193,14 @@ impl CoreStateInner {
         // the process.
         {
             let mut snapshot = self.credential_snapshot.write();
-            if let Some(existing) = snapshot.get(&config.gateway_key) {
-                if existing.id != crate::gateway_keys::PRIMARY_KEY_ID {
-                    eprintln!(
-                        "warning: primary key value collides with sub key `{}`; \
+            if let Some(existing) = snapshot.get(&config.gateway_key)
+                && existing.id != crate::gateway_keys::PRIMARY_KEY_ID
+            {
+                eprintln!(
+                    "warning: primary key value collides with sub key `{}`; \
                          the API-layer gate should have rejected this write",
-                        existing.name
-                    );
-                }
+                    existing.name
+                );
             }
             let stale_value = snapshot
                 .iter()

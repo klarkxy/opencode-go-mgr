@@ -770,6 +770,7 @@ export const enUSMessages = {
   "全部关闭": "Turn all off",
   "本列全部": "This column",
   "探测会向上游发送真实最小请求，可能消耗额度。是否继续？": "This sends minimal real requests upstream and may consume quota. Continue?",
+  "探测可能通过多个符合条件的账号发送真实最小请求，可能消耗额度。是否继续？": "This may send minimal real requests through multiple eligible accounts and may consume quota. Continue?",
   "协议覆盖已保存": "Protocol override saved",
   "保存协议覆盖失败: {error}": "Failed to save protocol override: {error}",
   "操作": "Actions",

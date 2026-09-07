@@ -1924,20 +1924,20 @@ impl StreamConverter {
                             content_index as u64,
                             reasoning,
                         ));
-                        if !self.input.response_delta_seen.contains(&key) {
-                            if let Some(index) = self.input.response_parts.get(&key).copied() {
-                                let text = part
-                                    .get("text")
-                                    .or_else(|| part.get("refusal"))
-                                    .and_then(Value::as_str)
-                                    .unwrap_or("")
-                                    .to_string();
-                                events.push(if reasoning {
-                                    PivotEvent::ReasoningDelta { index, text }
-                                } else {
-                                    PivotEvent::TextDelta { index, text }
-                                });
-                            }
+                        if !self.input.response_delta_seen.contains(&key)
+                            && let Some(index) = self.input.response_parts.get(&key).copied()
+                        {
+                            let text = part
+                                .get("text")
+                                .or_else(|| part.get("refusal"))
+                                .and_then(Value::as_str)
+                                .unwrap_or("")
+                                .to_string();
+                            events.push(if reasoning {
+                                PivotEvent::ReasoningDelta { index, text }
+                            } else {
+                                PivotEvent::TextDelta { index, text }
+                            });
                         }
                         if let Some(index) = self.input.response_parts.get(&key).copied() {
                             self.input.active.remove(&index);

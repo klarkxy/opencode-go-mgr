@@ -17,6 +17,19 @@ export const EDITABLE_SETTING_KEYS = [
 ] as const satisfies readonly (keyof AppConfig)[];
 
 /**
+ * Reference equality misreads array fields: a form clone of the saved value
+ * has the same content but a different identity. Compare array content so an
+ * untouched clone adopts the latest server array while a genuinely edited
+ * array still counts as a local edit.
+ */
+function settingsValueEqual(a: unknown, b: unknown): boolean {
+  if (Array.isArray(a) && Array.isArray(b)) {
+    return a.length === b.length && a.every((value, index) => value === b[index]);
+  }
+  return a === b;
+}
+
+/**
  * Keep locally edited fields while adopting a newer server snapshot.
  * Revision, sub keys, environment flags, and capability flags always come
  * from the server and are intentionally excluded from the editable key list.
@@ -28,7 +41,7 @@ export function mergeUnsavedSettings(
 ): AppConfig {
   const merged = { ...latest };
   for (const key of EDITABLE_SETTING_KEYS) {
-    if (current[key] !== saved[key]) {
+    if (!settingsValueEqual(current[key], saved[key])) {
       Object.assign(merged, { [key]: current[key] });
     }
   }

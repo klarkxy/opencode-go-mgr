@@ -1098,10 +1098,10 @@ fn build_connect_plan(
     old_state: Option<&StateV1>,
     desired_documents: Vec<DesiredDocument>,
 ) -> ApplicationConnectorResult<MutationPlan> {
-    if let Some(state) = old_state {
-        if !state_matches(roots, cipher, request.id, state)? {
-            return Err(conflict("connector-owned fields changed"));
-        }
+    if let Some(state) = old_state
+        && !state_matches(roots, cipher, request.id, state)?
+    {
+        return Err(conflict("connector-owned fields changed"));
     }
     validate_desired_documents(roots, request.id, &desired_documents)?;
 
@@ -1121,10 +1121,10 @@ fn build_connect_plan(
     for desired in desired_documents {
         let before = read_target(roots, request.id, &desired.target)?;
         let prior = old_documents.get(desired.target.id).copied();
-        if let Some(prior) = prior {
-            if prior.format != desired.target.format {
-                return Err(conflict("connector state format changed"));
-            }
+        if let Some(prior) = prior
+            && prior.format != desired.target.format
+        {
+            return Err(conflict("connector state format changed"));
         }
         let (after_bytes, document_state, mut document_changes) = match desired.target.format {
             DocumentFormat::Json => patch_json_connect(
@@ -2975,10 +2975,10 @@ impl EnvDocument {
             existing.content = line.to_string();
             return Ok(());
         }
-        if let Some(last) = self.lines.last_mut() {
-            if last.ending.is_empty() {
-                last.ending = self.default_ending.clone();
-            }
+        if let Some(last) = self.lines.last_mut()
+            && last.ending.is_empty()
+        {
+            last.ending = self.default_ending.clone();
         }
         self.lines.push(EnvLine {
             content: line.to_string(),
