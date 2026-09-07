@@ -58,7 +58,8 @@ Windows 全量运行发现了免费模型别名的诊断入口问题，修正后
 
 ## 证据边界与评审裁定
 
-- macOS/Linux 原生 CI 和 Windows 安装器验收已通过。签名更新分发、真实供应商/OAuth 会话、Claude Desktop/Gemini CLI 的文本与工具调用，以及发布流程中的人工桌面/浏览器检查仍未验证；CI 启动检查不能证明这些交互。
+- 应用接入计划废弃。用户已明确将该部分测试（包括 Claude Desktop、Gemini CLI）排除在本次验收范围外，不再作为候选发布阻塞项。
+- macOS/Linux 原生 CI 和 Windows 安装器验收已通过。签名更新分发和真实供应商/OAuth 会话未执行；候选检查不等同于生产签名或分发验证。
 - 既有 XOR Key 混淆并非认证加密。解密检查不能识别所有恰好产生合法 UTF-8 的错误密钥；本次未引入加密格式迁移。
 - Applications 导航此前已明确移除，不予恢复。无鉴权供应商保留文档规定的先删除账号、再删除供应商的非级联流程；删除唯一账号会结束路由，但空供应商仍可删除。重新创建供应商会重建其无鉴权单例。
 - 未加入统一的短请求超时，以免打断合法的长时间管理或推理操作。关于 CAS 不会自动更新、整套繁体中文缺失、网关日志翻页的评审推断，经追踪当前实现后排除。
@@ -73,4 +74,4 @@ Windows 全量运行发现了免费模型别名的诊断入口问题，修正后
 - [最终 Windows 候选](https://github.com/klarkxy/opencode-go-mgr/actions/runs/34081353017)：`b72a82fb` 通过。
 - [macOS Universal](https://github.com/klarkxy/opencode-go-mgr/actions/runs/34079065269/job/101610886207) 与 [Linux x64](https://github.com/klarkxy/opencode-go-mgr/actions/runs/34079065269/job/101610886205)：`917984b9` 通过。此后的源码修改仅影响 Windows 安装器及其冒烟检查，另有配套指南更新。
 
-源码评审与候选自动化验收已完成。[发布流程](../../../maintainer/releasing.zh-CN.md)中的剩余人工检查和签名更新验收尚未完成，因此仍不能无保留地宣称完整生产发布验收通过。手动候选流程不会创建 Release，也不接收 updater 签名密钥。本次未合并、打标签、正式发布或部署。
+源码评审、网关检查和三平台候选验收已通过。在约定范围内，候选已可进入[正式发布流程](../../../maintainer/releasing.zh-CN.md)；应用接入测试按用户要求排除。手动候选流程不会创建 Release，也不接收 updater 签名密钥，因此签名与分发仍由发布阶段检查。本次未合并、打标签、正式发布或部署。

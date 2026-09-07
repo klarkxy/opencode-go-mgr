@@ -89,10 +89,12 @@ so this report does not claim a locally verified Linux copy.
 
 ## Limits and review dispositions
 
+- Application integration is planned for retirement. The user explicitly excluded
+  its testing, including Claude Desktop and Gemini CLI, from this review's
+  acceptance scope. It is not a release blocker for this candidate.
 - Native macOS/Linux CI and Windows installer acceptance passed. Signed updater
-  delivery, live supplier/OAuth sessions, Claude Desktop/Gemini CLI text and tool
-  calls, and the manual desktop/browser checks in the release procedure remain
-  unverified. CI startup checks do not prove those interactions.
+  delivery and live supplier/OAuth sessions were not exercised. Candidate checks
+  do not constitute production signing or distribution verification.
 - The existing XOR Key obfuscation is not authenticated encryption. The new
   decrypt probe cannot distinguish every wrong key that happens to produce valid
   UTF-8; no cryptographic-format migration was introduced.
@@ -117,8 +119,9 @@ and the two application startup registry entries were checked/restored.
 - [Final Windows candidate](https://github.com/klarkxy/opencode-go-mgr/actions/runs/34081353017): passed on `b72a82fb`.
 - [macOS Universal](https://github.com/klarkxy/opencode-go-mgr/actions/runs/34079065269/job/101610886207) and [Linux x64](https://github.com/klarkxy/opencode-go-mgr/actions/runs/34079065269/job/101610886205): passed on `917984b9`. Subsequent source changes affect only the Windows installer and its smoke; paired guides were also updated.
 
-Code review and candidate automation are complete. The remaining manual checks
-and signed-update acceptance in [the release procedure](../../../maintainer/releasing.md)
-still prevent an unqualified claim of full production-release acceptance.
+Code review, gateway checks, and three-platform candidate acceptance passed.
+The candidate is ready to enter [the release procedure](../../../maintainer/releasing.md)
+within the agreed scope; application-integration testing is excluded by the user.
 Manual candidate workflows do not create a Release or receive updater signing
-keys. No merge, tag, production publication, or deployment was performed.
+keys, so signing and distribution remain release-stage checks. No merge, tag,
+production publication, or deployment was performed.
