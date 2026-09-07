@@ -2,9 +2,9 @@
 
 [简体中文](README.zh-CN.md)
 
-The local candidate is ready to enter the release pipeline. This review started
-from `39e85125`; changes remain in the working tree. No commit, push, tag,
-publication, or deployment was performed.
+This review started from `39e85125`. Fixes are committed on the candidate branch;
+draft PR #57 and three-platform candidate CI are authorized and started. No tag,
+production release, or deployment was performed.
 
 ## Repairs
 
@@ -102,5 +102,7 @@ confirms manual candidates do not create or publish a GitHub Release and receive
 no updater signing key. They cover three-platform builds, Windows installation
 checks, macOS mounted application startup, and Linux virtual-display startup.
 These checks do not replace signed-update validation or the manual platform
-checks above. Candidate branch publication and the draft PR have not been
-authorized or performed.
+checks above. Candidate branch publication and draft PR
+[#57](https://github.com/klarkxy/opencode-go-mgr/pull/57) are now authorized and
+created. Unix candidates also run CPA lifecycle tests to cover macOS process
+cleanup. CI results remain pending.
