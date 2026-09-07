@@ -1,9 +1,9 @@
-# 2.2.0 local release-candidate review
+# 2.2.0 release-candidate review
 
 [简体中文](README.zh-CN.md)
 
 This review started from `39e85125`. Fixes are committed on the candidate branch;
-draft PR #57 and three-platform candidate CI are authorized and started. No tag,
+draft PR #57 is open, and three-platform candidate CI passed as described below. No tag,
 production release, or deployment was performed.
 
 ## Repairs
@@ -32,6 +32,10 @@ production release, or deployment was performed.
   Corrected the obsolete navigation description and Zen test expectations.
   Rust minimum versions now match the locked dependencies at 1.88. Compiler-proposed
   equivalent syntax changes keep the strict warning gate clean.
+- Windows product-rename updates now retain the old installation directory and
+  write the new files there. Existing shortcuts migrate to the new name, and
+  legacy installation records are removed only after an in-place replacement.
+  Candidate CI exposed this defect; its final overwrite/uninstall smoke passed.
 
 Grok and Kimi supplied bounded reviews and repairs. A separate design review and
 implementation handled Unix process ownership, followed by an independent source
@@ -58,6 +62,11 @@ review. Returned changes and test evidence were inspected by the primary.
 | CLI extracted from the final archive | Dashboard, CRUD, CAS conflict, auth, model mapping, non-stream and SSE passed against a local fixture upstream |
 | Final desktop executable | Duplicate launch exits before opening a second data profile; first gateway remains; occupied port fails startup; restart and version passed |
 | Actual dashboard interaction | Final dashboard and Accounts rendered; CPA model-catalog empty state checked; Key remains masked |
+| Candidate Quality on `b72a82fb` | Web, Linux Rust, and Windows Tauri jobs passed |
+| macOS and Linux native CPA checks | 14 tests passed on each platform |
+| macOS Universal candidate | DMG architecture/ad-hoc signature check, mounted GUI startup, packaged CLI passed |
+| Linux x64 candidate | AppImage startup under Xvfb, Debian package metadata/content, packaged CLI passed |
+| Windows final candidate | Published 2.1.0 overwrite, preserved directory/data, shortcut migration, startup toggles, uninstall passed |
 
 The Windows full run exposed the new free-model alias diagnostic failure; its
 corrected gateway suite was rerun successfully. The final core suite was also
@@ -68,14 +77,22 @@ Clippy. Linux completed its full non-desktop suite on the integrated changes.
 
 | File in `release/` | SHA-256 |
 | --- | --- |
-| `ocg-manager_2.2.0_windows-x64-setup.exe` | `cc832e436a794fdce9c955229f963fbcbb501794aba6be63c8836d7c278e762e` |
-| `ocg-manager-cli_2.2.0_windows-x64.zip` | `f46d48e4104729e992113ed346318e70a7a7a74fc2d5cbb11109cee1996d0eff` |
+| `ocg-manager_2.2.0_windows-x64-setup.exe` | `494f90b1514a2be162a838be258ab0369f6def23958a6308e7cf9ac6a1ce1edc` |
+| `ocg-manager-cli_2.2.0_windows-x64.zip` | `322e6878f10be4043ec1f660d171808357478ee291c72a58477c84698903abcb` |
+
+These are the final Windows CI packages from `b72a82fb`, replacing the initial
+local packages. Both were verified after download; the extracted final CLI and
+its bundled dashboard also passed the local request smoke. macOS packages in
+`release/ci-917984b9/macos/` passed local checksum verification. Linux packages
+passed CI checksum verification; two local artifact downloads ended with EOF,
+so this report does not claim a locally verified Linux copy.
 
 ## Limits and review dispositions
 
-- macOS native execution, installer install/uninstall, signed updater delivery,
-  and live supplier/OAuth sessions were not exercised here. The signed platform
-  matrix and platform smokes remain part of the authorized release workflow.
+- Native macOS/Linux CI and Windows installer acceptance passed. Signed updater
+  delivery, live supplier/OAuth sessions, Claude Desktop/Gemini CLI text and tool
+  calls, and the manual desktop/browser checks in the release procedure remain
+  unverified. CI startup checks do not prove those interactions.
 - The existing XOR Key obfuscation is not authenticated encryption. The new
   decrypt probe cannot distinguish every wrong key that happens to produce valid
   UTF-8; no cryptographic-format migration was introduced.
@@ -93,16 +110,15 @@ Clippy. Linux completed its full non-desktop suite on the integrated changes.
 All verification used isolated test data. Temporary desktop processes were stopped
 and the two application startup registry entries were checked/restored.
 
-## Next acceptance gate
+## CI evidence and remaining gates
 
-Full release readiness remains unproven. The next step requires committing the
-candidate changes, pushing a separate candidate branch, opening a draft PR for
-Quality, then dispatching `release.yml` with `target=all`. Workflow inspection
-confirms manual candidates do not create or publish a GitHub Release and receive
-no updater signing key. They cover three-platform builds, Windows installation
-checks, macOS mounted application startup, and Linux virtual-display startup.
-These checks do not replace signed-update validation or the manual platform
-checks above. Candidate branch publication and draft PR
-[#57](https://github.com/klarkxy/opencode-go-mgr/pull/57) are now authorized and
-created. Unix candidates also run CPA lifecycle tests to cover macOS process
-cleanup. CI results remain pending.
+- [Draft PR #57](https://github.com/klarkxy/opencode-go-mgr/pull/57).
+- [Quality on b72a82fb](https://github.com/klarkxy/opencode-go-mgr/actions/runs/34081349089): passed.
+- [Final Windows candidate](https://github.com/klarkxy/opencode-go-mgr/actions/runs/34081353017): passed on `b72a82fb`.
+- [macOS Universal](https://github.com/klarkxy/opencode-go-mgr/actions/runs/34079065269/job/101610886207) and [Linux x64](https://github.com/klarkxy/opencode-go-mgr/actions/runs/34079065269/job/101610886205): passed on `917984b9`. Subsequent source changes affect only the Windows installer and its smoke; paired guides were also updated.
+
+Code review and candidate automation are complete. The remaining manual checks
+and signed-update acceptance in [the release procedure](../../../maintainer/releasing.md)
+still prevent an unqualified claim of full production-release acceptance.
+Manual candidate workflows do not create a Release or receive updater signing
+keys. No merge, tag, production publication, or deployment was performed.
