@@ -10,7 +10,9 @@ use crate::custom_http::{
 };
 use crate::gateway::attempt::UpstreamAuth;
 use crate::gateway::protocol::{CustomRouteSpec, RequestPlan};
-use crate::gateway::provider_adapter::{resolve_account_test_route, resolve_probe_route};
+use crate::gateway::provider_adapter::{
+    resolve_account_test_route_with_dynamics, resolve_probe_route,
+};
 use crate::models::{Account, AppConfig, UpstreamChannel};
 use crate::provider::{ProviderAdapterKind, UpstreamAuthScheme, UpstreamProtocolKind};
 use crate::provider_contracts::{self, ContractScope, PersistedModelProtocol, protocol_to_api};
@@ -132,34 +134,41 @@ pub(crate) async fn execute_protocol_probe(
     account: &Account,
     protocol: UpstreamProtocolKind,
 ) -> Result<u16, (Option<u16>, String)> {
-    execute_protocol_request(ctx, account, protocol, false).await
+    execute_protocol_request(ctx, account, protocol, false, &[]).await
 }
 
 /// Send the same minimal protocol request used by provider probes, but lock
 /// routing to the caller-selected account and retain the production route
 /// family for Plans whose provider probes are intentionally unavailable.
+pub(crate) struct AccountModelTestInput<'a> {
+    pub state: &'a CoreState,
+    pub config: &'a AppConfig,
+    pub account: &'a Account,
+    pub adapter: ProviderAdapterKind,
+    pub model_id: &'a str,
+    pub protocol: UpstreamProtocolKind,
+    pub custom_endpoint_url: Option<&'a str>,
+    pub dynamics: &'a [crate::dynamic::DynamicProviderRuntime],
+}
+
 pub(crate) async fn execute_account_model_test(
-    state: &CoreState,
-    config: &AppConfig,
-    account: &Account,
-    adapter: ProviderAdapterKind,
-    model_id: &str,
-    protocol: UpstreamProtocolKind,
-    custom_endpoint_url: Option<&str>,
+    input: AccountModelTestInput<'_>,
 ) -> Result<u16, (Option<u16>, String)> {
-    let custom_route = custom_endpoint_url.map(|endpoint_url| CustomRouteSpec {
-        endpoint_url: endpoint_url.to_string(),
-    });
+    let custom_route = input
+        .custom_endpoint_url
+        .map(|endpoint_url| CustomRouteSpec {
+            endpoint_url: endpoint_url.to_string(),
+        });
     let ctx = ProtocolProbeContext {
-        state,
-        config,
-        accounts: std::slice::from_ref(account),
-        adapter,
-        model_id,
+        state: input.state,
+        config: input.config,
+        accounts: std::slice::from_ref(input.account),
+        adapter: input.adapter,
+        model_id: input.model_id,
         custom_route,
         now: chrono::Utc::now(),
     };
-    execute_protocol_request(&ctx, account, protocol, true).await
+    execute_protocol_request(&ctx, input.account, input.protocol, true, input.dynamics).await
 }
 
 async fn execute_protocol_request(
@@ -167,6 +176,7 @@ async fn execute_protocol_request(
     account: &Account,
     protocol: UpstreamProtocolKind,
     account_test: bool,
+    dynamics: &[crate::dynamic::DynamicProviderRuntime],
 ) -> Result<u16, (Option<u16>, String)> {
     let format = protocol_to_api(protocol);
     let body = crate::custom::minimal_verification_body(protocol, ctx.model_id)
@@ -195,14 +205,14 @@ async fn execute_protocol_request(
         response_tool_choice: serde_json::json!("auto"),
         response_tools: Vec::new(),
     };
-    if ctx.adapter == ProviderAdapterKind::ConfigurableHttp && plan.custom_route.is_none() {
+    if crate::provider::is_custom_api(&account.provider_id) && plan.custom_route.is_none() {
         return Err((
             None,
             "Custom API accounts require a persisted API URL and upstream protocol".to_string(),
         ));
     }
     let route = if account_test {
-        resolve_account_test_route(account, ctx.config, &plan)
+        resolve_account_test_route_with_dynamics(account, ctx.config, &plan, dynamics)
     } else {
         resolve_probe_route(account, ctx.config, &plan)
     }

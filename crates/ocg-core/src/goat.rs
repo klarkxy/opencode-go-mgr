@@ -16,14 +16,6 @@ use std::fmt;
 use std::sync::{LazyLock, RwLock};
 use std::time::Duration;
 
-/// Snapshot used to reject stale GOAT verification commits after network I/O.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GoatVerificationContract {
-    pub account_id: String,
-    pub account_updated_at: String,
-    pub key_cipher: String,
-}
-
 /// Data-only GOAT routing state loaded from persistence for one account.
 #[derive(Debug, Clone)]
 pub struct GoatAccountRuntime {
@@ -34,26 +26,24 @@ pub struct GoatAccountRuntime {
     pub has_key: bool,
 }
 
-pub const MAX_GOAT_VERIFICATION_BODY_BYTES: usize = 256 * 1024;
-pub const GOAT_VERIFICATION_CONFLICT_MESSAGE: &str =
-    "the Command Code GOAT account changed while it was being verified; retry verification";
+pub const MAX_PROVIDER_CATALOG_BODY_BYTES: usize = 256 * 1024;
 
 #[cfg(debug_assertions)]
-static GOAT_VERIFY_ORIGINS: LazyLock<RwLock<HashMap<u64, String>>> =
+static GOAT_CATALOG_ORIGINS: LazyLock<RwLock<HashMap<u64, String>>> =
     LazyLock::new(|| RwLock::new(HashMap::new()));
 
-/// RAII guard for the debug-only GOAT verification origin substitute.
+/// RAII guard for the debug-only Command Code public catalog origin substitute.
 #[cfg(debug_assertions)]
 #[doc(hidden)]
-pub struct GoatVerifyOriginGuard {
+pub struct GoatCatalogOriginGuard {
     process_generation: u64,
     origin: String,
 }
 
 #[cfg(debug_assertions)]
-impl Drop for GoatVerifyOriginGuard {
+impl Drop for GoatCatalogOriginGuard {
     fn drop(&mut self) {
-        if let Ok(mut origins) = GOAT_VERIFY_ORIGINS.write()
+        if let Ok(mut origins) = GOAT_CATALOG_ORIGINS.write()
             && origins
                 .get(&self.process_generation)
                 .is_some_and(|origin| origin == &self.origin)
@@ -63,31 +53,31 @@ impl Drop for GoatVerifyOriginGuard {
     }
 }
 
-/// Installs a loopback-only origin used by GOAT GET `/models` tests.
+/// Installs a loopback-only origin used by Command Code GET `/models` tests.
 #[cfg(debug_assertions)]
 #[doc(hidden)]
-pub fn install_goat_verify_origin_for_test(
+pub fn install_goat_catalog_origin_for_test(
     process_generation: u64,
     origin: impl Into<String>,
-) -> Result<GoatVerifyOriginGuard, String> {
+) -> Result<GoatCatalogOriginGuard, String> {
     let origin = origin.into();
     ensure_loopback_origin(&origin)?;
     let origin = origin.trim_end_matches('/').to_string();
-    let guard = GoatVerifyOriginGuard {
+    let guard = GoatCatalogOriginGuard {
         process_generation,
         origin: origin.clone(),
     };
-    GOAT_VERIFY_ORIGINS
+    GOAT_CATALOG_ORIGINS
         .write()
-        .map_err(|_| "GOAT verify origin lock is poisoned".to_string())?
+        .map_err(|_| "Command Code catalog origin lock is poisoned".to_string())?
         .insert(process_generation, origin);
     Ok(guard)
 }
 
 #[cfg(debug_assertions)]
-pub fn goat_verify_base_url(process_generation: Option<u64>) -> String {
+pub fn goat_catalog_base_url(process_generation: Option<u64>) -> String {
     if let Some(generation) = process_generation
-        && let Ok(origins) = GOAT_VERIFY_ORIGINS.read()
+        && let Ok(origins) = GOAT_CATALOG_ORIGINS.read()
         && let Some(origin) = origins.get(&generation)
     {
         return format!("{}/provider/v1", origin.trim_end_matches('/'));
@@ -104,7 +94,7 @@ fn ensure_loopback_origin(origin: &str) -> Result<(), String> {
             Some("localhost") | Some("127.0.0.1") | Some("::1") | Some("[::1]")
         )
     {
-        return Err("GOAT verify test origin must be an HTTP loopback URL".to_string());
+        return Err("catalog test origin must be an HTTP loopback URL".to_string());
     }
     Ok(())
 }
@@ -170,13 +160,79 @@ pub fn opencode_go_models_url_for_base(base: &str) -> String {
     }
 }
 
-pub async fn probe_goat_models(
+pub fn ollama_cloud_models_url_for_base(base: &str) -> String {
+    format!(
+        "{}{}",
+        base.trim_end_matches('/'),
+        crate::kernel::ids::OLLAMA_CLOUD_MODELS_PATH
+    )
+}
+
+/// Public, keyless Ollama Cloud GET `/models` refresh. Auth-free by design:
+/// the endpoint is the catalog discovery surface, never a Key check.
+pub async fn refresh_ollama_cloud_models(
     config: &AppConfig,
-    _api_key: &str,
     base_url: &str,
 ) -> Result<Vec<String>, GoatVerifyFailure> {
-    let url = goat_models_url_for_base(base_url);
-    probe_public_provider_models_at_url(config, &url, "Command Code").await
+    let url = ollama_cloud_models_url_for_base(base_url);
+    probe_public_provider_models_at_url(config, &url, "Ollama Cloud").await
+}
+
+/// Debug-only loopback origin substitute for Ollama Cloud GET `/models`
+/// tests. Mirrors the Command Code catalog seam but never appends a provider path.
+#[cfg(debug_assertions)]
+static OLLAMA_MODELS_ORIGINS: LazyLock<RwLock<HashMap<u64, String>>> =
+    LazyLock::new(|| RwLock::new(HashMap::new()));
+
+#[cfg(debug_assertions)]
+#[doc(hidden)]
+pub struct OllamaModelsOriginGuard {
+    process_generation: u64,
+    origin: String,
+}
+
+#[cfg(debug_assertions)]
+impl Drop for OllamaModelsOriginGuard {
+    fn drop(&mut self) {
+        if let Ok(mut origins) = OLLAMA_MODELS_ORIGINS.write()
+            && origins
+                .get(&self.process_generation)
+                .is_some_and(|origin| origin == &self.origin)
+        {
+            origins.remove(&self.process_generation);
+        }
+    }
+}
+
+#[cfg(debug_assertions)]
+#[doc(hidden)]
+pub fn install_ollama_models_origin_for_test(
+    process_generation: u64,
+    origin: impl Into<String>,
+) -> Result<OllamaModelsOriginGuard, String> {
+    let origin = origin.into();
+    ensure_loopback_origin(&origin)?;
+    let origin = origin.trim_end_matches('/').to_string();
+    let guard = OllamaModelsOriginGuard {
+        process_generation,
+        origin: origin.clone(),
+    };
+    OLLAMA_MODELS_ORIGINS
+        .write()
+        .map_err(|_| "Ollama models origin lock is poisoned".to_string())?
+        .insert(process_generation, origin);
+    Ok(guard)
+}
+
+#[cfg(debug_assertions)]
+pub fn ollama_cloud_models_base_url(process_generation: Option<u64>) -> String {
+    if let Some(generation) = process_generation
+        && let Ok(origins) = OLLAMA_MODELS_ORIGINS.read()
+        && let Some(origin) = origins.get(&generation)
+    {
+        return origin.trim_end_matches('/').to_string();
+    }
+    crate::kernel::ids::OLLAMA_CLOUD_BASE_URL.to_string()
 }
 
 pub async fn refresh_command_code_models(
@@ -296,10 +352,10 @@ async fn read_limited_body(
         let chunk = chunk.map_err(|error| GoatVerifyFailure {
             message: format!("{provider_label} GET /models body failed: {error}"),
         })?;
-        if bytes.len() + chunk.len() > MAX_GOAT_VERIFICATION_BODY_BYTES {
+        if bytes.len() + chunk.len() > MAX_PROVIDER_CATALOG_BODY_BYTES {
             return Err(GoatVerifyFailure {
                 message: format!(
-                    "{provider_label} GET /models exceeded the {MAX_GOAT_VERIFICATION_BODY_BYTES}-byte limit"
+                    "{provider_label} GET /models exceeded the {MAX_PROVIDER_CATALOG_BODY_BYTES}-byte limit"
                 ),
             });
         }

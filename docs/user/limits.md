@@ -2,7 +2,9 @@
 
 # Limits
 
-Every gateway draws a line somewhere. This page is that line — a running list of things OCG Manager refuses to do, usually with a `400` instead of a polite lie.
+This page lists explicit errors and unimplemented surfaces. The preferred and
+supported protocol matrix lives in
+[Protocol conversion](protocol-conversion.md).
 
 - `/embeddings` is not implemented. Gemini `embedContent` is routed but
   returns a Google-style `501 UNIMPLEMENTED` response.
@@ -41,11 +43,11 @@ Every gateway draws a line somewhere. This page is that line — a running list 
 - Browser onboarding provides only manual page interaction; it does not
   register Google accounts, solve verification challenges, pay, scrape
   pages, or extract keys automatically.
-- The installed Windows desktop dashboard can start OCG Manager in the tray
-  when the user logs in. Development builds, macOS, Linux, CLI, and Docker do
-  not expose that dashboard `auto_start` switch. Docker Compose separately
-  uses `restart: unless-stopped`, so its service can restart with the Docker
-  daemon.
+- The installed Windows x64, macOS, and Linux x64 desktop dashboards can start
+  Open Console Gateway in the tray when the user logs in. Development builds, CLI, and
+  Docker do not expose that dashboard `auto_start` switch. Docker Compose
+  separately uses `restart: unless-stopped`, so its service can restart with
+  the Docker daemon.
 - The macOS desktop dashboard can hide the Dock icon while retaining the
   menu-bar icon. Windows, Linux, CLI, and Docker do not expose the
   `show_dock_icon` switch.
@@ -58,15 +60,25 @@ Every gateway draws a line somewhere. This page is that line — a running list 
   builds, the CLI, and Docker use the direct/manual upgrade path.
 - Command Code GOAT is a live fixed-origin route. Its public `/models` catalog
   is refreshed explicitly on **Providers**; GOAT preset rows default on and
-  additional rows default off. It has no official usage API and does not use
-  catalog refresh as Key verification. Its verified price snapshot estimates
-  new request costs, with a saved editable multiplier per priced model. The
-  account card projects those priced OCG logs into local `$14 / $35 / $70`
-  windows and allows manual baseline correction. This is not official usage:
-  traffic outside OCG and unpriced requests are omitted. Custom API is live under the trusted-administrator boundary in
-  [Accounts](accounts.md); it is unpriced, has no official usage path, and its
-  catalog, protocol, and pricing controls live on **Providers** as isolated
-  `CustomEndpoint` scopes.
+  additional rows default off. GOAT catalog refresh updates the model
+  directory; Key auth is observed from inference 401/403. Its verified price
+  snapshot estimates new request costs, with a saved editable multiplier per
+  priced model. The account card projects those priced OCG logs into local
+  `$14 / $35 / $70` windows and allows manual baseline correction. Command
+  Code exposes no machine-readable usage API; traffic outside OCG and unpriced
+  requests are omitted. Custom API is live under the trusted-administrator
+  boundary in [Accounts](accounts.md); it is unpriced, has no official usage
+  path, and its catalog, protocol, and pricing controls live on **Providers**
+  as isolated `CustomEndpoint` scopes.
+- Ollama Cloud monthly USD-credits usage is a soft estimate from locally priced
+  logs. Used credit may exceed the Pro `$60` / Max `$300` / Team `$1000`
+  limit; the dashboard clamps the bar at 100% and shows overage. Meter fullness
+  never writes cooldown, disables the account, or changes routing. New Ollama
+  accounts require an explicit Pro/Max/Team tier and purchase date. Migrated
+  accounts with no billing row stay routeable without a meter. Actual upstream
+  `429` still uses the generic cooldown/fallback path.
+- Zen Free routing uses the card's enable switch and list position. There is
+  no Deny / Explicit / Prefer policy.
 - Unknown model names return `400` on every supported client format. Clients
   should send published aliases or eligible Custom IDs from authenticated
   `GET /v1/models` that currently have an effective enabled protocol.

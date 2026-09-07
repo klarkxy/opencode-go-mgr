@@ -6,7 +6,7 @@ Operator contract for upgrades, backups, and rollback. Schema details are in [Pe
 
 ## Data directories and cipher identity
 
-Every database open uses the Host-resolved cipher (`Database::open_with_cipher` on CLI, desktop, and Docker). A different cipher fails closed; rewriting ciphertext does not fix a mismatch.
+Every database open uses the Host-resolved cipher (`Database::open_with_cipher` on CLI, desktop, and Docker). Stored account ciphertext is probed before migration and decryption errors fail closed. Key storage uses unauthenticated obfuscation: a successful UTF-8 decode alone cannot authenticate cipher identity. Retain the original cipher; rewriting ciphertext does not repair a mismatch.
 
 | Surface | Default data directory | Cipher identity |
 | --- | --- | --- |
@@ -15,7 +15,7 @@ Every database open uses the Host-resolved cipher (`Database::open_with_cipher` 
 | CLI | `~/.ocg-mgr-cli`, or `--data-dir <path>` | Priority: `--encryption-key` > `OCG_MANAGER_ENCRYPTION_KEY` > `<data-dir>/.encryption-key`. |
 | Docker | container `--data-dir /data` (Compose volume `ocg-data`) | Same CLI resolution. Optional `OCG_MANAGER_ENCRYPTION_KEY` is an explicit restore override; a normal volume keeps `.encryption-key`. Files in `/data` must stay writable by UID/GID `10001`. |
 
-Do not mix these identities:
+Keep each surface on its own cipher identity:
 
 - Windows desktop data cannot decrypt account ciphertext on another Windows user or machine, nor under the CLI/Docker static cipher.
 - Copying a GUI directory onto the CLI default path (or the reverse) uses a different directory and, on Windows, a different cipher.
@@ -33,11 +33,11 @@ Downgrades are not supported: never point an older binary at a migrated database
 
 ## Schema v27 and the pre-v3 snapshot
 
-`CURRENT_SCHEMA_VERSION = 35` (`crates/ocg-core/src/db.rs`). Opening a historical database first migrates canonically to v26, then the v27 rewrite copies the primary Key and every `sub_gateway_keys` row into one `access_keys` table (live primary id `00000000-0000-0000-0000-000000000001`), drops `sub_gateway_keys`, and drops the five legacy `accounts.usage_sync_*` columns (usage-sync metadata lives in `provider_usage_sync_state`). v33 adds the exact Custom upstream model identity; v34 adds the singleton CPA configuration table without importing or exporting CPA state. v35 collapses Provider/Plan identity to `provider_id` only: it preflights every known v34 provider/offering pair, refuses unknown pairs and lossy composite-key collisions before mutation, then rebuilds affected tables so offering columns are absent. Account `key_cipher` / `password_cipher` bytes are validated with the Host cipher and never re-encrypted.
+`CURRENT_SCHEMA_VERSION = 37` (`crates/ocg-core/src/db.rs`). Opening a historical database first migrates canonically to v26, then the v27 rewrite copies the primary Key and every `sub_gateway_keys` row into one `access_keys` table (live primary id `00000000-0000-0000-0000-000000000001`), drops `sub_gateway_keys`, and drops the five legacy `accounts.usage_sync_*` columns (usage-sync metadata lives in `provider_usage_sync_state`). v33 adds the exact Custom upstream model identity; v34 adds the singleton CPA configuration table without importing or exporting CPA state. v35 collapses Provider/Plan identity to `provider_id` only: it preflights every known v34 provider/offering pair, refuses unknown pairs and lossy composite-key collisions before mutation, then rebuilds affected tables so offering columns are absent. v36 additively created `ollama_cloud_usage_state` for the unreleased Cookie-usage scrape. v37 drops that table without touching account Keys or logs, and creates `ollama_cloud_billing`. Account `key_cipher` / `password_cipher` bytes are validated with the Host cipher and never re-encrypted.
 
 ## Schema v31 — per-model/per-protocol overrides
 
-v31 creates the `provider_contract_model_protocol_overrides` table. It stores one row per contract scope × model × protocol, with `state` ∈ `force_on` / `force_off`; an absent row means "auto". The composite primary key is `(scope_kind, scope_id, model_id, protocol)`. The `provider_contract_scopes` switch columns remain in the database for backward compatibility but are no longer read by effective contract derivation.
+v31 creates the `provider_contract_model_protocol_overrides` table. It stores one row per contract scope × model × protocol, with `state` ∈ `force_on` / `force_off`; an absent row means "auto". The composite primary key is `(scope_kind, scope_id, model_id, protocol)`. The `provider_contract_scopes` switch columns remain in the database for backward compatibility. Effective contract derivation reads `provider_contract_model_protocol_overrides`.
 
 ## Schema v32 — single-protocol Custom Endpoint
 
@@ -45,7 +45,7 @@ v32 replaces `account_custom_configs.base_url`, JSON `upstream_protocols`, and `
 
 ## Schema v35 — Provider single identity
 
-v35 removes the offering dimension. Provider and Plan are one product identity keyed by `provider_id`. Known v34 pairs map as `opencode/go`, `opencode-zen-free/anonymous-free`, `command-code/goat`, `minimax/cn`, `kimi/cn`, `custom/api`, and `cpa/local`. Unknown pairs and composite-key collisions fail closed before any write. The rebuild preserves accounts, ciphertext bytes, logs, pricing/catalog rows, contracts, Custom configs/capabilities, settings, and access keys. The same schema version also stores typed user-defined Providers in `dynamic_providers` and `dynamic_provider_models`. Node backups export payload V4 with `providerId` only.
+v35 removes the offering dimension. Provider and Plan are one product identity keyed by `provider_id`. Known v34 pairs map as `opencode/go`, `opencode-zen-free/anonymous-free`, `command-code/goat`, `minimax/cn`, `kimi/cn`, `custom/api`, and `cpa/local`. Unknown pairs and composite-key collisions fail closed before any write. The rebuild preserves accounts, ciphertext bytes, logs, pricing/catalog rows, contracts, Custom configs/capabilities, settings, and access keys. The same schema version also stores typed user-defined Providers in `dynamic_providers` and `dynamic_provider_models`. Node backups export payload V4 with `providerId` only, plus an optional/defaulted user-defined Provider definition collection. Payload V1–V3 are rejected with an explicit unsupported-version error.
 
 Before any destructive v35 rebuild on a non-empty v34 database, the process writes a unique never-overwritten sibling snapshot:
 
@@ -60,6 +60,44 @@ The snapshot is a standalone v34 SQLite file (`VACUUM INTO`, `quick_check` on bo
 sha256sum -c data.sqlite.pre-v35.<timestamp>.bak.sha256      # Linux
 shasum -a 256 -c data.sqlite.pre-v35.<timestamp>.bak.sha256  # macOS
 ```
+
+## Schema v36 — Ollama Cloud usage state
+
+v36 creates the `ollama_cloud_usage_state` table. One row per configured
+account holds:
+
+- `cookie_cipher` — the obfuscated browser-session Cookie for the
+  `https://ollama.com/settings` usage scrape. It uses the same
+  key-obfuscation facility as account keys and is explicitly not
+  AEAD; it is never returned by any API and never enters an export payload.
+- `status` — `unconfigured`, `ok`, `unauthorized`, or `failed`.
+- `snapshot` — the sanitized JSON from the last successful scrape (5h/7d
+  windows, per-model request counts, optional plan/balance). Written only on
+  success; failures update status columns and never clear it.
+- `last_error`, `last_success_at`, `last_attempt_at`, `next_eligible_at`,
+  `failure_streak` — manual-refresh throttle (30 seconds) and last-attempt
+  metadata.
+
+The row is keyed by `account_id` with `ON DELETE CASCADE`, so account
+deletion removes the usage state; clearing the Cookie deletes the row and
+returns the capability to the unconfigured state. The migration is additive:
+existing tables, rows, and routing facts stay as they are. It does not create
+a new backup family. Rollback remains the existing whole-directory restore.
+
+## Schema v37 — Ollama Cloud billing
+
+v37 drops `ollama_cloud_usage_state` (the unreleased Cookie scrape, including
+obfuscated Cookie ciphertext and last-good snapshots) and creates
+`ollama_cloud_billing`:
+
+- `account_id` — primary key, `ON DELETE CASCADE`
+- `billing_tier` — `pro` / `max` / `team`
+
+Absence of a row is unconfigured (`null` on the account field). Existing
+Ollama accounts migrate with no row, stay routeable, and keep their Keys and
+logs. New creates require a paid tier and `accounts.purchase_date`. Node
+export/import carries the billing tier. The migration does not create a new
+backup family. Rollback remains the existing whole-directory restore.
 
 ## Schema v33 — Custom upstream model identity
 
@@ -94,7 +132,7 @@ On Windows, compare `Get-FileHash -Algorithm SHA256` with the first field of the
 3. Copy the verified `.bak` over `data.sqlite`, and remove the stale `data.sqlite-wal` / `data.sqlite-shm` left behind by the previous live file.
 4. Start a v26-capable binary with the same cipher identity, or retry the v27 upgrade on that restored v26 file. Restoring after a successful v27 open discards every write made since the snapshot.
 
-A failed v27 transaction rolls back: the live file must remain schema 26 with `sub_gateway_keys` intact. Leave any pre-v3 files in place; a later successful open creates another unique name instead of overwriting. A wrong or missing Host cipher fails closed; never rewrite `key_cipher` / `password_cipher`. `ocg-manager-cli status` opens the database and will attempt v27; it is not a read-only schema inspector.
+A failed v27 transaction rolls back: the live file must remain schema 26 with `sub_gateway_keys` intact. Leave any pre-v3 files in place; a later successful open creates another unique name instead of overwriting. A wrong or missing Host cipher fails closed; never rewrite `key_cipher` / `password_cipher`. `ocg-manager-cli status` opens the database and will attempt v27, so it migrates rather than inspecting schema read-only.
 
 ---
 [Maintainer guide index](../MAINTAINER.md) · [简体中文](storage-migration.zh-CN.md) · [Docs index](../README.md)

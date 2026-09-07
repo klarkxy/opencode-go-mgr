@@ -2,8 +2,8 @@
 
 # 架构
 
-本页只定义稳定的依赖与所有权边界。运行时边缘情况、schema 历史、完整路由和发布流程
-留在各自章节，避免架构页变成第二份实现手册。
+本页定义稳定的依赖与所有权边界。运行时边缘情况、schema 历史、完整路由和发布流程
+留在各自章节。
 
 ## 依赖图
 
@@ -17,8 +17,8 @@ ocg-browser-worker   独立进程；不依赖内部 ocg-* crate
 Vue SPA              静态资源；只走 HTTP Dashboard V3
 ```
 
-**Adapter Registry** 静态密封。运行时 Provider 定义只是绑定 Configurable HTTP 的
-类型化数据，不是适配器实现或插件。
+**Adapter Registry** 静态密封。运行时 Provider 定义是绑定 Configurable HTTP 的
+类型化数据。
 
 | Crate | 负责 | 禁止持有 |
 | --- | --- | --- |
@@ -29,7 +29,7 @@ Vue SPA              静态资源；只走 HTTP Dashboard V3
 | `ocg-cli` / `src-tauri` | CLI 与 Desktop 进程组合 | 第二套控制面或 WebView 直接变更路径 |
 
 兼容 facade 继续留在 `ocg-core`，但新的无 I/O 目录、selector、Alias 与转换行为应进入
-下层 crate。生产依赖检查要求 DAG 中不存在多节点强连通分量。
+下层 crate。
 
 ## HTTP 组合
 
@@ -47,8 +47,7 @@ Vue SPA              静态资源；只走 HTTP Dashboard V3
   /dashboard/             Vue SPA 与静态资源
 ```
 
-SPA 始终是 HTTP 客户端。Desktop capability 注册进 `CoreState`；Dashboard 状态没有
-Tauri `invoke` command。
+SPA 始终是 HTTP 客户端。Desktop capability 注册进 `CoreState`。
 
 ## Gateway 请求路径
 
@@ -57,13 +56,15 @@ Tauri `invoke` command。
 1. `handler.rs` 分配 request id、验证客户端 Key、解析客户端协议、重写 Claude Desktop
    角色并解析模型身份。
 2. `GatewayExecutor` 在请求入口捕获一次价格、代理路由、合约与 Alias 解析快照。fallback
-   每轮重读实时账号状态、合格 Custom runtime 与 Zen Free 冷却。
+   每轮重读实时账号状态、合格 Custom runtime 与 Zen Free 冷却。协议选择使用该次保存的
+   合约。
 3. 候选物化先应用适配器上限和 effective 模型/协议状态，再由无 I/O selector 选择账号卡。
 4. `provider_adapter.rs` 对密封 `ProviderAdapterKind` 做穷尽映射并返回纯数据
    `AttemptSpec`；不解密 Key、不打开 SQLite，也不构造 HTTP client。
 5. Host 解析所选账号凭据；`forward_once` 每次只调用一次上游 `.send()`，重试与 fallback
    策略留在外层循环。
-6. 分类阶段决定同账号重试、账号 fallback、冷却或终止返回；随后 Host 转换响应并写日志。
+6. 分类阶段决定同账号重试、账号 fallback、冷却或终止返回；随后 Host 转换响应并写日志
+   （`requested_model`、`resolved_alias`、`upstream_model`）。
 
 未知或有歧义的模型身份在出站 HTTP 前失败。超时、流中断及其他可能已经到达上游的
 结果不会自动重放。完整状态码语义见[运行时不变式](runtime-invariants.zh-CN.md)。
@@ -75,10 +76,10 @@ Tauri `invoke` command。
 定义始终选择既有 Configurable HTTP 适配器。
 
 Custom API 即使使用同一个密封适配器种类，仍是账号级产品路径。CPA 是另一条静态外部
-集成。两者都不会加载用户代码、在运行时扩展枚举，或获得任意进程控制能力。
+集成。
 
 Provider 目录与合约先于账号凭据解析。保存的发现行只能激活代码持有 Alias 映射，或
-继续作为精确 raw pin；目录发现不会创建适配器实现。
+继续作为精确 raw pin。
 
 ## 控制面
 
@@ -87,7 +88,7 @@ Vue SPA 通过 `src/api/dashboard-v3.ts` 及 presenter 调用 `/dashboard/api/v3
 `expectedPricingRevision`。不变更状态的操作读取与诊断跳过 CAS。
 
 CLI 调用相同的 HTTP-neutral service，不带 argv CAS token。共享 service 负责持久化与
-revision bump；CLI 和前端都不实现第二条变更路径。
+revision bump，同时服务 CLI 与前端。
 
 Settings 的持久化、重绑与补偿顺序见
 [Dashboard API](dashboard-api.zh-CN.md#settings-变更流程)。账号 setup 状态见
@@ -103,7 +104,7 @@ Settings 的持久化、重绑与补偿顺序见
 | 数据表、迁移、备份与回滚 | [存储与迁移](storage-migration.zh-CN.md) |
 | 完整 HTTP 路由 | [HTTP 路由](http-routes.zh-CN.md) |
 | Workspace 结构与开发命令 | [结构](layout.zh-CN.md)、[开发](development.zh-CN.md) |
-| 扩展边界 | [扩展 OCG Manager](extending.zh-CN.md) |
+| 扩展边界 | [扩展 Open Console Gateway](extending.zh-CN.md) |
 
 ---
 

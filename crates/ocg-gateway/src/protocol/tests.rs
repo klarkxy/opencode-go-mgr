@@ -33,32 +33,6 @@ fn convert_resp(
 }
 
 #[test]
-fn conversion_types_are_owned_by_this_module() {
-    assert_eq!(
-        std::any::type_name::<ConversionError>(),
-        "ocg_gateway::protocol::ConversionError"
-    );
-    assert_eq!(
-        std::any::type_name::<NamespaceToolMapping>(),
-        "ocg_gateway::protocol::NamespaceToolMapping"
-    );
-    assert_eq!(
-        std::any::type_name::<ConvertedRequestJson>(),
-        "ocg_gateway::protocol::ConvertedRequestJson"
-    );
-    assert_eq!(
-        std::any::type_name::<ResponseSynthesis>(),
-        "ocg_gateway::protocol::ResponseSynthesis"
-    );
-    assert_eq!(
-        std::any::type_name::<ResponseConversion>(),
-        "ocg_gateway::protocol::ResponseConversion"
-    );
-    let _: fn(ApiFormat, ApiFormat, Value) -> Result<ConvertedRequestJson, ConversionError> =
-        convert_request_json;
-}
-
-#[test]
 fn convert_request_json_does_not_probe_unknown_models() {
     let converted = convert_req(
         ApiFormat::ChatCompletions,

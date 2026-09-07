@@ -29,6 +29,7 @@ fn provider_error_policy_covers_every_adapter_kind() {
             ProviderAdapterKind::CommandCodeGoat
             | ProviderAdapterKind::MiniMaxCn
             | ProviderAdapterKind::KimiCn
+            | ProviderAdapterKind::OllamaCloud
             | ProviderAdapterKind::ConfigurableHttp
             | ProviderAdapterKind::Cpa => {
                 assert_eq!(policy.inference_401, Auth401Policy::RotatePersistAuthError);
@@ -147,6 +148,42 @@ fn go_zen_free_and_generic_429_policies() {
     assert!(!schedule_go_usage_sync(ProviderErrorClass::RateLimited {
         policy: RateLimitPolicy::GenericFiveMinute
     }));
+}
+
+#[test]
+fn unknown_and_dynamic_shaped_429_use_generic_five_minute() {
+    for provider_id in [
+        "unknown-provider",
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    ] {
+        assert_eq!(
+            classify(429, provider_id, false, false),
+            ProviderErrorClass::RateLimited {
+                policy: RateLimitPolicy::GenericFiveMinute
+            },
+            "{provider_id}"
+        );
+        assert_eq!(
+            classify(429, provider_id, true, false),
+            ProviderErrorClass::RateLimited {
+                policy: RateLimitPolicy::GenericFiveMinute
+            },
+            "{provider_id}"
+        );
+        assert!(!schedule_go_usage_sync(classify(
+            429,
+            provider_id,
+            false,
+            false
+        )));
+    }
+    assert_eq!(
+        classify(429, OPENCODE_PROVIDER_ID, false, false),
+        ProviderErrorClass::RateLimited {
+            policy: RateLimitPolicy::GoWindow
+        }
+    );
 }
 
 #[test]

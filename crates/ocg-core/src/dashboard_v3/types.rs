@@ -11,8 +11,8 @@
 //! `GET /settings/update-status` are operational reads without CAS and do not bump
 //! revision. `POST /settings/install-update` is an in-memory control-plane mutation
 //! that requires `expectedRevision` and `processGeneration` but does not bump them.
-//! Plaintext OCG Manager Keys must not appear on `Settings` or
-//! provider/Zen/contract DTOs — `ConnectionInfo` is the only secret-bearing
+//! Plaintext Open Console Gateway Keys must not appear on `Settings` or
+//! provider/Zen/contract DTOs —`ConnectionInfo` is the only secret-bearing
 //! V3 response DTO for those Keys. `CpaRuntimeKeyCreated.secret` returns a
 //! newly generated CPA client inference key once. `CustomModelDiscoveryRequest.apiKey` is write-only. Protocol path/switch tokens
 //! stay `chat_completions`, `responses`, and `messages`. Pricing wire DTOs are
@@ -183,6 +183,7 @@ pub const CATALOG_TYPE_NAMES: &[&str] = &[
     "CpaIntegrationUpdate",
     "CpaTestRequest",
     "CpaConnectionReport",
+    "CpaModel",
     "CpaModels",
     "CpaAccounts",
     "CpaAccount",
@@ -212,6 +213,7 @@ pub const CATALOG_TYPE_NAMES: &[&str] = &[
     "DynamicProviderDiscoverResponse",
     "DynamicProviderTestRequest",
     "DynamicProviderTestResponse",
+    "OllamaBillingTier",
 ];
 
 pub const ERROR_UNAUTHORIZED: &str = "unauthorized";
@@ -520,7 +522,6 @@ impl V3Error {
 pub struct ConnectionInfo {
     pub gateway_port: u16,
     pub client_root_url: String,
-    pub upstream_base_url: String,
     pub primary_key: String,
     pub sub_keys: Vec<ConnectionSubKey>,
     pub revision: u64,
@@ -548,7 +549,6 @@ pub struct Settings {
     pub process_generation: u64,
     pub gateway_port: u16,
     pub gateway_port_from_env: bool,
-    pub upstream_base_url: String,
     pub proxy_mode: ProxyMode,
     pub proxy_url: String,
     pub proxy_list_direction: ProxyListDirection,
@@ -579,8 +579,6 @@ pub struct SettingsUpdate {
     pub expectation: MutationExpectation,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gateway_port: Option<u16>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub upstream_base_url: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proxy_mode: Option<ProxyMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -774,6 +772,8 @@ pub struct Account {
     pub plan_routable: bool,
     pub custom_config: Option<AccountCustomConfig>,
     pub model_capabilities: Vec<AccountModelCapability>,
+    #[serde(default)]
+    pub ollama_billing_tier: Option<OllamaBillingTier>,
 }
 
 /// GET `/accounts` and PUT `/accounts/order` envelope.
@@ -944,6 +944,8 @@ pub struct AccountCreate {
     pub custom_config: Option<AccountCustomConfigWrite>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub model_capabilities: Vec<AccountModelCapabilityWrite>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ollama_billing_tier: Option<OllamaBillingTier>,
 }
 
 /// POST `/accounts/managed` body. CAS tokens and `name` are required.
@@ -985,6 +987,8 @@ pub struct AccountUpdate {
     pub purchase_date: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ollama_billing_tier: Option<OllamaBillingTier>,
 }
 
 /// PUT `/accounts/order` body. CAS tokens and the complete id set are required.
@@ -2074,7 +2078,7 @@ pub struct GatewayStatus {
     pub pricing_revision: String,
 }
 
-/// Local Applications picker: Go routable Alias ∩ current pricing snapshot.
+/// Local Applications picker: Go routable Alias 鈭?current pricing snapshot.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 #[schemars(rename_all = "camelCase", deny_unknown_fields)]
@@ -2617,7 +2621,7 @@ pub struct BrowserOpenRequest {
 /// POST `/accounts/{id}/browser` result. Distinct from `browser::BrowserOpenResult`.
 ///
 /// Native mode always emits `sessionToken: null`. Remote mode emits only the
-/// opaque dashboard-bound display token — never a worker URL or control token.
+/// opaque dashboard-bound display token —never a worker URL or control token.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 #[schemars(rename_all = "camelCase", deny_unknown_fields)]
@@ -2652,6 +2656,38 @@ pub struct UsageRefreshThrottleError {
     pub current_revision: Option<u64>,
     pub process_generation: Option<u64>,
     pub next_allowed_at: String,
+}
+
+/// Paid Ollama Cloud billing profile. Wire values are exactly `pro`, `max`,
+/// and `team`. Absence of a stored row (migrated/unconfigured) and non-Ollama
+/// accounts serialize the account field as `null`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[schemars(rename_all = "snake_case")]
+pub enum OllamaBillingTier {
+    Pro,
+    Max,
+    Team,
+}
+
+impl From<crate::provider::OllamaBillingTier> for OllamaBillingTier {
+    fn from(tier: crate::provider::OllamaBillingTier) -> Self {
+        match tier {
+            crate::provider::OllamaBillingTier::Pro => Self::Pro,
+            crate::provider::OllamaBillingTier::Max => Self::Max,
+            crate::provider::OllamaBillingTier::Team => Self::Team,
+        }
+    }
+}
+
+impl From<OllamaBillingTier> for crate::provider::OllamaBillingTier {
+    fn from(tier: OllamaBillingTier) -> Self {
+        match tier {
+            OllamaBillingTier::Pro => Self::Pro,
+            OllamaBillingTier::Max => Self::Max,
+            OllamaBillingTier::Team => Self::Team,
+        }
+    }
 }
 
 /// Secret-free singleton configuration for the local CPA external integration.
@@ -2732,8 +2768,17 @@ pub struct CpaConnectionReport {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 #[schemars(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CpaModel {
+    pub id: String,
+    pub owned_by: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CpaModels {
-    pub models: Vec<String>,
+    pub models: Vec<CpaModel>,
+    pub source_url: Option<String>,
     pub refreshed_at: Option<String>,
     pub revision: u64,
     pub process_generation: u64,
@@ -2852,8 +2897,8 @@ pub struct CpaOAuthSessionDelete {
     pub state: String,
 }
 
-/// Secret-free CPA runtime snapshot. `supported` is true only on the
-/// installed Windows x64 desktop Host.
+/// Secret-free CPA runtime snapshot. `supported` is true only on an
+/// installed desktop Host on Windows x64, macOS, or Linux x64.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 #[schemars(rename_all = "camelCase", deny_unknown_fields)]
@@ -3196,6 +3241,7 @@ pub fn contract_schema() -> Value {
     include_type::<DesktopUpdate>(&mut serialize);
     include_type::<UsageRefresh>(&mut serialize);
     include_type::<UsageRefreshThrottleError>(&mut serialize);
+    include_type::<OllamaBillingTier>(&mut serialize);
     include_type::<ApplicationConnectorAction>(&mut serialize);
     include_type::<ApplicationConnectorStatus>(&mut serialize);
     include_type::<ApplicationConnectorChange>(&mut serialize);
@@ -3205,6 +3251,7 @@ pub fn contract_schema() -> Value {
     include_type::<ApplicationConnectorCommitResult>(&mut serialize);
     include_type::<CpaIntegration>(&mut serialize);
     include_type::<CpaConnectionReport>(&mut serialize);
+    include_type::<CpaModel>(&mut serialize);
     include_type::<CpaModels>(&mut serialize);
     include_type::<CpaAccounts>(&mut serialize);
     include_type::<CpaAccount>(&mut serialize);

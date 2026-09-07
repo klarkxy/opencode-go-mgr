@@ -1,4 +1,4 @@
-//! Infrastructure implementations for OCG Manager.
+//! Infrastructure implementations for Open Console Gateway.
 
 pub mod crypto;
 pub mod http;

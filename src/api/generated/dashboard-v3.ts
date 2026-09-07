@@ -145,6 +145,7 @@ export type DashboardApiV3 =
   | CpaIntegrationUpdate
   | CpaTestRequest
   | CpaConnectionReport
+  | CpaModel
   | CpaModels
   | CpaAccounts
   | CpaAccount
@@ -173,7 +174,8 @@ export type DashboardApiV3 =
   | DynamicProviderDiscoverRequest
   | DynamicProviderDiscoverResponse
   | DynamicProviderTestRequest
-  | DynamicProviderTestResponse;
+  | DynamicProviderTestResponse
+  | OllamaBillingTier;
 /**
  * Which listed models take the list-mode exception leg.
  */
@@ -198,6 +200,12 @@ export type AccountCredentialKind = "api_key" | "none";
  * Custom/upstream protocol. Wire values match V2 snake_case.
  */
 export type AccountUpstreamProtocol = "chat_completions" | "responses" | "messages";
+/**
+ * Paid Ollama Cloud billing profile. Wire values are exactly `pro`, `max`,
+ * and `team`. Absence of a stored row (migrated/unconfigured) and non-Ollama
+ * accounts serialize the account field as `null`.
+ */
+export type OllamaBillingTier = "pro" | "max" | "team";
 /**
  * Wire identity matching V2 `key` / `egress-ip`.
  */
@@ -340,7 +348,6 @@ export interface ConnectionInfo {
   processGeneration: number;
   revision: number;
   subKeys: ConnectionSubKey[];
-  upstreamBaseUrl: string;
 }
 /**
  * One non-deleted sub Key as exposed by [`ConnectionInfo`].
@@ -377,7 +384,6 @@ export interface Settings {
   routingMode: RoutingMode;
   showDockIcon: boolean | null;
   streamIdleTimeoutSecs: number;
-  upstreamBaseUrl: string;
 }
 /**
  * One known model backing the list-mode checkbox grid.
@@ -409,7 +415,6 @@ export interface SettingsUpdate {
   routingMode?: RoutingMode | null;
   showDockIcon?: boolean | null;
   streamIdleTimeoutSecs?: number | null;
-  upstreamBaseUrl?: string | null;
 }
 /**
  * POST `/keys` body. CAS tokens are required; `name` is required. Unknown
@@ -456,6 +461,7 @@ export interface Account {
   modelCapabilities: AccountModelCapability[];
   name: string;
   notes: string | null;
+  ollamaBillingTier: OllamaBillingTier | null;
   planRoutable: boolean;
   processGeneration: number;
   providerId: string;
@@ -517,6 +523,7 @@ export interface AccountCreate {
   modelCapabilities?: AccountModelCapabilityWrite[];
   name: string;
   notes?: string | null;
+  ollamaBillingTier?: OllamaBillingTier | null;
   password?: string | null;
   processGeneration: number;
   providerId?: string | null;
@@ -583,6 +590,7 @@ export interface AccountUpdate {
   key?: string | null;
   name?: string | null;
   notes?: string | null;
+  ollamaBillingTier?: OllamaBillingTier | null;
   password?: string | null;
   processGeneration: number;
   purchaseDate?: string | null;
@@ -1061,7 +1069,7 @@ export interface GatewayStatus {
   upstreamBaseUrl: string;
 }
 /**
- * Local Applications picker: Go routable Alias ∩ current pricing snapshot.
+ * Local Applications picker: Go routable Alias 鈭?current pricing snapshot.
  */
 export interface ApplicationModels {
   models: string[];
@@ -1491,7 +1499,7 @@ export interface BrowserOpenRequest {
  * POST `/accounts/{id}/browser` result. Distinct from `browser::BrowserOpenResult`.
  *
  * Native mode always emits `sessionToken: null`. Remote mode emits only the
- * opaque dashboard-bound display token — never a worker URL or control token.
+ * opaque dashboard-bound display token —never a worker URL or control token.
  */
 export interface BrowserOpen {
   mode: BrowserMode;
@@ -1840,11 +1848,16 @@ export interface CpaConnectionReport {
   revision: number;
   version: string | null;
 }
+export interface CpaModel {
+  id: string;
+  ownedBy: string | null;
+}
 export interface CpaModels {
-  models: string[];
+  models: CpaModel[];
   processGeneration: number;
   refreshedAt: string | null;
   revision: number;
+  sourceUrl: string | null;
 }
 export interface CpaAccounts {
   accounts: CpaAccount[];
@@ -1948,8 +1961,8 @@ export interface CpaOAuthSessionDelete {
   state: string;
 }
 /**
- * Secret-free CPA runtime snapshot. `supported` is true only on the
- * installed Windows x64 desktop Host.
+ * Secret-free CPA runtime snapshot. `supported` is true only on an
+ * installed desktop Host on Windows x64, macOS, or Linux x64.
  */
 export interface CpaRuntime {
   assetSha256: string | null;

@@ -217,13 +217,7 @@ fn parse_window(
         .map_err(|_| GoUsageError::Schema)?;
 
     let resets_in_minutes = match max_minutes {
-        Some(max) => {
-            let minutes = ceil_minutes_until(resets_at, now);
-            if minutes > max {
-                return Err(GoUsageError::Window);
-            }
-            Some(minutes)
-        }
+        Some(max) => Some(bounded_resets_in_minutes(resets_at, now, max)?),
         None => None,
     };
 
@@ -247,6 +241,23 @@ fn parse_percent(value: &Value) -> Result<f64, GoUsageError> {
         return Err(GoUsageError::Schema);
     }
     Ok(percent)
+}
+
+fn bounded_resets_in_minutes(
+    resets_at: DateTime<Utc>,
+    now: DateTime<Utc>,
+    max: i64,
+) -> Result<i64, GoUsageError> {
+    let minutes = ceil_minutes_until(resets_at, now);
+    // Official expired windows return exactly `window` hours from server now.
+    // Ceil-to-minutes plus sub-second skew is commonly max+1, not a new length.
+    if minutes <= max {
+        Ok(minutes)
+    } else if minutes == max + 1 {
+        Ok(max)
+    } else {
+        Err(GoUsageError::Window)
+    }
 }
 
 fn ceil_minutes_until(resets_at: DateTime<Utc>, now: DateTime<Utc>) -> i64 {

@@ -1,10 +1,10 @@
 [English](README.md)
 
-# OCG Manager
+# Open Console Gateway
 
 一个本地 Gateway：把各 Plan 的访问凭据收进一个 SQLite 数据库，在一个端口（`http://127.0.0.1:9042`）上提供五种客户端协议。机器上的 AI 工具共用路由和访问控制，不必分别维护上游配置。
 
-每个账号归属一个 Provider/Plan（`provider_id`），并在需要时保存凭据。客户端发送本地 Alias；Gateway 负责与 Plan 上游协议之间的双向转换。内置路由涵盖 OpenCode Go、OpenCode Zen Free、Command Code GOAT、MiniMax CN Token Plan、Kimi Code CN 与 Custom API。用户定义 Provider 只能使用类型化 Configurable HTTP 配置，不加载插件代码；CPA 是可选的本机扩展。OCG Manager 没有遥测或远端同步。
+每个账号归属一个 Provider/Plan（`provider_id`），并在需要时保存凭据。客户端发送本地 Alias；Gateway 负责与 Plan 上游协议之间的双向转换。内置路由涵盖 OpenCode Go、OpenCode Zen Free、Command Code GOAT、MiniMax CN Token Plan、Kimi Code CN 与 Custom API。用户定义 Provider 以类型化 Configurable HTTP 数据持久化。CPA 是可选的本机扩展。每个节点把凭据保存在本地。
 
 ## 主要特性
 
@@ -15,7 +15,7 @@
 
 ## 架构总览
 
-[![OCG Manager 单节点架构](https://klarkxy.github.io/opencode-go-mgr/diagrams/local-node.visual-check.1440x900.light.png)](https://klarkxy.github.io/opencode-go-mgr/diagrams/local-node/)
+[![Open Console Gateway 单节点架构](https://klarkxy.github.io/opencode-go-mgr/diagrams/local-node.visual-check.1440x900.light.png)](https://klarkxy.github.io/opencode-go-mgr/diagrams/local-node/)
 
 [查看全部交互式架构图与流程图](https://klarkxy.github.io/opencode-go-mgr/)。
 
@@ -39,8 +39,8 @@ Gateway: http://127.0.0.1:9042/v1
 ```
 
 1. 安装并启动。Gateway 就绪后管理面板会在系统浏览器中打开；托盘图标随时唤回。
-2. 在 **账号** 视图添加 Plan，并在需要时添加凭据。随后到 **访问密钥** 复制客户端 **Key**；客户端只需要这份 OCG Manager 凭据。
-3. 把客户端指向 `http://127.0.0.1:9042/v1`。**应用** 视图有各客户端的配置教程。
+2. 在 **账号** 视图添加 Plan，并在需要时添加凭据。随后到 **访问密钥** 复制客户端 **Key**；客户端只需要这份 Open Console Gateway 凭据。
+3. 把客户端指向 `http://127.0.0.1:9042/v1`。各客户端配置见[应用教程](docs/user/applications.zh-CN.md)。
 
 ```bash
 curl http://127.0.0.1:9042/v1/chat/completions \
@@ -57,7 +57,7 @@ curl http://127.0.0.1:9042/v1/chat/completions \
 
 ## 推荐协议分组
 
-OpenCode Go 模型各有推荐上游协议。匹配且已支持的客户端协议会透传；其他已支持的客户端会转换。Gateway 不会在请求路径上试探协议。
+OpenCode Go 模型各有推荐上游协议。匹配且已支持的客户端协议会透传；其他已支持的客户端会转换。请求路由使用已保存的推荐/已支持合约。
 
 | 推荐上游 | 分组 |
 | --- | --- |
@@ -73,10 +73,10 @@ Zen Free 使用已保存的官方目录快照。Gemini 是客户端格式，不�
 
 ## 交流群
 
-加入 OCG Manager QQ 群：**1104321231**。
+加入 Open Console Gateway QQ 群：**1104321231**。
 
 <p align="center">
-  <img src="assets/qq-group.png" alt="OCG Manager QQ 群二维码" width="360" />
+  <img src="assets/qq-group.png" alt="Open Console Gateway QQ 群二维码" width="360" />
 </p>
 
 ## 许可证

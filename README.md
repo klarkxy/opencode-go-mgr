@@ -1,6 +1,6 @@
 [简体中文](README.zh-CN.md)
 
-# OCG Manager
+# Open Console Gateway
 
 A local gateway that keeps provider credentials in one SQLite database and
 serves five client protocols on one port (`http://127.0.0.1:9042`). Your local
@@ -11,9 +11,8 @@ Each account belongs to one Provider/Plan (`provider_id`) and, when required,
 one credential. Clients send local aliases; the gateway converts requests to
 the Plan's upstream protocol and converts responses back. Built-in routes cover
 OpenCode Go, OpenCode Zen Free, Command Code GOAT, MiniMax CN Token Plan, Kimi
-Code CN, and Custom API. Typed user-defined Providers use Configurable HTTP
-without loading plugin code; CPA is an optional local Extension. OCG Manager
-has no telemetry or remote sync.
+Code CN, and Custom API. Typed user-defined Providers bind Configurable HTTP as persisted data. CPA is
+an optional local Extension. Each node stores credentials locally.
 
 ## Highlights
 
@@ -29,7 +28,7 @@ has no telemetry or remote sync.
 
 ## Architecture At A Glance
 
-[![OCG Manager local-node architecture](https://klarkxy.github.io/opencode-go-mgr/diagrams/local-node.visual-check.1440x900.light.png)](https://klarkxy.github.io/opencode-go-mgr/diagrams/local-node/)
+[![Open Console Gateway local-node architecture](https://klarkxy.github.io/opencode-go-mgr/diagrams/local-node.visual-check.1440x900.light.png)](https://klarkxy.github.io/opencode-go-mgr/diagrams/local-node/)
 
 [Explore all interactive architecture and workflow diagrams](https://klarkxy.github.io/opencode-go-mgr/).
 
@@ -60,10 +59,10 @@ Auth:    Authorization: Bearer <key>
 1. Install and launch. The dashboard opens in your system browser when the
    gateway is ready; the tray icon brings it back.
 2. In **Accounts**, add a Plan and its credential when needed. Copy a client
-   **Key** from **Access Keys**; it is the only OCG Manager credential your
+   **Key** from **Access Keys**; it is the only Open Console Gateway credential your
    client needs.
-3. Point your client at `http://127.0.0.1:9042/v1`. **Applications** has
-   per-client setup guides.
+3. Point your client at `http://127.0.0.1:9042/v1`. Per-client setup is in
+   [Application guides](docs/user/applications.md).
 
 ```bash
 curl http://127.0.0.1:9042/v1/chat/completions \
@@ -82,7 +81,8 @@ image pins, and Compose instructions are in the [Docker guide](docs/user/docker.
 ## Preferred Protocol Groups
 
 OpenCode Go models have a preferred upstream protocol. Matching supported
-client protocols pass through; other supported clients are converted. The gateway never probes protocols on a request path.
+client protocols pass through; other supported clients are converted. Request
+routing uses the saved preferred/supported contract.
 
 | Preferred upstream | Group |
 | --- | --- |
@@ -102,10 +102,10 @@ an upstream destination. Complete model, capability, and conversion tables are i
 
 ## Community
 
-Join the OCG Manager QQ group: **1104321231**.
+Join the Open Console Gateway QQ group: **1104321231**.
 
 <p align="center">
-  <img src="assets/qq-group.png" alt="OCG Manager QQ group QR code" width="360" />
+  <img src="assets/qq-group.png" alt="Open Console Gateway QQ group QR code" width="360" />
 </p>
 
 ## License

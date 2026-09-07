@@ -3,6 +3,7 @@
 //! This module deliberately exposes only the reviewed Management operations;
 //! it is not a generic Management API proxy and never reads raw auth files.
 
+use crate::db::CpaCatalogModel;
 use crate::http_client::{self, RouteLabel};
 use crate::models::AppConfig;
 use reqwest::{Method, StatusCode, header::HeaderMap};
@@ -288,7 +289,7 @@ impl CpaClient {
         Ok(())
     }
 
-    pub async fn models(&self) -> Result<Vec<String>, CpaError> {
+    pub async fn models(&self) -> Result<Vec<CpaCatalogModel>, CpaError> {
         let (_, value, _) = self
             .send_json(Method::GET, "v1/models", Some(&self.inference_key), None)
             .await?;
@@ -537,7 +538,7 @@ fn parse_api_keys(value: &Value) -> Result<Vec<String>, CpaError> {
     Ok(keys)
 }
 
-fn parse_models(value: &Value) -> Result<Vec<String>, CpaError> {
+fn parse_models(value: &Value) -> Result<Vec<CpaCatalogModel>, CpaError> {
     let data = value
         .get("data")
         .and_then(Value::as_array)
@@ -548,11 +549,31 @@ fn parse_models(value: &Value) -> Result<Vec<String>, CpaError> {
         let Some(id) = row.get("id").and_then(Value::as_str).map(str::trim) else {
             continue;
         };
-        if !id.is_empty() && seen.insert(id.to_string()) {
-            models.push(id.to_string());
+        if id.is_empty() || !seen.insert(id.to_string()) {
+            continue;
         }
+        let owned_by = row
+            .get("owned_by")
+            .or_else(|| row.get("ownedBy"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .or_else(|| {
+                row.get("type")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty() && !value.eq_ignore_ascii_case("model"))
+                    .map(str::to_string)
+            });
+        models.push(CpaCatalogModel {
+            id: id.to_string(),
+            owned_by,
+        });
     }
-    if models.is_empty() {
+    // A newly installed CPA has no OAuth accounts and legitimately lists no models.
+    // A nonempty payload without any valid IDs is still malformed.
+    if !data.is_empty() && models.is_empty() {
         return Err(CpaError::Response("CPA model catalog is empty".into()));
     }
     Ok(models)
@@ -685,6 +706,7 @@ fn validate_auth_index(value: &str) -> Result<String, CpaError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::CpaCatalogModel;
     use axum::extract::Query;
     use axum::routing::get;
     use axum::{Json, Router};
@@ -734,13 +756,31 @@ mod tests {
     }
 
     #[test]
-    fn model_catalog_is_deduplicated_and_nonempty() {
+    fn model_catalog_is_deduplicated_and_allows_an_empty_list() {
         let models = parse_models(&json!({
-            "data": [{"id":"gpt-5"}, {"id":"gpt-5"}, {"id":"claude"}]
+            "data": [
+                {"id":"gpt-5", "owned_by":"openai"},
+                {"id":"gpt-5", "owned_by":"openai"},
+                {"id":"claude", "type":"anthropic"}
+            ]
         }))
         .unwrap();
-        assert_eq!(models, ["gpt-5", "claude"]);
-        assert!(parse_models(&json!({"data": []})).is_err());
+        assert_eq!(
+            models,
+            [
+                CpaCatalogModel {
+                    id: "gpt-5".into(),
+                    owned_by: Some("openai".into()),
+                },
+                CpaCatalogModel {
+                    id: "claude".into(),
+                    owned_by: Some("anthropic".into()),
+                },
+            ]
+        );
+        assert!(parse_models(&json!({"data": []})).unwrap().is_empty());
+        assert!(parse_models(&json!({"data": [{"id": " "}]})).is_err());
+        assert!(parse_models(&json!({"data": null})).is_err());
     }
 
     #[test]

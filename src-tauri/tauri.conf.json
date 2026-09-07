@@ -34,8 +34,8 @@
     }
   },
   "identifier": "com.klarkxy.ocgmanager",
-  "productName": "OCG Manager",
-  "version": "2.1.0",
+  "productName": "Open Console Gateway",
+  "version": "2.2.0",
   "app": {
     "security": {
       "csp": "default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'",
@@ -46,7 +46,7 @@
         "fullscreen": false,
         "height": 800,
         "resizable": true,
-        "title": "OCG Manager",
+        "title": "Open Console Gateway",
         "width": 1200,
         "visible": false
       }

@@ -10,11 +10,19 @@ use crate::catalog::{
 };
 use crate::ids::{
     COMMAND_CODE_PROVIDER_ID, CPA_ACCOUNT_ID, CPA_PROVIDER_ID, CUSTOM_PROVIDER_ID,
-    KIMI_PROVIDER_ID, MINIMAX_PROVIDER_ID, OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID,
-    ZEN_FREE_ACCOUNT_ID,
+    KIMI_PROVIDER_ID, MINIMAX_PROVIDER_ID, OLLAMA_PROVIDER_ID, OPENCODE_PROVIDER_ID,
+    OPENCODE_ZEN_FREE_PROVIDER_ID, ZEN_FREE_ACCOUNT_ID,
 };
 use serde::{Deserialize, Serialize};
 use std::fmt;
+
+/// Official OpenCode Go inference origin. Production routes always use this
+/// origin; loopback substitutes exist only as a test seam.
+pub const OPENCODE_GO_BASE_URL: &str = "https://opencode.ai/zen/go";
+pub const OPENCODE_GO_HOST: &str = "opencode.ai";
+/// Official OpenCode Zen free-channel origin. Sibling of
+/// [`OPENCODE_GO_BASE_URL`], not derived from settings.
+pub const OPENCODE_ZEN_BASE_URL: &str = "https://opencode.ai/zen";
 
 /// Official Command Code Provider API v1 base. Production GOAT routes this
 /// fixed origin; loopback substitutes exist only as a test seam.
@@ -53,6 +61,57 @@ pub const KIMI_CN_MODELS_PATH: &str = "/models";
 pub const KIMI_CN_USAGE_URL: &str = "https://api.kimi.com/coding/v1/usages";
 pub const KIMI_CN_MODEL_SOURCE: &str = "kimi_cn_get_models";
 pub const MAX_KIMI_CN_MODELS_CATALOG: usize = 1_000;
+
+/// Ollama Cloud surface constants live in [`crate::ids`] next to the provider
+/// identity. The model source below feeds Provider catalog refresh evidence.
+pub const OLLAMA_CLOUD_MODEL_SOURCE: &str = "ollama_cloud_get_models";
+pub const MAX_OLLAMA_CLOUD_MODELS_CATALOG: usize = 1_000;
+
+/// Account-scoped Ollama Cloud billing profile. Credits are USD per billing
+/// month. Absence of a stored row is unconfigured, not a Free tier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OllamaBillingTier {
+    Pro,
+    Max,
+    Team,
+}
+
+impl OllamaBillingTier {
+    pub const PRO_MONTHLY_CREDITS: f64 = 60.0;
+    pub const MAX_MONTHLY_CREDITS: f64 = 300.0;
+    pub const TEAM_MONTHLY_CREDITS: f64 = 1000.0;
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Pro => "pro",
+            Self::Max => "max",
+            Self::Team => "team",
+        }
+    }
+
+    pub fn parse(value: &str) -> Result<Self, String> {
+        match value.trim() {
+            "pro" => Ok(Self::Pro),
+            "max" => Ok(Self::Max),
+            "team" => Ok(Self::Team),
+            other => Err(format!("unknown Ollama billing tier `{other}`")),
+        }
+    }
+
+    /// Soft monthly USD-credit limit for the paid profile.
+    pub fn monthly_credit_limit(self) -> f64 {
+        match self {
+            Self::Pro => Self::PRO_MONTHLY_CREDITS,
+            Self::Max => Self::MAX_MONTHLY_CREDITS,
+            Self::Team => Self::TEAM_MONTHLY_CREDITS,
+        }
+    }
+
+    pub fn requires_purchase_date(self) -> bool {
+        true
+    }
+}
 
 /// Models included by the GOAT subscription page. These are the default-on
 /// rows in the Provider model/protocol matrix. Models discovered beyond this
@@ -276,6 +335,12 @@ const PURCHASE_DATE_FIELD: PlanFormField = PlanFormField {
     required: false,
     immutable_after_create: false,
 };
+const OLLAMA_PURCHASE_DATE_FIELD: PlanFormField = PlanFormField {
+    id: "purchase_date",
+    kind: "date",
+    required: true,
+    immutable_after_create: false,
+};
 const NOTES_FIELD: PlanFormField = PlanFormField {
     id: "notes",
     kind: "text",
@@ -290,6 +355,12 @@ const ENDPOINT_URL_FIELD: PlanFormField = PlanFormField {
 };
 const PROTOCOL_FIELD: PlanFormField = PlanFormField {
     id: "upstream_protocol",
+    kind: "select",
+    required: true,
+    immutable_after_create: false,
+};
+const OLLAMA_BILLING_TIER_FIELD: PlanFormField = PlanFormField {
+    id: "ollama_billing_tier",
     kind: "select",
     required: true,
     immutable_after_create: false,
@@ -309,6 +380,13 @@ const MINIMAX_CN_FORM_FIELDS: [PlanFormField; 4] =
     [NAME_FIELD, KEY_FIELD, PURCHASE_DATE_FIELD, NOTES_FIELD];
 const KIMI_CN_FORM_FIELDS: [PlanFormField; 4] =
     [NAME_FIELD, KEY_FIELD, PURCHASE_DATE_FIELD, NOTES_FIELD];
+const OLLAMA_CLOUD_FORM_FIELDS: [PlanFormField; 5] = [
+    NAME_FIELD,
+    KEY_FIELD,
+    OLLAMA_BILLING_TIER_FIELD,
+    OLLAMA_PURCHASE_DATE_FIELD,
+    NOTES_FIELD,
+];
 const CUSTOM_FORM_FIELDS: [PlanFormField; 6] = [
     NAME_FIELD,
     KEY_FIELD,
@@ -334,13 +412,14 @@ const CHAT_MESSAGES_PROTOCOLS: [UpstreamProtocolKind; 2] = [
     UpstreamProtocolKind::ChatCompletions,
     UpstreamProtocolKind::Messages,
 ];
+const CHAT_PROTOCOLS: [UpstreamProtocolKind; 1] = [UpstreamProtocolKind::ChatCompletions];
 const CUSTOM_PROTOCOLS: [UpstreamProtocolKind; 3] = [
     UpstreamProtocolKind::ChatCompletions,
     UpstreamProtocolKind::Responses,
     UpstreamProtocolKind::Messages,
 ];
 
-pub const BUILTIN_PROVIDERS: [BuiltinProvider; 7] = [
+pub const BUILTIN_PROVIDERS: [BuiltinProvider; 8] = [
     BuiltinProvider {
         provider_id: OPENCODE_PROVIDER_ID,
         credential_kind: CredentialKind::ApiKey,
@@ -469,6 +548,31 @@ pub const BUILTIN_PROVIDERS: [BuiltinProvider; 7] = [
         form_fields: &KIMI_CN_FORM_FIELDS,
     },
     BuiltinProvider {
+        provider_id: OLLAMA_PROVIDER_ID,
+        credential_kind: CredentialKind::ApiKey,
+        quota_scope: QuotaScope::Key,
+        singleton_account_id: None,
+        contract_scope_id: Some(OLLAMA_PROVIDER_ID),
+        display_name: "Ollama Cloud",
+        display_family: "Ollama",
+        product_surface: ProviderProductSurface::Provider,
+        creation_availability: CreationAvailability::Available,
+        creation_unavailable_reason: None,
+        verification_policy: VerificationPolicy::NotRequired,
+        verification_runtime_availability: "not_applicable",
+        routable: true,
+        managed_registration: false,
+        pricing_availability: "available",
+        usage_availability: "local_state",
+        manual_usage_calibration: true,
+        quota_unit: "usd_credits",
+        model_source: OLLAMA_CLOUD_MODEL_SOURCE,
+        key_prefix: None,
+        auth_schemes: &BEARER_AUTH,
+        upstream_protocols: &CHAT_PROTOCOLS,
+        form_fields: &OLLAMA_CLOUD_FORM_FIELDS,
+    },
+    BuiltinProvider {
         provider_id: CUSTOM_PROVIDER_ID,
         credential_kind: CredentialKind::ApiKey,
         quota_scope: QuotaScope::Key,
@@ -551,17 +655,19 @@ pub enum ProviderAdapterKind {
     CommandCodeGoat,
     MiniMaxCn,
     KimiCn,
+    OllamaCloud,
     ConfigurableHttp,
     Cpa,
 }
 
 impl ProviderAdapterKind {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::OpenCodeGo,
         Self::ZenFree,
         Self::CommandCodeGoat,
         Self::MiniMaxCn,
         Self::KimiCn,
+        Self::OllamaCloud,
         Self::ConfigurableHttp,
         Self::Cpa,
     ];
@@ -573,6 +679,7 @@ impl ProviderAdapterKind {
             COMMAND_CODE_PROVIDER_ID => Some(Self::CommandCodeGoat),
             MINIMAX_PROVIDER_ID => Some(Self::MiniMaxCn),
             KIMI_PROVIDER_ID => Some(Self::KimiCn),
+            OLLAMA_PROVIDER_ID => Some(Self::OllamaCloud),
             CUSTOM_PROVIDER_ID => Some(Self::ConfigurableHttp),
             CPA_PROVIDER_ID => Some(Self::Cpa),
             _ => None,
@@ -586,6 +693,7 @@ impl ProviderAdapterKind {
             Self::CommandCodeGoat => "command_code_goat",
             Self::MiniMaxCn => "minimax_cn",
             Self::KimiCn => "kimi_cn",
+            Self::OllamaCloud => "ollama_cloud",
             Self::ConfigurableHttp => "configurable_http",
             Self::Cpa => "cpa",
         }
@@ -599,6 +707,7 @@ impl ProviderAdapterKind {
             | Self::CommandCodeGoat
             | Self::MiniMaxCn
             | Self::KimiCn
+            | Self::OllamaCloud
             | Self::ConfigurableHttp => ProviderProductSurface::Provider,
         }
     }
@@ -780,8 +889,6 @@ pub enum InferenceChannelKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InferenceOriginKind {
-    ConfigUpstreamBase,
-    DerivedZenBase,
     OfficialFixed,
     AccountConfigured,
     LocalExternalIntegration,
@@ -920,6 +1027,7 @@ impl ProviderAdapterKind {
             Self::CommandCodeGoat => command_code_goat_capabilities(plan),
             Self::MiniMaxCn => minimax_cn_capabilities(plan),
             Self::KimiCn => kimi_cn_capabilities(plan),
+            Self::OllamaCloud => ollama_cloud_capabilities(plan),
             Self::ConfigurableHttp => configurable_http_capabilities(plan),
             Self::Cpa => cpa_capabilities(plan),
         }
@@ -950,7 +1058,7 @@ fn open_code_go_capabilities(plan: BuiltinProvider) -> ProviderCapabilities {
             quota_scope: plan.quota_scope,
             auth: InferenceAuthDescriptor::OpenCodeProtocolDefault,
             follow_redirects: true,
-            origin: InferenceOriginKind::ConfigUpstreamBase,
+            origin: InferenceOriginKind::OfficialFixed,
             loopback_test_seam_only: false,
         },
         protocol_probe: ProtocolProbeDescriptor {
@@ -1015,7 +1123,7 @@ fn zen_free_capabilities(plan: BuiltinProvider) -> ProviderCapabilities {
             quota_scope: plan.quota_scope,
             auth: InferenceAuthDescriptor::None,
             follow_redirects: true,
-            origin: InferenceOriginKind::DerivedZenBase,
+            origin: InferenceOriginKind::OfficialFixed,
             loopback_test_seam_only: false,
         },
         protocol_probe: ProtocolProbeDescriptor {
@@ -1187,6 +1295,71 @@ fn minimax_cn_capabilities(plan: BuiltinProvider) -> ProviderCapabilities {
             connection_verify: CardVerifyAction::NotApplicable,
             protocol_and_auth_immutable_after_create: false,
             protocol_probe: true,
+            catalog_refresh: true,
+        },
+    }
+}
+
+fn ollama_cloud_capabilities(plan: BuiltinProvider) -> ProviderCapabilities {
+    ProviderCapabilities {
+        model_catalog: ModelCatalogDescriptor {
+            kind: ModelCatalogKind::ProviderPersistedSnapshot,
+            catalog_source: plan.model_source,
+            publishes_client_aliases: true,
+            admin_explicit_refresh: true,
+            overlays_declared_ids: false,
+            snapshot_is_adapter_input_only: false,
+        },
+        inference: InferenceRoutingDescriptor {
+            catalog_routable: plan.routable,
+            production_inference: true,
+            channel: Some(InferenceChannelKind::Go),
+            credential_kind: plan.credential_kind,
+            quota_scope: plan.quota_scope,
+            auth: InferenceAuthDescriptor::Bearer,
+            follow_redirects: false,
+            origin: InferenceOriginKind::OfficialFixed,
+            loopback_test_seam_only: false,
+        },
+        protocol_probe: ProtocolProbeDescriptor {
+            request_path_may_trial: false,
+            matrix: ProtocolMatrixKind::FixedProviderProtocols,
+            unknown_zen_free_defaults_to_chat: false,
+            fallback_priority: &CHAT_PROTOCOLS,
+            explicit_probe: false,
+            structural_ceiling: StructuralProbeCeiling::Unavailable,
+        },
+        verification: VerificationDescriptor {
+            policy: plan.verification_policy,
+            runtime_availability: plan.verification_runtime_availability,
+            never_auto_enable: false,
+            probe_first_declared_model: false,
+            uses_get_models: false,
+        },
+        usage: UsageDescriptor {
+            catalog_availability: plan.usage_availability,
+            contract: UsageContractKind::LocalState,
+            endpoint: None,
+            experimental: false,
+            automatic_sync: false,
+            authoritative_for_quota: false,
+            affects_inference_eligibility: false,
+            publishes_capability: true,
+            manual_calibration: true,
+            egress_ip_shared_cooldown_window: false,
+        },
+        pricing: catalog_pricing(plan),
+        card_actions: CardActionsDescriptor {
+            persisted_enable_allowed: plan.routable,
+            enable_requires_verification: false,
+            managed_registration: false,
+            fetch_zen_models: false,
+            discover_models: false,
+            usage_refresh: false,
+            manual_usage_calibration: true,
+            connection_verify: CardVerifyAction::NotApplicable,
+            protocol_and_auth_immutable_after_create: false,
+            protocol_probe: false,
             catalog_refresh: true,
         },
     }
@@ -1446,13 +1619,13 @@ pub fn validate_plan_key(plan: BuiltinProvider, key: &str) -> Result<(), Provide
     if trimmed.is_empty() {
         return Err(ProviderBindingError::KeyRequired);
     }
-    if let Some(prefix) = plan.key_prefix {
-        if !trimmed.starts_with(prefix) {
-            return Err(ProviderBindingError::KeyPrefixMismatch {
-                provider_id: plan.provider_id.to_string(),
-                prefix: prefix.to_string(),
-            });
-        }
+    if let Some(prefix) = plan.key_prefix
+        && !trimmed.starts_with(prefix)
+    {
+        return Err(ProviderBindingError::KeyPrefixMismatch {
+            provider_id: plan.provider_id.to_string(),
+            prefix: prefix.to_string(),
+        });
     }
     Ok(())
 }

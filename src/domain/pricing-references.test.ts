@@ -2,11 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   GOAT_PRICING_REFERENCE,
-  PRICING_REFERENCE_CHECKED_AT,
 } from "./pricing-references.ts";
 
 test("GOAT reference mirrors the official plan summary and 40 included models", () => {
-  assert.equal(PRICING_REFERENCE_CHECKED_AT, "2026-08-24");
   assert.equal(GOAT_PRICING_REFERENCE.includedModelCount, 40);
   assert.equal(GOAT_PRICING_REFERENCE.models.length, 40);
   assert.deepEqual(

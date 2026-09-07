@@ -85,6 +85,7 @@ export interface Account {
   plan_routable: boolean;
   custom_config?: AccountCustomConfig | null;
   model_capabilities: AccountModelCapability[];
+  ollama_billing_tier?: "pro" | "max" | "team" | null;
 }
 
 export interface AccountCustomConfigInput {
@@ -113,8 +114,7 @@ export interface AccountInput {
   notes?: string;
   custom_config?: AccountCustomConfigInput;
   model_capabilities?: AccountModelCapabilityInput[];
-  /** Page-local stale value is ignored; the controlPlane store owns CAS. */
-  expected_revision?: number;
+  ollama_billing_tier?: "pro" | "max" | "team";
 }
 
 export interface AccountUpdate {
@@ -125,15 +125,13 @@ export interface AccountUpdate {
   enabled?: boolean;
   purchase_date?: string;
   notes?: string;
-  /** Page-local stale value is ignored; the controlPlane store owns CAS. */
-  expected_revision?: number;
+  ollama_billing_tier?: "pro" | "max" | "team";
 }
 
 export interface ManagedAccountInput {
   name: string;
   username?: string;
   notes?: string;
-  expected_revision?: number;
 }
 
 export interface CustomModelDiscoveryInput {
@@ -162,7 +160,6 @@ export interface AppConfig {
   revision: number;
   gateway_port: number;
   gateway_port_from_env: boolean;
-  upstream_base_url: string;
   proxy_mode: ProxyMode;
   proxy_url: string;
   proxy_list_direction: ProxyListDirection;
@@ -192,7 +189,6 @@ export interface ConnectionSubKey {
 export interface ConnectionInfo {
   gateway_port: number;
   client_root_url: string;
-  upstream_base_url: string;
   primary_key: string;
   sub_keys: ConnectionSubKey[];
   revision: number;
@@ -439,12 +435,6 @@ export interface DailyModelTokens {
   tokens: number;
 }
 
-export interface DashboardAuthStatus {
-  local: boolean;
-  initialized: boolean;
-  authenticated: boolean;
-}
-
 export function presentAccount(value: V3Account): Account {
   return {
     id: value.id,
@@ -492,6 +482,7 @@ export function presentAccount(value: V3Account): Account {
       source: capability.source,
       upstream_model: capability.upstreamModel,
     })),
+    ollama_billing_tier: value.ollamaBillingTier ?? null,
   };
 }
 
@@ -514,6 +505,7 @@ export function accountCreateInput(value: AccountInput): Omit<V3AccountCreate, "
       source: capability.source,
       upstreamModel: capability.upstream_model,
     })),
+    ollamaBillingTier: value.ollama_billing_tier,
   };
 }
 
@@ -526,6 +518,7 @@ export function accountUpdateInput(value: AccountUpdate): Omit<V3AccountUpdate, 
     enabled: value.enabled,
     purchaseDate: value.purchase_date,
     notes: value.notes,
+    ollamaBillingTier: value.ollama_billing_tier,
   };
 }
 
@@ -534,7 +527,6 @@ export function presentSettings(value: V3Settings): AppConfig {
     revision: value.revision,
     gateway_port: value.gatewayPort,
     gateway_port_from_env: value.gatewayPortFromEnv,
-    upstream_base_url: value.upstreamBaseUrl,
     proxy_mode: value.proxyMode,
     proxy_url: value.proxyUrl,
     proxy_list_direction: value.proxyListDirection,
@@ -561,7 +553,6 @@ export function presentSettings(value: V3Settings): AppConfig {
 
 export function settingsUpdateInput(value: AppConfig): Omit<V3SettingsUpdate, "expectedRevision" | "processGeneration"> {
   const input: Omit<V3SettingsUpdate, "expectedRevision" | "processGeneration"> = {
-    autoStart: value.auto_start,
     clientRootUrl: value.client_root_url,
     connectTimeoutSecs: value.connect_timeout_secs,
     conversationSticky: value.conversation_sticky,
@@ -572,10 +563,10 @@ export function settingsUpdateInput(value: AppConfig): Omit<V3SettingsUpdate, "e
     proxyMode: value.proxy_mode,
     proxyUrl: value.proxy_url,
     routingMode: value.routing_mode,
-    showDockIcon: value.show_dock_icon,
     streamIdleTimeoutSecs: value.stream_idle_timeout_secs,
-    upstreamBaseUrl: value.upstream_base_url,
   };
+  if (value.auto_start_supported) input.autoStart = value.auto_start;
+  if (value.dock_visibility_supported) input.showDockIcon = value.show_dock_icon;
   if (!value.gateway_port_from_env) input.gatewayPort = value.gateway_port;
   return input;
 }
@@ -584,7 +575,6 @@ export function presentConnection(value: V3ConnectionInfo): ConnectionInfo {
   return {
     gateway_port: value.gatewayPort,
     client_root_url: value.clientRootUrl,
-    upstream_base_url: value.upstreamBaseUrl,
     primary_key: value.primaryKey,
     sub_keys: value.subKeys.map((key) => ({ id: key.id, name: key.name, enabled: key.enabled, value: key.value })),
     revision: value.revision,

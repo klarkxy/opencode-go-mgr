@@ -993,11 +993,6 @@ fn sync_metadata_survives_reopen() {
         assert_eq!(sync.next_eligible_at, Some(now + ACTIVE_CADENCE));
         assert_eq!(sync.failure_streak, 0);
         assert_eq!(sync.last_expedited_at, Some(now));
-        // Defaults after migration: missing rows still open.
-        assert_eq!(
-            db.schema_version().unwrap(),
-            crate::db::CURRENT_SCHEMA_VERSION
-        );
     }
     std::fs::remove_dir_all(dir).unwrap();
 }
@@ -1098,11 +1093,6 @@ fn eligibility_lists_active_hourly_vs_inactive_daily_and_exclusions() {
 
     drop(state);
     std::fs::remove_dir_all(dir).unwrap();
-}
-
-#[test]
-fn unused_app_config_type_keeps_fetch_signature_honest() {
-    let _ = AppConfig::default();
 }
 
 fn seed_high_usage(state: &CoreState, account_id: &str) {

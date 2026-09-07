@@ -6,10 +6,10 @@ Gateway 启动后，接入客户端主要是复制配置。请使用接入中心
 
 1. 在 **账号** 视图用官方分发的 API Key 添加一个 OpenCode Go 账号。登录账号可选；新增时如果先填写账号，它会自动作为必填名称，直到你手动修改名称。面板不收集或维护 OpenCode 登录密码。
 2. 在面板的 **接入中心** 复制 **Key** 和 **API Base URL** （`http://127.0.0.1:9042/v1`）。
-3. 把客户端指向该 Base URL 并填入 Key。**应用** 视图内置了 17 个常见客户端的教程。
+3. 把客户端指向该 Base URL 并填入 Key。[应用教程](applications.zh-CN.md) 覆盖 17 个常见客户端。
 4. 发一个真实请求验证。
 
-**Key** 是你唯一要交给客户端的秘密。它接受三种请求头形态——`Authorization: Bearer <key>`、Anthropic 风格的 `x-api-key: <key>`、Gemini 风格的 `x-goog-api-key: <key>`——并且和 OpenCode-Go 账号 Key 毫无关系；后者由 Gateway 从 SQLite 取出后自行注入上游。
+**Key** 是你唯一要交给客户端的秘密。它接受三种请求头形态——`Authorization: Bearer <key>`、Anthropic 风格的 `x-api-key: <key>`、Gemini 风格的 `x-goog-api-key: <key>`。Gateway 从 SQLite 取出 OpenCode-Go 账号 Key，并自行注入上游。
 
 五类兼容入口的最小 POSIX shell 检查：
 
@@ -32,7 +32,7 @@ curl "$BASE/v1/messages" -H "x-api-key: $KEY" \
   -H "anthropic-version: 2023-06-01" -H "Content-Type: application/json" \
   -d '{"model":"deepseek-v4-flash","max_tokens":16,"messages":[{"role":"user","content":"ping"}]}'
 
-# Claude Desktop: the alias is rewritten to the model saved in the Applications view
+# Claude Desktop: 别名会改写为已保存的 sonnet/opus/haiku 映射
 curl "$BASE/claude-desktop/v1/messages" -H "x-api-key: $KEY" \
   -H "anthropic-version: 2023-06-01" -H "Content-Type: application/json" \
   -d '{"model":"claude-sonnet-4-6","max_tokens":16,"messages":[{"role":"user","content":"ping"}]}'

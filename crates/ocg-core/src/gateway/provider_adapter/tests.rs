@@ -1,18 +1,27 @@
 use super::*;
 use crate::crypto::{KeyCipher, StaticKeyCipher};
-use crate::gateway::protocol::CustomRouteSpec;
+use crate::gateway::protocol::{CustomRouteSpec, opencode_supports_upstream};
 use crate::models::{Account, AccountSetupStep, AccountType, AppConfig};
 use crate::provider::{
     COMMAND_CODE_GOAT_BASE_URL, COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM,
     COMMAND_CODE_PROVIDER_ID, CUSTOM_PROVIDER_ID, KIMI_CN_BASE_URL, KIMI_CN_CHAT_COMPLETIONS_PATH,
     KIMI_CN_MESSAGES_PATH, KIMI_PROVIDER_ID, MINIMAX_CN_ANTHROPIC_BASE_URL, MINIMAX_CN_BASE_URL,
     MINIMAX_CN_CHAT_COMPLETIONS_PATH, MINIMAX_CN_MESSAGES_PATH, MINIMAX_PROVIDER_ID,
+    OLLAMA_CLOUD_BASE_URL, OLLAMA_CLOUD_CHAT_COMPLETIONS_PATH, OLLAMA_PROVIDER_ID,
     OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID, ZEN_FREE_ACCOUNT_NAME,
 };
 use bytes::Bytes;
 use chrono::Utc;
 use serde_json::json;
 use std::sync::Arc;
+
+fn resolve_route(
+    account: &Account,
+    config: &AppConfig,
+    plan: &RequestPlan,
+) -> Result<AttemptSpec, String> {
+    resolve_route_with_dynamics(account, config, plan, &[])
+}
 
 fn account(
     id: &str,
@@ -378,6 +387,7 @@ fn adapter_kind_match_is_exhaustive_and_consistent_with_descriptors() {
             | ProviderAdapterKind::CommandCodeGoat
             | ProviderAdapterKind::MiniMaxCn
             | ProviderAdapterKind::KimiCn
+            | ProviderAdapterKind::OllamaCloud
             | ProviderAdapterKind::Cpa
             | ProviderAdapterKind::ConfigurableHttp => {}
         }
@@ -402,9 +412,12 @@ fn adapter_kind_match_is_exhaustive_and_consistent_with_descriptors() {
                 assert!(descriptor.inference.production_inference);
                 assert!(!descriptor.inference.loopback_test_seam_only);
             }
-            ProviderAdapterKind::MiniMaxCn | ProviderAdapterKind::KimiCn => {
+            ProviderAdapterKind::MiniMaxCn
+            | ProviderAdapterKind::KimiCn
+            | ProviderAdapterKind::OllamaCloud => {
                 assert_eq!(descriptor.inference.auth, InferenceAuthDescriptor::Bearer);
                 assert!(!descriptor.inference.follow_redirects);
+                assert!(descriptor.inference.catalog_routable);
             }
             ProviderAdapterKind::Cpa => {
                 assert_eq!(descriptor.inference.auth, InferenceAuthDescriptor::Bearer);
@@ -549,8 +562,9 @@ fn fixed_provider_plans_expose_documented_chat_and_messages_routes() {
             (ApiFormat::Messages, messages_base, messages_path),
         ] {
             let plan = chat_plan(model_id, UpstreamChannel::Go, protocol, None);
-            let account_route = resolve_account_test_route(&account, &config, &plan)
-                .expect("account-level tests use the documented production route");
+            let account_route =
+                resolve_account_test_route_with_dynamics(&account, &config, &plan, &[])
+                    .expect("account-level tests use the documented production route");
             let provider_route = resolve_probe_route(&account, &config, &plan)
                 .expect("provider probes reuse the documented production route");
             for route in [account_route, provider_route] {
@@ -571,4 +585,128 @@ fn fixed_provider_plans_expose_documented_chat_and_messages_routes() {
             .contains("no official upstream path")
         );
     }
+}
+
+#[test]
+fn minimax_kimi_ollama_do_not_inherit_opencode_responses_for_shared_model_names() {
+    let config = AppConfig::default();
+    let shared = "grok-4.5";
+    assert!(opencode_supports_upstream(shared, ApiFormat::Responses));
+    assert!(!opencode_supports_upstream(
+        shared,
+        ApiFormat::ChatCompletions
+    ));
+
+    let minimax = account(
+        "minimax-shared",
+        MINIMAX_PROVIDER_ID,
+        CredentialKind::ApiKey,
+        QuotaScope::Key,
+    );
+    let kimi = account(
+        "kimi-shared",
+        KIMI_PROVIDER_ID,
+        CredentialKind::ApiKey,
+        QuotaScope::Key,
+    );
+    let ollama = account(
+        "ollama-shared",
+        OLLAMA_PROVIDER_ID,
+        CredentialKind::ApiKey,
+        QuotaScope::Key,
+    );
+
+    for account in [&minimax, &kimi, &ollama] {
+        let err = resolve_account_test_route_with_dynamics(
+            account,
+            &config,
+            &chat_plan(shared, UpstreamChannel::Go, ApiFormat::Responses, None),
+            &[],
+        )
+        .unwrap_err();
+        assert!(
+            err.contains("no official upstream path") || err.contains("no verified support"),
+            "{} Responses must not inherit OpenCode support: {err}",
+            account.provider_id
+        );
+        let probe_err = resolve_probe_route(
+            account,
+            &config,
+            &chat_plan(shared, UpstreamChannel::Go, ApiFormat::Responses, None),
+        )
+        .unwrap_err();
+        assert!(
+            probe_err.contains("no official upstream path")
+                || probe_err.contains("no verified support"),
+            "{} probe Responses must not inherit OpenCode support: {probe_err}",
+            account.provider_id
+        );
+    }
+
+    let minimax_chat = resolve_account_test_route_with_dynamics(
+        &minimax,
+        &config,
+        &chat_plan(
+            "MiniMax-M3",
+            UpstreamChannel::Go,
+            ApiFormat::ChatCompletions,
+            None,
+        ),
+        &[],
+    )
+    .unwrap();
+    assert_eq!(minimax_chat.base_url, MINIMAX_CN_BASE_URL);
+    assert_eq!(minimax_chat.path, MINIMAX_CN_CHAT_COMPLETIONS_PATH);
+    let minimax_messages = resolve_account_test_route_with_dynamics(
+        &minimax,
+        &config,
+        &chat_plan("MiniMax-M3", UpstreamChannel::Go, ApiFormat::Messages, None),
+        &[],
+    )
+    .unwrap();
+    assert_eq!(minimax_messages.base_url, MINIMAX_CN_ANTHROPIC_BASE_URL);
+    assert_eq!(minimax_messages.path, MINIMAX_CN_MESSAGES_PATH);
+
+    let kimi_chat = resolve_account_test_route_with_dynamics(
+        &kimi,
+        &config,
+        &chat_plan(
+            "kimi-for-coding",
+            UpstreamChannel::Go,
+            ApiFormat::ChatCompletions,
+            None,
+        ),
+        &[],
+    )
+    .unwrap();
+    assert_eq!(kimi_chat.base_url, KIMI_CN_BASE_URL);
+    assert_eq!(kimi_chat.path, KIMI_CN_CHAT_COMPLETIONS_PATH);
+    let kimi_messages = resolve_account_test_route_with_dynamics(
+        &kimi,
+        &config,
+        &chat_plan(
+            "kimi-for-coding",
+            UpstreamChannel::Go,
+            ApiFormat::Messages,
+            None,
+        ),
+        &[],
+    )
+    .unwrap();
+    assert_eq!(kimi_messages.path, KIMI_CN_MESSAGES_PATH);
+
+    let ollama_chat = resolve_account_test_route_with_dynamics(
+        &ollama,
+        &config,
+        &chat_plan(
+            "deepseek-v4-flash",
+            UpstreamChannel::Go,
+            ApiFormat::ChatCompletions,
+            None,
+        ),
+        &[],
+    )
+    .unwrap();
+    assert_eq!(ollama_chat.base_url, OLLAMA_CLOUD_BASE_URL);
+    assert_eq!(ollama_chat.path, OLLAMA_CLOUD_CHAT_COMPLETIONS_PATH);
 }

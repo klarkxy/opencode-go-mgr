@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { Account } from "../api/dashboard.ts";
 import type { ProviderScopeView } from "./provider-contracts.ts";
-import { dynamicProviderAliasRows, providerAliasRows } from "./provider-aliases.ts";
+import {
+  dynamicProviderAliasRows,
+  mergeProviderAliasRows,
+  providerAliasRows,
+} from "./provider-aliases.ts";
 
 const protocol = {
   protocol: "chat_completions" as const,
@@ -139,4 +143,36 @@ test("user-defined Provider mappings appear as Alias rows labelled by Provider n
     routable: true,
     custom_account_id: null,
   }]);
+});
+
+test("production Alias merge appends definition-level dynamic rows without edit actions or secrets", () => {
+  const dynamic = {
+    id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    name: "Lab",
+    endpoint_url: "http://127.0.0.1:9",
+    upstream_protocol: "chat_completions" as const,
+    auth_kind: "bearer" as const,
+    models: [{ public_model: "lab-opus", upstream_model: "vendor/opus" }],
+    created_at: "",
+    updated_at: "",
+    revision: 1,
+    process_generation: 1,
+  };
+  const rows = mergeProviderAliasRows([builtinScope, customScope], [customAccount], [dynamic]);
+  assert.deepEqual(rows.map((row) => row.key), [
+    "provider:go:gpt-5.6:gpt-5.6-upstream",
+    "custom:custom-1:public-model:vendor/model:free",
+    "dynamic:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa:lab-opus:vendor/opus",
+  ]);
+  const dynamicRow = rows.at(-1)!;
+  assert.equal(dynamicRow.routable, true);
+  assert.equal(dynamicRow.custom_account, null);
+  assert.equal(dynamicRow.custom_account_id, null);
+  assert.equal(dynamicRow.provider_plan, "Lab");
+  assert.equal(
+    dynamicRow.key,
+    "dynamic:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa:lab-opus:vendor/opus",
+  );
+  assert.equal("endpoint_url" in dynamicRow, false);
+  assert.equal("auth_kind" in dynamicRow, false);
 });

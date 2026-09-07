@@ -35,36 +35,19 @@ fn plan_with_model(client: ApiFormat, upstream: ApiFormat, model: &str) -> Reque
 }
 
 #[test]
-fn ox_alpha_free_is_chat_only_known_model() {
-    assert!(is_known_model("ox-alpha-free"));
+fn unknown_models_are_not_in_the_protocol_table() {
     assert!(!is_known_model("x-preview-f-free"));
     assert!(!is_known_model("totally-made-up-xyz"));
-    let plan = prepare_request(
-        ApiFormat::ChatCompletions,
-        bytes(json!({
-            "model": "ox-alpha-free",
-            "messages": [{"role": "user", "content": "hi"}]
-        })),
-    )
-    .expect("Chat should passthrough Ox Alpha Free");
-    assert_eq!(plan.upstream, ApiFormat::ChatCompletions);
-    let gemini = prepare_gemini_request(
-        "ox-alpha-free".into(),
-        false,
-        bytes(json!({"contents":[{"role":"user","parts":[{"text":"hi"}]}]})),
-    )
-    .expect("Gemini should convert Ox Alpha Free to Chat");
-    assert_eq!(gemini.upstream, ApiFormat::ChatCompletions);
-    let responses = prepare_request(
-        ApiFormat::Responses,
-        bytes(json!({
-            "model": "ox-alpha-free",
-            "input": "hi",
-            "store": false
-        })),
-    )
-    .expect("Responses should convert Ox Alpha Free to Chat");
-    assert_eq!(responses.upstream, ApiFormat::ChatCompletions);
+    assert!(
+        prepare_request(
+            ApiFormat::ChatCompletions,
+            bytes(json!({
+                "model": "totally-made-up-xyz",
+                "messages": [{"role": "user", "content": "hi"}]
+            })),
+        )
+        .is_err()
+    );
 }
 
 #[test]
@@ -102,26 +85,31 @@ fn muse_spark_contributor_routes_every_client_to_responses() {
 
 #[test]
 fn muse_spark_contributor_free_is_responses_only() {
-    assert!(is_known_model("muse-spark-1.2-contributor-free"));
-    let chat = prepare_request(
-        ApiFormat::ChatCompletions,
-        bytes(json!({
-            "model": "muse-spark-1.2-contributor-free",
-            "messages": [{"role": "user", "content": "hi"}]
-        })),
-    )
-    .expect("Chat should convert Muse Spark free to Responses");
-    assert_eq!(chat.upstream, ApiFormat::Responses);
-    let responses = prepare_request(
-        ApiFormat::Responses,
-        bytes(json!({
-            "model": "muse-spark-1.2-contributor-free",
-            "input": "hi",
-            "store": false
-        })),
-    )
-    .expect("Responses should passthrough Muse Spark free");
-    assert_eq!(responses.upstream, ApiFormat::Responses);
+    for model in [
+        "muse-spark-1.2-contributor-free",
+        "muse-spark-1.3-contributor-free",
+    ] {
+        assert!(is_known_model(model), "{model}");
+        let chat = prepare_request(
+            ApiFormat::ChatCompletions,
+            bytes(json!({
+                "model": model,
+                "messages": [{"role": "user", "content": "hi"}]
+            })),
+        )
+        .unwrap_or_else(|error| panic!("{model} Chat should convert to Responses: {error}"));
+        assert_eq!(chat.upstream, ApiFormat::Responses, "{model}");
+        let responses = prepare_request(
+            ApiFormat::Responses,
+            bytes(json!({
+                "model": model,
+                "input": "hi",
+                "store": false
+            })),
+        )
+        .unwrap_or_else(|error| panic!("{model} Responses should passthrough: {error}"));
+        assert_eq!(responses.upstream, ApiFormat::Responses, "{model}");
+    }
 }
 
 #[test]
@@ -860,6 +848,32 @@ fn unknown_chat_and_messages_models_fail_closed() {
     assert!(chat.message.contains("unknown model"));
     assert_eq!(messages.status, StatusCode::BAD_REQUEST);
     assert!(messages.message.contains("unknown model"));
+}
+
+#[test]
+fn unknown_zen_free_suffix_defaults_to_chat() {
+    let chat = prepare_request(
+        ApiFormat::ChatCompletions,
+        bytes(json!({
+            "model": "brand-new-promo-free",
+            "messages": [{"role": "user", "content": "hi"}],
+            "max_tokens": 1
+        })),
+    )
+    .expect("unknown -free IDs materialize as Chat");
+    assert_eq!(chat.upstream, ApiFormat::ChatCompletions);
+    assert_eq!(chat.model, "brand-new-promo-free");
+
+    let converted = prepare_request(
+        ApiFormat::Messages,
+        bytes(json!({
+            "model": "brand-new-promo-free",
+            "max_tokens": 1,
+            "messages": [{"role": "user", "content": "hi"}]
+        })),
+    )
+    .expect("other client formats convert to Chat for unknown -free IDs");
+    assert_eq!(converted.upstream, ApiFormat::ChatCompletions);
 }
 
 #[test]

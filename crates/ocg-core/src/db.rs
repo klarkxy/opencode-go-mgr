@@ -23,6 +23,8 @@ use rusqlite::{
     params_from_iter,
     types::{Type, Value},
 };
+use serde::de::Error as SerdeError;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
     collections::HashSet,
@@ -46,11 +48,93 @@ pub struct CpaIntegrationRecord {
     pub management_key_cipher: String,
 }
 
+/// One row from the persisted CPA `/v1/models` snapshot.
+/// `owned_by` is CPA's reported source when present; legacy ID-only snapshots
+/// keep it empty until the next explicit refresh.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CpaCatalogModel {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owned_by: Option<String>,
+}
+
+impl From<String> for CpaCatalogModel {
+    fn from(id: String) -> Self {
+        Self { id, owned_by: None }
+    }
+}
+
+impl From<&str> for CpaCatalogModel {
+    fn from(id: &str) -> Self {
+        Self {
+            id: id.to_string(),
+            owned_by: None,
+        }
+    }
+}
+
+impl CpaCatalogModel {
+    pub fn ids(models: &[Self]) -> Vec<String> {
+        models.iter().map(|model| model.id.clone()).collect()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CpaCatalogRecord {
-    pub models: Vec<String>,
+    pub models: Vec<CpaCatalogModel>,
     pub refreshed_at: Option<DateTime<Utc>>,
     pub source_url: String,
+}
+
+/// Accepts both the current `[{id, owned_by}]` snapshot and the legacy
+/// `["id"]` array written before sources were persisted.
+fn parse_cpa_catalog_models(models_json: &str) -> Result<Vec<CpaCatalogModel>, serde_json::Error> {
+    let value: serde_json::Value = serde_json::from_str(models_json)?;
+    let Some(rows) = value.as_array() else {
+        return Err(SerdeError::custom("CPA catalog must be a JSON array"));
+    };
+    let mut models = Vec::new();
+    let mut seen = HashSet::new();
+    for row in rows {
+        let model = match row {
+            serde_json::Value::String(id) => {
+                let id = id.trim();
+                if id.is_empty() {
+                    continue;
+                }
+                CpaCatalogModel {
+                    id: id.to_string(),
+                    owned_by: None,
+                }
+            }
+            serde_json::Value::Object(object) => {
+                let Some(id) = object
+                    .get("id")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                else {
+                    continue;
+                };
+                let owned_by = object
+                    .get("owned_by")
+                    .or_else(|| object.get("ownedBy"))
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_string);
+                CpaCatalogModel {
+                    id: id.to_string(),
+                    owned_by,
+                }
+            }
+            _ => continue,
+        };
+        if seen.insert(model.id.clone()) {
+            models.push(model);
+        }
+    }
+    Ok(models)
 }
 
 /// One fully validated account definition ready for an atomic migration import.
@@ -63,6 +147,7 @@ pub struct AccountImportRecord {
     pub capabilities: Vec<AccountModelCapabilityInput>,
     pub verification_status: ConnectionVerificationStatus,
     pub connection_verified_at: Option<DateTime<Utc>>,
+    pub ollama_billing_tier: Option<OllamaBillingTier>,
 }
 
 /// One fully validated, portable node-state snapshot. Stable IDs merge into an
@@ -78,6 +163,7 @@ pub struct NodeImportRecord {
     pub zen_free_enabled: bool,
     pub zen_catalog: crate::kernel::zen::ZenFreeModelCatalog,
     pub provider_contracts: PersistedContracts,
+    pub dynamic_providers: Vec<DynamicProviderRuntime>,
 }
 
 /// Settings key holding the forward-log client-key backfill watermark
@@ -108,7 +194,7 @@ pub const PRE_V3_BACKUP_FILE_PREFIX: &str = "data.sqlite.pre-v3.";
 /// database is rewritten to provider-only identity in v35.
 pub const PRE_V35_BACKUP_FILE_PREFIX: &str = "data.sqlite.pre-v35.";
 /// Highest schema this binary can open or migrate. Newer databases fail closed.
-pub const CURRENT_SCHEMA_VERSION: i32 = 35;
+pub const CURRENT_SCHEMA_VERSION: i32 = 37;
 /// Canonical source schema for the v35 provider-identity rewrite.
 pub const V34_SCHEMA_VERSION: i32 = 34;
 /// Historical v34 offering IDs. Used only by v1–v34 SQL and the v35 preflight
@@ -1130,13 +1216,13 @@ fn sanitize_config_json_primary_key(json: &str) -> Result<(String, Option<String
         .map(str::trim)
         .filter(|item| !item.is_empty())
         .map(str::to_string);
-    if let Some(object) = value.as_object_mut() {
-        if object.contains_key("gateway_key") {
-            object.insert(
-                "gateway_key".to_string(),
-                serde_json::Value::String(String::new()),
-            );
-        }
+    if let Some(object) = value.as_object_mut()
+        && object.contains_key("gateway_key")
+    {
+        object.insert(
+            "gateway_key".to_string(),
+            serde_json::Value::String(String::new()),
+        );
     }
     Ok((serde_json::to_string(&value)?, primary))
 }
@@ -1971,7 +2057,7 @@ fn migrate_v35_body(tx: &Transaction<'_>) -> Result<()> {
 fn dynamic_tx_fault(point: &'static str) -> Result<()> {
     #[cfg(test)]
     {
-        return dynamic_provider_fault::inject(point);
+        dynamic_provider_fault::inject(point)
     }
     #[cfg(not(test))]
     {
@@ -2002,13 +2088,15 @@ fn list_dynamic_providers_on(conn: &Connection) -> Result<Vec<DynamicProviderRun
         let (id, name, endpoint_url, protocol, auth_kind, created_at, updated_at) = row?;
         providers.push(load_dynamic_provider_runtime(
             conn,
-            id,
-            name,
-            endpoint_url,
-            protocol,
-            auth_kind,
-            created_at,
-            updated_at,
+            DynamicProviderRow {
+                id,
+                name,
+                endpoint_url,
+                protocol,
+                auth_kind,
+                created_at,
+                updated_at,
+            },
         )?);
     }
     Ok(providers)
@@ -2042,18 +2130,19 @@ fn get_dynamic_provider_on(
     };
     Ok(Some(load_dynamic_provider_runtime(
         conn,
-        id,
-        name,
-        endpoint_url,
-        protocol,
-        auth_kind,
-        created_at,
-        updated_at,
+        DynamicProviderRow {
+            id,
+            name,
+            endpoint_url,
+            protocol,
+            auth_kind,
+            created_at,
+            updated_at,
+        },
     )?))
 }
 
-fn load_dynamic_provider_runtime(
-    conn: &Connection,
+struct DynamicProviderRow {
     id: String,
     name: String,
     endpoint_url: String,
@@ -2061,10 +2150,16 @@ fn load_dynamic_provider_runtime(
     auth_kind: String,
     created_at: String,
     updated_at: String,
+}
+
+fn load_dynamic_provider_runtime(
+    conn: &Connection,
+    provider: DynamicProviderRow,
 ) -> Result<DynamicProviderRuntime> {
-    let upstream_protocol = ocg_domain::catalog::UpstreamProtocolKind::try_from(protocol.as_str())
-        .map_err(|error| anyhow::anyhow!(error.to_string()))?;
-    let auth_kind = DynamicAuthKind::try_from(auth_kind.as_str())
+    let upstream_protocol =
+        ocg_domain::catalog::UpstreamProtocolKind::try_from(provider.protocol.as_str())
+            .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+    let auth_kind = DynamicAuthKind::try_from(provider.auth_kind.as_str())
         .map_err(|error| anyhow::anyhow!(error.to_string()))?;
     let mut stmt = conn.prepare(
         "SELECT public_model, upstream_model
@@ -2072,7 +2167,7 @@ fn load_dynamic_provider_runtime(
          WHERE provider_id = ?1
          ORDER BY public_model_key ASC",
     )?;
-    let rows = stmt.query_map([&id], |row| {
+    let rows = stmt.query_map([&provider.id], |row| {
         Ok(DynamicModelMapping {
             public_model: row.get(0)?,
             upstream_model: row.get(1)?,
@@ -2082,19 +2177,31 @@ fn load_dynamic_provider_runtime(
     for row in rows {
         mappings.push(row?);
     }
+    let created_at = DateTime::parse_from_rfc3339(&provider.created_at)
+        .map(|value| value.with_timezone(&Utc))
+        .map_err(|error| {
+            anyhow::anyhow!(
+                "dynamic provider {} has invalid created_at: {error}",
+                provider.id
+            )
+        })?;
+    let updated_at = DateTime::parse_from_rfc3339(&provider.updated_at)
+        .map(|value| value.with_timezone(&Utc))
+        .map_err(|error| {
+            anyhow::anyhow!(
+                "dynamic provider {} has invalid updated_at: {error}",
+                provider.id
+            )
+        })?;
     Ok(DynamicProviderRuntime {
-        id,
-        name,
-        endpoint_url,
+        id: provider.id,
+        name: provider.name,
+        endpoint_url: provider.endpoint_url,
         upstream_protocol,
         auth_kind,
         mappings,
-        created_at: DateTime::parse_from_rfc3339(&created_at)
-            .map(|value| value.with_timezone(&Utc))
-            .unwrap_or_else(|_| Utc::now()),
-        updated_at: DateTime::parse_from_rfc3339(&updated_at)
-            .map(|value| value.with_timezone(&Utc))
-            .unwrap_or_else(|_| Utc::now()),
+        created_at,
+        updated_at,
     })
 }
 
@@ -2114,6 +2221,76 @@ fn insert_dynamic_provider_on(conn: &Connection, runtime: &DynamicProviderRuntim
         ],
     )?;
     insert_dynamic_provider_models_on(conn, &runtime.id, &runtime.mappings)
+}
+
+fn count_accounts_for_provider_on(conn: &Connection, provider_id: &str) -> Result<i64> {
+    conn.query_row(
+        "SELECT COUNT(*) FROM accounts WHERE lower(provider_id) = lower(?1)",
+        [provider_id],
+        |row| row.get(0),
+    )
+    .map_err(Into::into)
+}
+
+fn upsert_imported_dynamic_provider_on(
+    conn: &Connection,
+    runtime: &DynamicProviderRuntime,
+    imported_account_ids: &HashSet<String>,
+) -> Result<()> {
+    anyhow::ensure!(
+        builtin_provider(&runtime.id).is_none(),
+        "dynamic provider id collides with a built-in provider"
+    );
+    if let Some(existing) = get_dynamic_provider_on(conn, &runtime.id)? {
+        if existing.auth_kind.requires_key() != runtime.auth_kind.requires_key() {
+            let mut statement =
+                conn.prepare("SELECT id FROM accounts WHERE lower(provider_id) = lower(?1)")?;
+            let existing_ids =
+                statement.query_map([&existing.id], |row| row.get::<_, String>(0))?;
+            for account_id in existing_ids {
+                let account_id = account_id?;
+                anyhow::ensure!(
+                    imported_account_ids.contains(&account_id.to_ascii_lowercase()),
+                    "cannot change dynamic provider auth while destination-only accounts still reference it"
+                );
+            }
+        }
+        conn.execute(
+            "UPDATE dynamic_providers
+             SET name = ?1, endpoint_url = ?2, upstream_protocol = ?3, auth_kind = ?4, updated_at = ?5
+             WHERE id = ?6",
+            params![
+                runtime.name,
+                runtime.endpoint_url,
+                runtime.upstream_protocol.as_str(),
+                runtime.auth_kind.as_str(),
+                runtime.updated_at.to_rfc3339(),
+                existing.id,
+            ],
+        )?;
+        conn.execute(
+            "DELETE FROM dynamic_provider_models WHERE provider_id = ?1",
+            [&existing.id],
+        )?;
+        insert_dynamic_provider_models_on(conn, &existing.id, &runtime.mappings)
+    } else {
+        insert_dynamic_provider_on(conn, runtime)
+    }
+}
+
+fn ensure_dynamic_singleton_accounts_on(conn: &Connection) -> Result<()> {
+    for runtime in list_dynamic_providers_on(conn)? {
+        if !runtime.auth_kind.is_singleton() {
+            continue;
+        }
+        let count = count_accounts_for_provider_on(conn, &runtime.id)?;
+        anyhow::ensure!(
+            count <= 1,
+            "no-auth provider `{}` requires a singleton account",
+            runtime.id
+        );
+    }
+    Ok(())
 }
 
 fn insert_dynamic_provider_models_on(
@@ -2167,7 +2344,7 @@ fn ensure_dynamic_provider_tables(conn: &Connection) -> Result<()> {
 /// first schema that omits it.
 fn migrate_to_v35(conn: &Connection, db_path: &Path, is_fresh: bool) -> Result<()> {
     let version = schema_version_on(conn)?;
-    if version >= CURRENT_SCHEMA_VERSION {
+    if version >= 35 {
         return Ok(());
     }
     anyhow::ensure!(
@@ -2181,7 +2358,7 @@ fn migrate_to_v35(conn: &Connection, db_path: &Path, is_fresh: bool) -> Result<(
     with_foreign_keys_off(conn, || {
         let tx = Transaction::new_unchecked(conn, TransactionBehavior::Immediate)?;
         let version_locked = schema_version_on(&tx)?;
-        if version_locked >= CURRENT_SCHEMA_VERSION {
+        if version_locked >= 35 {
             tx.rollback()?;
             return Ok(());
         }
@@ -2191,12 +2368,69 @@ fn migrate_to_v35(conn: &Connection, db_path: &Path, is_fresh: bool) -> Result<(
         );
         preflight_v35_identity(&tx)?;
         migrate_v35_body(&tx)?;
-        tx.execute_batch(&format!(
-            "INSERT OR REPLACE INTO schema_version (version) VALUES ({CURRENT_SCHEMA_VERSION});"
-        ))?;
+        tx.execute_batch("INSERT OR REPLACE INTO schema_version (version) VALUES (35);")?;
         tx.commit()?;
         Ok(())
     })
+}
+
+/// v36: additive Ollama Cloud Cookie-usage state. One row per account holds
+/// the obfuscated browser-session Cookie and the last-good sanitized snapshot.
+/// Failures update status columns and never clear the snapshot. The row
+/// cascades with the account.
+fn migrate_to_v36(conn: &Connection) -> Result<()> {
+    let version = schema_version_on(conn)?;
+    if version >= 36 {
+        return Ok(());
+    }
+    anyhow::ensure!(
+        version == 35,
+        "v36 requires a canonical schema v35 source, found {version}"
+    );
+    let tx = conn.unchecked_transaction()?;
+    tx.execute_batch(
+        "CREATE TABLE IF NOT EXISTS ollama_cloud_usage_state (
+            account_id TEXT PRIMARY KEY,
+            cookie_cipher TEXT,
+            status TEXT NOT NULL DEFAULT 'unconfigured',
+            snapshot TEXT,
+            last_error TEXT,
+            last_success_at TEXT,
+            last_attempt_at TEXT,
+            next_eligible_at TEXT,
+            failure_streak INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+        );
+        INSERT OR REPLACE INTO schema_version (version) VALUES (36);",
+    )?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// v37: drop the unreleased Cookie-usage scrape table and add the account
+/// billing-tier side table. Existing Ollama accounts stay routeable with no
+/// row (unconfigured). Account Keys and logs are untouched.
+fn migrate_to_v37(conn: &Connection) -> Result<()> {
+    let version = schema_version_on(conn)?;
+    if version >= 37 {
+        return Ok(());
+    }
+    anyhow::ensure!(
+        version == 36,
+        "v37 requires a canonical schema v36 source, found {version}"
+    );
+    let tx = conn.unchecked_transaction()?;
+    tx.execute_batch(
+        "DROP TABLE IF EXISTS ollama_cloud_usage_state;
+        CREATE TABLE IF NOT EXISTS ollama_cloud_billing (
+            account_id TEXT PRIMARY KEY,
+            billing_tier TEXT NOT NULL CHECK (billing_tier IN ('pro', 'max', 'team')),
+            FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+        );
+        INSERT OR REPLACE INTO schema_version (version) VALUES (37);",
+    )?;
+    tx.commit()?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -2352,43 +2586,8 @@ fn insert_account_row(
 }
 
 fn insert_import_account_on(conn: &Connection, record: &AccountImportRecord) -> Result<()> {
+    validate_import_account_on(conn, record)?;
     let account = &record.account;
-    anyhow::ensure!(
-        account.id != ZEN_FREE_ACCOUNT_ID,
-        "Zen Free is database-owned and cannot be imported"
-    );
-    account.validate_provider_binding()?;
-    ensure_enabled_provider_is_routable(&account.provider_id, account.enabled)?;
-    let plan = builtin_provider(&account.provider_id)
-        .ok_or_else(|| anyhow::anyhow!("unknown provider offering"))?;
-    let verification_gates_enablement = plan.verification_policy == VerificationPolicy::Required
-        && ProviderRegistry::get(&account.provider_id)
-            .is_some_and(|descriptor| descriptor.card_actions.enable_requires_verification);
-    anyhow::ensure!(
-        !account.enabled
-            || !verification_gates_enablement
-            || record.verification_status.allows_enablement(),
-        "an enabled imported account must retain an enabling verification state"
-    );
-    if plan_requires_custom_config(plan) {
-        anyhow::ensure!(
-            record.custom_config.is_some(),
-            "Custom API accounts require a complete endpoint"
-        );
-        anyhow::ensure!(
-            !record.capabilities.is_empty(),
-            "Custom API accounts require at least one model capability"
-        );
-    } else {
-        anyhow::ensure!(
-            record.custom_config.is_none(),
-            "custom config is only available for Custom API accounts"
-        );
-        anyhow::ensure!(
-            record.capabilities.is_empty(),
-            "model capabilities are only available for Custom API accounts"
-        );
-    }
     let purchase_date = if account.purchase_date.trim().is_empty() {
         local_today()
     } else {
@@ -2396,12 +2595,72 @@ fn insert_import_account_on(conn: &Connection, record: &AccountImportRecord) -> 
     };
     insert_account_row(conn, account, &purchase_date, record.verification_status)?;
     if let Some(config) = &record.custom_config {
-        persist_account_custom_config_on(conn, &account.id, config, true)?;
+        persist_account_custom_config_on(conn, &account.id, config)?;
     }
     if !record.capabilities.is_empty() {
         persist_account_model_capabilities_on(conn, &account.id, &record.capabilities)?;
     }
     restore_import_verification_on(conn, record)?;
+    persist_ollama_billing_on(conn, record)?;
+    Ok(())
+}
+
+fn validate_import_account_on(conn: &Connection, record: &AccountImportRecord) -> Result<()> {
+    let account = &record.account;
+    anyhow::ensure!(
+        account.id != ZEN_FREE_ACCOUNT_ID,
+        "Zen Free is database-owned and cannot be imported"
+    );
+    if let Some(plan) = builtin_provider(&account.provider_id) {
+        account.validate_provider_binding()?;
+        ensure_enabled_provider_is_routable(&account.provider_id, account.enabled)?;
+        let verification_gates_enablement = plan.verification_policy
+            == VerificationPolicy::Required
+            && ProviderRegistry::get(&account.provider_id)
+                .is_some_and(|descriptor| descriptor.card_actions.enable_requires_verification);
+        anyhow::ensure!(
+            !account.enabled
+                || !verification_gates_enablement
+                || record.verification_status.allows_enablement(),
+            "an enabled imported account must retain an enabling verification state"
+        );
+        if plan_requires_custom_config(plan) {
+            anyhow::ensure!(
+                record.custom_config.is_some(),
+                "Custom API accounts require a complete endpoint"
+            );
+            anyhow::ensure!(
+                !record.capabilities.is_empty(),
+                "Custom API accounts require at least one model capability"
+            );
+        } else {
+            anyhow::ensure!(
+                record.custom_config.is_none(),
+                "custom config is only available for Custom API accounts"
+            );
+            anyhow::ensure!(
+                record.capabilities.is_empty(),
+                "model capabilities are only available for Custom API accounts"
+            );
+        }
+        return Ok(());
+    }
+    let runtime = get_dynamic_provider_on(conn, &account.provider_id)?
+        .ok_or_else(|| anyhow::anyhow!("unknown provider `{}`", account.provider_id))?;
+    anyhow::ensure!(
+        account.credential_kind == runtime.auth_kind.credential_kind()
+            && account.quota_scope == runtime.auth_kind.quota_scope(),
+        "provider binding does not match `{}`",
+        account.provider_id
+    );
+    anyhow::ensure!(
+        record.custom_config.is_none(),
+        "custom config is only available for Custom API accounts"
+    );
+    anyhow::ensure!(
+        record.capabilities.is_empty(),
+        "model capabilities are only available for Custom API accounts"
+    );
     Ok(())
 }
 
@@ -2433,39 +2692,8 @@ fn merge_import_account_on(conn: &Connection, record: &AccountImportRecord) -> R
     {
         return insert_import_account_on(conn, record);
     }
+    validate_import_account_on(conn, record)?;
     let account = &record.account;
-    account.validate_provider_binding()?;
-    ensure_enabled_provider_is_routable(&account.provider_id, account.enabled)?;
-    let plan = builtin_provider(&account.provider_id)
-        .ok_or_else(|| anyhow::anyhow!("unknown provider offering"))?;
-    let verification_gates_enablement = plan.verification_policy == VerificationPolicy::Required
-        && ProviderRegistry::get(&account.provider_id)
-            .is_some_and(|descriptor| descriptor.card_actions.enable_requires_verification);
-    anyhow::ensure!(
-        !account.enabled
-            || !verification_gates_enablement
-            || record.verification_status.allows_enablement(),
-        "an enabled imported account must retain an enabling verification state"
-    );
-    if plan_requires_custom_config(plan) {
-        anyhow::ensure!(
-            record.custom_config.is_some(),
-            "Custom API accounts require a complete endpoint"
-        );
-        anyhow::ensure!(
-            !record.capabilities.is_empty(),
-            "Custom API accounts require at least one model capability"
-        );
-    } else {
-        anyhow::ensure!(
-            record.custom_config.is_none(),
-            "custom config is only available for Custom API accounts"
-        );
-        anyhow::ensure!(
-            record.capabilities.is_empty(),
-            "model capabilities are only available for Custom API accounts"
-        );
-    }
     let purchase_date = if account.purchase_date.trim().is_empty() {
         local_today()
     } else {
@@ -2523,7 +2751,7 @@ fn merge_import_account_on(conn: &Connection, record: &AccountImportRecord) -> R
         params![SCOPE_KIND_CUSTOM_ENDPOINT, account.id],
     )?;
     if let Some(config) = &record.custom_config {
-        persist_account_custom_config_on(conn, &account.id, config, true)?;
+        persist_account_custom_config_on(conn, &account.id, config)?;
     }
     if !record.capabilities.is_empty() {
         persist_account_model_capabilities_on(conn, &account.id, &record.capabilities)?;
@@ -2532,14 +2760,30 @@ fn merge_import_account_on(conn: &Connection, record: &AccountImportRecord) -> R
     // edits. A validated node snapshot is different: it carries the source
     // verification state as part of the portable account definition.
     restore_import_verification_on(conn, record)?;
+    persist_ollama_billing_on(conn, record)?;
     Ok(())
+}
+
+fn persist_ollama_billing_on(conn: &Connection, record: &AccountImportRecord) -> Result<()> {
+    let is_ollama = record.account.provider_id == OLLAMA_PROVIDER_ID;
+    if let Some(tier) = record.ollama_billing_tier {
+        anyhow::ensure!(
+            is_ollama,
+            "Ollama billing tier is only valid for Ollama Cloud accounts"
+        );
+        if tier.requires_purchase_date() && record.account.purchase_date.trim().is_empty() {
+            anyhow::bail!("a configured Ollama paid tier requires purchase_date");
+        }
+    } else if !is_ollama {
+        return Ok(());
+    }
+    set_ollama_cloud_billing_tier_on(conn, &record.account.id, record.ollama_billing_tier)
 }
 
 fn persist_account_custom_config_on(
     conn: &Connection,
     account_id: &str,
     input: &AccountCustomConfigInput,
-    allow_protocol_change: bool,
 ) -> Result<()> {
     let endpoint_url = validate_custom_endpoint_url(&input.endpoint_url)?;
     let now = Utc::now().to_rfc3339();
@@ -2550,11 +2794,7 @@ fn persist_account_custom_config_on(
             |row| row.get::<_, String>(0),
         )
         .optional()?;
-    if let Some(protocol) = existing {
-        anyhow::ensure!(
-            allow_protocol_change || protocol == input.upstream_protocol.as_str(),
-            "Custom upstream protocol cannot be changed after create"
-        );
+    if existing.is_some() {
         conn.execute(
             "UPDATE account_custom_configs
              SET endpoint_url = ?2, upstream_protocol = ?3, updated_at = ?4
@@ -2596,45 +2836,6 @@ fn mark_required_verification_stale_on(conn: &Connection, account_id: &str) -> R
          WHERE id = ?1 AND verification_status <> 'not_required'",
         params![account_id, Utc::now().to_rfc3339()],
     )?;
-    Ok(())
-}
-
-fn persist_goat_catalog_on(
-    conn: &Connection,
-    account_id: &str,
-    models: &[String],
-    verified_at: Option<DateTime<Utc>>,
-) -> Result<()> {
-    conn.execute(
-        "DELETE FROM account_model_capabilities
-         WHERE account_id = ?1 AND source = ?2",
-        params![account_id, COMMAND_CODE_GOAT_MODELS_SOURCE],
-    )?;
-    let verified = verified_at.map(|value| value.to_rfc3339());
-    let mut seen = HashSet::new();
-    for model in models {
-        let model_id = validate_custom_model_id(model)?;
-        let key = model_id.to_ascii_lowercase();
-        if !seen.insert(key) {
-            continue;
-        }
-        let protocol = match ocg_domain::protocol::command_code_preferred_format(&model_id) {
-            Some(ocg_domain::protocol::ApiFormat::Messages) => UpstreamProtocolKind::Messages,
-            _ => UpstreamProtocolKind::ChatCompletions,
-        };
-        conn.execute(
-            "INSERT INTO account_model_capabilities
-             (account_id, model_id, upstream_model, protocol, verified_at, source)
-             VALUES (?1, ?2, ?2, ?3, ?4, ?5)",
-            params![
-                account_id,
-                model_id,
-                protocol.as_str(),
-                verified,
-                COMMAND_CODE_GOAT_MODELS_SOURCE,
-            ],
-        )?;
-    }
     Ok(())
 }
 
@@ -2686,6 +2887,46 @@ fn refresh_goat_provider_catalog_on(conn: &Connection) -> Result<()> {
         COMMAND_CODE_GOAT_BASE_URL,
         now,
     )?;
+    Ok(())
+}
+
+#[cfg(test)]
+fn persist_goat_catalog_on(
+    conn: &Connection,
+    account_id: &str,
+    models: &[String],
+    verified_at: Option<DateTime<Utc>>,
+) -> Result<()> {
+    conn.execute(
+        "DELETE FROM account_model_capabilities
+         WHERE account_id = ?1 AND source = ?2",
+        params![account_id, COMMAND_CODE_GOAT_MODELS_SOURCE],
+    )?;
+    let verified = verified_at.map(|value| value.to_rfc3339());
+    let mut seen = HashSet::new();
+    for model in models {
+        let model_id = validate_custom_model_id(model)?;
+        let key = model_id.to_ascii_lowercase();
+        if !seen.insert(key) {
+            continue;
+        }
+        let protocol = match ocg_domain::protocol::command_code_preferred_format(&model_id) {
+            Some(ocg_domain::protocol::ApiFormat::Messages) => UpstreamProtocolKind::Messages,
+            _ => UpstreamProtocolKind::ChatCompletions,
+        };
+        conn.execute(
+            "INSERT INTO account_model_capabilities
+             (account_id, model_id, upstream_model, protocol, verified_at, source)
+             VALUES (?1, ?2, ?2, ?3, ?4, ?5)",
+            params![
+                account_id,
+                model_id,
+                protocol.as_str(),
+                verified,
+                COMMAND_CODE_GOAT_MODELS_SOURCE,
+            ],
+        )?;
+    }
     Ok(())
 }
 
@@ -2938,7 +3179,9 @@ impl Database {
     }
 
     /// Production open path: migrate with the already-resolved Host cipher.
-    /// Account ciphertext is validated in place and never rewritten.
+    /// Persisted account key/password ciphertext is probed in place before
+    /// migration and is never rewritten. Decrypt failure fails closed; the
+    /// XOR obfuscation is not authenticated encryption.
     pub fn open_with_cipher(
         data_dir: PathBuf,
         cipher: Arc<dyn KeyCipher + Send + Sync>,
@@ -2957,6 +3200,14 @@ impl Database {
             "database schema version {existing_version} is newer than this build supports ({CURRENT_SCHEMA_VERSION}); restore a matching data directory and encryption key"
         );
         let is_fresh = is_fresh_empty_database(&conn, existing_version)?;
+        // Host-cipher opens probe persisted account key/password ciphertext
+        // before migrate() can mutate the file. Decrypt failure fails closed.
+        // XOR obfuscation cannot authenticate every wrong-key UTF-8 result.
+        // Database::open (cipher None) skips this; v27 still probes when that
+        // rewrite runs. Empty or no-auth rows have nothing to decrypt.
+        if cipher.is_some() {
+            preflight_ciphertext_probes(&conn, cipher)?;
+        }
         ensure_pre_v22_backup(&conn, &db_path)?;
         ensure_pre_v23_backup(&conn, &db_path)?;
         // WAL keeps request-path log writes off the rollback-journal FULL fsync;
@@ -2975,6 +3226,8 @@ impl Database {
         migrate_to_v33(&db.conn)?;
         migrate_to_v34(&db.conn)?;
         migrate_to_v35(&db.conn, &db_path, is_fresh)?;
+        migrate_to_v36(&db.conn)?;
+        migrate_to_v37(&db.conn)?;
         ensure_dynamic_provider_tables(&db.conn)?;
         Ok(db)
     }
@@ -4761,6 +5014,18 @@ impl Database {
         custom_config: Option<&AccountCustomConfigInput>,
         capabilities: &[AccountModelCapabilityInput],
     ) -> Result<()> {
+        self.create_account_with_contract_and_billing(account, custom_config, capabilities, None)
+    }
+
+    /// Same as [`Self::create_account_with_contract`], writing Ollama billing in
+    /// the same SQLite transaction when the account is an Ollama Cloud row.
+    pub fn create_account_with_contract_and_billing(
+        &self,
+        account: &Account,
+        custom_config: Option<&AccountCustomConfigInput>,
+        capabilities: &[AccountModelCapabilityInput],
+        ollama_billing: Option<OllamaBillingTier>,
+    ) -> Result<()> {
         anyhow::ensure!(
             account.id != ZEN_FREE_ACCOUNT_ID,
             "Zen Free is database-owned and cannot be created through the generic account API"
@@ -4787,6 +5052,15 @@ impl Database {
                 "model capabilities are only available for Custom API accounts"
             );
         }
+        if let Some(tier) = ollama_billing {
+            anyhow::ensure!(
+                account.provider_id == OLLAMA_PROVIDER_ID,
+                "Ollama billing tier is only valid for Ollama Cloud accounts"
+            );
+            if tier.requires_purchase_date() && account.purchase_date.trim().is_empty() {
+                anyhow::bail!("a configured Ollama paid tier requires purchase_date");
+            }
+        }
         let purchase_date = if account.purchase_date.trim().is_empty() {
             local_today()
         } else {
@@ -4796,10 +5070,13 @@ impl Database {
         let tx = self.conn.unchecked_transaction()?;
         insert_account_row(&tx, account, &purchase_date, verification_status)?;
         if let Some(config) = custom_config {
-            persist_account_custom_config_on(&tx, &account.id, config, true)?;
+            persist_account_custom_config_on(&tx, &account.id, config)?;
         }
         if !capabilities.is_empty() {
             persist_account_model_capabilities_on(&tx, &account.id, capabilities)?;
+        }
+        if account.provider_id == OLLAMA_PROVIDER_ID || ollama_billing.is_some() {
+            set_ollama_cloud_billing_tier_on(&tx, &account.id, ollama_billing)?;
         }
         tx.commit()?;
         Ok(())
@@ -4817,20 +5094,14 @@ impl Database {
     }
 
     pub fn count_accounts_for_provider(&self, provider_id: &str) -> Result<i64> {
-        self.conn
-            .query_row(
-                "SELECT COUNT(*) FROM accounts WHERE lower(provider_id) = lower(?1)",
-                [provider_id],
-                |row| row.get(0),
-            )
-            .map_err(Into::into)
+        count_accounts_for_provider_on(&self.conn, provider_id)
     }
 
     pub fn create_dynamic_provider(
         &self,
         runtime: &DynamicProviderRuntime,
         first_account: &Account,
-    ) -> Result<()> {
+    ) -> Result<Vec<DynamicProviderRuntime>> {
         let tx = self.conn.unchecked_transaction()?;
         insert_dynamic_provider_on(&tx, runtime)?;
         dynamic_tx_fault("after_provider_insert")?;
@@ -4846,8 +5117,9 @@ impl Database {
             ConnectionVerificationStatus::NotRequired,
         )?;
         dynamic_tx_fault("after_account_insert")?;
+        let snapshot = list_dynamic_providers_on(&tx)?;
         tx.commit()?;
-        Ok(())
+        Ok(snapshot)
     }
 
     pub fn replace_dynamic_provider(
@@ -4856,7 +5128,7 @@ impl Database {
         clear_runtime_state: bool,
         clear_keys: bool,
         replacement_key_cipher: Option<&str>,
-    ) -> Result<()> {
+    ) -> Result<Vec<DynamicProviderRuntime>> {
         let tx = self.conn.unchecked_transaction()?;
         let existing = get_dynamic_provider_on(&tx, &runtime.id)?
             .ok_or_else(|| anyhow::anyhow!("unknown provider `{}`", runtime.id))?;
@@ -4907,6 +5179,11 @@ impl Database {
                 ],
             )?;
         } else if let Some(key_cipher) = replacement_key_cipher {
+            let count = count_accounts_for_provider_on(&tx, &existing.id)?;
+            anyhow::ensure!(
+                count == 1,
+                "replacement Key can only be written to the singleton account"
+            );
             tx.execute(
                 "UPDATE accounts SET key_cipher = ?1, credential_kind = ?2, quota_scope = ?3, updated_at = ?4
                  WHERE lower(provider_id) = lower(?5)",
@@ -4930,11 +5207,15 @@ impl Database {
                 ],
             )?;
         }
+        let snapshot = list_dynamic_providers_on(&tx)?;
         tx.commit()?;
-        Ok(())
+        Ok(snapshot)
     }
 
-    pub fn delete_dynamic_provider(&self, provider_id: &str) -> Result<()> {
+    pub fn delete_dynamic_provider(
+        &self,
+        provider_id: &str,
+    ) -> Result<Vec<DynamicProviderRuntime>> {
         let tx = self.conn.unchecked_transaction()?;
         let existing = get_dynamic_provider_on(&tx, provider_id)?
             .ok_or_else(|| anyhow::anyhow!("unknown provider `{provider_id}`"))?;
@@ -4955,8 +5236,9 @@ impl Database {
             "DELETE FROM dynamic_providers WHERE id = ?1",
             [&existing.id],
         )?;
+        let snapshot = list_dynamic_providers_on(&tx)?;
         tx.commit()?;
-        Ok(())
+        Ok(snapshot)
     }
 
     /// Insert every migrated account and its Custom contract in one SQLite
@@ -4989,6 +5271,14 @@ impl Database {
             for id in rows {
                 ordered_ids.push(id?);
             }
+        }
+        let imported_account_ids = record
+            .accounts
+            .iter()
+            .map(|record| record.account.id.to_ascii_lowercase())
+            .collect::<HashSet<_>>();
+        for runtime in &record.dynamic_providers {
+            upsert_imported_dynamic_provider_on(&tx, runtime, &imported_account_ids)?;
         }
         for account in &record.accounts {
             merge_import_account_on(&tx, account)?;
@@ -5143,6 +5433,7 @@ impl Database {
             }
         }
 
+        ensure_dynamic_singleton_accounts_on(&tx)?;
         sqlite_foreign_key_check(&tx)?;
         // The callback reads through this same SQLite connection, so it sees
         // the uncommitted merged rows. Every fallible runtime construction
@@ -5159,6 +5450,21 @@ impl Database {
         update: &AccountUpdate,
         key_cipher: Option<&str>,
         password_cipher: Option<&str>,
+    ) -> Result<()> {
+        self.update_account_with_billing(id, update, key_cipher, password_cipher, None)
+    }
+
+    /// Persist account field updates and an optional Ollama billing write in
+    /// one SQLite transaction. `None` leaves billing unchanged; `Some(None)`
+    /// clears the billing row. A billing-write failure leaves the account row
+    /// and Key ciphertext untouched.
+    pub fn update_account_with_billing(
+        &self,
+        id: &str,
+        update: &AccountUpdate,
+        key_cipher: Option<&str>,
+        password_cipher: Option<&str>,
+        ollama_billing: Option<Option<OllamaBillingTier>>,
     ) -> Result<()> {
         let existing = self
             .get_account(id)?
@@ -5256,6 +5562,9 @@ impl Database {
             )?;
             refresh_goat_provider_catalog_on(&tx)?;
         }
+        if let Some(tier) = ollama_billing {
+            set_ollama_cloud_billing_tier_on(&tx, id, tier)?;
+        }
         tx.commit()?;
         Ok(())
     }
@@ -5268,10 +5577,10 @@ impl Database {
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             [sanitized],
         )?;
-        if table_exists(&tx, "access_keys")? {
-            if let Some(primary) = primary {
-                upsert_primary_access_key_on(&tx, &primary)?;
-            }
+        if table_exists(&tx, "access_keys")?
+            && let Some(primary) = primary
+        {
+            upsert_primary_access_key_on(&tx, &primary)?;
         }
         tx.commit()?;
         Ok(())
@@ -5422,7 +5731,7 @@ impl Database {
                 |row| {
                     let models_json: String = row.get(0)?;
                     let refreshed_at: Option<String> = row.get(1)?;
-                    let models = serde_json::from_str(&models_json).map_err(|error| {
+                    let models = parse_cpa_catalog_models(&models_json).map_err(|error| {
                         rusqlite::Error::FromSqlConversionFailure(0, Type::Text, Box::new(error))
                     })?;
                     let refreshed_at = refreshed_at
@@ -5451,11 +5760,10 @@ impl Database {
 
     pub fn replace_cpa_model_catalog(
         &self,
-        models: &[String],
+        models: &[CpaCatalogModel],
         source_url: &str,
         refreshed_at: DateTime<Utc>,
     ) -> Result<()> {
-        anyhow::ensure!(!models.is_empty(), "CPA model catalog cannot be empty");
         let models_json = serde_json::to_string(models)?;
         self.conn.execute(
             "INSERT INTO provider_model_catalogs
@@ -5727,9 +6035,8 @@ impl Database {
         &self,
         account_id: &str,
         input: &AccountCustomConfigInput,
-        allow_protocol_auth_change: bool,
     ) -> Result<AccountCustomConfig> {
-        self.commit_account_custom_config(account_id, input, allow_protocol_auth_change)?;
+        self.commit_account_custom_config(account_id, input)?;
         self.account_custom_config(account_id)?
             .ok_or_else(|| anyhow::anyhow!("custom config was not persisted"))
     }
@@ -5741,11 +6048,10 @@ impl Database {
         &self,
         account_id: &str,
         input: &AccountCustomConfigInput,
-        allow_protocol_auth_change: bool,
     ) -> Result<()> {
         anyhow::ensure!(self.get_account(account_id)?.is_some(), "account not found");
         let tx = self.conn.unchecked_transaction()?;
-        persist_account_custom_config_on(&tx, account_id, input, allow_protocol_auth_change)?;
+        persist_account_custom_config_on(&tx, account_id, input)?;
         tx.commit()?;
         Ok(())
     }
@@ -5761,7 +6067,7 @@ impl Database {
     ) -> Result<()> {
         anyhow::ensure!(self.get_account(account_id)?.is_some(), "account not found");
         let tx = self.conn.unchecked_transaction()?;
-        persist_account_custom_config_on(&tx, account_id, input, true)?;
+        persist_account_custom_config_on(&tx, account_id, input)?;
         persist_account_model_capabilities_on(&tx, account_id, capabilities)?;
         clear_custom_protocol_state_except_on(&tx, account_id, input.upstream_protocol)?;
         tx.commit()?;
@@ -5908,111 +6214,6 @@ impl Database {
         Ok(runtimes)
     }
 
-    pub fn capture_goat_verification_contract(
-        &self,
-        account_id: &str,
-    ) -> Result<Option<crate::goat::GoatVerificationContract>> {
-        Ok(self.custom_verification_row_identity(account_id)?.map(
-            |(updated_at, key_cipher, _status)| crate::goat::GoatVerificationContract {
-                account_id: account_id.to_string(),
-                account_updated_at: updated_at,
-                key_cipher,
-            },
-        ))
-    }
-
-    pub fn commit_goat_verification_if_contract_matches(
-        &self,
-        contract: &crate::goat::GoatVerificationContract,
-        status: ConnectionVerificationStatus,
-        verified_at: Option<DateTime<Utc>>,
-        error: Option<&str>,
-        models: Option<&[String]>,
-    ) -> Result<bool> {
-        let tx = self.conn.unchecked_transaction()?;
-        let matches = tx.query_row(
-            "SELECT COUNT(*) FROM accounts
-                 WHERE id = ?1
-                   AND verification_status IN ('pending', 'failed')
-                   AND updated_at = ?2
-                   AND key_cipher = ?3",
-            params![
-                contract.account_id,
-                contract.account_updated_at,
-                contract.key_cipher
-            ],
-            |row| row.get::<_, i64>(0),
-        )? == 1;
-        if !matches {
-            return Ok(false);
-        }
-        if status == ConnectionVerificationStatus::Verified {
-            let models = models.ok_or_else(|| {
-                anyhow::anyhow!("verified Command Code GOAT commit requires a model snapshot")
-            })?;
-            persist_goat_catalog_on(&tx, &contract.account_id, models, verified_at)?;
-        }
-        let changed = tx.execute(
-            "UPDATE accounts
-             SET verification_status = ?2,
-                 connection_verified_at = ?3,
-                 verification_error = ?4,
-                 updated_at = ?5
-             WHERE id = ?1
-               AND verification_status IN ('pending', 'failed')
-               AND updated_at = ?6
-               AND key_cipher = ?7",
-            params![
-                contract.account_id,
-                status.as_str(),
-                verified_at.map(|value| value.to_rfc3339()),
-                error,
-                Utc::now().to_rfc3339(),
-                contract.account_updated_at,
-                contract.key_cipher,
-            ],
-        )?;
-        if changed != 1 {
-            return Ok(false);
-        }
-        if status == ConnectionVerificationStatus::Verified {
-            refresh_goat_provider_catalog_on(&tx)?;
-        }
-        tx.commit()?;
-        Ok(true)
-    }
-
-    pub fn refresh_goat_catalog_if_contract_matches(
-        &self,
-        contract: &crate::goat::GoatVerificationContract,
-        models: &[String],
-        refreshed_at: DateTime<Utc>,
-    ) -> Result<bool> {
-        let tx = self.conn.unchecked_transaction()?;
-        let matches = tx.query_row(
-            "SELECT COUNT(*) FROM accounts
-             WHERE id = ?1
-               AND provider_id = ?2
-               AND verification_status = 'verified'
-               AND updated_at = ?3
-               AND key_cipher = ?4",
-            params![
-                contract.account_id,
-                COMMAND_CODE_PROVIDER_ID,
-                contract.account_updated_at,
-                contract.key_cipher,
-            ],
-            |row| row.get::<_, i64>(0),
-        )? == 1;
-        if !matches {
-            return Ok(false);
-        }
-        persist_goat_catalog_on(&tx, &contract.account_id, models, Some(refreshed_at))?;
-        refresh_goat_provider_catalog_on(&tx)?;
-        tx.commit()?;
-        Ok(true)
-    }
-
     pub fn replace_account_model_capabilities(
         &self,
         account_id: &str,
@@ -6106,6 +6307,20 @@ impl Database {
             }
         }
         Ok(map)
+    }
+
+    /// Configured Ollama Cloud billing tier, if the account has a side-table row.
+    pub fn ollama_cloud_billing_tier(&self, account_id: &str) -> Result<Option<OllamaBillingTier>> {
+        ollama_cloud_billing_tier_on(&self.conn, account_id)
+    }
+
+    pub fn set_ollama_cloud_billing_tier(
+        &self,
+        account_id: &str,
+        tier: Option<OllamaBillingTier>,
+    ) -> Result<()> {
+        anyhow::ensure!(self.get_account(account_id)?.is_some(), "account not found");
+        set_ollama_cloud_billing_tier_on(&self.conn, account_id, tier)
     }
 
     pub fn upsert_quota_window(&self, window: &QuotaWindow) -> Result<()> {
@@ -7770,6 +7985,84 @@ impl Database {
         self.live_fixed_quota_windows(account_id, limits, source, None)
     }
 
+    /// One monthly USD-credit window from locally priced request logs plus
+    /// calibration. Used credit is not clamped to the soft limit. 5h/week
+    /// windows are not published.
+    pub fn live_ollama_month_quota_window(
+        &self,
+        account_id: &str,
+        month_limit: f64,
+    ) -> Result<Vec<QuotaWindow>> {
+        let now = Utc::now();
+        let (offset, purchase_date): (f64, String) = self.conn.query_row(
+            "SELECT usage_month_window_cost_offset, recharge_date FROM accounts WHERE id = ?1",
+            [account_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        let (used, resets_at) =
+            compute_ollama_month_window(&self.conn, account_id, &purchase_date, offset)?;
+        Ok(vec![QuotaWindow {
+            account_id: account_id.to_string(),
+            window_kind: QUOTA_WINDOW_MONTH.to_string(),
+            used,
+            limit_value: Some(month_limit),
+            started_at: month_window_start_utc(&purchase_date).ok(),
+            resets_at,
+            calibration_offset: offset,
+            unit: "usd_credits".to_string(),
+            source: "ollama-cloud-local".to_string(),
+            observed_at: None,
+            updated_at: now,
+        }])
+    }
+
+    /// Unclamped Ollama month used credit and reset instant.
+    pub fn ollama_month_usage(&self, account_id: &str) -> Result<(f64, Option<DateTime<Utc>>)> {
+        let Some((offset, purchase_date)) = self
+            .conn
+            .query_row(
+                "SELECT usage_month_window_cost_offset, recharge_date FROM accounts WHERE id = ?1",
+                [account_id],
+                |row| Ok((row.get::<_, f64>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()?
+        else {
+            return Ok((0.0, None));
+        };
+        compute_ollama_month_window(&self.conn, account_id, &purchase_date, offset)
+    }
+
+    pub fn calibrate_ollama_month_usage(
+        &self,
+        account_id: &str,
+        percent: f64,
+        limit: f64,
+        now: DateTime<Utc>,
+    ) -> Result<bool> {
+        let purchase_date: String = match self
+            .conn
+            .query_row(
+                "SELECT recharge_date FROM accounts WHERE id = ?1",
+                [account_id],
+                |row| row.get(0),
+            )
+            .optional()?
+        {
+            Some(value) => value,
+            None => return Ok(false),
+        };
+        let actual_cost = sum_ollama_month_cost_on(&self.conn, account_id, &purchase_date)?;
+        let offset = limit * percent / 100.0 - actual_cost;
+        let changed = self.conn.execute(
+            "UPDATE accounts
+             SET usage_month_window_cost_offset = ?2,
+                 updated_at = ?3
+             WHERE id = ?1",
+            params![account_id, offset, now.to_rfc3339()],
+        )?;
+        Ok(changed > 0)
+    }
+
     fn live_fixed_quota_windows(
         &self,
         account_id: &str,
@@ -8145,6 +8438,65 @@ fn compute_fixed_window(
             }
         }
     }
+}
+
+/// Ollama month window: `[purchase_date 00:00 local, next-month-same-day 00:00 local)`.
+/// Used credit is `offset + cost` and is not clamped to the soft limit.
+fn compute_ollama_month_window(
+    conn: &Connection,
+    account_id: &str,
+    purchase_date: &str,
+    offset: f64,
+) -> Result<(f64, Option<DateTime<Utc>>)> {
+    if purchase_date.trim().is_empty() {
+        return Ok((0.0, None));
+    }
+    let (start, end) = ollama_month_bounds(purchase_date)?;
+    let cost = sum_priced_cost_between(conn, account_id, start, end)?;
+    Ok((offset + cost, Some(end)))
+}
+
+fn ollama_month_bounds(purchase_date: &str) -> Result<(DateTime<Utc>, DateTime<Utc>)> {
+    let start = month_window_start_utc(purchase_date)?;
+    let expires = purchase_expires_on(purchase_date)?;
+    let end_naive = NaiveDate::parse_from_str(&expires, "%Y-%m-%d")?
+        .and_hms_opt(0, 0, 0)
+        .unwrap();
+    let end = Local
+        .from_local_datetime(&end_naive)
+        .single()
+        .ok_or_else(|| anyhow::anyhow!("ambiguous local datetime for expires_on"))?
+        .with_timezone(&Utc);
+    Ok((start, end))
+}
+
+fn sum_ollama_month_cost_on(
+    conn: &Connection,
+    account_id: &str,
+    purchase_date: &str,
+) -> Result<f64> {
+    if purchase_date.trim().is_empty() {
+        return Ok(0.0);
+    }
+    let (start, end) = ollama_month_bounds(purchase_date)?;
+    sum_priced_cost_between(conn, account_id, start, end)
+}
+
+fn sum_priced_cost_between(
+    conn: &Connection,
+    account_id: &str,
+    start: DateTime<Utc>,
+    end: DateTime<Utc>,
+) -> Result<f64> {
+    Ok(conn.query_row(
+        "SELECT COALESCE(SUM(cost), 0) FROM forward_logs
+         WHERE account_id = ?1
+           AND cost_state IN ('priced', 'legacy_estimate')
+           AND timestamp >= ?2
+           AND timestamp < ?3",
+        params![account_id, start.to_rfc3339(), end.to_rfc3339()],
+        |row| row.get(0),
+    )?)
 }
 
 /// 月窗口：从 `purchase_date 00:00 本地时区` 累计到 `purchase_expires_on(purchase_date) 00:00 本地时区`，不重置。
@@ -8550,6 +8902,56 @@ fn custom_verification_contract_still_matches_on(
         current.push((public_model, upstream_model, protocol));
     }
     Ok(current == contract.capabilities)
+}
+
+fn ollama_cloud_billing_tier_on(
+    conn: &Connection,
+    account_id: &str,
+) -> Result<Option<OllamaBillingTier>> {
+    let value: Option<String> = conn
+        .query_row(
+            "SELECT billing_tier FROM ollama_cloud_billing WHERE account_id = ?1",
+            [account_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    match value {
+        Some(tier) => OllamaBillingTier::parse(&tier)
+            .map(Some)
+            .map_err(|error| anyhow::anyhow!(error)),
+        None => Ok(None),
+    }
+}
+
+fn set_ollama_cloud_billing_tier_on(
+    conn: &Connection,
+    account_id: &str,
+    tier: Option<OllamaBillingTier>,
+) -> Result<()> {
+    let current = ollama_cloud_billing_tier_on(conn, account_id)?;
+    match tier {
+        None => {
+            conn.execute(
+                "DELETE FROM ollama_cloud_billing WHERE account_id = ?1",
+                [account_id],
+            )?;
+        }
+        Some(tier) => {
+            conn.execute(
+                "INSERT INTO ollama_cloud_billing (account_id, billing_tier)
+                 VALUES (?1, ?2)
+                 ON CONFLICT(account_id) DO UPDATE SET billing_tier = excluded.billing_tier",
+                params![account_id, tier.as_str()],
+            )?;
+        }
+    }
+    if current != tier {
+        conn.execute(
+            "UPDATE accounts SET usage_month_window_cost_offset = 0 WHERE id = ?1",
+            [account_id],
+        )?;
+    }
+    Ok(())
 }
 
 fn account_custom_config_from_row(row: &Row<'_>) -> rusqlite::Result<AccountCustomConfig> {

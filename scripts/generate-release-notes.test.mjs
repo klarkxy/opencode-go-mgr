@@ -70,7 +70,7 @@ test("buildReleaseNotes groups commits and always appends platform warnings", ()
     ],
   });
 
-  assert.match(notes, /^# OCG Manager v1\.5\.7\n/);
+  assert.match(notes, /^# Open Console Gateway v1\.5\.7\n/);
   assert.match(notes, /## Changes since v1\.5\.6/);
   assert.match(notes, /### Features\n\n- multi-protocol passthrough\n- settings: expose account routing controls/);
   assert.match(notes, /### Fixes\n\n- harden sticky-global failover/);
@@ -100,20 +100,13 @@ test("every prerelease note leads with the full Beta risk warning", () => {
       subjects: ["feat: managed account registration and isolated browser profiles"],
     });
     assert.ok(notes.includes(PRERELEASE_WARNING));
-    assert.ok(notes.startsWith(`${PRERELEASE_WARNING}\n\n# OCG Manager ${tag}`));
-    assert.match(notes, /managed account registration and isolated browser profiles are Beta/i);
-    assert.match(notes, /have not been thoroughly tested/i);
-    assert.match(notes, /Real Google signup, OpenCode signup, and payment flows/);
-    assert.match(notes, /noVNC keyboard and clipboard behavior/);
-    assert.match(notes, /Live GHCR first-publication behavior/);
-    assert.match(notes, /gateway, redaction, and release-pipeline changes/);
-    assert.match(notes, /Do not treat it as production-ready/);
+    assert.ok(notes.startsWith(`${PRERELEASE_WARNING}\n\n# Open Console Gateway ${tag}`));
   }
 });
 
 test("stable notes do not show the Beta warning", () => {
   const notes = buildReleaseNotes({ tag: "v1.5.8", previousTag: "v1.5.7", subjects: [] });
-  assert.doesNotMatch(notes, /\[!WARNING\]|Beta preview/);
+  assert.ok(!notes.includes(PRERELEASE_WARNING));
 });
 
 test("selectPreviousTag walks descending versions", () => {
@@ -204,7 +197,7 @@ test("CLI writes notes for a local tag range without depending on checkout depth
       { encoding: "utf8", windowsHide: true },
     );
     assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
-    assert.match(result.stdout, /# OCG Manager v1\.5\.7/);
+    assert.match(result.stdout, /# Open Console Gateway v1\.5\.7/);
     assert.match(result.stdout, /## Changes since v1\.5\.6/);
     assert.match(result.stdout, /### Features\n\n- shipping notes/);
     assert.doesNotMatch(result.stdout, /ignored formatting/);

@@ -1,6 +1,6 @@
 {
   "identifier": "default",
-  "description": "Default capabilities for OCG Manager main window",
+  "description": "Default capabilities for Open Console Gateway main window",
   "windows": ["main"],
   "permissions": [
     "core:default",

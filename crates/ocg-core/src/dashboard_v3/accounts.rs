@@ -28,7 +28,7 @@ use super::types::{
     Account, AccountCreate, AccountCustomConfig, AccountCustomConfigUpdate,
     AccountCustomConfigWrite, AccountList, AccountManagedCreate, AccountModelCapabilitiesUpdate,
     AccountModelCapability, AccountModelCapabilityWrite, AccountMutation, AccountOrder,
-    AccountSetupUpdate, AccountUpdate, MutationExpectation,
+    AccountSetupUpdate, AccountUpdate, MutationExpectation, OllamaBillingTier,
 };
 use super::{V3ApiError, check_expectation, parse_mutation_json};
 
@@ -336,7 +336,7 @@ fn create_account_locked(
         account_type: ModelAccountType::Key,
         setup_step: ModelSetupStep::Ready,
         referral_code: clean_optional(input.referral_code),
-        purchase_date,
+        purchase_date: purchase_date.clone(),
         expires_on: String::new(),
         cooldown_until: None,
         cooldown_generic_until: None,
@@ -350,10 +350,22 @@ fn create_account_locked(
         created_at: now,
         updated_at: now,
     };
+    let ollama_billing = parse_ollama_billing_write(
+        state,
+        plan.provider_id,
+        input.ollama_billing_tier,
+        &purchase_date,
+        true,
+    )?;
     {
         let db = state.db.lock();
-        db.create_account_with_contract(&account, custom_config.as_ref(), &model_capabilities)
-            .map_err(|error| map_account_write_error(state, error))?;
+        db.create_account_with_contract_and_billing(
+            &account,
+            custom_config.as_ref(),
+            &model_capabilities,
+            ollama_billing,
+        )
+        .map_err(|error| map_account_write_error(state, error))?;
         let _ = db.log_gateway(
             "info",
             "account",
@@ -505,13 +517,28 @@ fn update_account_locked(
         None => None,
         Some(password) => Some(state.encrypt_key(password).map_err(V3ApiError::internal)?),
     };
+    let effective_purchase_date = update
+        .purchase_date
+        .clone()
+        .unwrap_or_else(|| existing.purchase_date.clone());
+    let ollama_billing = match input.ollama_billing_tier {
+        Some(tier) => Some(parse_ollama_billing_write(
+            state,
+            &existing.provider_id,
+            Some(tier),
+            &effective_purchase_date,
+            false,
+        )?),
+        None => None,
+    };
     {
         let db = state.db.lock();
-        db.update_account(
+        db.update_account_with_billing(
             id,
             &update,
             key_cipher.as_deref(),
             password_cipher.as_deref(),
+            ollama_billing,
         )
         .map_err(|error| map_account_write_error(state, error))?;
         let _ = db.log_gateway("info", "account", &format!("updated account {id}"));
@@ -826,7 +853,7 @@ pub(super) fn mutation_at(
 }
 
 fn account_from_state(state: &CoreState, account: ModelAccount) -> Result<Account, V3ApiError> {
-    let ((usage_sync_last_success_at, usage_sync_next_allowed_at), contract) = {
+    let ((usage_sync_last_success_at, usage_sync_next_allowed_at), contract, ollama_billing) = {
         let db = state.db.lock();
         let sync = db
             .account_usage_sync_state(&account.id)
@@ -834,9 +861,16 @@ fn account_from_state(state: &CoreState, account: ModelAccount) -> Result<Accoun
         let contract = db
             .load_account_contract(&account.id)
             .map_err(V3ApiError::internal)?;
+        let ollama_billing = if account.provider_id == crate::provider::OLLAMA_PROVIDER_ID {
+            db.ollama_cloud_billing_tier(&account.id)
+                .map_err(V3ApiError::internal)?
+        } else {
+            None
+        };
         (
             crate::usage_sync::dashboard_sync_fields(sync.as_ref(), state.usage_sync.now()),
             contract,
+            ollama_billing,
         )
     };
     let known_secret = if account.last_error.is_some()
@@ -893,14 +927,61 @@ fn account_from_state(state: &CoreState, account: ModelAccount) -> Result<Accoun
             .connection_verified_at
             .map(|value| value.to_rfc3339()),
         verification_error: sanitize_persisted_error(contract.verification.verification_error),
-        plan_routable: plan.is_some_and(|plan| plan.routable),
+        plan_routable: plan.is_some_and(|plan| plan.routable)
+            || crate::dynamic::find_runtime(&state.dynamic_providers(), &account.provider_id)
+                .is_some(),
         custom_config: contract.custom_config.map(custom_config_from_model),
         model_capabilities: contract
             .model_capabilities
             .into_iter()
             .map(capability_from_model)
             .collect(),
+        ollama_billing_tier: present_ollama_billing(&account.provider_id, ollama_billing),
     })
+}
+
+fn present_ollama_billing(
+    provider_id: &str,
+    tier: Option<crate::provider::OllamaBillingTier>,
+) -> Option<OllamaBillingTier> {
+    if provider_id != crate::provider::OLLAMA_PROVIDER_ID {
+        return None;
+    }
+    tier.map(OllamaBillingTier::from)
+}
+
+fn parse_ollama_billing_write(
+    state: &CoreState,
+    provider_id: &str,
+    requested: Option<OllamaBillingTier>,
+    purchase_date: &str,
+    create: bool,
+) -> Result<Option<crate::provider::OllamaBillingTier>, V3ApiError> {
+    if provider_id != crate::provider::OLLAMA_PROVIDER_ID {
+        if requested.is_some() {
+            return Err(V3ApiError::invalid_request_at(
+                state,
+                "Ollama billing tier is only valid for Ollama Cloud accounts",
+            ));
+        }
+        return Ok(None);
+    }
+    let Some(requested) = requested else {
+        if create {
+            return Err(V3ApiError::invalid_request_at(
+                state,
+                "Ollama Cloud accounts require a billing tier",
+            ));
+        }
+        return Ok(None);
+    };
+    if purchase_date.trim().is_empty() {
+        return Err(V3ApiError::invalid_request_at(
+            state,
+            "a configured Ollama paid tier requires purchase_date",
+        ));
+    }
+    Ok(Some(requested.into()))
 }
 
 fn custom_config_from_model(config: crate::models::AccountCustomConfig) -> AccountCustomConfig {

@@ -6,7 +6,7 @@ authors.workspace = true
 license-file.workspace = true
 repository.workspace = true
 rust-version.workspace = true
-description = "Private Chromium sidecar controller for OCG Manager"
+description = "Private Chromium sidecar controller for Open Console Gateway"
 
 [[bin]]
 name = "ocg-browser-worker"

@@ -2,15 +2,14 @@
 
 # Docker
 
-OCG Manager runs headlessly in Docker, serving the same dashboard and gateway
-on port `9042` without a tray icon to click. Pull the image from GHCR
-anonymously — it ships `linux/amd64` and `linux/arm64`, and Docker picks the
-right variant. Save the release's `compose.example.yaml` as `compose.yaml`,
-add `.env` if needed, and run the commands below. You can also use a checkout
-of the matching tag.
+Open Console Gateway runs headlessly in Docker, serving the same dashboard and gateway
+on port `9042`. Pull the image from GHCR anonymously — it ships `linux/amd64`
+and `linux/arm64`, and Docker picks the right variant. Save the release's
+`compose.example.yaml` as `compose.yaml`, add `.env` if needed, and run the
+commands below. You can also use a checkout of the matching tag.
 
 ```bash
-git clone --branch v2.1.0 --depth 1 https://github.com/klarkxy/opencode-go-mgr.git
+git clone --branch v2.2.0 --depth 1 https://github.com/klarkxy/opencode-go-mgr.git
 cd opencode-go-mgr
 cp .env.example .env
 # PowerShell: Copy-Item .env.example .env
@@ -27,14 +26,13 @@ Image tags move; decide how pinned you want to be.
 - The checkout's `compose.yaml` defaults to `latest`; the Release
   `compose.example.yaml` pins its matching full version.
 - For repeatable production deployments, set `OCG_IMAGE` in `.env` to a full
-  release tag such as `ghcr.io/klarkxy/opencode-go-mgr:2.1.0`.
+  release tag such as `ghcr.io/klarkxy/opencode-go-mgr:2.2.0`.
 - Full-version and `sha-<commit>` tags identify one release and are intended
   not to move; `1.5` and `latest` do. Only a digest such as
   `ghcr.io/klarkxy/opencode-go-mgr@sha256:...` is truly immutable.
 - To build the current checkout instead, set `OCG_IMAGE=ocg-manager:local`
   and run `docker compose up -d --build`. `NPM_REGISTRY` and
-  `CARGO_REGISTRY` are build arguments for that source-build path only; they
-  do not change a pulled image.
+  `CARGO_REGISTRY` are build arguments for that source-build path only.
 
 | Variable | Scope | Meaning |
 | --- | --- | --- |
@@ -54,9 +52,9 @@ when you need managed onboarding or website login on a headless host.
 
 ## Optional Local CPA
 
-CPA is an optional **local** subscription-runtime sibling, not an OCG
-Provider or Plan. It is off by default. Before enabling it, copy the included
-template next to your Compose file and set a distinct CPA inference key:
+CPA is an optional **local** subscription-runtime sibling. It is off by
+default. Before enabling it, copy the included template next to your Compose
+file and set a distinct CPA inference key:
 
 ```bash
 cp cpa-config.example.yaml cpa-config.yaml
@@ -122,7 +120,7 @@ runtime volume, but always stop and back up the two sensitive persistent
 volumes, `ocg-data` and `ocg-browser-profiles`, together.
 
 Google may treat a data-center egress IP as high risk, require additional
-verification, or reject registration/login. OCG Manager does not bypass that
+verification, or reject registration/login. Open Console Gateway does not bypass that
 risk control. Complete Google's checks yourself, or use the desktop build on
 a residential connection. Real payment is always an explicit user action on
 the official site.
@@ -210,20 +208,20 @@ provenance, and a GitHub signed provenance attestation. Inspect and verify a
 release with:
 
 ```bash
-docker buildx imagetools inspect ghcr.io/klarkxy/opencode-go-mgr:2.1.0
-docker buildx imagetools inspect ghcr.io/klarkxy/opencode-go-mgr-browser:2.1.0
+docker buildx imagetools inspect ghcr.io/klarkxy/opencode-go-mgr:2.2.0
+docker buildx imagetools inspect ghcr.io/klarkxy/opencode-go-mgr-browser:2.2.0
 gh attestation verify \
-  oci://ghcr.io/klarkxy/opencode-go-mgr:2.1.0 \
+  oci://ghcr.io/klarkxy/opencode-go-mgr:2.2.0 \
   --repo klarkxy/opencode-go-mgr
 gh attestation verify \
-  oci://ghcr.io/klarkxy/opencode-go-mgr-browser:2.1.0 \
+  oci://ghcr.io/klarkxy/opencode-go-mgr-browser:2.2.0 \
   --repo klarkxy/opencode-go-mgr
 ```
 
 Both `gh attestation verify` commands require an authenticated GitHub CLI. Public pulls are
 anonymous; if the OCI client still requests registry credentials,
 authenticate to `ghcr.io` with a token that can read packages. Provenance
-proves how the artifact was produced; it is not a vulnerability scan.
+proves how the artifact was produced.
 
 Regenerate the Key if it leaks.
 

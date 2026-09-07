@@ -1,5 +1,5 @@
 //! Pure domain identities, catalogs, protocol policy, and Zen model
-//! normalization for OCG Manager.
+//! normalization for Open Console Gateway.
 
 pub mod account;
 pub mod catalog;

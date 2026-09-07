@@ -33,7 +33,6 @@ fn connection_from_state(state: &CoreState) -> Result<ConnectionInfo, V3ApiError
     Ok(ConnectionInfo {
         gateway_port: settings.gateway_port,
         client_root_url: settings.client_root_url,
-        upstream_base_url: settings.upstream_base_url,
         primary_key: settings.gateway_key,
         sub_keys,
         revision: state.settings_revision(),

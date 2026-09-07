@@ -14,8 +14,10 @@ pub use crate::kernel::catalog::{
 pub use crate::kernel::ids::{
     COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_ALIAS, COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM,
     COMMAND_CODE_PROVIDER_ID, CPA_ACCOUNT_ID, CPA_ACCOUNT_NAME, CPA_PROVIDER_ID,
-    CUSTOM_PROVIDER_ID, KIMI_PROVIDER_ID, MINIMAX_PROVIDER_ID, OPENCODE_PROVIDER_ID,
-    OPENCODE_ZEN_FREE_PROVIDER_ID, ZEN_FREE_ACCOUNT_ID, ZEN_FREE_ACCOUNT_NAME,
+    CUSTOM_PROVIDER_ID, KIMI_PROVIDER_ID, MINIMAX_PROVIDER_ID, OLLAMA_CLOUD_BASE_URL,
+    OLLAMA_CLOUD_CHAT_COMPLETIONS_PATH, OLLAMA_CLOUD_MODELS_PATH, OLLAMA_CLOUD_PRICING_URL,
+    OLLAMA_PROVIDER_ID, OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID, ZEN_FREE_ACCOUNT_ID,
+    ZEN_FREE_ACCOUNT_NAME,
 };
 
 pub use ocg_domain::provider::{
@@ -27,10 +29,11 @@ pub use ocg_domain::provider::{
     CardActionsDescriptor, CardVerifyAction, ConnectionVerificationStatus, CreationAvailability,
     InferenceAuthDescriptor, InferenceChannelKind, InferenceOriginKind, InferenceRoutingDescriptor,
     KIMI_CN_BASE_URL, KIMI_CN_CHAT_COMPLETIONS_PATH, KIMI_CN_MESSAGES_PATH, KIMI_CN_MODELS_PATH,
-    KIMI_CN_USAGE_URL, MINIMAX_CN_ANTHROPIC_BASE_URL, MINIMAX_CN_BASE_URL,
-    MINIMAX_CN_CHAT_COMPLETIONS_PATH, MINIMAX_CN_MESSAGES_PATH, MINIMAX_CN_MODELS_PATH,
-    MINIMAX_CN_USAGE_URL, ModelCatalogDescriptor, ModelCatalogKind,
-    OPENCODE_CONSTRUCTABLE_PROTOCOLS, PROTOCOL_FALLBACK_CHAT_MESSAGES,
+    KIMI_CN_USAGE_URL, MAX_OLLAMA_CLOUD_MODELS_CATALOG, MINIMAX_CN_ANTHROPIC_BASE_URL,
+    MINIMAX_CN_BASE_URL, MINIMAX_CN_CHAT_COMPLETIONS_PATH, MINIMAX_CN_MESSAGES_PATH,
+    MINIMAX_CN_MODELS_PATH, MINIMAX_CN_USAGE_URL, ModelCatalogDescriptor, ModelCatalogKind,
+    OLLAMA_CLOUD_MODEL_SOURCE, OPENCODE_CONSTRUCTABLE_PROTOCOLS, OPENCODE_GO_BASE_URL,
+    OPENCODE_GO_HOST, OPENCODE_ZEN_BASE_URL, OllamaBillingTier, PROTOCOL_FALLBACK_CHAT_MESSAGES,
     PROTOCOL_FALLBACK_CHAT_RESPONSES_MESSAGES, PlanFormField, PricingDescriptor,
     ProtocolMatrixKind, ProtocolProbeDescriptor, ProviderAdapterKind, ProviderBindingError,
     ProviderDescriptor, ProviderProductSurface, ProviderRegistry, QUOTA_WINDOW_FIVE_HOURS,
@@ -44,35 +47,3 @@ pub use ocg_domain::provider::{
     provider_allows_enablement, validate_account_binding, validate_custom_model_id,
     validate_plan_key,
 };
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn historical_provider_facade_reexports_moved_symbols() {
-        let _ = BUILTIN_PROVIDERS;
-        let _ = COMMAND_CODE_GOAT_BASE_URL;
-        let _ = ProviderAdapterKind::ALL;
-        let _ = ProviderRegistry::iter();
-        assert!(plan_allows_enablement(
-            builtin_provider(OPENCODE_PROVIDER_ID).unwrap()
-        ));
-        assert_eq!(
-            std::any::type_name::<ProviderBindingError>(),
-            "ocg_domain::provider::ProviderBindingError"
-        );
-        assert_eq!(
-            std::any::type_name::<BuiltinProvider>(),
-            "ocg_domain::provider::BuiltinProvider"
-        );
-        assert_eq!(
-            std::any::type_name::<crate::custom::CustomUrlHost>(),
-            "ocg_core::custom_http::CustomUrlHost"
-        );
-        assert_eq!(
-            std::any::type_name::<crate::models::QuotaWindow>(),
-            "ocg_core::models::QuotaWindow"
-        );
-    }
-}

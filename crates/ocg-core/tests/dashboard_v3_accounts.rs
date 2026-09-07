@@ -1592,3 +1592,81 @@ async fn dashboard_v3_account_mutations_coexist_with_v2() {
 
     harness.stop();
 }
+
+async fn find_account_for_provider(harness: &V3Harness, provider_id: &str) -> Account {
+    let (status, listed) = harness
+        .get_json(&format!("{}/accounts", harness.v3_base))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{listed}");
+    parse_list(&listed)
+        .accounts
+        .into_iter()
+        .find(|account| account.provider_id == provider_id)
+        .unwrap_or_else(|| panic!("missing account for {provider_id}"))
+}
+
+#[tokio::test]
+async fn dynamic_accounts_are_plan_routable_and_stale_uuid_accounts_are_not() {
+    let harness = start_loopback("accounts-dyn-routable").await;
+    let (status, created) = send_json(
+        &harness,
+        Method::POST,
+        "/providers",
+        &cas(
+            &harness,
+            json!({
+                "name": "Lab",
+                "endpointUrl": "http://127.0.0.1:9",
+                "upstreamProtocol": "chat_completions",
+                "authKind": "bearer",
+                "key": "sk-lab",
+                "models": [{"publicModel": "lab-opus", "upstreamModel": "vendor/opus"}]
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    let provider_id = created["provider"]["id"].as_str().unwrap().to_string();
+    let account = find_account_for_provider(&harness, &provider_id).await;
+    assert!(account.plan_routable);
+    assert!(account.enabled);
+
+    let (status, detail) = harness
+        .get_json(&format!("{}/accounts/{}", harness.v3_base, account.id))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert!(parse_account(&detail).plan_routable);
+
+    let (status, created_stale) = send_json(
+        &harness,
+        Method::POST,
+        "/accounts",
+        &cas(&harness, json!({ "name": "Stale", "key": "sk-stale" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{created_stale}");
+    let stale_id = mutation_account(&created_stale).id;
+    let stale_uuid = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    {
+        let conn = rusqlite::Connection::open(harness.dir.join("data.sqlite")).unwrap();
+        conn.execute(
+            "UPDATE accounts SET provider_id = ?1 WHERE id = ?2",
+            [stale_uuid, stale_id.as_str()],
+        )
+        .unwrap();
+    }
+    let (status, stale) = harness
+        .get_json(&format!("{}/accounts/{stale_id}", harness.v3_base))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{stale}");
+    assert!(
+        !parse_account(&stale).plan_routable,
+        "a dangling UUID account stays unroutable while a current dynamic snapshot is present"
+    );
+    let (status, still_dynamic) = harness
+        .get_json(&format!("{}/accounts/{}", harness.v3_base, account.id))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{still_dynamic}");
+    assert!(parse_account(&still_dynamic).plan_routable);
+    harness.stop();
+}

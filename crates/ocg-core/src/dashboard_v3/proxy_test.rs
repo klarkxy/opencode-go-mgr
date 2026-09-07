@@ -24,7 +24,7 @@ use super::settings::app_proxy_mode;
 use super::types::{ProxyListDirection, ProxyTestRequest, ProxyTestResponse, V3Error};
 
 /// Safe public HTTPS origin used by the production diagnostic GET.
-pub const PROXY_TEST_TARGET: &str = "https://opencode.ai/zen/go";
+pub const PROXY_TEST_TARGET: &str = crate::provider::OPENCODE_GO_BASE_URL;
 const PROXY_TEST_TIMEOUT_SECS: u64 = 30;
 
 #[cfg(debug_assertions)]

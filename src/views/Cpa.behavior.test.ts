@@ -35,7 +35,7 @@ function cpaHarnessPlugin() {
       } });
       export const NCard = pass; export const NEmpty = pass; export const NForm = pass;
       export const NFormItem = pass; export const NInput = pass; export const NSpin = pass; export const NSpace = pass;
-      export const NSwitch = pass; export const NTag = pass;
+      export const NSwitch = pass; export const NTabPane = pass; export const NTabs = pass; export const NTag = pass;
       export const useDialog = () => ({ warning: (options) => options.onPositiveClick?.() });
       export const useMessage = () => ({ error() {}, success() {}, warning() {} });
     `,
@@ -198,7 +198,10 @@ function button(root: HostNode, label: string): HostNode {
 
 async function mount(componentApi: CpaApi): Promise<{ app: App; root: HostNode; window: TestWindow }> {
   const testWindow = installWindow();
-  api = componentApi;
+  api = {
+    getCpaModels: async () => ({ models: [], sourceUrl: null, refreshedAt: null, processGeneration: 1, revision: 1 }),
+    ...componentApi,
+  };
   (globalThis as { __cpaComponentApi?: CpaApi }).__cpaComponentApi = api;
   const root: HostNode = { children: [], props: {}, type: "root" };
   const app = renderer.createApp(Cpa);
@@ -362,5 +365,51 @@ test("a runtime poll failure stays visible with a local retry", async () => {
   await settle();
   assert.doesNotMatch(text(mounted.root), /CPA 运行时状态刷新失败/);
   assert.doesNotMatch(text(mounted.root), /下载中/);
+  mounted.app.unmount();
+});
+
+test("the persisted model catalog lists ids grouped by source", async () => {
+  const mounted = await mount({
+    getCpaIntegration: async () => integration({ modelCount: 2, modelsRefreshedAt: "2026-09-07T01:51:55.000Z" }),
+    getCpaRuntime: async () => runtime(),
+    getCpaAccounts: async () => ({ accounts: [] }),
+    getCpaRuntimeKeys: async () => ({ keys: [], processGeneration: 1, revision: 1 }),
+    getCpaModels: async () => ({
+      models: [
+        { id: "gpt-5", ownedBy: "openai" },
+        { id: "claude-sonnet", ownedBy: "anthropic" },
+      ],
+      sourceUrl: "http://127.0.0.1:8317",
+      refreshedAt: "2026-09-07T01:51:55.000Z",
+      processGeneration: 1,
+      revision: 1,
+    }),
+  });
+  assert.match(text(mounted.root), /gpt-5/);
+  assert.match(text(mounted.root), /claude-sonnet/);
+  assert.match(text(mounted.root), /openai/);
+  assert.match(text(mounted.root), /anthropic/);
+  assert.match(text(mounted.root), /http:\/\/127\.0\.0\.1:8317/);
+  mounted.app.unmount();
+});
+
+test("refreshing the model catalog renders returned ids and sources", async () => {
+  const mounted = await mount({
+    getCpaIntegration: async () => integration({ modelCount: 0 }),
+    getCpaRuntime: async () => runtime(),
+    getCpaAccounts: async () => ({ accounts: [] }),
+    getCpaRuntimeKeys: async () => ({ keys: [], processGeneration: 1, revision: 1 }),
+    refreshCpaModels: async () => ({
+      models: [{ id: "grok-4", ownedBy: "xai" }],
+      sourceUrl: "http://127.0.0.1:8317",
+      refreshedAt: "2026-09-07T02:00:00.000Z",
+      processGeneration: 1,
+      revision: 2,
+    }),
+  });
+  await (button(mounted.root, "刷新模型目录").props.onClick as () => Promise<void>)();
+  await settle();
+  assert.match(text(mounted.root), /grok-4/);
+  assert.match(text(mounted.root), /xai/);
   mounted.app.unmount();
 });

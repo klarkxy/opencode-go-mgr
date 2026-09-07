@@ -2,7 +2,7 @@
 
 # User Guide
 
-This guide is for people running OCG Manager as a desktop app, a headless gateway, or a Docker service. Chapters follow the order you will actually meet them: install first, troubleshoot later.
+This guide is for people running Open Console Gateway as a desktop app, a headless gateway, or a Docker service. Chapters follow the order you will actually meet them: install first, troubleshoot later.
 
 ## Add integrations
 
@@ -11,12 +11,12 @@ This guide is for people running OCG Manager as a desktop app, a headless gatewa
 
 ## Chapters
 
-- [What OCG Manager Does](user/overview.md) — Product positioning and the four jobs the gateway performs.
+- [What Open Console Gateway Does](user/overview.md) — Product positioning and the four jobs the gateway performs.
 - [Architecture Diagrams](user/architecture.md) — Text maps of one node, a client request, Plans, and the dashboard.
 - [Install And First Run](user/install.md) — Windows, macOS, and Linux installers; the SmartScreen ritual included.
 - [Connect Your First Client](user/first-client.md) — Copy the Key and base URL, then prove it with one request.
 - [Upgrade, Backup, Restore, And Uninstall](user/upgrade-backup.md) — Updater channel, manual upgrade, backup, restore, and uninstall.
-- [The Dashboard](user/dashboard.md) — The eight core views, Extensions group, i18n, and Connection Center.
+- [The Dashboard](user/dashboard.md) — The seven core views, Extensions group, i18n, and Connection Center.
 - [Application Guides And Model Capabilities](user/applications.md) — Client tutorials and the model capability table.
 - [Accounts](user/accounts.md) — Plans, credentials, ordering, quota behavior, and managed onboarding.
 - [Providers](user/providers.md) — Catalog, provider contracts, per-model protocol overrides, probes, and user-defined Providers.
@@ -28,7 +28,7 @@ This guide is for people running OCG Manager as a desktop app, a headless gatewa
 - [Docker](user/docker.md) — GHCR image, Compose setup, browser sidecar, and source builds.
 - [External Integrations](user/external-integrations.md) — Local CPA setup, ownership boundaries, routing pool, and disconnect behavior.
 - [Data And Security](user/data-security.md) — Data locations, credential storage, and encryption boundaries.
-- [Limits](user/limits.md) — What is not implemented, on purpose or otherwise.
+- [Limits](user/limits.md) — Explicit errors, unimplemented surfaces, and platform caveats.
 - [Troubleshooting](user/troubleshooting.md) — Common first-run, auth, routing, and log problems.
 
 ## Reading paths

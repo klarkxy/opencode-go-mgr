@@ -29,9 +29,12 @@ use crate::models::{
     AccountSetupStep as ModelSetupStep, AccountType as ModelAccountType, AppConfig, SubGatewayKey,
     normalize_account_notes, normalize_purchase_date,
 };
+use ocg_domain::dynamic::{DynamicAuthKind, DynamicModelMapping, DynamicProviderDefinition};
+
+use crate::dynamic::DynamicProviderRuntime;
 use crate::provider::{
-    ConnectionVerificationStatus, CreationAvailability, UpstreamProtocolKind, builtin_provider,
-    provider_allows_enablement,
+    ConnectionVerificationStatus, CreationAvailability, CredentialKind, QuotaScope,
+    UpstreamProtocolKind, builtin_provider, provider_allows_enablement,
 };
 use crate::provider_contracts::{
     ContractEvidenceSource, ContractScope, ContractScopeKind, PersistedContracts,
@@ -49,7 +52,9 @@ use super::{V3ApiError, check_expectation, parse_json, parse_mutation_json};
 
 const ENVELOPE_FORMAT: &str = "ocg-manager-account-backup";
 const ENVELOPE_VERSION: u32 = 1;
+#[cfg(test)]
 const LEGACY_PAYLOAD_VERSION: u32 = 1;
+#[cfg(test)]
 const NODE_PAYLOAD_VERSION: u32 = 2;
 const PAYLOAD_VERSION: u32 = 4;
 const AAD: &[u8] = b"ocg-manager-account-backup:v1:argon2id-m65536-t3-p1:aes-256-gcm";
@@ -92,6 +97,8 @@ struct PortablePayload {
     version: u32,
     exported_at: String,
     accounts: Vec<PortableAccount>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    dynamic_providers: Vec<PortableDynamicProvider>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     node: Option<PortableNodeState>,
 }
@@ -119,6 +126,8 @@ struct PortableAccount {
     connection_verified_at: Option<String>,
     custom_config: Option<PortableCustomConfig>,
     model_capabilities: Vec<PortableModelCapability>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    ollama_billing_tier: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -188,6 +197,24 @@ struct PortableCustomConfig {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PortableDynamicProvider {
+    id: String,
+    name: String,
+    endpoint_url: String,
+    upstream_protocol: String,
+    auth_kind: String,
+    models: Vec<PortableDynamicModel>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PortableDynamicModel {
+    public_model: String,
+    upstream_model: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(untagged)]
 enum PortableModelCapability {
     Canonical(PortableModelCapabilityCanonical),
@@ -214,6 +241,7 @@ impl Zeroize for PortablePayload {
         self.version.zeroize();
         self.exported_at.zeroize();
         self.accounts.zeroize();
+        self.dynamic_providers.zeroize();
         self.node.zeroize();
     }
 }
@@ -235,6 +263,7 @@ impl Zeroize for PortableAccount {
         self.connection_verified_at.zeroize();
         self.custom_config.zeroize();
         self.model_capabilities.zeroize();
+        self.ollama_billing_tier.zeroize();
     }
 }
 
@@ -306,6 +335,24 @@ impl Zeroize for PortableCustomConfig {
     }
 }
 
+impl Zeroize for PortableDynamicProvider {
+    fn zeroize(&mut self) {
+        self.id.zeroize();
+        self.name.zeroize();
+        self.endpoint_url.zeroize();
+        self.upstream_protocol.zeroize();
+        self.auth_kind.zeroize();
+        self.models.zeroize();
+    }
+}
+
+impl Zeroize for PortableDynamicModel {
+    fn zeroize(&mut self) {
+        self.public_model.zeroize();
+        self.upstream_model.zeroize();
+    }
+}
+
 impl Zeroize for PortableModelCapability {
     fn zeroize(&mut self) {
         match self {
@@ -341,6 +388,9 @@ struct ValidatedAccount {
     connection_verified_at: Option<DateTime<Utc>>,
     custom_config: Option<AccountCustomConfigInput>,
     capabilities: Vec<AccountModelCapabilityInput>,
+    ollama_billing_tier: Option<crate::provider::OllamaBillingTier>,
+    credential_kind: CredentialKind,
+    quota_scope: QuotaScope,
 }
 
 #[derive(Debug)]
@@ -348,12 +398,14 @@ struct ValidatedMigration {
     exported_at: String,
     accounts: Vec<ValidatedAccount>,
     node: Option<Zeroizing<PortableNodeState>>,
+    dynamic_providers: Vec<DynamicProviderRuntime>,
 }
 
 #[derive(Debug)]
 enum TransferError {
     Invalid(String),
     InvalidBundle,
+    UnsupportedVersion(u32),
     Busy,
     InsecureTransport,
     Internal,
@@ -526,12 +578,8 @@ async fn import_accounts_inner(
             id,
             provider_id: account.provider_id.clone(),
 
-            credential_kind: builtin_provider(&account.provider_id)
-                .expect("validated Plan must remain sealed")
-                .credential_kind,
-            quota_scope: builtin_provider(&account.provider_id)
-                .expect("validated Plan must remain sealed")
-                .quota_scope,
+            credential_kind: account.credential_kind,
+            quota_scope: account.quota_scope,
             name: account.name.clone(),
             username: account.username.clone(),
             password_cipher: None,
@@ -560,6 +608,7 @@ async fn import_accounts_inner(
             capabilities: account.capabilities.clone(),
             verification_status: account.verification_status,
             connection_verified_at: account.connection_verified_at,
+            ollama_billing_tier: account.ollama_billing_tier,
         });
         items.push(preview_item(
             &account,
@@ -627,6 +676,7 @@ async fn import_accounts_inner(
             },
             provider_contracts: persisted_contracts_from_portable(&node.provider_contracts, now)
                 .map_err(|error| V3ApiError::invalid_request_at(&state, error))?,
+            dynamic_providers: validated.dynamic_providers,
         };
         let runtime = state
             .db
@@ -660,7 +710,7 @@ async fn import_accounts_inner(
 fn export_payload(state: &CoreState) -> Result<(PortablePayload, u64, u64), TransferError> {
     let _settings_update = state.settings_update.lock();
     let revision = state.settings_revision();
-    let (snapshots, sub_keys, persisted_contracts) = {
+    let (snapshots, sub_keys, persisted_contracts, dynamic_runtimes) = {
         let db = state.db.lock();
         let accounts = db.list_accounts().map_err(|_| TransferError::Internal)?;
         let snapshots = accounts
@@ -669,7 +719,13 @@ fn export_payload(state: &CoreState) -> Result<(PortablePayload, u64, u64), Tran
                 let contract = db
                     .load_account_contract(&account.id)
                     .map_err(|_| TransferError::Internal)?;
-                Ok((account, contract))
+                let ollama_billing = if account.provider_id == crate::provider::OLLAMA_PROVIDER_ID {
+                    db.ollama_cloud_billing_tier(&account.id)
+                        .map_err(|_| TransferError::Internal)?
+                } else {
+                    None
+                };
+                Ok((account, contract, ollama_billing))
             })
             .collect::<Result<Vec<_>, TransferError>>()?;
         let sub_keys = db
@@ -678,13 +734,16 @@ fn export_payload(state: &CoreState) -> Result<(PortablePayload, u64, u64), Tran
         let persisted_contracts = db
             .load_persisted_contracts()
             .map_err(|_| TransferError::Internal)?;
-        (snapshots, sub_keys, persisted_contracts)
+        let dynamic_runtimes = db
+            .list_dynamic_providers()
+            .map_err(|_| TransferError::Internal)?;
+        (snapshots, sub_keys, persisted_contracts, dynamic_runtimes)
     };
     let mut accounts = Zeroizing::new(Vec::new());
     let mut account_order = Vec::new();
     let mut skipped = 0_u64;
     let mut zen_enabled = false;
-    for (account, contract) in snapshots {
+    for (account, contract, ollama_billing) in snapshots {
         if account.id == crate::provider::CPA_ACCOUNT_ID {
             continue;
         }
@@ -700,7 +759,19 @@ fn export_payload(state: &CoreState) -> Result<(PortablePayload, u64, u64), Tran
             continue;
         }
         account_order.push(account.id.clone());
-        let portable_key_required = migration_exports_key(account.account_type, account.setup_step);
+        let dynamic = dynamic_runtimes
+            .iter()
+            .find(|runtime| crate::dynamic::provider_ids_equal(&runtime.id, &account.provider_id));
+        let plan = builtin_provider(&account.provider_id);
+        if plan.is_none() && dynamic.is_none() {
+            return Err(TransferError::Internal);
+        }
+        let portable_key_required =
+            if dynamic.is_some_and(|runtime| !runtime.auth_kind.requires_key()) {
+                false
+            } else {
+                migration_exports_key(account.account_type, account.setup_step)
+            };
         let mut key = Zeroizing::new(if !portable_key_required || account.key_cipher.is_empty() {
             String::new()
         } else {
@@ -711,9 +782,8 @@ fn export_payload(state: &CoreState) -> Result<(PortablePayload, u64, u64), Tran
         if portable_key_required && key.trim().is_empty() {
             return Err(TransferError::Internal);
         }
-        let plan = builtin_provider(&account.provider_id).ok_or(TransferError::Internal)?;
         let (custom_config, model_capabilities) =
-            if crate::provider::plan_requires_custom_config(plan) {
+            if plan.is_some_and(crate::provider::plan_requires_custom_config) {
                 (
                     contract.custom_config.map(|config| PortableCustomConfig {
                         endpoint_url: config.endpoint_url,
@@ -757,6 +827,7 @@ fn export_payload(state: &CoreState) -> Result<(PortablePayload, u64, u64), Tran
                 .map(|value| value.to_rfc3339()),
             custom_config,
             model_capabilities,
+            ollama_billing_tier: ollama_billing.map(|tier| tier.as_str().to_string()),
         });
     }
     if accounts.len() > MAX_ACCOUNTS {
@@ -820,12 +891,32 @@ fn export_payload(state: &CoreState) -> Result<(PortablePayload, u64, u64), Tran
         })
         .collect::<Vec<_>>();
     provider_contracts.sort_by(|left, right| left.provider_id.cmp(&right.provider_id));
+    let mut portable_dynamics = dynamic_runtimes
+        .into_iter()
+        .map(|runtime| PortableDynamicProvider {
+            id: runtime.id,
+            name: runtime.name,
+            endpoint_url: runtime.endpoint_url,
+            upstream_protocol: runtime.upstream_protocol.as_str().to_string(),
+            auth_kind: runtime.auth_kind.as_str().to_string(),
+            models: runtime
+                .mappings
+                .into_iter()
+                .map(|mapping| PortableDynamicModel {
+                    public_model: mapping.public_model,
+                    upstream_model: mapping.upstream_model,
+                })
+                .collect(),
+        })
+        .collect::<Vec<_>>();
+    portable_dynamics.sort_by(|left, right| left.id.cmp(&right.id));
     let zen_catalog = state.zen_free_model_catalog();
     Ok((
         PortablePayload {
             version: PAYLOAD_VERSION,
             exported_at: Utc::now().to_rfc3339(),
             accounts: std::mem::take(&mut *accounts),
+            dynamic_providers: portable_dynamics,
             node: Some(PortableNodeState {
                 config: state.config(),
                 access_keys,
@@ -928,8 +1019,15 @@ fn decrypt_and_validate(bundle: &str, password: &str) -> Result<ValidatedMigrati
     if plaintext.len() > MAX_PLAINTEXT_BYTES {
         return Err(TransferError::InvalidBundle);
     }
-    let payload: PortablePayload =
+    let value: serde_json::Value =
         serde_json::from_slice(plaintext.as_slice()).map_err(|_| TransferError::InvalidBundle)?;
+    match value.get("version").and_then(|version| version.as_u64()) {
+        Some(version) if version == u64::from(PAYLOAD_VERSION) => {}
+        Some(version) => return Err(TransferError::UnsupportedVersion(version as u32)),
+        None => return Err(TransferError::InvalidBundle),
+    }
+    let payload: PortablePayload =
+        serde_json::from_value(value).map_err(|_| TransferError::InvalidBundle)?;
     validate_payload(payload)
 }
 
@@ -946,13 +1044,10 @@ fn derive_key(password: &str, salt: &[u8]) -> Result<Zeroizing<[u8; 32]>, Transf
 
 fn validate_payload(payload: PortablePayload) -> Result<ValidatedMigration, TransferError> {
     let mut payload = Zeroizing::new(payload);
-    if payload.version == LEGACY_PAYLOAD_VERSION
-        || payload.version == NODE_PAYLOAD_VERSION
-        || payload.version == 3
-        || payload.version != PAYLOAD_VERSION
-        || payload.accounts.len() > MAX_ACCOUNTS
-        || payload.node.is_none()
-    {
+    if payload.version != PAYLOAD_VERSION {
+        return Err(TransferError::UnsupportedVersion(payload.version));
+    }
+    if payload.accounts.len() > MAX_ACCOUNTS || payload.node.is_none() {
         return Err(TransferError::InvalidBundle);
     }
     let is_node_migration = true;
@@ -962,6 +1057,7 @@ fn validate_payload(payload: PortablePayload) -> Result<ValidatedMigration, Tran
         return Err(TransferError::InvalidBundle);
     }
     let exported_at = payload.exported_at.clone();
+    let validated_dynamics = validate_portable_dynamic_providers(&payload.dynamic_providers)?;
     let mut logical = HashSet::new();
     let mut account_ids = HashSet::new();
     let mut validated = Vec::with_capacity(payload.accounts.len());
@@ -1011,10 +1107,19 @@ fn validate_payload(payload: PortablePayload) -> Result<ValidatedMigration, Tran
                 prefix()
             )));
         }
-        let plan = builtin_provider(&account.provider_id)
-            .ok_or_else(|| TransferError::Invalid(format!("{} uses an unknown Plan", prefix())))?;
-        if plan.singleton_account_id.is_some()
-            || plan.creation_availability == CreationAvailability::Unavailable
+        let dynamic = validated_dynamics
+            .iter()
+            .find(|runtime| crate::dynamic::provider_ids_equal(&runtime.id, &account.provider_id));
+        let plan = builtin_provider(&account.provider_id);
+        if plan.is_none() && dynamic.is_none() {
+            return Err(TransferError::Invalid(format!(
+                "{} references an unknown provider",
+                prefix()
+            )));
+        }
+        if let Some(plan) = plan
+            && (plan.singleton_account_id.is_some()
+                || plan.creation_availability == CreationAvailability::Unavailable)
         {
             return Err(TransferError::Invalid(format!(
                 "{} uses a Plan that cannot be imported",
@@ -1028,25 +1133,38 @@ fn validate_payload(payload: PortablePayload) -> Result<ValidatedMigration, Tran
         let source_setup = ModelSetupStep::try_from(account.setup_step.as_str()).map_err(|_| {
             TransferError::Invalid(format!("{} has an invalid setup step", prefix()))
         })?;
+        let requires_key = dynamic
+            .map(|runtime| runtime.auth_kind.requires_key())
+            .unwrap_or(true);
         let (setup_step, key, enabled) = match account_type {
             ModelAccountType::Key => {
-                if source_setup != ModelSetupStep::Ready || account.key.is_empty() {
+                if source_setup != ModelSetupStep::Ready || (requires_key && account.key.is_empty())
+                {
                     return Err(TransferError::Invalid(format!(
                         "{} is missing its account Key",
                         prefix()
                     )));
                 }
-                crate::provider::validate_plan_key(plan, &account.key).map_err(|_| {
-                    TransferError::Invalid(format!("{} has an invalid account Key", prefix()))
-                })?;
+                if !requires_key && !account.key.is_empty() {
+                    return Err(TransferError::Invalid(format!(
+                        "{} must not include an account Key",
+                        prefix()
+                    )));
+                }
+                if let Some(plan) = plan {
+                    crate::provider::validate_plan_key(plan, &account.key).map_err(|_| {
+                        TransferError::Invalid(format!("{} has an invalid account Key", prefix()))
+                    })?;
+                }
                 (
                     ModelSetupStep::Ready,
                     Zeroizing::new(std::mem::take(&mut account.key)),
-                    account.enabled && provider_allows_enablement(&account.provider_id),
+                    account.enabled
+                        && (dynamic.is_some() || provider_allows_enablement(&account.provider_id)),
                 )
             }
             ModelAccountType::Managed => {
-                if !plan.managed_registration {
+                if dynamic.is_some() || !plan.is_some_and(|plan| plan.managed_registration) {
                     return Err(TransferError::Invalid(format!(
                         "{} is not a supported managed account",
                         prefix()
@@ -1059,7 +1177,11 @@ fn validate_payload(payload: PortablePayload) -> Result<ValidatedMigration, Tran
                             prefix()
                         )));
                     }
-                    crate::provider::validate_plan_key(plan, &account.key).map_err(|_| {
+                    crate::provider::validate_plan_key(
+                        plan.expect("managed accounts require a built-in Plan"),
+                        &account.key,
+                    )
+                    .map_err(|_| {
                         TransferError::Invalid(format!("{} has an invalid account Key", prefix()))
                     })?;
                     (
@@ -1083,6 +1205,30 @@ fn validate_payload(payload: PortablePayload) -> Result<ValidatedMigration, Tran
                 TransferError::Invalid(format!("{} has an invalid purchase date", prefix()))
             })?
         };
+        let ollama_billing_tier = match account.ollama_billing_tier.as_deref() {
+            None | Some("") => None,
+            Some(value) => {
+                if account.provider_id != crate::provider::OLLAMA_PROVIDER_ID {
+                    return Err(TransferError::Invalid(format!(
+                        "{} has an Ollama billing tier on a non-Ollama account",
+                        prefix()
+                    )));
+                }
+                let tier = crate::provider::OllamaBillingTier::parse(value).map_err(|_| {
+                    TransferError::Invalid(format!(
+                        "{} has an invalid Ollama billing tier",
+                        prefix()
+                    ))
+                })?;
+                if tier.requires_purchase_date() && purchase_date.is_empty() {
+                    return Err(TransferError::Invalid(format!(
+                        "{} is a paid Ollama tier and requires a purchase date",
+                        prefix()
+                    )));
+                }
+                Some(tier)
+            }
+        };
         let notes = match account.notes.as_deref() {
             Some(value) if value.chars().count() > MAX_NOTES_CHARS => {
                 return Err(TransferError::Invalid(format!(
@@ -1104,7 +1250,10 @@ fn validate_payload(payload: PortablePayload) -> Result<ValidatedMigration, Tran
             Some(value) => ConnectionVerificationStatus::try_from(value).map_err(|_| {
                 TransferError::Invalid(format!("{} has an invalid verification state", prefix()))
             })?,
-            None => crate::provider::default_verification_status(plan),
+            None => plan.map_or(
+                ConnectionVerificationStatus::NotRequired,
+                crate::provider::default_verification_status,
+            ),
         };
         let connection_verified_at = account
             .connection_verified_at
@@ -1115,10 +1264,11 @@ fn validate_payload(payload: PortablePayload) -> Result<ValidatedMigration, Tran
                 TransferError::Invalid(format!("{} has an invalid verification time", prefix()))
             })?
             .map(|value| value.with_timezone(&Utc));
-        let verification_gates_enablement = plan.verification_policy
-            == crate::provider::VerificationPolicy::Required
-            && crate::provider::ProviderRegistry::get(&account.provider_id)
-                .is_some_and(|descriptor| descriptor.card_actions.enable_requires_verification);
+        let verification_gates_enablement = plan.is_some_and(|plan| {
+            plan.verification_policy == crate::provider::VerificationPolicy::Required
+                && crate::provider::ProviderRegistry::get(&account.provider_id)
+                    .is_some_and(|descriptor| descriptor.card_actions.enable_requires_verification)
+        });
         if is_node_migration
             && enabled
             && verification_gates_enablement
@@ -1131,7 +1281,7 @@ fn validate_payload(payload: PortablePayload) -> Result<ValidatedMigration, Tran
         }
         let enabled =
             enabled && (!verification_gates_enablement || verification_status.allows_enablement());
-        let requires_custom = crate::provider::plan_requires_custom_config(plan);
+        let requires_custom = plan.is_some_and(crate::provider::plan_requires_custom_config);
         let (custom_config, capabilities) = if requires_custom {
             let config = account.custom_config.as_ref().ok_or_else(|| {
                 TransferError::Invalid(format!("{} is missing its Custom Endpoint", prefix()))
@@ -1259,6 +1409,15 @@ fn validate_payload(payload: PortablePayload) -> Result<ValidatedMigration, Tran
             connection_verified_at,
             custom_config,
             capabilities,
+            ollama_billing_tier,
+            credential_kind: dynamic
+                .map(|runtime| runtime.auth_kind.credential_kind())
+                .or_else(|| plan.map(|plan| plan.credential_kind))
+                .expect("imported account provider was resolved"),
+            quota_scope: dynamic
+                .map(|runtime| runtime.auth_kind.quota_scope())
+                .or_else(|| plan.map(|plan| plan.quota_scope))
+                .expect("imported account provider was resolved"),
         });
     }
     let node = payload
@@ -1271,7 +1430,72 @@ fn validate_payload(payload: PortablePayload) -> Result<ValidatedMigration, Tran
         exported_at,
         accounts: validated,
         node,
+        dynamic_providers: validated_dynamics,
     })
+}
+
+fn validate_portable_dynamic_providers(
+    providers: &[PortableDynamicProvider],
+) -> Result<Vec<DynamicProviderRuntime>, TransferError> {
+    let now = Utc::now();
+    let mut seen_ids = HashSet::new();
+    let mut validated = Vec::with_capacity(providers.len());
+    for (index, provider) in providers.iter().enumerate() {
+        let prefix = || format!("dynamic provider {}", index + 1);
+        let id = provider.id.trim();
+        uuid::Uuid::parse_str(id).map_err(|_| {
+            TransferError::Invalid(format!("{} has an invalid provider id", prefix()))
+        })?;
+        if !seen_ids.insert(id.to_ascii_lowercase()) {
+            return Err(TransferError::Invalid(format!(
+                "{} duplicates an earlier provider id in the package",
+                prefix()
+            )));
+        }
+        if crate::dynamic::collides_with_known_id(id, &[]) {
+            return Err(TransferError::Invalid(format!(
+                "{} collides with a built-in provider",
+                prefix()
+            )));
+        }
+        let auth_kind = DynamicAuthKind::try_from(provider.auth_kind.trim()).map_err(|_| {
+            TransferError::Invalid(format!("{} has an invalid auth kind", prefix()))
+        })?;
+        let protocol =
+            UpstreamProtocolKind::try_from(provider.upstream_protocol.trim()).map_err(|_| {
+                TransferError::Invalid(format!("{} has an invalid upstream protocol", prefix()))
+            })?;
+        let endpoint_url = crate::custom::validate_custom_endpoint_url(&provider.endpoint_url)
+            .map_err(|_| TransferError::Invalid(format!("{} has an invalid Endpoint", prefix())))?;
+        let mappings = provider
+            .models
+            .iter()
+            .map(|model| DynamicModelMapping {
+                public_model: model.public_model.clone(),
+                upstream_model: model.upstream_model.clone(),
+            })
+            .collect::<Vec<_>>();
+        let definition = crate::dynamic::validate_definition(DynamicProviderDefinition {
+            id: id.to_string(),
+            name: provider.name.clone(),
+            endpoint_url,
+            upstream_protocol: protocol,
+            auth_kind,
+            mappings,
+        })
+        .map_err(|error| TransferError::Invalid(format!("{} is invalid: {error}", prefix())))?;
+        validated.push(DynamicProviderRuntime {
+            id: definition.id,
+            name: definition.name,
+            endpoint_url: definition.endpoint_url,
+            upstream_protocol: definition.upstream_protocol,
+            auth_kind: definition.auth_kind,
+            mappings: definition.mappings,
+            created_at: now,
+            updated_at: now,
+        });
+    }
+    Ok(validated)
 }
 
 fn validate_node_state(
@@ -1658,6 +1882,12 @@ fn map_transfer_error(state: &CoreState, error: TransferError) -> V3ApiError {
             state,
             "migration password is incorrect or the backup file is damaged",
         ),
+        TransferError::UnsupportedVersion(version) => V3ApiError::invalid_request_at(
+            state,
+            format!(
+                "this backup uses payload version {version}; this node expects payload version {PAYLOAD_VERSION}"
+            ),
+        ),
         TransferError::Busy => V3ApiError::service_unavailable(
             state,
             "another account migration cryptographic operation is in progress",
@@ -1702,6 +1932,7 @@ mod tests {
             connection_verified_at: None,
             custom_config: None,
             model_capabilities: Vec::new(),
+            ollama_billing_tier: None,
         }
     }
 
@@ -1713,6 +1944,7 @@ mod tests {
             version: PAYLOAD_VERSION,
             exported_at: "2026-08-29T00:00:00Z".to_string(),
             accounts: vec![account],
+            dynamic_providers: Vec::new(),
             node: Some(sample_node(account_id)),
         }
     }
@@ -1738,6 +1970,7 @@ mod tests {
                 upstream_protocol: "chat_completions".to_string(),
             }),
             model_capabilities: Vec::new(),
+            ollama_billing_tier: None,
         }
     }
 
@@ -1793,11 +2026,86 @@ mod tests {
                 version,
                 exported_at: "2026-08-29T00:00:00Z".to_string(),
                 accounts: vec![account],
+                dynamic_providers: Vec::new(),
                 node,
             })
             .unwrap_err();
-            assert!(matches!(error, TransferError::InvalidBundle), "{error:?}");
+            assert!(
+                matches!(error, TransferError::UnsupportedVersion(found) if found == version),
+                "{error:?}"
+            );
         }
+    }
+
+    #[test]
+    fn unsupported_payload_version_is_not_a_password_or_damage_error() {
+        let mut payload = sample_payload();
+        payload.version = 3;
+        let bundle = encrypt_payload(&payload, "correct horse battery").unwrap();
+        let error = decrypt_and_validate(&bundle, "correct horse battery").unwrap_err();
+        assert!(
+            matches!(error, TransferError::UnsupportedVersion(3)),
+            "{error:?}"
+        );
+        let message = format!(
+            "this backup uses payload version 3; this node expects payload version {PAYLOAD_VERSION}"
+        );
+        assert!(!message.to_ascii_lowercase().contains("password"));
+        assert!(!message.to_ascii_lowercase().contains("damaged"));
+        assert!(message.contains(&PAYLOAD_VERSION.to_string()));
+    }
+
+    fn sample_dynamic_provider(id: &str, name: &str) -> PortableDynamicProvider {
+        PortableDynamicProvider {
+            id: id.to_string(),
+            name: name.to_string(),
+            endpoint_url: "http://127.0.0.1:9/v1".to_string(),
+            upstream_protocol: "chat_completions".to_string(),
+            auth_kind: "bearer".to_string(),
+            models: vec![PortableDynamicModel {
+                public_model: "lab-opus".to_string(),
+                upstream_model: "vendor/opus".to_string(),
+            }],
+        }
+    }
+
+    #[test]
+    fn dynamic_provider_definitions_are_validated_and_dangling_ids_fail() {
+        let provider_id = "00000000-0000-4000-8000-0000000000aa";
+        let account_id = "00000000-0000-4000-8000-0000000000ab";
+        let mut account = sample_account("Lab");
+        account.id = Some(account_id.to_string());
+        account.provider_id = provider_id.to_string();
+        let payload = PortablePayload {
+            version: PAYLOAD_VERSION,
+            exported_at: "2026-08-29T00:00:00Z".to_string(),
+            accounts: vec![account],
+            dynamic_providers: vec![sample_dynamic_provider(provider_id, "Lab")],
+            node: Some(sample_node(account_id)),
+        };
+        let validated = validate_payload(payload).unwrap();
+        assert_eq!(validated.dynamic_providers.len(), 1);
+        assert_eq!(validated.dynamic_providers[0].name, "Lab");
+        assert_eq!(
+            validated.accounts[0].credential_kind,
+            crate::provider::CredentialKind::ApiKey
+        );
+
+        let mut dangling_account = sample_account("Lab");
+        dangling_account.id = Some(account_id.to_string());
+        dangling_account.provider_id = provider_id.to_string();
+        let dangling = PortablePayload {
+            version: PAYLOAD_VERSION,
+            exported_at: "2026-08-29T00:00:00Z".to_string(),
+            accounts: vec![dangling_account],
+            dynamic_providers: Vec::new(),
+            node: Some(sample_node(account_id)),
+        };
+        let error = validate_payload(dangling).unwrap_err();
+        assert!(
+            matches!(error, TransferError::Invalid(ref message) if message.contains("unknown provider")),
+            "{error:?}"
+        );
     }
 
     #[test]
@@ -1816,6 +2124,7 @@ mod tests {
             version: PAYLOAD_VERSION,
             exported_at: "2026-08-29T00:00:00Z".to_string(),
             accounts: vec![account],
+            dynamic_providers: Vec::new(),
             node: Some(sample_node(account_id)),
         };
         let json = serde_json::to_value(&payload).unwrap();
@@ -1893,6 +2202,7 @@ mod tests {
             connection_verified_at: None,
             custom_config: None,
             model_capabilities: Vec::new(),
+            ollama_billing_tier: None,
         });
         let bundle = encrypt_payload(&payload, "correct horse battery").unwrap();
         assert!(matches!(

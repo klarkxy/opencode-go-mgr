@@ -1,6 +1,7 @@
 import type {
   CpaAccount,
   CpaIntegration,
+  CpaModel,
   CpaOAuthProvider,
   CpaRuntime,
   CpaRuntimeCheck,
@@ -153,6 +154,32 @@ export function partitionCpaRuntimeKeys(keys: readonly CpaRuntimeKey[]): CpaRunt
     (key.protected ? protectedKeys : directKeys).push(key);
   }
   return { protectedKeys, directKeys };
+}
+
+export type CpaCatalogGroup = {
+  source: string;
+  models: CpaModel[];
+};
+
+/** Group the persisted CPA snapshot by CPA-reported `ownedBy`, unknown last. */
+export function groupCpaCatalogModels(models: readonly CpaModel[]): CpaCatalogGroup[] {
+  const groups = new Map<string, CpaModel[]>();
+  for (const model of models) {
+    const source = model.ownedBy?.trim() ?? "";
+    const rows = groups.get(source);
+    if (rows) rows.push(model);
+    else groups.set(source, [model]);
+  }
+  const known: CpaCatalogGroup[] = [];
+  let unknown: CpaCatalogGroup | null = null;
+  for (const [source, rows] of groups) {
+    rows.sort((left, right) => left.id.localeCompare(right.id));
+    const group = { source, models: rows };
+    if (source) known.push(group);
+    else unknown = group;
+  }
+  known.sort((left, right) => left.source.localeCompare(right.source));
+  return unknown ? [...known, unknown] : known;
 }
 
 /** Stable row identity for account lists. */

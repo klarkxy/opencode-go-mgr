@@ -2,7 +2,7 @@
   <main class="browser-session">
     <header class="browser-session__header">
       <div>
-        <p class="browser-session__eyebrow">OCG Manager</p>
+        <p class="browser-session__eyebrow">Open Console Gateway</p>
         <h1>{{ t("远程浏览器") }}</h1>
       </div>
       <n-space align="center">

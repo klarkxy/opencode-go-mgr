@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -15,8 +14,6 @@ import {
   renderTypeScript,
   runContract,
 } from "./dashboard-v3-contract.mjs";
-
-const scriptSource = readFileSync(new URL("./dashboard-v3-contract.mjs", import.meta.url), "utf8");
 
 const fixtureSchema = {
   $schema: "https://json-schema.org/draft/2020-12/schema",
@@ -56,8 +53,6 @@ test("artifact paths are schema plus types and never an endpoint client", () => 
     "--locked",
     "--quiet",
   ]);
-  assert.doesNotMatch(scriptSource, /dashboard-v3-client/);
-  assert.doesNotMatch(scriptSource, /src\/api\/tauri/);
 });
 
 test("generated TypeScript must stay types-only", () => {

@@ -3,7 +3,7 @@
     <dl class="pricing-ledger">
       <div class="pricing-ledger__revision">
         <dt>{{ t("修订版本") }}</dt>
-        <dd><code>{{ snapshot?.revision ?? `static-${PRICING_REFERENCE_CHECKED_AT}` }}</code></dd>
+        <dd><code>{{ snapshot?.revision ?? "—" }}</code></dd>
       </div>
       <div>
         <dt>{{ t("启用时间") }}</dt>
@@ -11,7 +11,7 @@
       </div>
       <div>
         <dt>{{ t("文档更新时间") }}</dt>
-        <dd>{{ documentUpdatedAt }}</dd>
+        <dd>{{ snapshot ? documentUpdatedAt : "—" }}</dd>
       </div>
     </dl>
 
@@ -39,8 +39,6 @@ import { locale, t } from "../i18n/index.ts";
 import type { ProviderNeutralPricingSnapshot } from "../api/providers.ts";
 import { formatPricingRate } from "../domain/pricing-view.ts";
 import {
-  GOAT_PRICING_REFERENCE,
-  PRICING_REFERENCE_CHECKED_AT,
   type GoatOfficialRate,
 } from "../domain/pricing-references.ts";
 
@@ -69,10 +67,7 @@ watch(() => props.snapshot?.revision, () => {
 });
 
 const rows = computed<GoatPricingRow[]>(() => {
-  if (!props.snapshot) return GOAT_PRICING_REFERENCE.models.map((row) => ({
-    modelId: row.model,
-    ...row,
-  }));
+  if (!props.snapshot) return [];
   return props.snapshot.values.map((row) => {
     const free = row.input_per_million === null
       && row.output_per_million === null
@@ -91,7 +86,7 @@ const rows = computed<GoatPricingRow[]>(() => {
 
 const documentUpdatedAt = computed(() => {
   const value = props.snapshot?.document_updated_at;
-  return value ? formatTimestamp(value) : PRICING_REFERENCE_CHECKED_AT;
+  return value ? formatTimestamp(value) : "—";
 });
 
 function formatTimestamp(value: string): string {

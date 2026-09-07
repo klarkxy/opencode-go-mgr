@@ -245,7 +245,6 @@ let loadGeneration = 0;
 const EMPTY_CONNECTION: ConnectionInfo = {
   gateway_port: 9042,
   client_root_url: "",
-  upstream_base_url: "",
   primary_key: "",
   sub_keys: [],
   revision: 0,

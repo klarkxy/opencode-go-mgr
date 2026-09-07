@@ -2,7 +2,7 @@
 
 # 用户指南
 
-本指南面向把 OCG Manager 当作桌面应用、无头 Gateway 或 Docker 服务运行的人。章节按你实际会撞上它们的顺序排列：先装起来，排障在后。
+本指南面向把 Open Console Gateway 当作桌面应用、无头 Gateway 或 Docker 服务运行的人。章节按你实际会撞上它们的顺序排列：先装起来，排障在后。
 
 ## 新增集成
 
@@ -16,7 +16,7 @@
 - [安装与首次启动](user/install.zh-CN.md) — Windows、macOS、Linux 安装包；附赠 SmartScreen 仪式。
 - [接入第一个客户端](user/first-client.zh-CN.md) — 复制 Key 与 API Base URL，用一个请求验证连通。
 - [升级、备份、恢复与卸载](user/upgrade-backup.zh-CN.md) — 升级通道、手动升级、备份、恢复与卸载。
-- [管理面板](user/dashboard.zh-CN.md) — 八个核心页面、扩展分组、国际化与接入中心。
+- [管理面板](user/dashboard.zh-CN.md) — 七个核心页面、扩展分组、国际化与接入中心。
 - [应用教程与模型能力](user/applications.zh-CN.md) — 客户端教程与模型能力表。
 - [账号](user/accounts.zh-CN.md) — Plan、凭据、排序、额度行为与托管注册。
 - [供应商](user/providers.zh-CN.md) — 目录、供应商合约、按模型协议覆盖、探测与用户定义供应商。
@@ -28,7 +28,7 @@
 - [Docker](user/docker.zh-CN.md) — GHCR 镜像、Compose 部署、浏览器 Sidecar 与源码构建。
 - [外部接入](user/external-integrations.zh-CN.md) — 本机 CPA 配置、数据归属、路由订阅池与断开行为。
 - [数据与安全](user/data-security.zh-CN.md) — 数据目录、凭据存储与加密边界。
-- [限制](user/limits.zh-CN.md) — 没实现的东西，有的是故意的，有的还没来得及。
+- [限制](user/limits.zh-CN.md) — 明确报错、未实现的表面与平台边界。
 - [常见问题](user/troubleshooting.zh-CN.md) — 首次启动、鉴权、路由与日志的常见问题。
 
 ## 阅读路径

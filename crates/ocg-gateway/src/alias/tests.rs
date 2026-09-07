@@ -1,44 +1,201 @@
 use super::*;
-use std::any::{TypeId, type_name};
+
+const NO_IDS: &[String] = &[];
+
+fn catalogs<'a>(
+    go: &'a [String],
+    zen_free: &'a [String],
+    custom: &'a [String],
+    command_code: &'a [String],
+    minimax: &'a [String],
+    kimi: &'a [String],
+) -> RuntimeCatalogs<'a> {
+    RuntimeCatalogs {
+        go,
+        zen_free,
+        custom,
+        command_code,
+        minimax,
+        kimi,
+        cpa: NO_IDS,
+        ollama: NO_IDS,
+        ollama_pinned: NO_IDS,
+        extra: &[],
+    }
+}
+
+fn resolve_with_custom(
+    requested: &str,
+    custom_model_ids: &[String],
+) -> Result<ResolvedModel, ResolveError> {
+    resolve_with_runtime_catalogs(
+        requested,
+        catalogs(NO_IDS, NO_IDS, custom_model_ids, NO_IDS, NO_IDS, NO_IDS),
+    )
+}
+
+fn resolve_with_provider_models(
+    requested: &str,
+    zen_free_models: &[String],
+    custom_model_ids: &[String],
+) -> Result<ResolvedModel, ResolveError> {
+    resolve_with_runtime_catalogs(
+        requested,
+        catalogs(
+            NO_IDS,
+            zen_free_models,
+            custom_model_ids,
+            NO_IDS,
+            NO_IDS,
+            NO_IDS,
+        ),
+    )
+}
+
+fn resolve_with_catalogs(
+    requested: &str,
+    zen_free_models: &[String],
+    custom_model_ids: &[String],
+    goat_model_ids: &[String],
+) -> Result<ResolvedModel, ResolveError> {
+    resolve_with_runtime_catalogs(
+        requested,
+        catalogs(
+            NO_IDS,
+            zen_free_models,
+            custom_model_ids,
+            goat_model_ids,
+            NO_IDS,
+            NO_IDS,
+        ),
+    )
+}
+
+fn resolve_with_all_catalogs(
+    requested: &str,
+    go_model_ids: &[String],
+    zen_free_models: &[String],
+    custom_model_ids: &[String],
+    goat_model_ids: &[String],
+) -> Result<ResolvedModel, ResolveError> {
+    resolve_with_runtime_catalogs(
+        requested,
+        catalogs(
+            go_model_ids,
+            zen_free_models,
+            custom_model_ids,
+            goat_model_ids,
+            NO_IDS,
+            NO_IDS,
+        ),
+    )
+}
+
+fn resolve_with_extended_catalogs(
+    requested: &str,
+    go_model_ids: &[String],
+    zen_free_models: &[String],
+    custom_model_ids: &[String],
+    goat_model_ids: &[String],
+    minimax_model_ids: &[String],
+    kimi_model_ids: &[String],
+) -> Result<ResolvedModel, ResolveError> {
+    resolve_with_runtime_catalogs(
+        requested,
+        catalogs(
+            go_model_ids,
+            zen_free_models,
+            custom_model_ids,
+            goat_model_ids,
+            minimax_model_ids,
+            kimi_model_ids,
+        ),
+    )
+}
+
+fn published_routeable_aliases_with_zen(zen_free_models: &[String]) -> Vec<PublishedAlias> {
+    published_routeable_aliases_with_runtime_catalogs(catalogs(
+        NO_IDS,
+        zen_free_models,
+        NO_IDS,
+        NO_IDS,
+        NO_IDS,
+        NO_IDS,
+    ))
+}
+
+fn published_routeable_aliases_with_catalogs(
+    zen_free_models: &[String],
+    goat_model_ids: &[String],
+) -> Vec<PublishedAlias> {
+    published_routeable_aliases_with_runtime_catalogs(catalogs(
+        NO_IDS,
+        zen_free_models,
+        NO_IDS,
+        goat_model_ids,
+        NO_IDS,
+        NO_IDS,
+    ))
+}
+
+fn published_routeable_aliases_with_all_catalogs(
+    go_model_ids: &[String],
+    zen_free_models: &[String],
+    goat_model_ids: &[String],
+) -> Vec<PublishedAlias> {
+    published_routeable_aliases_with_runtime_catalogs(catalogs(
+        go_model_ids,
+        zen_free_models,
+        NO_IDS,
+        goat_model_ids,
+        NO_IDS,
+        NO_IDS,
+    ))
+}
+
+fn published_routeable_aliases_with_extended_catalogs(
+    go_model_ids: &[String],
+    zen_free_models: &[String],
+    goat_model_ids: &[String],
+    minimax_model_ids: &[String],
+    kimi_model_ids: &[String],
+) -> Vec<PublishedAlias> {
+    published_routeable_aliases_with_runtime_catalogs(catalogs(
+        go_model_ids,
+        zen_free_models,
+        NO_IDS,
+        goat_model_ids,
+        minimax_model_ids,
+        kimi_model_ids,
+    ))
+}
+
+fn routeable_aliases_for_with_extended_catalogs(
+    provider_id: &str,
+    zen_free_models: &[String],
+    goat_model_ids: &[String],
+    minimax_model_ids: &[String],
+    kimi_model_ids: &[String],
+) -> Vec<String> {
+    routeable_aliases_for_with_runtime_catalogs(
+        provider_id,
+        catalogs(
+            NO_IDS,
+            zen_free_models,
+            NO_IDS,
+            goat_model_ids,
+            minimax_model_ids,
+            kimi_model_ids,
+        ),
+    )
+}
+
+fn is_published_alias(name: &str) -> bool {
+    matches!(resolve(name), Ok(ResolvedModel::Alias { .. }))
+}
 
 fn seeded_free_models() -> Vec<String> {
     ZenFreeModelCatalog::default().models
-}
-
-#[test]
-fn alias_types_are_owned_by_this_module() {
-    assert_eq!(
-        type_name::<ProviderMapping>(),
-        "ocg_gateway::alias::ProviderMapping"
-    );
-    assert_eq!(type_name::<AliasEntry>(), "ocg_gateway::alias::AliasEntry");
-    assert_eq!(
-        type_name::<ResolvedModel>(),
-        "ocg_gateway::alias::ResolvedModel"
-    );
-    assert_eq!(
-        type_name::<ResolveError>(),
-        "ocg_gateway::alias::ResolveError"
-    );
-    assert_eq!(
-        type_name::<PublishedAlias>(),
-        "ocg_gateway::alias::PublishedAlias"
-    );
-    let _ = TypeId::of::<ProviderMapping>();
-    let _ = TypeId::of::<AliasEntry>();
-    let _ = TypeId::of::<ResolvedModel>();
-    let _ = TypeId::of::<ResolveError>();
-    let _ = TypeId::of::<PublishedAlias>();
-    let _: ResolveName = resolve;
-    let _: ResolveCustom = resolve_with_custom;
-    let _: ResolveProviderModels = resolve_with_provider_models;
-    let _: ResolveCatalogs = resolve_with_catalogs;
-    let _: fn() -> Vec<String> = published_aliases;
-    let _: fn() -> Vec<PublishedAlias> = published_routeable_aliases;
-    let _: fn(&[String]) -> Vec<PublishedAlias> = published_routeable_aliases_with_zen;
-    let _: fn(&str) -> Vec<String> = routeable_aliases_for;
-    let _: RouteableWithZen = routeable_aliases_for_with_zen;
-    let _: fn(&str) -> bool = is_published_alias;
 }
 
 #[test]
@@ -170,15 +327,6 @@ fn command_catalog_uses_go_canonical_aliases_and_keeps_raw_ids_pinned() {
         Ok(ResolvedModel::PinnedRaw { mapping, .. })
             if mapping.is_command_code_goat() && mapping.upstream_model == "hy3-paid"
     ));
-    match resolve_with_all_catalogs("ox-alpha-free", &go, &zen, &[], &command).unwrap() {
-        ResolvedModel::Alias { mappings, .. } => {
-            assert!(mappings.iter().any(ProviderMapping::is_opencode_go));
-            assert!(mappings.iter().any(|mapping| {
-                mapping.is_command_code_goat() && mapping.upstream_model == "stealth/ox-alpha"
-            }));
-        }
-        other => panic!("expected Ox Alpha to share the Go baseline Alias, got {other:?}"),
-    }
     assert!(matches!(
         resolve_with_all_catalogs("stealth/ox-alpha", &go, &zen, &[], &command),
         Ok(ResolvedModel::PinnedRaw { mapping, .. })
@@ -309,7 +457,7 @@ fn command_catalog_reuses_sealed_cn_aliases_and_known_plan_suffixes() {
 }
 
 #[test]
-fn refreshed_zen_models_without_static_authority_stay_raw_only() {
+fn refreshed_zen_models_derive_stripped_aliases_from_the_free_suffix() {
     let models = vec!["brand-new-coder-free".to_string()];
     match resolve_with_provider_models("brand-new-coder-free", &models, &[]).unwrap() {
         ResolvedModel::PinnedRaw { mapping, .. } => {
@@ -318,33 +466,29 @@ fn refreshed_zen_models_without_static_authority_stay_raw_only() {
         }
         other => panic!("expected dynamic Zen raw pin, got {other:?}"),
     }
-    assert!(matches!(
-        resolve_with_provider_models("brand-new-coder", &models, &[]),
-        Err(ResolveError::Unknown { .. })
-    ));
+    match resolve_with_provider_models("brand-new-coder", &models, &[]).unwrap() {
+        ResolvedModel::Alias {
+            alias, mappings, ..
+        } => {
+            assert_eq!(alias, "brand-new-coder");
+            assert_eq!(mappings.len(), 1);
+            assert!(mappings[0].is_zen_free());
+            assert_eq!(mappings[0].upstream_model, "brand-new-coder-free");
+        }
+        other => panic!("expected stripped Zen Alias, got {other:?}"),
+    }
     let published = published_routeable_aliases_with_zen(&models);
     assert!(
-        !published
+        published
             .iter()
-            .any(|entry| entry.alias == "brand-new-coder")
+            .any(|entry| entry.alias == "brand-new-coder"
+                && entry.owned_by == OPENCODE_ZEN_FREE_PROVIDER_ID)
     );
     assert!(
         !published
             .iter()
             .any(|entry| entry.alias == "brand-new-coder-free")
     );
-}
-
-#[test]
-fn refreshed_catalog_cannot_steal_go_only_ox_alpha_free() {
-    let models = vec!["ox-alpha-free".to_string()];
-    match resolve_with_provider_models("ox-alpha-free", &models, &[]).unwrap() {
-        ResolvedModel::Alias { mappings, .. } => {
-            assert!(mappings.iter().all(ProviderMapping::is_opencode_go));
-        }
-        other => panic!("expected Go alias, got {other:?}"),
-    }
-    assert!(resolve_with_provider_models("ox-alpha", &models, &[]).is_err());
 }
 
 #[test]
@@ -366,11 +510,10 @@ fn registry_covers_every_opencode_protocol_id() {
         );
     }
     for id in &free_models {
-        let statically_authorized = supported_model_ids().any(|known| known == id);
-        assert_eq!(
-            stripped_free_alias(id).is_some_and(|alias| aliases.iter().any(|item| item == alias)),
-            statically_authorized,
-            "only a statically authorized free model may have a stripped alias: `{id}`"
+        let alias = stripped_free_alias(id).expect("seeded Zen ids end in -free");
+        assert!(
+            aliases.iter().any(|item| item == alias),
+            "Zen `-free` catalog rows must publish the stripped alias `{alias}`"
         );
         assert!(resolve(id).unwrap().routeable_mappings()[0].is_zen_free());
     }
@@ -520,14 +663,7 @@ fn eligible_goat_catalog_joins_static_aliases_and_keeps_other_ids_raw() {
         }
         other => panic!("expected raw-only GOAT pin, got {other:?}"),
     }
-    match resolve_with_catalogs(
-        COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_ALIAS,
-        &[],
-        &[],
-        &goat_ids,
-    )
-    .unwrap()
-    {
+    match resolve_with_catalogs("deepseek-v4-flash", &[], &[], &goat_ids).unwrap() {
         ResolvedModel::Alias { mappings, .. } => {
             assert!(
                 mappings
@@ -752,11 +888,13 @@ fn catalog_aliases_are_routeable_mappings_in_registry_order() {
     assert!(!go.iter().any(|alias| alias == "deepseek-v4-flash-free"));
     assert!(!zen.iter().any(|alias| alias == "glm-5.2"));
     assert!(zen.iter().any(|alias| alias == "deepseek-v4-flash"));
+    assert!(
+        zen.iter()
+            .any(|alias| alias == "muse-spark-1.3-contributor"),
+        "Zen-only `-free` rows still publish a stripped Alias"
+    );
     assert!(!zen.iter().any(|alias| alias.ends_with("-free")));
-    for id in free_models
-        .iter()
-        .filter(|id| supported_model_ids().any(|known| known == id.as_str()))
-    {
+    for id in &free_models {
         let alias = stripped_free_alias(id).expect("seeded Zen ids end in -free");
         assert!(
             zen.iter().any(|item| item == alias),
@@ -1078,9 +1216,6 @@ fn cpa_catalog_joins_code_owned_aliases_and_keeps_raw_ids_exact_and_fail_closed(
             other => panic!("CPA unknown catalog id must remain raw, got {other:?}"),
         }
     }
-    assert_eq!(canonical_alias_for_cpa_model("GLM-5.2"), "glm-5.2");
-    assert_eq!(canonical_alias_for_cpa_model("vendor/cpa-raw"), "");
-
     let published = published_routeable_aliases_with_runtime_catalogs(catalogs);
     assert!(published.iter().any(|item| item.alias == "glm-5.2"));
     assert!(!published.iter().any(|item| item.alias == "cpa-raw-model"));
@@ -1152,4 +1287,409 @@ fn extra_catalogs_aggregate_public_aliases_and_fail_closed_on_raw_ambiguity() {
     )
     .unwrap_err();
     assert_eq!(err.code(), Some(AMBIGUOUS_MODEL_ID));
+}
+
+#[test]
+fn extra_catalogs_keep_raw_shaped_public_to_upstream_mapping() {
+    let extra = ExtraProviderCatalog {
+        provider_id: "11111111-1111-4111-8111-111111111111".into(),
+        mappings: vec![
+            ("org/same".into(), "org/same".into()),
+            ("org/public".into(), "vendor/real".into()),
+            ("lab_model".into(), "vendor/lab".into()),
+            ("lab model".into(), "vendor/space".into()),
+            ("glm-5.2".into(), "vendor/glm".into()),
+        ],
+    };
+    let catalogs = RuntimeCatalogs {
+        extra: std::slice::from_ref(&extra),
+        ..RuntimeCatalogs::default()
+    };
+
+    match resolve_with_runtime_catalogs("org/same", catalogs).unwrap() {
+        ResolvedModel::PinnedRaw { mapping, .. } => {
+            assert_eq!(mapping.provider_id, extra.provider_id);
+            assert_eq!(mapping.upstream_model, "org/same");
+            assert!(mapping.routeable);
+        }
+        other => panic!("raw public==upstream must pin, got {other:?}"),
+    }
+    let public_mappings = match resolve_with_runtime_catalogs("org/public", catalogs).unwrap() {
+        ResolvedModel::Alias { mappings, .. } => mappings,
+        ResolvedModel::PinnedRaw { mapping, .. } => vec![mapping],
+    };
+    assert_eq!(public_mappings.len(), 1);
+    assert_eq!(public_mappings[0].provider_id, extra.provider_id);
+    assert_eq!(public_mappings[0].upstream_model, "vendor/real");
+    let underscore_upstream = match resolve_with_runtime_catalogs("lab_model", catalogs).unwrap() {
+        ResolvedModel::Alias { mappings, .. } => mappings[0].upstream_model.clone(),
+        ResolvedModel::PinnedRaw { mapping, .. } => mapping.upstream_model,
+    };
+    assert_eq!(underscore_upstream, "vendor/lab");
+    let space_upstream = match resolve_with_runtime_catalogs("lab model", catalogs).unwrap() {
+        ResolvedModel::Alias { mappings, .. } => mappings[0].upstream_model.clone(),
+        ResolvedModel::PinnedRaw { mapping, .. } => mapping.upstream_model,
+    };
+    assert_eq!(space_upstream, "vendor/space");
+
+    let published = published_routeable_aliases_with_runtime_catalogs(catalogs);
+    assert!(
+        published
+            .iter()
+            .any(|item| item.alias == "glm-5.2" && item.owned_by == OPENCODE_PROVIDER_ID),
+        "dynamic public names must not steal code-owned aliases: {published:?}"
+    );
+    for leaked in [
+        "org/same",
+        "org/public",
+        "vendor/real",
+        "lab_model",
+        "lab model",
+    ] {
+        assert!(
+            !published.iter().any(|item| item.alias == leaked),
+            "raw-shaped extra ids stay outside the Alias-only list: {leaked}"
+        );
+    }
+
+    match resolve_with_runtime_catalogs("glm-5.2", catalogs).unwrap() {
+        ResolvedModel::Alias { mappings, .. } => {
+            assert!(mappings.iter().any(ProviderMapping::is_opencode_go));
+            assert!(mappings.iter().any(|mapping| {
+                mapping.provider_id == extra.provider_id && mapping.upstream_model == "vendor/glm"
+            }));
+        }
+        other => panic!("code-owned alias must keep Go and join extra, got {other:?}"),
+    }
+}
+
+#[test]
+fn extra_catalog_raw_public_conflicts_stay_ambiguous() {
+    let one = ExtraProviderCatalog {
+        provider_id: "11111111-1111-4111-8111-111111111111".into(),
+        mappings: vec![("shared/raw".into(), "shared/raw".into())],
+    };
+    let two = ExtraProviderCatalog {
+        provider_id: "22222222-2222-4222-8222-222222222222".into(),
+        mappings: vec![("shared/raw".into(), "shared/raw".into())],
+    };
+    let catalogs = RuntimeCatalogs {
+        extra: &[one, two],
+        ..RuntimeCatalogs::default()
+    };
+    let err = resolve_with_runtime_catalogs("shared/raw", catalogs).unwrap_err();
+    assert_eq!(err.code(), Some(AMBIGUOUS_MODEL_ID));
+    assert!(
+        !published_routeable_aliases_with_runtime_catalogs(catalogs)
+            .iter()
+            .any(|item| item.alias == "shared/raw")
+    );
+}
+
+fn extra_ab_shared_model_collision(order: [ExtraProviderCatalog; 2]) {
+    let extras = order;
+    let err = resolve_with_runtime_catalogs(
+        "shared-model",
+        RuntimeCatalogs {
+            extra: &extras,
+            ..RuntimeCatalogs::default()
+        },
+    )
+    .unwrap_err();
+    assert_eq!(err.code(), Some(AMBIGUOUS_MODEL_ID));
+    match err {
+        ResolveError::Ambiguous { mappings, .. } => {
+            assert!(
+                mappings
+                    .iter()
+                    .any(|mapping| mapping.provider_id == extras[0].provider_id
+                        || mapping.provider_id == extras[1].provider_id)
+            );
+            assert!(
+                mappings.len() >= 2,
+                "raw/public collision must not pick a single extra, got {mappings:?}"
+            );
+        }
+        other => panic!("expected Ambiguous, got {other:?}"),
+    }
+}
+
+#[test]
+fn extra_catalogs_fail_closed_when_public_alias_collides_with_another_upstream() {
+    let extra_a = ExtraProviderCatalog {
+        provider_id: "11111111-1111-4111-8111-111111111111".into(),
+        mappings: vec![("shared-model".into(), "vendor-a".into())],
+    };
+    let extra_b = ExtraProviderCatalog {
+        provider_id: "22222222-2222-4222-8222-222222222222".into(),
+        mappings: vec![("other-model".into(), "shared-model".into())],
+    };
+    extra_ab_shared_model_collision([extra_a.clone(), extra_b.clone()]);
+    extra_ab_shared_model_collision([extra_b.clone(), extra_a.clone()]);
+
+    match resolve_with_runtime_catalogs(
+        "other-model",
+        RuntimeCatalogs {
+            extra: &[extra_a.clone(), extra_b.clone()],
+            ..RuntimeCatalogs::default()
+        },
+    )
+    .unwrap()
+    {
+        ResolvedModel::Alias { mappings, .. } => {
+            assert_eq!(mappings.len(), 1);
+            assert_eq!(mappings[0].provider_id, extra_b.provider_id);
+            assert_eq!(mappings[0].upstream_model, "shared-model");
+        }
+        other => panic!("other-model stays B's public alias, got {other:?}"),
+    }
+
+    match resolve_with_runtime_catalogs(
+        "vendor-a",
+        RuntimeCatalogs {
+            extra: &[extra_a.clone(), extra_b],
+            ..RuntimeCatalogs::default()
+        },
+    )
+    .unwrap()
+    {
+        ResolvedModel::PinnedRaw { mapping, .. } => {
+            assert_eq!(mapping.provider_id, extra_a.provider_id);
+            assert_eq!(mapping.upstream_model, "vendor-a");
+        }
+        other => panic!("unique raw vendor-a must pin, got {other:?}"),
+    }
+}
+
+#[test]
+fn extra_catalogs_fail_closed_on_builtin_alias_upstream_collision() {
+    let extra = ExtraProviderCatalog {
+        provider_id: "11111111-1111-4111-8111-111111111111".into(),
+        mappings: vec![("other-model".into(), "glm-5.2".into())],
+    };
+    let err = resolve_with_runtime_catalogs(
+        "glm-5.2",
+        RuntimeCatalogs {
+            extra: std::slice::from_ref(&extra),
+            ..RuntimeCatalogs::default()
+        },
+    )
+    .unwrap_err();
+    assert_eq!(err.code(), Some(AMBIGUOUS_MODEL_ID));
+}
+
+#[test]
+fn extra_catalogs_fail_closed_when_same_provider_raw_precedes_public() {
+    let extra = ExtraProviderCatalog {
+        provider_id: "11111111-1111-4111-8111-111111111111".into(),
+        mappings: vec![
+            ("other-model".into(), "shared-model".into()),
+            ("shared-model".into(), "vendor-a".into()),
+        ],
+    };
+    let err = resolve_with_runtime_catalogs(
+        "shared-model",
+        RuntimeCatalogs {
+            extra: std::slice::from_ref(&extra),
+            ..RuntimeCatalogs::default()
+        },
+    )
+    .unwrap_err();
+    assert_eq!(err.code(), Some(AMBIGUOUS_MODEL_ID));
+
+    let extra_public_first = ExtraProviderCatalog {
+        provider_id: extra.provider_id.clone(),
+        mappings: vec![
+            ("shared-model".into(), "vendor-a".into()),
+            ("other-model".into(), "shared-model".into()),
+        ],
+    };
+    let err = resolve_with_runtime_catalogs(
+        "shared-model",
+        RuntimeCatalogs {
+            extra: std::slice::from_ref(&extra_public_first),
+            ..RuntimeCatalogs::default()
+        },
+    )
+    .unwrap_err();
+    assert_eq!(err.code(), Some(AMBIGUOUS_MODEL_ID));
+}
+
+#[test]
+fn extra_catalogs_keep_canonical_public_match_without_stealing_raw() {
+    let extra = ExtraProviderCatalog {
+        provider_id: "11111111-1111-4111-8111-111111111111".into(),
+        mappings: vec![("Shared-Model".into(), "vendor-a".into())],
+    };
+    match resolve_with_runtime_catalogs(
+        "shared-model",
+        RuntimeCatalogs {
+            extra: std::slice::from_ref(&extra),
+            ..RuntimeCatalogs::default()
+        },
+    )
+    .unwrap()
+    {
+        ResolvedModel::Alias { mappings, .. } => {
+            assert_eq!(mappings.len(), 1);
+            assert_eq!(mappings[0].provider_id, extra.provider_id);
+            assert_eq!(mappings[0].upstream_model, "vendor-a");
+        }
+        other => panic!("canonical public match must resolve, got {other:?}"),
+    }
+}
+
+#[test]
+fn extra_catalogs_allow_multiple_public_names_for_the_same_raw_target() {
+    for requested in ["shared-model", "org/public"] {
+        let mut extra = ExtraProviderCatalog {
+            provider_id: "11111111-1111-4111-8111-111111111111".into(),
+            mappings: vec![
+                (requested.into(), requested.into()),
+                ("other-model".into(), requested.into()),
+            ],
+        };
+        for _ in 0..2 {
+            let resolved = resolve_with_runtime_catalogs(
+                requested,
+                RuntimeCatalogs {
+                    extra: std::slice::from_ref(&extra),
+                    ..RuntimeCatalogs::default()
+                },
+            )
+            .unwrap();
+            let mappings = resolved.routeable_mappings();
+            assert_eq!(mappings.len(), 1);
+            assert_eq!(mappings[0].provider_id, extra.provider_id);
+            assert_eq!(mappings[0].upstream_model, requested);
+            extra.mappings.reverse();
+        }
+    }
+}
+
+#[test]
+fn extra_catalogs_reject_same_provider_raw_shaped_public_target_conflicts() {
+    let mut extra = ExtraProviderCatalog {
+        provider_id: "11111111-1111-4111-8111-111111111111".into(),
+        mappings: vec![
+            ("org/public".into(), "vendor/real".into()),
+            ("other-model".into(), "org/public".into()),
+        ],
+    };
+    for _ in 0..2 {
+        let error = resolve_with_runtime_catalogs(
+            "org/public",
+            RuntimeCatalogs {
+                extra: std::slice::from_ref(&extra),
+                ..RuntimeCatalogs::default()
+            },
+        )
+        .unwrap_err();
+        assert_eq!(error.code(), Some(AMBIGUOUS_MODEL_ID));
+        let ResolveError::Ambiguous { mappings, .. } = error else {
+            unreachable!()
+        };
+        assert_eq!(mappings.len(), 2);
+        assert!(
+            mappings
+                .iter()
+                .any(|mapping| mapping.upstream_model == "vendor/real")
+        );
+        assert!(
+            mappings
+                .iter()
+                .any(|mapping| mapping.upstream_model == "org/public")
+        );
+        extra.mappings.reverse();
+    }
+}
+
+fn resolve_ollama(
+    requested: &str,
+    ollama: &[&str],
+    pinned: &[&str],
+) -> Result<ResolvedModel, ResolveError> {
+    let ollama_models: Vec<String> = ollama.iter().map(|id| id.to_string()).collect();
+    let pinned_models: Vec<String> = pinned.iter().map(|id| id.to_string()).collect();
+    resolve_with_runtime_catalogs(
+        requested,
+        RuntimeCatalogs {
+            ollama: &ollama_models,
+            ollama_pinned: &pinned_models,
+            ..RuntimeCatalogs::default()
+        },
+    )
+}
+
+#[test]
+fn ollama_overlay_appends_shared_alias_mappings_without_stealing_publication() {
+    match resolve_ollama(
+        "deepseek-v4-flash",
+        &["deepseek-v4-flash:0731", "gpt-oss:20b", "gpt-oss:120b"],
+        &[],
+    )
+    .unwrap()
+    {
+        ResolvedModel::Alias {
+            alias, mappings, ..
+        } => {
+            assert_eq!(alias, "deepseek-v4-flash");
+            assert!(
+                mappings.iter().any(ProviderMapping::is_opencode_go),
+                "Go keeps owning the shared alias"
+            );
+            assert!(mappings.iter().any(|mapping| {
+                mapping.is_ollama_cloud()
+                    && mapping.routeable
+                    && mapping.upstream_model == "deepseek-v4-flash:0731"
+            }));
+            assert!(
+                !mappings.iter().any(|mapping| {
+                    mapping.is_ollama_cloud() && mapping.upstream_model == "gpt-oss:20b"
+                }),
+                "size-variant stems must not bind the shared alias"
+            );
+        }
+        other => panic!("expected shared alias, got {other:?}"),
+    }
+
+    match resolve_ollama("gpt-oss:20b", &["gpt-oss:20b", "gpt-oss:120b"], &[]).unwrap() {
+        ResolvedModel::PinnedRaw { mapping, .. } => {
+            assert!(mapping.is_ollama_cloud());
+            assert_eq!(mapping.upstream_model, "gpt-oss:20b");
+        }
+        other => panic!("expected raw pin, got {other:?}"),
+    }
+    assert!(resolve_ollama("gpt-oss", &["gpt-oss:20b", "gpt-oss:120b"], &[]).is_err());
+}
+
+#[test]
+fn ollama_overlay_coexisting_tags_fail_closed_until_pinned() {
+    let coexisting = ["deepseek-v4-flash:0731", "deepseek-v4-flash:0915"];
+    match resolve_ollama(COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_ALIAS, &coexisting, &[]).unwrap() {
+        ResolvedModel::Alias { mappings, .. } => {
+            assert!(
+                !mappings.iter().any(ProviderMapping::is_ollama_cloud),
+                "coexisting tags must not guess a shared-alias binding"
+            );
+        }
+        other => panic!("expected shared alias, got {other:?}"),
+    }
+    match resolve_ollama(
+        "deepseek-v4-flash",
+        &coexisting,
+        &["deepseek-v4-flash:0915"],
+    )
+    .unwrap()
+    {
+        ResolvedModel::Alias { mappings, .. } => {
+            let ollama: Vec<_> = mappings
+                .iter()
+                .filter(|mapping| mapping.is_ollama_cloud())
+                .collect();
+            assert_eq!(ollama.len(), 1);
+            assert_eq!(ollama[0].upstream_model, "deepseek-v4-flash:0915");
+        }
+        other => panic!("expected pinned shared alias, got {other:?}"),
+    }
 }

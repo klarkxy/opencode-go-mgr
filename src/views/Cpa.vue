@@ -15,8 +15,10 @@
     </n-alert>
 
     <template v-else-if="integration">
+      <n-tabs v-model:value="activeTab" type="line" animated class="cpa-tabs" display-directive="if">
+        <n-tab-pane name="overview" :tab="t('概览')">
       <section class="cpa-section" aria-labelledby="cpa-overview-title">
-        <h2 id="cpa-overview-title" class="cpa-section-title">{{ t("概览") }}</h2>
+        <h2 id="cpa-overview-title" class="cpa-section-title sr-only">{{ t("概览") }}</h2>
         <n-space class="cpa-mode-choice" align="center" wrap>
           <span class="cpa-muted">{{ t("选择 CPA 使用方式") }}</span>
           <n-button size="small" :type="mode === 'external' ? 'primary' : 'default'" @click="selectMode('external')">
@@ -106,7 +108,7 @@
 
         <template v-else>
           <n-alert v-if="mode === 'unsupported'" type="warning" :title="t('当前环境不支持托管 CPA 运行时')">
-            {{ integration.runtimeUnavailableReason || runtime?.unavailableReason || t("仅已安装的 Windows x64 桌面端可以托管 CPA；请改用外部连接。") }}
+            {{ integration.runtimeUnavailableReason || runtime?.unavailableReason || t("当前平台没有官方 CLIProxyAPI 构建（支持 Windows x64、macOS、Linux x64）；请改用外部连接。") }}
           </n-alert>
 
           <template v-else>
@@ -193,114 +195,11 @@
                   @click="confirmRemoveRuntime"
                 >{{ t("移除") }}</n-button>
               </n-space>
-
-              <div class="cpa-logs">
-                <n-button size="small" secondary :aria-expanded="logsExpanded" @click="toggleLogs">
-                  {{ logsExpanded ? t("收起日志") : t("查看日志") }}
-                </n-button>
-                <template v-if="logsExpanded">
-                  <div v-if="logsLoading" class="cpa-state"><n-spin size="small" /></div>
-                  <n-alert v-else-if="logsError" type="error" :title="t('加载 CPA 运行时日志失败: {error}', { error: logsError })">
-                    <n-button size="small" secondary @click="refreshLogs">{{ t("重试") }}</n-button>
-                  </n-alert>
-                  <template v-else-if="logs">
-                    <div class="cpa-log-actions">
-                      <n-button size="tiny" quaternary :loading="logsLoading" @click="refreshLogs">{{ t("刷新日志") }}</n-button>
-                    </div>
-                    <template v-if="stdoutTail || stderrTail">
-                      <h3 class="cpa-log-title">{{ t("标准输出") }}</h3>
-                      <pre class="cpa-log mono">{{ stdoutTail || t("暂无日志") }}</pre>
-                      <h3 class="cpa-log-title">{{ t("标准错误") }}</h3>
-                      <pre class="cpa-log mono">{{ stderrTail || t("暂无日志") }}</pre>
-                    </template>
-                    <n-empty v-else :description="t('暂无日志')" />
-                  </template>
-                </template>
-              </div>
             </n-card>
           </template>
         </template>
-      </section>
 
-      <section class="cpa-section" aria-labelledby="cpa-accounts-title">
-        <h2 id="cpa-accounts-title" class="cpa-section-title">{{ t("账号") }}</h2>
-
-        <n-card size="small" :title="t('模型目录')" class="cpa-card">
-          <n-space align="center" wrap>
-            <n-button
-              :disabled="!integration.configured"
-              :loading="refreshingModels"
-              @click="refreshModels"
-            >{{ t("刷新模型目录") }}</n-button>
-            <span class="cpa-muted">{{ modelCatalogDetail }}</span>
-          </n-space>
-          <p v-if="integration.modelCount === 0" class="cpa-help">{{ t("尚未刷新模型目录；启用路由前请先刷新。") }}</p>
-        </n-card>
-
-        <n-card size="small" :title="t('CPA OAuth 账号')" class="cpa-card">
-          <template #header-extra>
-            <span class="cpa-muted">{{ t("由 CPA 管理；OCG 不读取或保存 OAuth Token。") }}</span>
-          </template>
-          <n-space wrap class="oauth-providers">
-            <n-button
-              v-for="provider in CPA_OAUTH_PROVIDERS"
-              :key="provider.id"
-              secondary
-              :disabled="!integration.configured || !!oauth || !!oauthStartingProvider"
-              :loading="oauthStartingProvider === provider.id"
-              @click="startOAuth(provider.id)"
-            >{{ t("登录 {provider}", { provider: provider.label }) }}</n-button>
-          </n-space>
-          <n-alert v-if="oauth" type="info" class="cpa-oauth-status" :show-icon="false">
-            <p>{{ t("正在等待 CPA 完成授权…") }}</p>
-            <n-space align="center" wrap>
-              <n-button v-if="oauth.url" size="small" type="primary" tag="a" :href="oauth.url" target="_blank" rel="noopener noreferrer">
-                {{ t("打开授权页面") }}
-              </n-button>
-              <n-tag v-if="oauth.userCode" type="warning">{{ t("设备码：{code}", { code: oauth.userCode }) }}</n-tag>
-              <n-button size="small" secondary :loading="oauthCancelling" @click="cancelOAuth">{{ t("取消当前授权") }}</n-button>
-            </n-space>
-          </n-alert>
-
-          <div v-if="accountsLoading" class="cpa-state"><n-spin size="small" /></div>
-          <n-alert v-else-if="accountsError" type="error" :title="t('CPA 账号操作失败: {error}', { error: accountsError })">
-            <n-button size="small" secondary @click="loadAccounts">{{ t("重试") }}</n-button>
-          </n-alert>
-          <n-empty v-else-if="cpaAccounts.length === 0" :description="t('暂无账号')" />
-          <div v-else class="cpa-account-list">
-            <article v-for="account in cpaAccounts" :key="cpaAccountKey(account)" class="cpa-account-row">
-              <div class="cpa-account-main">
-                <div class="cpa-account-title">
-                  <strong>{{ account.label || account.name }}</strong>
-                  <n-tag v-if="account.runtimeOnly" type="warning" size="small">{{ t("运行时插件账号，仅供查看") }}</n-tag>
-                  <n-tag v-else :type="account.disabled || account.unavailable ? 'default' : 'success'" size="small">
-                    {{ account.status || (account.disabled ? t("已禁用") : account.unavailable ? t("不可用") : t("可用")) }}
-                  </n-tag>
-                </div>
-                <span class="cpa-muted">{{ account.provider }}<template v-if="account.email"> · {{ account.email }}</template></span>
-                <span v-if="account.statusMessage" class="cpa-muted">{{ account.statusMessage }}</span>
-                <span v-if="account.quota !== null" class="cpa-muted">{{ t("配额") }} · {{ formatCpaQuota(account.quota) }}</span>
-              </div>
-              <n-space v-if="account.mutable && !account.runtimeOnly && account.authIndex" wrap>
-                <n-button size="small" :loading="accountAction === cpaAccountKey(account)" @click="setAccountStatus(account, !account.disabled)">
-                  {{ account.disabled ? t("启用") : t("停用") }}
-                </n-button>
-                <n-button v-if="account.authIndex" size="small" :loading="accountAction === cpaAccountKey(account)" @click="resetQuota(account)">
-                  {{ t("重置配额") }}
-                </n-button>
-                <n-button size="small" type="error" secondary :loading="accountAction === cpaAccountKey(account)" @click="confirmDeleteAccount(account)">
-                  {{ t("删除") }}
-                </n-button>
-              </n-space>
-            </article>
-          </div>
-        </n-card>
-      </section>
-
-      <section v-if="showClientKeys" class="cpa-section" aria-labelledby="cpa-keys-title">
-        <h2 id="cpa-keys-title" class="cpa-section-title">{{ t("客户端 Key") }}</h2>
-
-        <n-card size="small" class="cpa-card">
+        <n-card v-if="showClientKeys" size="small" :title="t('客户端 Key')" class="cpa-card">
           <template #header-extra>
             <n-space wrap>
               <n-button
@@ -312,6 +211,7 @@
               >{{ t("添加客户端 Key") }}</n-button>
             </n-space>
           </template>
+          <p class="cpa-help">{{ t("OCG 使用受保护的路由 Key 访问 CPA；只有直连 CPA 时才需要额外 Key。") }}</p>
 
           <n-alert v-if="revealedSecret" type="success" class="cpa-secret" :title="t('新 Key 仅显示这一次')">
             <p>{{ t("请立即复制并妥善保存；关闭后将无法再次查看。") }}</p>
@@ -377,12 +277,140 @@
           </template>
         </n-card>
       </section>
+        </n-tab-pane>
+
+        <n-tab-pane name="accounts" :tab="t('账号')">
+      <section class="cpa-section" aria-labelledby="cpa-accounts-title">
+        <h2 id="cpa-accounts-title" class="cpa-section-title sr-only">{{ t("账号") }}</h2>
+
+        <n-card size="small" :title="t('CPA OAuth 账号')" class="cpa-card">
+          <template #header-extra>
+            <span class="cpa-muted">{{ t("由 CPA 管理；OCG 不读取或保存 OAuth Token。") }}</span>
+          </template>
+          <n-space wrap class="oauth-providers">
+            <n-button
+              v-for="provider in CPA_OAUTH_PROVIDERS"
+              :key="provider.id"
+              secondary
+              :disabled="!integration.configured || !!oauth || !!oauthStartingProvider"
+              :loading="oauthStartingProvider === provider.id"
+              @click="startOAuth(provider.id)"
+            >{{ t("登录 {provider}", { provider: provider.label }) }}</n-button>
+          </n-space>
+          <n-alert v-if="oauth" type="info" class="cpa-oauth-status" :show-icon="false">
+            <p>{{ t("正在等待 CPA 完成授权…") }}</p>
+            <n-space align="center" wrap>
+              <n-button v-if="oauth.url" size="small" type="primary" tag="a" :href="oauth.url" target="_blank" rel="noopener noreferrer">
+                {{ t("打开授权页面") }}
+              </n-button>
+              <n-tag v-if="oauth.userCode" type="warning">{{ t("设备码：{code}", { code: oauth.userCode }) }}</n-tag>
+              <n-button size="small" secondary :loading="oauthCancelling" @click="cancelOAuth">{{ t("取消当前授权") }}</n-button>
+            </n-space>
+          </n-alert>
+
+          <div v-if="accountsLoading" class="cpa-state"><n-spin size="small" /></div>
+          <n-alert v-else-if="accountsError" type="error" :title="t('CPA 账号操作失败: {error}', { error: accountsError })">
+            <n-button size="small" secondary @click="loadAccounts">{{ t("重试") }}</n-button>
+          </n-alert>
+          <n-empty v-else-if="cpaAccounts.length === 0" :description="t('暂无账号')" />
+          <div v-else class="cpa-account-list">
+            <article v-for="account in cpaAccounts" :key="cpaAccountKey(account)" class="cpa-account-row">
+              <div class="cpa-account-main">
+                <div class="cpa-account-title">
+                  <strong>{{ account.label || account.name }}</strong>
+                  <n-tag v-if="account.runtimeOnly" type="warning" size="small">{{ t("运行时插件账号，仅供查看") }}</n-tag>
+                  <n-tag v-else :type="account.disabled || account.unavailable ? 'default' : 'success'" size="small">
+                    {{ account.status || (account.disabled ? t("已禁用") : account.unavailable ? t("不可用") : t("可用")) }}
+                  </n-tag>
+                </div>
+                <span class="cpa-muted">{{ account.provider }}<template v-if="account.email"> · {{ account.email }}</template></span>
+                <span v-if="account.statusMessage" class="cpa-muted">{{ account.statusMessage }}</span>
+                <span v-if="account.quota !== null" class="cpa-muted">{{ t("配额") }} · {{ formatCpaQuota(account.quota) }}</span>
+              </div>
+              <n-space v-if="account.mutable && !account.runtimeOnly && account.authIndex" wrap>
+                <n-button size="small" :loading="accountAction === cpaAccountKey(account)" @click="setAccountStatus(account, !account.disabled)">
+                  {{ account.disabled ? t("启用") : t("停用") }}
+                </n-button>
+                <n-button v-if="account.authIndex" size="small" :loading="accountAction === cpaAccountKey(account)" @click="resetQuota(account)">
+                  {{ t("重置配额") }}
+                </n-button>
+                <n-button size="small" type="error" secondary :loading="accountAction === cpaAccountKey(account)" @click="confirmDeleteAccount(account)">
+                  {{ t("删除") }}
+                </n-button>
+              </n-space>
+            </article>
+          </div>
+        </n-card>
+      </section>
+        </n-tab-pane>
+
+        <n-tab-pane name="catalog" :tab="t('模型目录')">
+      <section class="cpa-section" aria-labelledby="cpa-catalog-title">
+        <h2 id="cpa-catalog-title" class="cpa-section-title sr-only">{{ t("模型目录") }}</h2>
+        <n-card size="small" class="cpa-card">
+          <div class="cpa-catalog-head">
+            <div class="cpa-catalog-meta">
+              <span>{{ modelCatalogDetail }}</span>
+              <span v-if="catalogSourceUrl" class="mono">{{ t("来源") }} · {{ catalogSourceUrl }}</span>
+            </div>
+            <n-button
+              type="primary"
+              :disabled="!integration.configured"
+              :loading="refreshingModels"
+              @click="refreshModels"
+            >{{ catalogRefreshingLabel }}</n-button>
+          </div>
+          <div v-if="catalogLoading" class="cpa-state"><n-spin size="small" /></div>
+          <n-alert v-else-if="catalogError" type="error" :title="t('加载模型目录失败: {error}', { error: catalogError })">
+            <n-button size="small" secondary @click="loadCatalog">{{ t("重试") }}</n-button>
+          </n-alert>
+          <p v-else-if="catalogModels.length === 0" class="cpa-help">{{ t("尚未刷新模型目录；启用路由前请先刷新。") }}</p>
+          <div v-else class="cpa-catalog-groups">
+            <section v-for="group in catalogGroups" :key="group.source || 'unknown'" class="cpa-catalog-group">
+              <h3>{{ group.source || t("未知来源") }} · {{ group.models.length }}</h3>
+              <ul>
+                <li v-for="model in group.models" :key="model.id">
+                  <code class="mono">{{ model.id }}</code>
+                </li>
+              </ul>
+            </section>
+          </div>
+        </n-card>
+      </section>
+        </n-tab-pane>
+
+        <n-tab-pane v-if="mode === 'managed'" name="logs" :tab="t('运行时日志')">
+      <section class="cpa-section" aria-labelledby="cpa-logs-title">
+        <h2 id="cpa-logs-title" class="cpa-section-title sr-only">{{ t("运行时日志") }}</h2>
+
+        <n-card size="small" class="cpa-card">
+          <template #header-extra>
+            <n-button size="small" quaternary :loading="logsLoading" @click="refreshLogs">{{ t("刷新日志") }}</n-button>
+          </template>
+          <div v-if="logsLoading" class="cpa-state"><n-spin size="small" /></div>
+          <n-alert v-else-if="logsError" type="error" :title="t('加载 CPA 运行时日志失败: {error}', { error: logsError })">
+            <n-button size="small" secondary @click="refreshLogs">{{ t("重试") }}</n-button>
+          </n-alert>
+          <template v-else-if="logs">
+            <template v-if="stdoutTail || stderrTail">
+              <h3 class="cpa-log-title">{{ t("标准输出") }}</h3>
+              <pre class="cpa-log mono">{{ stdoutTail || t("暂无日志") }}</pre>
+              <h3 class="cpa-log-title">{{ t("标准错误") }}</h3>
+              <pre class="cpa-log mono">{{ stderrTail || t("暂无日志") }}</pre>
+            </template>
+            <n-empty v-else :description="t('暂无日志')" />
+          </template>
+          <n-empty v-else :description="t('暂无日志')" />
+        </n-card>
+      </section>
+        </n-tab-pane>
+      </n-tabs>
     </template>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, h, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref } from "vue";
+import { computed, h, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from "vue";
 import {
   NAlert,
   NButton,
@@ -394,6 +422,8 @@ import {
   NSpin,
   NSpace,
   NSwitch,
+  NTabPane,
+  NTabs,
   NTag,
   useDialog,
   useMessage,
@@ -402,6 +432,7 @@ import type {
   CpaAccount,
   CpaConnectionReport,
   CpaIntegration,
+  CpaModel,
   CpaOAuthProvider,
   CpaOAuthStart,
   CpaRuntime,
@@ -425,6 +456,7 @@ import {
   cpaRuntimeControls,
   cpaRuntimeMode,
   formatCpaQuota,
+  groupCpaCatalogModels,
   partitionCpaRuntimeKeys,
   isCpaOAuthSuccessStatus,
   isCpaOAuthTerminalStatus,
@@ -445,6 +477,10 @@ const loadError = ref("");
 const saving = ref(false);
 const testing = ref(false);
 const refreshingModels = ref(false);
+const catalogModels = ref<CpaModel[]>([]);
+const catalogSourceUrl = ref<string | null>(null);
+const catalogLoading = ref(false);
+const catalogError = ref("");
 const accountsLoading = ref(false);
 const accountsError = ref("");
 const accountAction = ref("");
@@ -453,6 +489,7 @@ const oauth = ref<CpaOAuthStart | null>(null);
 const oauthStartingProvider = ref<CpaOAuthProvider | null>(null);
 const oauthCancelling = ref(false);
 let oauthTimer: number | null = null;
+let oauthPollGeneration = 0;
 
 const runtime = ref<CpaRuntime | null>(null);
 const runtimeError = ref("");
@@ -463,9 +500,10 @@ let runtimeTimer: number | null = null;
 let runtimePollGeneration = 0;
 
 const logs = ref<CpaRuntimeLogs | null>(null);
-const logsExpanded = ref(false);
 const logsLoading = ref(false);
 const logsError = ref("");
+
+const activeTab = ref("overview");
 
 const runtimeKeys = ref<CpaRuntimeKey[]>([]);
 const keysLoading = ref(false);
@@ -491,6 +529,10 @@ const controls = computed(() => cpaRuntimeControls({
   updateCheck: runtimeCheck.value,
 }));
 const keyPartition = computed(() => partitionCpaRuntimeKeys(runtimeKeys.value));
+const catalogGroups = computed(() => groupCpaCatalogModels(catalogModels.value));
+const catalogRefreshingLabel = computed(() => (
+  refreshingModels.value ? t("正在刷新模型目录…") : t("刷新模型目录")
+));
 const stdoutTail = computed(() => cpaLogTail(logs.value?.stdout ?? ""));
 const stderrTail = computed(() => cpaLogTail(logs.value?.stderr ?? ""));
 
@@ -522,12 +564,12 @@ const rollbackLabel = computed(() => (
 ));
 
 const modelCatalogDetail = computed(() => {
-  if (!integration.value) return "";
-  if (integration.value.modelCount === 0) return t("未测试");
-  const refreshed = integration.value.modelsRefreshedAt
+  const count = catalogModels.value.length || integration.value?.modelCount || 0;
+  if (count === 0) return t("未测试");
+  const refreshed = integration.value?.modelsRefreshedAt
     ? new Date(integration.value.modelsRefreshedAt).toLocaleString()
     : "";
-  return refreshed ? `${integration.value.modelCount} · ${refreshed}` : String(integration.value.modelCount);
+  return refreshed ? `${count} · ${refreshed}` : String(count);
 });
 
 function runtimePhaseLabel(phase: CpaRuntimePhase): string {
@@ -578,8 +620,13 @@ async function load(): Promise<void> {
       runtime.value = null;
       runtimeError.value = dashboardErrorDetail(error);
     }
-    if (value.configured) await loadAccounts();
-    else cpaAccounts.value = [];
+    if (value.configured) {
+      await loadAccounts();
+      await loadCatalog();
+    } else {
+      cpaAccounts.value = [];
+      resetCatalog();
+    }
     if (generation !== runtimePollGeneration) return;
     if (cpaClientKeysAvailable(runtime.value)) await loadRuntimeKeys();
     else runtimeKeys.value = [];
@@ -609,6 +656,7 @@ async function save(): Promise<void> {
     draft.value.managementKey = "";
     message.success(t("CPA 配置已保存"));
     await loadAccounts();
+    await loadCatalog();
   } catch (error) {
     message.error(t("CPA 配置失败: {error}", { error: dashboardErrorDetail(error) }));
   } finally {
@@ -644,14 +692,44 @@ async function setRoutingEnabled(enabled: boolean): Promise<void> {
   }
 }
 
+function applyCatalog(snapshot: { models: CpaModel[]; sourceUrl: string | null; refreshedAt: string | null }): void {
+  catalogModels.value = snapshot.models;
+  catalogSourceUrl.value = snapshot.sourceUrl;
+  catalogError.value = "";
+  if (integration.value) {
+    integration.value = {
+      ...integration.value,
+      modelCount: snapshot.models.length,
+      modelsRefreshedAt: snapshot.refreshedAt,
+    };
+  }
+}
+
+function resetCatalog(): void {
+  catalogModels.value = [];
+  catalogSourceUrl.value = null;
+  catalogError.value = "";
+}
+
+async function loadCatalog(): Promise<void> {
+  if (catalogLoading.value) return;
+  catalogLoading.value = true;
+  catalogError.value = "";
+  try {
+    applyCatalog(await dashboardV3.getCpaModels());
+  } catch (error) {
+    catalogError.value = dashboardErrorDetail(error);
+  } finally {
+    catalogLoading.value = false;
+  }
+}
+
 async function refreshModels(): Promise<void> {
   if (refreshingModels.value) return;
   refreshingModels.value = true;
   try {
     const models = await runMutation((expectation) => dashboardV3.refreshCpaModels(expectation));
-    if (integration.value) {
-      integration.value = { ...integration.value, modelCount: models.models.length, modelsRefreshedAt: models.refreshedAt };
-    }
+    applyCatalog(models);
     message.success(t("模型目录已刷新，共 {count} 个模型", { count: models.models.length }));
   } catch (error) {
     message.error(t("CPA 模型刷新失败: {error}", { error: dashboardErrorDetail(error) }));
@@ -731,42 +809,66 @@ async function deleteAccount(account: CpaAccount): Promise<void> {
 
 async function startOAuth(provider: CpaOAuthProvider): Promise<void> {
   if (oauth.value || oauthStartingProvider.value) return;
+  // A new flow invalidates any poll still in flight from a previous one.
+  bumpOAuthPollGeneration();
+  const generation = oauthPollGeneration;
   oauthStartingProvider.value = provider;
   try {
     const started = await runMutation((expectation) => dashboardV3.startCpaOAuth({ provider }, expectation));
+    if (generation !== oauthPollGeneration) {
+      // The page left or the flow was superseded while the start was in flight:
+      // never adopt the session, but release it server-side on a best-effort basis.
+      void runMutation((expectation) => dashboardV3.cancelCpaOAuth({ state: started.state }, expectation)).catch(() => {});
+      return;
+    }
     oauth.value = started;
     if (started.url) window.open(started.url, "_blank", "noopener,noreferrer");
     scheduleOAuthPoll();
   } catch (error) {
+    if (generation !== oauthPollGeneration) return;
     message.error(t("CPA 账号操作失败: {error}", { error: dashboardErrorDetail(error) }));
   } finally {
     oauthStartingProvider.value = null;
   }
 }
 
+function bumpOAuthPollGeneration(): void {
+  oauthPollGeneration += 1;
+  stopOAuthPoll();
+}
+
+// Completion-scheduled single flight: the next poll is queued only after the
+// previous response has been applied, so a slow status read never overlaps itself.
 function scheduleOAuthPoll(): void {
   stopOAuthPoll();
-  oauthTimer = window.setInterval(() => void pollOAuth(), 3000);
+  oauthTimer = window.setTimeout(() => void pollOAuth(), 3000);
 }
 
 function stopOAuthPoll(): void {
-  if (oauthTimer !== null) window.clearInterval(oauthTimer);
+  if (oauthTimer !== null) window.clearTimeout(oauthTimer);
   oauthTimer = null;
 }
 
 async function pollOAuth(): Promise<void> {
   const active = oauth.value;
   if (!active) return;
+  const generation = oauthPollGeneration;
+  const flowState = active.state;
   try {
-    const status = await dashboardV3.getCpaOAuthStatus(active.state);
+    const status = await dashboardV3.getCpaOAuthStatus(flowState);
+    // Cancel, leaving the page, or a newer flow invalidates this response.
+    if (generation !== oauthPollGeneration || oauth.value?.state !== flowState) return;
     if (isCpaOAuthTerminalStatus(status.status)) {
-      stopOAuthPoll();
+      bumpOAuthPollGeneration();
       oauth.value = null;
       if (isCpaOAuthSuccessStatus(status.status)) await loadAccounts();
       else if (status.error) message.warning(status.error);
+    } else {
+      scheduleOAuthPoll();
     }
   } catch (error) {
-    stopOAuthPoll();
+    if (generation !== oauthPollGeneration || oauth.value?.state !== flowState) return;
+    bumpOAuthPollGeneration();
     oauth.value = null;
     message.error(t("CPA 账号操作失败: {error}", { error: dashboardErrorDetail(error) }));
   }
@@ -774,20 +876,26 @@ async function pollOAuth(): Promise<void> {
 
 async function cancelOAuth(): Promise<void> {
   const active = oauth.value;
+  // Invalidate synchronously: an in-flight poll must not mutate state or
+  // re-arm the timer while the cancel request is still on the wire.
+  bumpOAuthPollGeneration();
   if (!active) return;
+  const generation = oauthPollGeneration;
   oauthCancelling.value = true;
   try {
     await runMutation((expectation) => dashboardV3.cancelCpaOAuth({ state: active.state }, expectation));
   } catch {
     // A page close must not surface a second error over the original OAuth result.
   } finally {
-    stopOAuthPoll();
-    oauth.value = null;
+    // A slow cancel must not clear a flow started after this one was invalidated.
+    if (generation === oauthPollGeneration && oauth.value?.state === active.state) oauth.value = null;
     oauthCancelling.value = false;
   }
 }
 
 function cancelOAuthOnLeave(): void {
+  // Bump even with no visible flow so a pending start resolves into a no-op.
+  bumpOAuthPollGeneration();
   if (!oauth.value) return;
   void cancelOAuth();
 }
@@ -808,6 +916,7 @@ async function disconnect(): Promise<void> {
     await runMutation((expectation) => dashboardV3.deleteCpaIntegration(expectation));
     integration.value = await dashboardV3.getCpaIntegration();
     cpaAccounts.value = [];
+    resetCatalog();
     report.value = null;
     draft.value = { baseUrl: integration.value.baseUrl, inferenceKey: "", managementKey: "" };
     message.success(t("CPA 已断开"));
@@ -889,8 +998,13 @@ async function refreshAfterRuntimeSettled(): Promise<void> {
     // The runtime snapshot remains visible and the header retry can recover the integration read.
     return;
   }
-  if (integration.value.configured) await loadAccounts();
-  else cpaAccounts.value = [];
+  if (integration.value.configured) {
+    await loadAccounts();
+    await loadCatalog();
+  } else {
+    cpaAccounts.value = [];
+    resetCatalog();
+  }
   if (generation !== runtimePollGeneration) return;
   if (cpaClientKeysAvailable(runtime.value)) await loadRuntimeKeys();
   else runtimeKeys.value = [];
@@ -981,10 +1095,13 @@ function confirmRemoveRuntime(): void {
 
 // --- runtime logs ---
 
-function toggleLogs(): void {
-  logsExpanded.value = !logsExpanded.value;
-  if (logsExpanded.value && !logs.value) void refreshLogs();
-}
+// Logs live in their own tab: load them on first visit, and fall back to the
+// overview tab if the active pane disappears with the managed runtime.
+watch([activeTab, mode], () => {
+  if (activeTab.value === "keys") activeTab.value = "overview";
+  if (activeTab.value === "logs" && mode.value !== "managed") activeTab.value = "overview";
+  if (activeTab.value === "logs" && !logs.value && !logsLoading.value) void refreshLogs();
+});
 
 async function refreshLogs(): Promise<void> {
   if (logsLoading.value) return;
@@ -1111,14 +1228,13 @@ onBeforeUnmount(() => {
 .cpa-header p, .cpa-help, .cpa-danger p { margin: 6px 0 0; color: var(--ocg-muted); line-height: 1.6; }
 .cpa-section { display: grid; gap: 12px; }
 .cpa-section-title { margin: 8px 0 0; color: var(--ocg-ink); font-size: var(--ocg-font-lg); }
+.cpa-tabs :deep(.n-tabs-nav) { margin-bottom: 12px; }
 .cpa-card { box-shadow: var(--ocg-shadow-sm); }
 .cpa-status-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
 .cpa-status-cell { display: grid; gap: 6px; min-width: 0; align-content: start; }
 .cpa-status-detail, .cpa-muted { overflow-wrap: anywhere; color: var(--ocg-muted); font-size: var(--ocg-font-sm); }
 .cpa-phase { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 14px; }
 .cpa-runtime-actions { margin-top: 14px; }
-.cpa-logs { display: grid; gap: 10px; margin-top: 14px; justify-items: start; }
-.cpa-log-actions { display: flex; justify-content: flex-end; width: 100%; }
 .cpa-log-title { margin: 0; color: var(--ocg-muted); font-size: var(--ocg-font-sm); font-weight: 600; }
 .cpa-log {
   box-sizing: border-box;
@@ -1139,6 +1255,12 @@ onBeforeUnmount(() => {
 .cpa-oauth-status { margin-top: 14px; }
 .cpa-oauth-status p { margin-top: 0; }
 .cpa-state { display: grid; justify-content: center; padding: 20px; }
+.cpa-catalog-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.cpa-catalog-meta { display: flex; flex-wrap: wrap; gap: 8px 16px; color: var(--ocg-muted); font-size: var(--ocg-font-sm); }
+.cpa-catalog-groups { display: grid; gap: 16px; margin-top: 14px; }
+.cpa-catalog-group h3 { margin: 0 0 8px; color: var(--ocg-muted); font-size: var(--ocg-font-sm); font-weight: 600; }
+.cpa-catalog-group ul { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.cpa-catalog-group li { padding: 8px 12px; border: 1px solid var(--ocg-divider); border-radius: 10px; }
 .cpa-account-list, .cpa-key-list { display: grid; gap: 8px; margin-top: 14px; }
 .cpa-account-row, .cpa-key-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px; border: 1px solid var(--ocg-divider); border-radius: 10px; }
 .cpa-account-main { display: grid; gap: 4px; min-width: 0; }
@@ -1156,7 +1278,7 @@ onBeforeUnmount(() => {
 }
 .cpa-danger { border-color: color-mix(in srgb, var(--ocg-error) 34%, var(--ocg-divider)); }
 @media (max-width: 760px) {
-  .cpa-header, .cpa-account-row, .cpa-key-row { align-items: stretch; flex-direction: column; }
+  .cpa-header, .cpa-account-row, .cpa-key-row, .cpa-catalog-head { align-items: stretch; flex-direction: column; }
   .cpa-status-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 </style>

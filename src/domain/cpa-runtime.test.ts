@@ -10,6 +10,7 @@ import {
   cpaRuntimeControls,
   cpaRuntimeMode,
   formatCpaQuota,
+  groupCpaCatalogModels,
   isCpaOAuthSuccessStatus,
   isCpaOAuthTerminalStatus,
   isCpaPhaseBusy,
@@ -82,6 +83,35 @@ test("a missing runtime snapshot is not confirmed managed support", () => {
   assert.equal(cpaRuntimeMode(integration(), null, "managed"), "external");
   assert.equal(cpaRuntimeMode(integration({ runtimeOwned: true }), null), "managed");
   assert.equal(cpaRuntimeMode(integration({ runtimeSupported: false, runtimeOwned: true }), null), "unsupported");
+});
+
+test("CPA catalog groups by source and keeps unknown sources last", () => {
+  assert.deepEqual(
+    groupCpaCatalogModels([
+      { id: "claude-sonnet", ownedBy: "anthropic" },
+      { id: "gpt-5", ownedBy: "openai" },
+      { id: "mystery", ownedBy: null },
+      { id: "o3", ownedBy: "openai" },
+      { id: "  ", ownedBy: "  " },
+    ]),
+    [
+      { source: "anthropic", models: [{ id: "claude-sonnet", ownedBy: "anthropic" }] },
+      {
+        source: "openai",
+        models: [
+          { id: "gpt-5", ownedBy: "openai" },
+          { id: "o3", ownedBy: "openai" },
+        ],
+      },
+      {
+        source: "",
+        models: [
+          { id: "  ", ownedBy: "  " },
+          { id: "mystery", ownedBy: null },
+        ],
+      },
+    ],
+  );
 });
 
 test("client keys exist only for an owned, installed, supported managed runtime", () => {

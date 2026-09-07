@@ -63,6 +63,7 @@ test("add-account chooser omits singleton Zen Free and groups remaining families
     "command-code-goat",
     "minimax-cn",
     "kimi-cn",
+    "ollama-cloud",
     "custom-endpoint",
   ]);
   assert.deepEqual(
@@ -70,7 +71,7 @@ test("add-account chooser omits singleton Zen Free and groups remaining families
     [
       ["available", ["opencode-go", "custom-endpoint"]],
       ["draft", ["command-code-goat"]],
-      ["unavailable", ["minimax-cn", "kimi-cn"]],
+      ["unavailable", ["minimax-cn", "kimi-cn", "ollama-cloud"]],
     ],
   );
 });

@@ -2,12 +2,10 @@ import type { AppConfig } from "../api/dashboard";
 
 export const EDITABLE_SETTING_KEYS = [
   "gateway_port",
-  "upstream_base_url",
   "proxy_mode",
   "proxy_url",
   "proxy_list_direction",
   "proxy_list_models",
-  "opencode_invite_url",
   "client_root_url",
   "auto_start",
   "show_dock_icon",
@@ -17,6 +15,19 @@ export const EDITABLE_SETTING_KEYS = [
   "routing_mode",
   "conversation_sticky",
 ] as const satisfies readonly (keyof AppConfig)[];
+
+/**
+ * Reference equality misreads array fields: a form clone of the saved value
+ * has the same content but a different identity. Compare array content so an
+ * untouched clone adopts the latest server array while a genuinely edited
+ * array still counts as a local edit.
+ */
+function settingsValueEqual(a: unknown, b: unknown): boolean {
+  if (Array.isArray(a) && Array.isArray(b)) {
+    return a.length === b.length && a.every((value, index) => value === b[index]);
+  }
+  return a === b;
+}
 
 /**
  * Keep locally edited fields while adopting a newer server snapshot.
@@ -30,7 +41,7 @@ export function mergeUnsavedSettings(
 ): AppConfig {
   const merged = { ...latest };
   for (const key of EDITABLE_SETTING_KEYS) {
-    if (current[key] !== saved[key]) {
+    if (!settingsValueEqual(current[key], saved[key])) {
       Object.assign(merged, { [key]: current[key] });
     }
   }

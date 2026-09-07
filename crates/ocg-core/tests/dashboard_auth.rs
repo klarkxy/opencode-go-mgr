@@ -354,6 +354,95 @@ async fn public_dashboard_uses_first_registration_and_session_cookie() {
 }
 
 #[tokio::test]
+async fn local_connection_rejects_rebinding_and_cross_origin_requests() {
+    let state = state("local-authority");
+    let handle = gateway::start_gateway_on(state.clone(), SocketAddr::from(([127, 0, 0, 1], 0)))
+        .await
+        .unwrap();
+    let client = loopback_client();
+    let host = format!("127.0.0.1:{}", handle.port);
+    let origin = format!("http://{host}");
+    for (request_host, request_origin, expected) in [
+        (host.as_str(), None, StatusCode::OK),
+        (host.as_str(), Some(origin.as_str()), StatusCode::OK),
+        (
+            "localhost:30001",
+            Some("http://localhost:30001"),
+            StatusCode::OK,
+        ),
+        (
+            "attacker.invalid",
+            Some("http://attacker.invalid"),
+            StatusCode::FORBIDDEN,
+        ),
+        ("attacker.invalid", None, StatusCode::FORBIDDEN),
+        (
+            host.as_str(),
+            Some("http://attacker.invalid"),
+            StatusCode::FORBIDDEN,
+        ),
+        (host.as_str(), Some("null"), StatusCode::FORBIDDEN),
+    ] {
+        let mut request = client
+            .get(v3_url(handle.port, "/connection"))
+            .header("host", request_host);
+        if let Some(value) = request_origin {
+            request = request.header("origin", value);
+        }
+        let response = request.send().await.unwrap();
+        assert_eq!(
+            response.status(),
+            expected,
+            "host={request_host}, origin={request_origin:?}"
+        );
+        let body = response.text().await.unwrap();
+        assert_eq!(
+            body.contains(&state.config().gateway_key),
+            expected == StatusCode::OK
+        );
+    }
+    let response = client
+        .get(v3_url(handle.port, "/connection"))
+        .header("sec-fetch-site", "cross-site")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    for path in [
+        "/dashboard/api/auth/register",
+        "/dashboard/api/v3/auth/register",
+    ] {
+        let response = client
+            .post(format!("http://{host}{path}"))
+            .header("host", "attacker.invalid")
+            .header("origin", "http://attacker.invalid")
+            .json(&cas(
+                &state,
+                json!({"username": "attacker", "password": "password123"}),
+            ))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN, "{path}");
+    }
+    let response = client
+        .get(v3_url(handle.port, "/connection"))
+        .header("host", "attacker.invalid")
+        .header(
+            "cookie",
+            format!(
+                "ocg_dashboard_session={}",
+                state.dashboard_session_token.lock()
+            ),
+        )
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    gateway::stop_gateway(handle);
+}
+
+#[tokio::test]
 async fn loopback_dashboard_skips_login() {
     let state = state("local");
     let handle = gateway::start_gateway_on(state, SocketAddr::from(([127, 0, 0, 1], 0)))

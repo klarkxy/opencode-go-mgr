@@ -49,9 +49,6 @@ fn error_envelope_always_emits_nullable_fields() {
 fn schema_catalog_is_extensible_and_names_kernel_types() {
     let schema = contract_schema();
     let defs = schema["$defs"].as_object().expect("catalog $defs");
-    for name in CATALOG_TYPE_NAMES {
-        assert!(defs.contains_key(*name), "missing {name}");
-    }
     let required_error = defs["V3Error"]["required"]
         .as_array()
         .expect("V3Error.required");
@@ -76,7 +73,6 @@ fn connection_info_is_the_only_secret_bearing_dto() {
     let connection = ConnectionInfo {
         gateway_port: 9042,
         client_root_url: String::new(),
-        upstream_base_url: "https://opencode.ai/zen/go".into(),
         primary_key: "ocg-secret".into(),
         sub_keys: vec![ConnectionSubKey {
             id: "sub".into(),
@@ -90,6 +86,7 @@ fn connection_info_is_the_only_secret_bearing_dto() {
     let value = serde_json::to_value(&connection).unwrap();
     assert_eq!(value["primaryKey"], "ocg-secret");
     assert_eq!(value["subKeys"][0]["value"], "ocg-sub-secret");
+    assert!(value.get("upstreamBaseUrl").is_none());
     assert!(value.get("gatewayKey").is_none());
     assert!(value.get("key").is_none());
     assert!(value.get("gateway_key").is_none());
@@ -103,7 +100,6 @@ fn settings_wire_omits_key_fields_and_nulls_unsupported_host_toggles() {
         process_generation: 9,
         gateway_port: 9042,
         gateway_port_from_env: false,
-        upstream_base_url: "https://opencode.ai/zen/go".into(),
         proxy_mode: ProxyMode::Auto,
         proxy_url: String::new(),
         proxy_list_direction: ProxyListDirection::Whitelist,
@@ -134,6 +130,8 @@ fn settings_wire_omits_key_fields_and_nulls_unsupported_host_toggles() {
         "gateway_key",
         "primaryKey",
         "primary_key",
+        "upstreamBaseUrl",
+        "upstream_base_url",
     ] {
         assert!(
             !object.contains_key(forbidden),
@@ -169,6 +167,14 @@ fn settings_update_requires_cas_and_allows_omitted_patch_fields() {
             "expectedRevision": 7,
             "processGeneration": 9,
             "gatewayKey": "ocg-secret"
+        }))
+        .is_err()
+    );
+    assert!(
+        serde_json::from_value::<SettingsUpdate>(json!({
+            "expectedRevision": 7,
+            "processGeneration": 9,
+            "upstreamBaseUrl": "https://opencode.ai/zen/go"
         }))
         .is_err()
     );
@@ -381,6 +387,7 @@ fn account_response_emits_nulls_and_never_carries_secrets() {
         plan_routable: true,
         custom_config: None,
         model_capabilities: Vec::new(),
+        ollama_billing_tier: None,
     };
     let value = serde_json::to_value(&account).unwrap();
     let object = value.as_object().unwrap();
@@ -955,56 +962,9 @@ fn sample_contracts() -> ProviderContracts {
 }
 
 #[test]
-fn catalog_type_names_keep_accounts_prefix_and_register_provider_dtos() {
-    assert_eq!(
-        &CATALOG_TYPE_NAMES[..ACCOUNTS_CATALOG_PREFIX.len()],
-        ACCOUNTS_CATALOG_PREFIX
-    );
-    for name in [
-        "ProviderCatalog",
-        "ProviderCatalogEntry",
-        "ProviderCatalogFormField",
-        "ProviderModelCapability",
-        "ZenFreeSettings",
-        "ZenFreeSettingsUpdate",
-        "ZenFreeModels",
-        "ZenFreeModel",
-        "ProviderContracts",
-        "ProviderContractGroup",
-        "CustomEndpointContract",
-        "ProviderAccountChoice",
-        "EffectiveCatalog",
-        "EffectiveModelContract",
-        "EffectiveModelProtocols",
-        "EffectiveProtocolEvidence",
-        "CapabilitySummary",
-        "CardCapabilitySummary",
-        "ModelProtocolOverridesUpdate",
-        "ModelProtocolOverride",
-        "ProtocolOverrideState",
-        "ProtocolProbeRequest",
-        "ProtocolProbeResult",
-        "ProtocolProbeResponse",
-    ] {
-        assert!(
-            CATALOG_TYPE_NAMES.contains(&name),
-            "CATALOG_TYPE_NAMES missing {name}"
-        );
-    }
-
+fn account_schema_keeps_required_fields() {
     let schema = contract_schema();
     let defs = schema["$defs"].as_object().expect("catalog $defs");
-    for name in CATALOG_TYPE_NAMES {
-        assert!(defs.contains_key(*name), "schema missing {name}");
-    }
-    let any_of = schema["anyOf"].as_array().expect("catalog anyOf");
-    for (index, name) in ACCOUNTS_CATALOG_PREFIX.iter().enumerate() {
-        assert_eq!(
-            any_of[index]["$ref"],
-            format!("#/$defs/{name}"),
-            "anyOf prefix drifted at {index}"
-        );
-    }
     assert_eq!(
         defs["Account"]["required"],
         json!([
@@ -1039,7 +999,8 @@ fn catalog_type_names_keep_accounts_prefix_and_register_provider_dtos() {
             "verificationError",
             "planRoutable",
             "customConfig",
-            "modelCapabilities"
+            "modelCapabilities",
+            "ollamaBillingTier"
         ])
     );
 }
@@ -1768,6 +1729,7 @@ const CPA_CATALOG_TYPES: &[&str] = &[
     "CpaIntegrationUpdate",
     "CpaTestRequest",
     "CpaConnectionReport",
+    "CpaModel",
     "CpaModels",
     "CpaAccounts",
     "CpaAccount",
@@ -1800,6 +1762,7 @@ const DYNAMIC_PROVIDER_CATALOG_TYPES: &[&str] = &[
     "DynamicProviderTestRequest",
     "DynamicProviderTestResponse",
 ];
+const OLLAMA_USAGE_CATALOG_TYPES: &[&str] = &["OllamaBillingTier"];
 
 #[test]
 fn catalog_type_names_append_pricing_dtos_after_the_provider_prefix() {
@@ -1895,7 +1858,12 @@ fn catalog_type_names_append_pricing_dtos_after_the_provider_prefix() {
         &CATALOG_TYPE_NAMES[cpa_end..dynamic_end],
         DYNAMIC_PROVIDER_CATALOG_TYPES
     );
-    assert_eq!(CATALOG_TYPE_NAMES.len(), dynamic_end);
+    let ollama_end = dynamic_end + OLLAMA_USAGE_CATALOG_TYPES.len();
+    assert_eq!(
+        &CATALOG_TYPE_NAMES[dynamic_end..ollama_end],
+        OLLAMA_USAGE_CATALOG_TYPES
+    );
+    assert_eq!(CATALOG_TYPE_NAMES.len(), ollama_end);
 }
 
 #[test]

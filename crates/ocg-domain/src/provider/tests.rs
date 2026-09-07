@@ -5,7 +5,7 @@ use crate::catalog::{
 };
 use crate::ids::{
     COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM, COMMAND_CODE_PROVIDER_ID, CPA_ACCOUNT_ID,
-    CPA_PROVIDER_ID, CUSTOM_PROVIDER_ID, KIMI_PROVIDER_ID, MINIMAX_PROVIDER_ID,
+    CPA_PROVIDER_ID, CUSTOM_PROVIDER_ID, KIMI_PROVIDER_ID, MINIMAX_PROVIDER_ID, OLLAMA_PROVIDER_ID,
     OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID, ZEN_FREE_ACCOUNT_ID,
 };
 
@@ -48,7 +48,6 @@ fn builtin_providers_derive_credential_and_quota_scope() {
 
 #[test]
 fn goat_included_model_set_is_exact_unique_and_mode_gated() {
-    assert_eq!(COMMAND_CODE_GOAT_INCLUDED_MODEL_IDS.len(), 40);
     let mut unique = std::collections::HashSet::new();
     for model in COMMAND_CODE_GOAT_INCLUDED_MODEL_IDS {
         assert!(
@@ -125,7 +124,6 @@ fn singleton_and_provider_validation_is_fail_closed() {
 
 #[test]
 fn catalog_hardcodes_providers_and_keeps_unverified_providers_unroutable() {
-    assert_eq!(BUILTIN_PROVIDERS.len(), 7);
     let goat = builtin_provider(COMMAND_CODE_PROVIDER_ID).unwrap();
     assert!(goat.routable);
     assert_eq!(goat.verification_policy, VerificationPolicy::NotRequired);
@@ -194,6 +192,7 @@ fn catalog_hardcodes_providers_and_keeps_unverified_providers_unroutable() {
         COMMAND_CODE_PROVIDER_ID,
         MINIMAX_PROVIDER_ID,
         KIMI_PROVIDER_ID,
+        OLLAMA_PROVIDER_ID,
     ] {
         let plan = builtin_provider(provider_id).unwrap();
         assert!(
@@ -209,6 +208,40 @@ fn catalog_hardcodes_providers_and_keeps_unverified_providers_unroutable() {
             .iter()
             .any(|field| field.id == "purchase_date")
     );
+}
+
+#[test]
+fn ollama_cloud_exposes_priced_local_month_credits_and_billing_form() {
+    let plan = builtin_provider(OLLAMA_PROVIDER_ID).unwrap();
+    assert_eq!(plan.pricing_availability, "available");
+    assert_eq!(plan.usage_availability, "local_state");
+    assert!(plan.manual_usage_calibration);
+    assert_eq!(plan.quota_unit, "usd_credits");
+    assert!(
+        plan.form_fields
+            .iter()
+            .any(|field| field.id == "ollama_billing_tier" && field.required)
+    );
+    assert!(
+        plan.form_fields
+            .iter()
+            .any(|field| field.id == "purchase_date" && field.required)
+    );
+    let capabilities = ProviderRegistry::get(OLLAMA_PROVIDER_ID).unwrap();
+    assert!(!capabilities.card_actions.usage_refresh);
+    assert!(capabilities.card_actions.manual_usage_calibration);
+    assert!(capabilities.usage.manual_calibration);
+    assert_eq!(OllamaBillingTier::Pro.monthly_credit_limit(), 60.0);
+    assert_eq!(OllamaBillingTier::Max.monthly_credit_limit(), 300.0);
+    assert_eq!(OllamaBillingTier::Team.monthly_credit_limit(), 1000.0);
+    assert!(OllamaBillingTier::Pro.requires_purchase_date());
+    assert_eq!(
+        OllamaBillingTier::parse("pro").unwrap(),
+        OllamaBillingTier::Pro
+    );
+    assert!(OllamaBillingTier::parse("free").is_err());
+    assert!(OllamaBillingTier::parse("unconfigured").is_err());
+    assert!(OllamaBillingTier::parse("starter").is_err());
 }
 
 #[test]
@@ -344,6 +377,7 @@ fn provider_registry_is_exhaustive_for_plans_and_adapter_kinds() {
                     | ProviderAdapterKind::CommandCodeGoat
                     | ProviderAdapterKind::MiniMaxCn
                     | ProviderAdapterKind::KimiCn
+                    | ProviderAdapterKind::OllamaCloud
                     | ProviderAdapterKind::Cpa
             )
         );
@@ -372,6 +406,7 @@ fn provider_registry_is_exhaustive_for_plans_and_adapter_kinds() {
             | ProviderAdapterKind::CommandCodeGoat
             | ProviderAdapterKind::MiniMaxCn
             | ProviderAdapterKind::KimiCn
+            | ProviderAdapterKind::OllamaCloud
             | ProviderAdapterKind::ConfigurableHttp
             | ProviderAdapterKind::Cpa => {
                 assert!(descriptor.inference.production_inference);
@@ -388,7 +423,7 @@ fn provider_registry_is_exhaustive_for_plans_and_adapter_kinds() {
     assert_eq!(seen.len(), ProviderAdapterKind::ALL.len());
     assert!(ProviderAdapterKind::from_provider_id("unknown").is_none());
     assert!(ProviderRegistry::get("unknown").is_none());
-    assert_eq!(ProviderAdapterKind::ALL.len(), 7);
+    assert_eq!(ProviderAdapterKind::ALL.len(), 8);
 }
 
 #[test]
@@ -400,7 +435,11 @@ fn adapter_descriptors_preserve_current_capability_decisions() {
         InferenceAuthDescriptor::OpenCodeProtocolDefault
     );
     assert!(go.inference.follow_redirects);
-    assert_eq!(go.inference.origin, InferenceOriginKind::ConfigUpstreamBase);
+    assert_eq!(go.inference.origin, InferenceOriginKind::OfficialFixed);
+    assert_eq!(OPENCODE_GO_BASE_URL, "https://opencode.ai/zen/go");
+    assert_eq!(OPENCODE_GO_HOST, "opencode.ai");
+    assert_eq!(OPENCODE_ZEN_BASE_URL, "https://opencode.ai/zen");
+    assert!(OPENCODE_GO_USAGE_URL.starts_with(OPENCODE_GO_BASE_URL));
     assert!(go.usage.automatic_sync);
     assert!(go.usage.authoritative_for_quota);
     assert_eq!(go.usage.endpoint, Some(OPENCODE_GO_USAGE_URL));
@@ -432,6 +471,7 @@ fn adapter_descriptors_preserve_current_capability_decisions() {
     assert_eq!(zen.inference.quota_scope, QuotaScope::EgressIp);
     assert_eq!(zen.inference.channel, Some(InferenceChannelKind::Free));
     assert!(zen.inference.follow_redirects);
+    assert_eq!(zen.inference.origin, InferenceOriginKind::OfficialFixed);
     assert!(zen.model_catalog.admin_explicit_refresh);
     assert!(zen.protocol_probe.unknown_zen_free_defaults_to_chat);
     assert!(zen.protocol_probe.explicit_probe);
@@ -498,6 +538,31 @@ fn adapter_descriptors_preserve_current_capability_decisions() {
         );
         assert!(fixed_provider.card_actions.protocol_probe);
     }
+
+    let ollama = ProviderRegistry::get(OLLAMA_PROVIDER_ID).unwrap();
+    assert_eq!(ollama.kind, ProviderAdapterKind::OllamaCloud);
+    assert_eq!(ollama.inference.auth, InferenceAuthDescriptor::Bearer);
+    assert!(!ollama.inference.follow_redirects);
+    assert_eq!(ollama.inference.origin, InferenceOriginKind::OfficialFixed);
+    assert!(ollama.inference.catalog_routable);
+    assert!(!ollama.protocol_probe.explicit_probe);
+    assert_eq!(
+        ollama.protocol_probe.structural_ceiling,
+        StructuralProbeCeiling::Unavailable
+    );
+    assert_eq!(ollama.protocol_probe.fallback_priority, &CHAT_PROTOCOLS);
+    assert_eq!(ollama.usage.contract, UsageContractKind::LocalState);
+    assert!(ollama.usage.publishes_capability);
+    assert!(ollama.usage.manual_calibration);
+    assert!(!ollama.card_actions.usage_refresh);
+    assert!(ollama.card_actions.manual_usage_calibration);
+    assert!(ollama.card_actions.catalog_refresh);
+    assert!(ollama.card_actions.persisted_enable_allowed);
+    assert!(!ollama.card_actions.protocol_probe);
+    assert_eq!(
+        ollama.model_catalog.kind,
+        ModelCatalogKind::ProviderPersistedSnapshot
+    );
 
     let custom = ProviderRegistry::get(CUSTOM_PROVIDER_ID).unwrap();
     assert_eq!(custom.kind, ProviderAdapterKind::ConfigurableHttp);

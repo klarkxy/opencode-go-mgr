@@ -128,7 +128,7 @@ export function buildReleaseNotes({ tag, previousTag = null, subjects = [] }) {
   }
 
   lines.push("---", "", PLATFORM_RELEASE_NOTES, "");
-  const heading = [`# OCG Manager ${current}`, ""];
+  const heading = [`# Open Console Gateway ${current}`, ""];
   if (current.includes("-")) {
     return [PRERELEASE_WARNING, "", ...heading, ...lines].join("\n");
   }

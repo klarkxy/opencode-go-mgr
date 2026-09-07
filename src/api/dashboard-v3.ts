@@ -75,7 +75,6 @@ import type {
   ForwardLogs,
   GatewayLogQuery,
   GatewayLogs,
-  GatewayStatus,
   InstallUpdate,
   KeyCreate,
   KeyUpdate,
@@ -89,8 +88,6 @@ import type {
   ProviderCatalog,
   ProviderContracts,
   ProviderModelCapability,
-  ProviderModels,
-  ProviderModelsRefreshUpdate,
   ProviderPricing,
   ProviderPricingRefresh,
   ProviderPricingRefreshUpdate,
@@ -250,11 +247,6 @@ export function isRevisionConflict(error: unknown): error is DashboardConflictEr
     || (error instanceof DashboardRequestError && error.status === 409 && error.code === "revisionConflict");
 }
 
-export function isGone(error: unknown): error is DashboardGoneError {
-  return error instanceof DashboardGoneError
-    || (error instanceof DashboardRequestError && error.status === 410);
-}
-
 export function v3ApiBase(): string {
   if (window.location.pathname.startsWith("/dashboard")) {
     return "/dashboard/api/v3";
@@ -404,6 +396,7 @@ export const dashboardV3 = {
       method: "POST",
       body: json(input),
     }),
+  getCpaModels: () => requestV3<CpaModels>("/external-integrations/cpa/models"),
   refreshCpaModels: (expectation: MutationExpectation) =>
     requestV3<CpaModels>("/external-integrations/cpa/models/refresh", {
       method: "POST",
@@ -770,14 +763,6 @@ export const dashboardV3 = {
     }),
   getProviderModelCapabilities: () =>
     requestV3<ProviderModelCapability[]>("/providers/model-capabilities"),
-  refreshProviderModels: (
-    providerId: string,
-    accountId: WithoutExpectation<ProviderModelsRefreshUpdate>["accountId"],
-    expectation: MutationExpectation,
-  ) => requestV3<ProviderModels>(`/providers/${encode(providerId)}/models/refresh`, {
-    method: "POST",
-    body: withExpectation({ accountId } satisfies WithoutExpectation<ProviderModelsRefreshUpdate>, expectation),
-  }),
   getZenFreeSettings: () => requestV3<ZenFreeSettings>("/providers/zen-free"),
   patchZenFreeSettings: (enabled: boolean, expectation: MutationExpectation) =>
     requestV3<ZenFreeSettings>("/providers/zen-free", {
@@ -833,7 +818,6 @@ export const dashboardV3 = {
     }),
 
   // --- observability (read-only, page-local state) ---
-  getGatewayStatus: () => requestV3<GatewayStatus>("/gateway/status"),
   getApplicationModels: () => requestV3<ApplicationModels>("/application-models"),
   getDashboardSummary: () => requestV3<DashboardSummary>("/dashboard/summary"),
   getDailyTokensByModel: (days?: number) =>

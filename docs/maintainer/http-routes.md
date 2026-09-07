@@ -4,6 +4,16 @@
 
 All routes share one port: inference, Dashboard V3, V2 tombstone, and SPA. See [Architecture](architecture.md).
 
+Retired `/dashboard/api/...` REST returns empty-body **401** when anonymous
+(auth runs before the tombstone) and **410**
+`{ "code": "dashboardV2Removed", "message": "Dashboard API V2 has been removed; refresh the page and retry." }`
+when authenticated, including loopback local mode. Unknown `/dashboard/api/...`
+paths that are not V3 and not a preserved family are also 410 once
+authenticated. Preserved `/dashboard/api` families (exact path, no trailing
+slash, no extra segments): `auth/status`, `auth/register`, `auth/login`,
+`auth/logout`, and `browser/sessions/{token}/ws` (non-empty token). Do not
+revive protected V2 REST; new JSON is V3.
+
 ## Inference (unchanged paths)
 
 | Method | Path | Notes |
@@ -49,14 +59,17 @@ Session-protected (non-exhaustive; see `dashboard_v3/mod.rs`):
 `/logs/forward/models`, `/logs/forward/keys`,
 `/custom/models/discover`.
 
+`GET /contract` returns the current process's live revision / generation token
+(`revision`, `processGeneration`, `pricingRevision`).
+
 Go/Zen protocol probes are `POST /providers/{provider_id}/protocol-probes`.
 Custom is rejected there (`protocol probes for Custom API are account-owned`).
-The historical V2 `POST /accounts/{id}/protocol-probes` is 410. Custom
-connection verify is `POST /accounts/{id}/verify`; model discovery is the
-operational `POST /custom/models/discover`. User-defined Providers use
+Custom connection verify is `POST /accounts/{id}/verify`; model discovery is
+`POST /custom/models/discover`. Historical V2
+`POST /accounts/{id}/protocol-probes` is 410. User-defined Providers use
 `POST /providers`, `GET|PATCH|DELETE /providers/{provider_id}`,
-`POST /providers/models/discover`, and `POST /providers/test`. Discovery and
-test never gate save; a real test may consume upstream quota.
+`POST /providers/models/discover`, and `POST /providers/test`. Save succeeds
+independently of discovery and test; a real test may consume upstream quota.
 
 ## Static dashboard
 

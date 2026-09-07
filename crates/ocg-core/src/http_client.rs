@@ -158,13 +158,6 @@ mod tests {
         ZenFreeModelCatalog::default()
     }
 
-    fn assert_same_type<T>(_: &T, _: &T) {}
-
-    #[test]
-    fn facade_reexports_infra_route_label() {
-        assert_same_type(&RouteLabel::Auto, &ocg_infra::http::RouteLabel::Auto);
-    }
-
     #[test]
     fn no_redirect_builder_keeps_global_proxy_and_disables_follow() {
         let config = AppConfig {

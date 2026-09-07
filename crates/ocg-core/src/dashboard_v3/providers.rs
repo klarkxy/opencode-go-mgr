@@ -35,8 +35,8 @@ use crate::protocol_probe::{self, ProtocolProbeContext, ProtocolProbeRunError};
 use crate::provider::{
     BUILTIN_PROVIDERS, BuiltinProvider, COMMAND_CODE_PROVIDER_ID, CUSTOM_PROVIDER_ID,
     ConnectionVerificationStatus, KIMI_CN_BASE_URL, KIMI_PROVIDER_ID, MINIMAX_CN_BASE_URL,
-    MINIMAX_PROVIDER_ID, OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID, ProviderAdapterKind,
-    ProviderRegistry, ZEN_FREE_ACCOUNT_ID, default_verification_status,
+    MINIMAX_PROVIDER_ID, OLLAMA_PROVIDER_ID, OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID,
+    ProviderAdapterKind, ProviderRegistry, ZEN_FREE_ACCOUNT_ID, default_verification_status,
 };
 use crate::provider_contracts::{
     self, ContractScope, EffectiveContractSet, EffectiveModelContract as DomainModelContract,
@@ -221,63 +221,124 @@ pub(super) async fn refresh_zen_free_models(
     Ok(Json(zen_free_models_from_state(&state)))
 }
 
-pub(super) async fn refresh_provider_models(
-    State(state): State<CoreState>,
-    Path(provider_id): Path<String>,
-    body: Bytes,
-) -> Result<Json<ProviderModels>, V3ApiError> {
-    let input = parse_mutation_json::<ProviderModelsRefreshUpdate>(&body)?;
-    let _refresh = state.provider_models_refresh.try_lock().map_err(|_| {
-        V3ApiError::conflict_at(&state, "provider model refresh is already running")
-    })?;
-    let (account, config, key, base_url, source_url) = {
+enum GoCommandCatalogAccount<'a> {
+    Explicit { account_id: &'a str },
+    Eligible,
+    None,
+}
+
+struct GoCommandCatalogRefresh {
+    provider_id: String,
+    account_id: Option<String>,
+    models: Vec<String>,
+    refreshed_at: DateTime<Utc>,
+    source_url: String,
+    revision: u64,
+}
+
+async fn refresh_go_or_command_catalog(
+    state: &CoreState,
+    provider_id: &str,
+    expectation: &MutationExpectation,
+    account_selection: GoCommandCatalogAccount<'_>,
+) -> Result<GoCommandCatalogRefresh, V3ApiError> {
+    if provider_id != OPENCODE_PROVIDER_ID && provider_id != COMMAND_CODE_PROVIDER_ID {
+        return Err(V3ApiError::invalid_request_at(
+            state,
+            "this provider does not support model refresh",
+        ));
+    }
+    let _refresh = state
+        .provider_models_refresh
+        .try_lock()
+        .map_err(|_| V3ApiError::conflict_at(state, "provider model refresh is already running"))?;
+    let scope = ContractScope::provider(provider_id);
+    let (account, config, key, base_url, source_url, previous_models) = {
         let _settings_update = state.settings_update.lock();
-        check_expectation(&state, &input.expectation)?;
-        let account = if provider_id == OPENCODE_PROVIDER_ID {
-            let account_id = input.account_id.as_deref().unwrap_or_default().trim();
-            if account_id.is_empty() {
+        check_expectation(state, expectation)?;
+        validate_provider_scope(state, &scope)?;
+        let account = match (provider_id, &account_selection) {
+            (id, GoCommandCatalogAccount::Explicit { account_id })
+                if id == OPENCODE_PROVIDER_ID =>
+            {
+                let account_id = account_id.trim();
+                if account_id.is_empty() {
+                    return Err(V3ApiError::invalid_request_at(
+                        state,
+                        "OpenCode Go model refresh requires a selected account",
+                    ));
+                }
+                let account = load_model_account(state, account_id)?;
+                if account.provider_id != OPENCODE_PROVIDER_ID {
+                    return Err(V3ApiError::invalid_request_at(
+                        state,
+                        "the selected account is not an OpenCode Go account",
+                    ));
+                }
+                Some(account)
+            }
+            (id, GoCommandCatalogAccount::Eligible) if id == OPENCODE_PROVIDER_ID => {
+                let now = Utc::now();
+                Some(
+                    state
+                        .db
+                        .lock()
+                        .list_accounts()
+                        .map_err(V3ApiError::internal)?
+                        .into_iter()
+                        .find(|account| {
+                            account.provider_id == OPENCODE_PROVIDER_ID
+                                && account_is_available_for_at(
+                                    account,
+                                    UpstreamChannel::Go,
+                                    &[],
+                                    now,
+                                )
+                        })
+                        .ok_or_else(|| {
+                            V3ApiError::invalid_request_at(
+                                state,
+                                "no eligible OpenCode Go account is available for catalog refresh",
+                            )
+                        })?,
+                )
+            }
+            (id, GoCommandCatalogAccount::None) if id == COMMAND_CODE_PROVIDER_ID => None,
+            _ => {
                 return Err(V3ApiError::invalid_request_at(
-                    &state,
-                    "OpenCode Go model refresh requires a selected account",
+                    state,
+                    "this provider does not support model refresh",
                 ));
             }
-            let account = load_model_account(&state, account_id)?;
-            if account.provider_id != OPENCODE_PROVIDER_ID {
-                return Err(V3ApiError::invalid_request_at(
-                    &state,
-                    "the selected account is not an OpenCode Go account",
-                ));
-            }
-            Some(account)
-        } else if provider_id == COMMAND_CODE_PROVIDER_ID {
-            None
-        } else {
-            return Err(V3ApiError::invalid_request_at(
-                &state,
-                "this provider does not support model refresh",
-            ));
         };
-        let key = account
-            .as_ref()
-            .map(|account| {
+        let key = match (&account, &account_selection) {
+            (Some(account), GoCommandCatalogAccount::Explicit { .. }) => {
                 if account.key_cipher.trim().is_empty() {
                     return Err(V3ApiError::invalid_request_at(
-                        &state,
+                        state,
                         "the selected account has no stored Key",
                     ));
                 }
+                Some(
+                    state
+                        .decrypt_key(&account.key_cipher)
+                        .map_err(V3ApiError::internal)?,
+                )
+            }
+            (Some(account), _) => Some(
                 state
                     .decrypt_key(&account.key_cipher)
-                    .map_err(V3ApiError::internal)
-            })
-            .transpose()?;
+                    .map_err(V3ApiError::internal)?,
+            ),
+            (None, _) => None,
+        };
         let config = state.config();
         let base_url = if provider_id == OPENCODE_PROVIDER_ID {
-            config.upstream_base_url.clone()
+            crate::gateway::free_models::opencode_go_base_url(&config.upstream_base_url)
         } else {
             #[cfg(debug_assertions)]
             {
-                goat::goat_verify_base_url(Some(state.process_generation()))
+                goat::goat_catalog_base_url(Some(state.process_generation()))
             }
             #[cfg(not(debug_assertions))]
             {
@@ -289,7 +350,12 @@ pub(super) async fn refresh_provider_models(
         } else {
             goat::goat_models_url_for_base(&base_url)
         };
-        (account, config, key, base_url, source_url)
+        let previous_models = state
+            .provider_contracts()
+            .scope(&scope)
+            .map(|contract| contract.catalog.models.clone())
+            .unwrap_or_default();
+        (account, config, key, base_url, source_url, previous_models)
     };
 
     let models_result = if provider_id == OPENCODE_PROVIDER_ID {
@@ -305,26 +371,29 @@ pub(super) async fn refresh_provider_models(
     let models = match models_result {
         Ok(models) => models,
         Err(failure) => {
-            audit_catalog_failure(&state, &provider_id, "fetch");
-            return Err(V3ApiError::outbound_failed(&state, failure.message));
+            audit_catalog_failure(state, provider_id, "fetch");
+            return Err(V3ApiError::outbound_failed(state, failure.message));
         }
     };
     if models.is_empty() {
-        audit_catalog_failure(&state, &provider_id, "empty_catalog");
+        audit_catalog_failure(state, provider_id, "empty_catalog");
         return Err(V3ApiError::outbound_failed(
-            &state,
-            "provider model refresh returned an empty catalog",
+            state,
+            if provider_id == COMMAND_CODE_PROVIDER_ID {
+                "Command Code model refresh returned an empty catalog"
+            } else {
+                "provider model refresh returned an empty catalog"
+            },
         ));
     }
     // Zen Free owns every `-free` id; keep them out of the persisted Go
     // catalog so they never reach the Go provider-contracts surface.
-    // (`ox-alpha-free` is a Go model; `is_free_model` excludes it.)
     let models = if provider_id == OPENCODE_PROVIDER_ID {
         let filtered: Vec<String> = models.into_iter().filter(|id| !is_free_model(id)).collect();
         if filtered.is_empty() {
-            audit_catalog_failure(&state, &provider_id, "zen_only_catalog");
+            audit_catalog_failure(state, provider_id, "zen_only_catalog");
             return Err(V3ApiError::outbound_failed(
-                &state,
+                state,
                 "provider model refresh returned only Zen Free models",
             ));
         }
@@ -335,56 +404,77 @@ pub(super) async fn refresh_provider_models(
 
     let now = Utc::now();
     let _settings_update = state.settings_update.lock();
-    check_expectation(&state, &input.expectation)?;
-    if provider_id == OPENCODE_PROVIDER_ID {
-        let account = account
-            .as_ref()
-            .expect("OpenCode refresh prepared an account");
-        let current = load_model_account(&state, &account.id)?;
+    check_expectation(state, expectation)?;
+    if let Some(account) = account.as_ref() {
+        let current = load_model_account(state, &account.id)?;
         if current.updated_at != account.updated_at || current.key_cipher != account.key_cipher {
             return Err(V3ApiError::conflict_at(
-                &state,
+                state,
                 "the selected OpenCode Go account changed while models were refreshing",
             ));
         }
-        state
-            .db
-            .lock()
-            .set_contract_catalog(
-                &ContractScope::provider(OPENCODE_PROVIDER_ID),
-                &models,
-                Some(now),
-                provider_contracts::CATALOG_SOURCE_OPENCODE_MODELS,
-                &source_url,
-                now,
-            )
-            .map_err(V3ApiError::internal)?;
+    }
+    let source = if provider_id == OPENCODE_PROVIDER_ID {
+        provider_contracts::CATALOG_SOURCE_OPENCODE_MODELS
     } else {
+        provider_contracts::CATALOG_SOURCE_COMMAND_CODE_MODELS
+    };
+    {
+        let db = state.db.lock();
+        db.refresh_contract_catalog_with_default_off(
+            &scope,
+            &previous_models,
+            &models,
+            now,
+            source,
+            &source_url,
+        )
+        .map_err(V3ApiError::internal)?;
         state
-            .db
-            .lock()
-            .set_contract_catalog(
-                &ContractScope::provider(COMMAND_CODE_PROVIDER_ID),
-                &models,
-                Some(now),
-                provider_contracts::CATALOG_SOURCE_COMMAND_CODE_MODELS,
-                &source_url,
-                now,
-            )
+            .reload_provider_contracts_locked(&db)
             .map_err(V3ApiError::internal)?;
     }
-    state
-        .reload_provider_contracts()
-        .map_err(V3ApiError::internal)?;
+    state.routing.reset();
     let revision = state.bump_settings_revision();
-    audit_catalog_success(&state, &provider_id, models.len(), revision);
-    Ok(Json(ProviderModels {
-        provider_id,
+    audit_catalog_success(state, provider_id, models.len(), revision);
+    Ok(GoCommandCatalogRefresh {
+        provider_id: provider_id.to_string(),
         account_id: account.map(|account| account.id),
         models,
-        refreshed_at: now.to_rfc3339(),
+        refreshed_at: now,
         source_url,
         revision,
+    })
+}
+
+pub(super) async fn refresh_provider_models(
+    State(state): State<CoreState>,
+    Path(provider_id): Path<String>,
+    body: Bytes,
+) -> Result<Json<ProviderModels>, V3ApiError> {
+    let input = parse_mutation_json::<ProviderModelsRefreshUpdate>(&body)?;
+    let account_selection = if provider_id == OPENCODE_PROVIDER_ID {
+        GoCommandCatalogAccount::Explicit {
+            account_id: input.account_id.as_deref().unwrap_or_default(),
+        }
+    } else if provider_id == COMMAND_CODE_PROVIDER_ID {
+        GoCommandCatalogAccount::None
+    } else {
+        return Err(V3ApiError::invalid_request_at(
+            &state,
+            "this provider does not support model refresh",
+        ));
+    };
+    let refreshed =
+        refresh_go_or_command_catalog(&state, &provider_id, &input.expectation, account_selection)
+            .await?;
+    Ok(Json(ProviderModels {
+        provider_id: refreshed.provider_id,
+        account_id: refreshed.account_id,
+        models: refreshed.models,
+        refreshed_at: refreshed.refreshed_at.to_rfc3339(),
+        source_url: refreshed.source_url,
+        revision: refreshed.revision,
         process_generation: state.process_generation(),
         pricing_revision: state.pricing_snapshot().revision.clone(),
     }))
@@ -411,11 +501,13 @@ pub(super) async fn refresh_contract_catalog(
         let _ = refresh_zen_free_models(State(state.clone()), body).await?;
         return provider_contracts_response(&state);
     }
-    if scope_id == COMMAND_CODE_PROVIDER_ID {
+    if scope_id == OLLAMA_PROVIDER_ID {
+        // Public keyless GET /models: no account, no Key verification, explicit
+        // control-plane refresh only. Reuses the process-wide catalog lock.
         let _refresh = state.provider_models_refresh.try_lock().map_err(|_| {
             V3ApiError::conflict_at(&state, "provider model refresh is already running")
         })?;
-        let (config, base_url, source_url, previous_models) = {
+        let (config, base_url, source_url) = {
             let _settings_update = state.settings_update.lock();
             check_expectation(&state, &expectation)?;
             validate_provider_scope(&state, &scope)?;
@@ -423,22 +515,17 @@ pub(super) async fn refresh_contract_catalog(
             let base_url = {
                 #[cfg(debug_assertions)]
                 {
-                    goat::goat_verify_base_url(Some(state.process_generation()))
+                    goat::ollama_cloud_models_base_url(Some(state.process_generation()))
                 }
                 #[cfg(not(debug_assertions))]
                 {
-                    crate::provider::COMMAND_CODE_GOAT_BASE_URL.to_string()
+                    crate::provider::OLLAMA_CLOUD_BASE_URL.to_string()
                 }
             };
-            let source_url = goat::goat_models_url_for_base(&base_url);
-            let previous_models = state
-                .provider_contracts()
-                .scope(&scope)
-                .map(|contract| contract.catalog.models.clone())
-                .unwrap_or_default();
-            (config, base_url, source_url, previous_models)
+            let source_url = goat::ollama_cloud_models_url_for_base(&base_url);
+            (config, base_url, source_url)
         };
-        let models = match goat::refresh_command_code_models(&config, &base_url).await {
+        let models = match goat::refresh_ollama_cloud_models(&config, &base_url).await {
             Ok(models) => models,
             Err(failure) => {
                 audit_catalog_failure(&state, &scope_id, "fetch");
@@ -449,7 +536,7 @@ pub(super) async fn refresh_contract_catalog(
             audit_catalog_failure(&state, &scope_id, "empty_catalog");
             return Err(V3ApiError::outbound_failed(
                 &state,
-                "Command Code model refresh returned an empty catalog",
+                "Ollama Cloud model refresh returned an empty catalog",
             ));
         }
         let now = Utc::now();
@@ -457,13 +544,13 @@ pub(super) async fn refresh_contract_catalog(
         check_expectation(&state, &expectation)?;
         {
             let db = state.db.lock();
-            db.refresh_contract_catalog_with_default_off(
+            db.set_contract_catalog(
                 &scope,
-                &previous_models,
                 &models,
-                now,
-                provider_contracts::CATALOG_SOURCE_COMMAND_CODE_MODELS,
+                Some(now),
+                provider_contracts::CATALOG_SOURCE_OLLAMA_CLOUD_MODELS,
                 &source_url,
+                now,
             )
             .map_err(V3ApiError::internal)?;
             state
@@ -559,96 +646,16 @@ pub(super) async fn refresh_contract_catalog(
         audit_catalog_success(&state, &scope_id, models.len(), revision);
         return provider_contracts_response(&state);
     }
-    if scope_id != OPENCODE_PROVIDER_ID {
-        return Err(V3ApiError::not_found_at(&state, "provider scope not found"));
+    if scope_id == COMMAND_CODE_PROVIDER_ID || scope_id == OPENCODE_PROVIDER_ID {
+        let account_selection = if scope_id == COMMAND_CODE_PROVIDER_ID {
+            GoCommandCatalogAccount::None
+        } else {
+            GoCommandCatalogAccount::Eligible
+        };
+        refresh_go_or_command_catalog(&state, &scope_id, &expectation, account_selection).await?;
+        return provider_contracts_response(&state);
     }
-
-    let _refresh = state.provider_models_refresh.try_lock().map_err(|_| {
-        V3ApiError::conflict_at(&state, "provider model refresh is already running")
-    })?;
-    let (account, config, key, base_url, source_url, previous_models) = {
-        let _settings_update = state.settings_update.lock();
-        check_expectation(&state, &expectation)?;
-        validate_provider_scope(&state, &scope)?;
-        let now = Utc::now();
-        let account = state
-            .db
-            .lock()
-            .list_accounts()
-            .map_err(V3ApiError::internal)?
-            .into_iter()
-            .find(|account| {
-                account.provider_id == OPENCODE_PROVIDER_ID
-                    && account_is_available_for_at(account, UpstreamChannel::Go, &[], now)
-            })
-            .ok_or_else(|| {
-                V3ApiError::invalid_request_at(
-                    &state,
-                    "no eligible OpenCode Go account is available for catalog refresh",
-                )
-            })?;
-        let key = state
-            .decrypt_key(&account.key_cipher)
-            .map_err(V3ApiError::internal)?;
-        let config = state.config();
-        let base_url = config.upstream_base_url.clone();
-        let source_url = goat::opencode_go_models_url_for_base(&base_url);
-        let previous_models = state
-            .provider_contracts()
-            .scope(&scope)
-            .map(|contract| contract.catalog.models.clone())
-            .unwrap_or_default();
-        (account, config, key, base_url, source_url, previous_models)
-    };
-
-    let models = match goat::probe_opencode_go_models(&config, &key, &base_url).await {
-        Ok(models) => models,
-        Err(failure) => {
-            audit_catalog_failure(&state, &scope_id, "fetch");
-            return Err(V3ApiError::outbound_failed(&state, failure.message));
-        }
-    };
-    let models: Vec<String> = models
-        .into_iter()
-        .filter(|model_id| !is_free_model(model_id))
-        .collect();
-    if models.is_empty() {
-        audit_catalog_failure(&state, &scope_id, "empty_catalog");
-        return Err(V3ApiError::outbound_failed(
-            &state,
-            "provider model refresh returned no OpenCode Go models",
-        ));
-    }
-
-    let now = Utc::now();
-    let _settings_update = state.settings_update.lock();
-    check_expectation(&state, &expectation)?;
-    let current = load_model_account(&state, &account.id)?;
-    if current.updated_at != account.updated_at || current.key_cipher != account.key_cipher {
-        return Err(V3ApiError::conflict_at(
-            &state,
-            "the selected OpenCode Go account changed while models were refreshing",
-        ));
-    }
-    {
-        let db = state.db.lock();
-        db.refresh_contract_catalog_with_default_off(
-            &scope,
-            &previous_models,
-            &models,
-            now,
-            provider_contracts::CATALOG_SOURCE_OPENCODE_MODELS,
-            &source_url,
-        )
-        .map_err(V3ApiError::internal)?;
-        state
-            .reload_provider_contracts_locked(&db)
-            .map_err(V3ApiError::internal)?;
-    }
-    state.routing.reset();
-    let revision = state.bump_settings_revision();
-    audit_catalog_success(&state, &scope_id, models.len(), revision);
-    provider_contracts_response(&state)
+    Err(V3ApiError::not_found_at(&state, "provider scope not found"))
 }
 
 pub(super) async fn get_provider_contracts(
@@ -1155,10 +1162,10 @@ fn prepare_protocol_probe(
         .iter()
         .filter(|account| {
             account.provider_id == provider_id
-                && match adapter {
-                    ProviderAdapterKind::ConfigurableHttp => false,
-                    _ => true,
-                }
+                && !matches!(
+                    adapter,
+                    ProviderAdapterKind::ConfigurableHttp | ProviderAdapterKind::OllamaCloud
+                )
                 && account_is_available_for_at(account, channel, &[], now)
         })
         .cloned()
@@ -1276,6 +1283,12 @@ fn provider_catalog_from_state(state: &CoreState) -> ProviderCatalog {
         .get(KIMI_PROVIDER_ID)
         .map(|scope| scope.catalog.models.as_slice())
         .unwrap_or_default();
+    let ollama_models = contracts
+        .providers
+        .get(OLLAMA_PROVIDER_ID)
+        .map(|scope| scope.catalog.models.as_slice())
+        .unwrap_or_default();
+    let ollama_pinned_models = provider_contracts::ollama_cloud_pinned_model_ids(&contracts);
     let mut entries: Vec<ProviderCatalogEntry> = BUILTIN_PROVIDERS
         .iter()
         .filter(|plan| !plan.product_surface.is_external_integration())
@@ -1286,6 +1299,8 @@ fn provider_catalog_from_state(state: &CoreState) -> ProviderCatalog {
                 goat_models,
                 minimax_models,
                 kimi_models,
+                ollama_models,
+                &ollama_pinned_models,
             )
         })
         .collect();
@@ -1370,6 +1385,8 @@ fn catalog_entry(
     goat_models: &[String],
     minimax_models: &[String],
     kimi_models: &[String],
+    ollama_models: &[String],
+    ollama_pinned_models: &[String],
 ) -> ProviderCatalogEntry {
     ProviderCatalogEntry {
         provider_id: plan.provider_id.to_string(),
@@ -1413,12 +1430,17 @@ fn catalog_entry(
                 immutable_after_create: field.immutable_after_create,
             })
             .collect(),
-        model_aliases: alias::routeable_aliases_for_with_extended_catalogs(
+        model_aliases: alias::routeable_aliases_for_with_runtime_catalogs(
             plan.provider_id,
-            zen_models,
-            goat_models,
-            minimax_models,
-            kimi_models,
+            alias::RuntimeCatalogs {
+                zen_free: zen_models,
+                command_code: goat_models,
+                minimax: minimax_models,
+                kimi: kimi_models,
+                ollama: ollama_models,
+                ollama_pinned: ollama_pinned_models,
+                ..alias::RuntimeCatalogs::default()
+            },
         ),
     }
 }

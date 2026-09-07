@@ -30,7 +30,7 @@ pub(super) async fn get_gateway_status(State(state): State<CoreState>) -> Json<G
     let runtime = observability::gateway_runtime_status(
         running,
         state.active_gateway_port(),
-        config.upstream_base_url,
+        crate::gateway::free_models::opencode_go_base_url(&config.upstream_base_url),
         last_error,
     );
     let (revision, process_generation, pricing_revision) = snapshot_tokens(&state);

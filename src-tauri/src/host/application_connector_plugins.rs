@@ -1,7 +1,7 @@
 //! Native-package connector engine for Pi and DSH.
 //!
 //! This module deliberately owns only generated, immutable package sources in
-//! OCG Manager's data directory. Pi remains responsible for its credential
+//! Open Console Gateway's data directory. Pi remains responsible for its credential
 //! through its native login flow. DSH receives its credential through the
 //! separate field-owned configuration engine; this package engine never places
 //! a gateway key or environment value in package source, command-line

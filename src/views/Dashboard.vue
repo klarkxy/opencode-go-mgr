@@ -151,31 +151,6 @@
               </n-tooltip>
             </div>
           </div>
-
-          <div class="connection-row">
-            <n-icon size="18" aria-hidden="true"><CloudServerOutlined /></n-icon>
-            <div class="connection-value">
-              <span class="sr-only">{{ t("上游地址") }}</span>
-              <code>{{ serviceConfig.upstream_base_url || t("未设置") }}</code>
-            </div>
-            <n-tooltip trigger="hover" :delay="200">
-              <template #trigger>
-                <n-button
-                  circle
-                  quaternary
-                  size="small"
-                  :aria-label="t('复制上游地址')"
-                  :disabled="!serviceConfig.upstream_base_url"
-                  @click="copyConnection('upstream', serviceConfig.upstream_base_url, t('上游地址'))"
-                >
-                  <template #icon>
-                    <n-icon :component="copiedTarget === 'upstream' ? CheckOutlined : CopyOutlined" />
-                  </template>
-                </n-button>
-              </template>
-              {{ t("复制上游地址") }}
-            </n-tooltip>
-          </div>
         </div>
         <p v-if="connectionUrls.insecureHttp" class="connection-warning" role="status">
           {{ t("非本机 HTTP 会明文传输 Key 与请求内容，请仅在可信网络中使用。") }}
@@ -260,7 +235,6 @@ import { NAlert, NButton, NEmpty, NIcon, NPopconfirm, NPopover, NSpin, NTag, NTo
 import {
   ApiOutlined,
   CheckOutlined,
-  CloudServerOutlined,
   CopyOutlined,
   DownOutlined,
   KeyOutlined,
@@ -281,7 +255,7 @@ import { CHART_PALETTE } from "../theme";
 import { t } from "../i18n/index.ts";
 import { formatNumber, formatTokens, useClipboard } from "../utils/format.ts";
 import { userFacingError } from "../utils/errors.ts";
-import { daysUntilDate } from "../domain/account-lifecycle.ts";
+import { accountExpiryLabel } from "../domain/account-display.ts";
 import { maskConnectionKey, resolveConnectionUrls } from "./dashboard-connection";
 import { buildNeedsAttention } from "./dashboard-attention.ts";
 import type { AttentionItem, AttentionReason } from "./dashboard-attention.ts";
@@ -318,7 +292,6 @@ const lifecycleNow = ref(Date.now());
 const EMPTY_CONNECTION: ConnectionInfo = {
   gateway_port: 9042,
   client_root_url: "",
-  upstream_base_url: "",
   primary_key: "",
   sub_keys: [],
   revision: 0,
@@ -412,7 +385,7 @@ function attentionLabel(item: AttentionItem): string {
     case "expired": {
       const account = attentionAccount(item);
       return account
-        ? accountExpiryLabel(account)
+        ? accountExpiryLabel(account, lifecycleNow.value)
         : t("已到期 {days} 天", { days: 0 });
     }
     case "cooling":
@@ -438,20 +411,6 @@ function attentionTagType(
 
 function attentionItemAriaLabel(item: AttentionItem): string {
   return `${item.accountName} · ${attentionLabel(item)}`;
-}
-
-function accountExpiryDays(account: Account): number {
-  return daysUntilDate(account.expires_on, lifecycleNow.value);
-}
-
-function accountExpiryLabel(account: Account): string {
-  const days = accountExpiryDays(account);
-  if (!Number.isFinite(days)) return t("未设置");
-  if (days === 1) return t("剩 1 天");
-  if (days > 0) return t("剩 {days} 天", { days });
-  if (days === 0) return t("今天到期");
-  if (days === -1) return t("已到期 1 天");
-  return t("已到期 {days} 天", { days: Math.abs(days) });
 }
 
 async function copyConnection(target: ConnectionTarget, value: string, label: string) {

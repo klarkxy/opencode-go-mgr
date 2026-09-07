@@ -22,8 +22,6 @@ export interface DynamicProviderDraft {
   key: string;
 }
 
-export type DynamicProviderSource = "builtin" | "user-defined";
-
 export type DynamicProviderDraftError =
   | "missing_name"
   | "missing_endpoint_url"
@@ -74,12 +72,6 @@ export function isDynamicCatalogEntry(
   entry: Pick<ProviderCatalogEntry, "model_source">,
 ): boolean {
   return entry.model_source === DYNAMIC_PROVIDER_MODEL_SOURCE;
-}
-
-export function providerSourceLabel(
-  entry: Pick<ProviderCatalogEntry, "model_source"> | null | undefined,
-): DynamicProviderSource {
-  return entry && isDynamicCatalogEntry(entry) ? "user-defined" : "builtin";
 }
 
 export function dynamicAuthRequiresKey(authKind: DynamicAuthKind | ""): boolean {
@@ -228,29 +220,17 @@ export function buildDynamicProviderUpdateBody(
       upstreamModel: mapping.upstream_model,
     })),
   };
-  if (draft.key.trim()) body.key = draft.key.trim();
+  const sendReplacementKey =
+    previousAuthKind === "none" && dynamicAuthRequiresKey(draft.auth_kind);
+  if (sendReplacementKey && draft.key.trim()) {
+    body.key = draft.key.trim();
+  }
   return body;
-}
-
-export function createBodyOmitsSecretAfterBuild(body: { key?: string }): boolean {
-  return !("key" in body) || body.key === undefined;
-}
-
-export function omitSecretFromRecord(value: Record<string, unknown>): Record<string, unknown> {
-  const next = { ...value };
-  delete next.key;
-  delete next.apiKey;
-  return next;
 }
 
 export const DYNAMIC_PAID_TEST_WARNING_KEY = "真实测试会消耗上游额度或产生费用。确定继续？" as const;
 
 export type DynamicProviderUiAction = "save" | "discover" | "test" | "delete";
-
-/** Enter in the Provider form saves. Paid tests and deletes stay behind confirmation. */
-export function dynamicProviderFormEnterAction(): "save" {
-  return "save";
-}
 
 export function dynamicProviderActionNeedsConfirm(action: DynamicProviderUiAction): boolean {
   return action === "test" || action === "delete";

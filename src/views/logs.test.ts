@@ -35,6 +35,9 @@ test("forward log API sends remote paging and filter parameters", async () => {
     status: "success",
     account_id: "account 117",
     request_id: "ocg-test id",
+    provider_id: "opencode",
+    route_account_id: "route 1",
+    credential_account_id: "cred 2",
     sort_by: "attempt",
     sort_order: "asc",
   });
@@ -45,6 +48,9 @@ test("forward log API sends remote paging and filter parameters", async () => {
   assert.equal(query.get("status"), "success");
   assert.equal(query.get("accountId"), "account 117");
   assert.equal(query.get("requestId"), "ocg-test id");
+  assert.equal(query.get("providerId"), "opencode");
+  assert.equal(query.get("routeAccountId"), "route 1");
+  assert.equal(query.get("credentialAccountId"), "cred 2");
   assert.equal(query.get("sortBy"), "attempt");
   assert.equal(query.get("sortOrder"), "asc");
 });
@@ -91,7 +97,6 @@ test("settings update writes CAS tokens and reloads the full config", async () =
         pricingRevision: null,
         gatewayPort: 9042,
         gatewayPortFromEnv: true,
-        upstreamBaseUrl: "https://opencode.ai/zen/go",
         proxyMode: "auto",
         proxyUrl: "",
         proxyListDirection: "whitelist",
@@ -118,7 +123,6 @@ test("settings update writes CAS tokens and reloads the full config", async () =
     revision: 7,
     gateway_port: 9042,
     gateway_port_from_env: true,
-    upstream_base_url: "https://opencode.ai/zen/go",
     proxy_mode: "auto",
     proxy_url: "",
     proxy_list_direction: "whitelist",
@@ -161,7 +165,6 @@ test("primary key regeneration reloads plaintext from the connection endpoint", 
         processGeneration: 99,
         gatewayPort: 9042,
         clientRootUrl: "http://127.0.0.1:9042",
-        upstreamBaseUrl: "https://opencode.ai/zen/go",
         primaryKey,
         subKeys: [],
       };

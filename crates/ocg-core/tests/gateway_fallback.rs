@@ -6,10 +6,13 @@ use chrono::{Duration, Utc};
 use ocg_core::crypto::{KeyCipher, StaticKeyCipher};
 use ocg_core::db::{Database, ForwardLogQueryOptions};
 use ocg_core::gateway;
-use ocg_core::models::{AccountUpdate, AppConfig, ProxyMode, RoutingMode};
+use ocg_core::models::{
+    Account, AccountSetupStep, AccountType, AccountUpdate, AppConfig, ProxyMode, RoutingMode,
+};
 use ocg_core::provider::{
     COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_ALIAS, COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM,
-    COMMAND_CODE_PROVIDER_ID, OPENCODE_PROVIDER_ID, ZEN_FREE_ACCOUNT_ID,
+    COMMAND_CODE_PROVIDER_ID, CPA_ACCOUNT_ID, CPA_ACCOUNT_NAME, CPA_PROVIDER_ID, CredentialKind,
+    OPENCODE_PROVIDER_ID, QuotaScope, ZEN_FREE_ACCOUNT_ID,
 };
 use ocg_core::state::CoreStateInner;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -296,7 +299,7 @@ async fn model_discovery_does_not_create_inference_logs() {
     assert_eq!(status, StatusCode::OK);
     assert_local_openai_alias_list(&h.state, &body);
     assert!(
-        !body.contains("hy3-free") && body.contains("hy3"),
+        !body.contains("mimo-v2.5-free") && body.contains("mimo-v2.5"),
         "Zen Free must publish only the suffix-stripped Alias: {body}"
     );
     assert!(
@@ -1734,7 +1737,7 @@ async fn corrupt_selectable_credential_writes_a_preflight_row_without_upstream_c
 #[tokio::test]
 async fn registered_zen_promo_routes_to_zen_not_go() {
     let h = FallbackHarness::zen_go(&[("", &[ok(), ok()])], &["key-1"]).await;
-    for model in ["hy3-free", "hy3"] {
+    for model in ["mimo-v2.5-free", "mimo-v2.5"] {
         let (status, body) = h.protocol("/v1/chat/completions", model).await;
         assert_eq!(status, StatusCode::OK, "{model} {body}");
     }
@@ -1757,15 +1760,68 @@ async fn registered_zen_promo_routes_to_zen_not_go() {
 }
 
 #[tokio::test]
-async fn go_named_free_without_current_protocol_is_rejected_locally() {
+async fn unregistered_free_suffix_without_protocol_is_rejected_locally() {
     let h = FallbackHarness::zen_go(&[("key-1", &[ok_responses()])], &["key-1"]).await;
-    let (status, body) = h.protocol("/v1/chat/completions", "ox-alpha-free").await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
     let (status, body) = h
         .protocol("/v1/chat/completions", "brand-new-promo-free")
         .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
     assert!(h.calls.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn unknown_zen_catalog_free_id_forwards_as_chat_on_raw_pin_and_stripped_alias() {
+    let p = PreparedFallback::zen_go(&[("", &[ok(), ok()])], &["normal-key"]).await;
+    let mut catalog = (*p.state.zen_free_model_catalog()).clone();
+    catalog.models.push("brand-new-promo-free".into());
+    catalog.refreshed_at = Some(Utc::now());
+    p.state
+        .db
+        .lock()
+        .set_zen_free_model_catalog(&catalog)
+        .unwrap();
+    p.state.reload_provider_contracts().unwrap();
+    p.state.activate_zen_free_model_catalog(catalog).unwrap();
+    let h = p.bind().await;
+
+    for model in ["brand-new-promo-free", "brand-new-promo"] {
+        let (status, body) = h.protocol("/v1/chat/completions", model).await;
+        assert_eq!(status, StatusCode::OK, "{model} {body}");
+    }
+    assert_eq!(
+        h.calls
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|call| call.path.as_str())
+            .collect::<Vec<_>>(),
+        ["/zen/v1/chat/completions", "/zen/v1/chat/completions"]
+    );
+    assert!(
+        h.calls
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|call| call.key.is_empty())
+    );
+
+    let (status, body) = h.models().await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let payload: serde_json::Value = serde_json::from_str(&body).unwrap();
+    let ids = payload["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|item| item["id"].as_str())
+        .collect::<HashSet<_>>();
+    assert!(
+        ids.contains("brand-new-promo"),
+        "stripped Alias missing: {body}"
+    );
+    assert!(
+        !ids.contains("brand-new-promo-free"),
+        "raw pin leaked into /v1/models: {body}"
+    );
 }
 
 #[tokio::test]
@@ -1779,7 +1835,7 @@ async fn registered_zen_model_401_is_returned_without_credential_fallback_or_bre
     )
     .await;
 
-    let (status, body) = h.protocol("/v1/chat/completions", "hy3-free").await;
+    let (status, body) = h.protocol("/v1/chat/completions", "mimo-v2.5-free").await;
     assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
     assert_eq!(h.call_keys(), [""]);
     assert!(
@@ -1820,7 +1876,7 @@ async fn zen_free_429_is_anonymous_and_cools_the_singleton_egress_route() {
     )
     .await;
 
-    let (status, _) = h.protocol("/v1/chat/completions", "hy3-free").await;
+    let (status, _) = h.protocol("/v1/chat/completions", "mimo-v2.5-free").await;
     assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
     assert_eq!(
         h.call_keys(),
@@ -1849,12 +1905,12 @@ async fn zen_free_429_is_anonymous_and_cools_the_singleton_egress_route() {
     assert!(captured.x_goog_api_key.is_none());
 
     h.set_enabled("acct-1", false);
-    let (status, _) = h.protocol("/v1/chat/completions", "hy3-free").await;
+    let (status, _) = h.protocol("/v1/chat/completions", "mimo-v2.5-free").await;
     assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
     assert_eq!(h.call_count(), 1);
 
     h.state.db.lock().delete_account("acct-1").unwrap();
-    let (status, _) = h.protocol("/v1/chat/completions", "hy3-free").await;
+    let (status, _) = h.protocol("/v1/chat/completions", "mimo-v2.5-free").await;
     assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
     assert_eq!(h.call_count(), 1);
 }
@@ -1864,10 +1920,10 @@ async fn zen_free_is_anonymous_across_all_client_formats_and_logs_route_identity
     let h = FallbackHarness::zen_go(&[("", &[ok(), ok(), ok(), ok()])], &["normal-key"]).await;
 
     for path in ["/v1/chat/completions", "/v1/responses", "/v1/messages"] {
-        let (status, body) = h.protocol(path, "hy3-free").await;
+        let (status, body) = h.protocol(path, "mimo-v2.5-free").await;
         assert_eq!(status, StatusCode::OK, "{path}: {body}");
     }
-    let (status, body) = gemini_call(h.port, "hy3-free").await;
+    let (status, body) = gemini_call(h.port, "mimo-v2.5-free").await;
     assert_eq!(status, StatusCode::OK, "{body}");
 
     let captured = h.calls.lock().unwrap().clone();
@@ -1901,13 +1957,92 @@ async fn zen_free_is_anonymous_across_all_client_formats_and_logs_route_identity
 }
 
 #[tokio::test]
+async fn zen_free_synthesizes_official_anonymous_identity_headers() {
+    let h = FallbackHarness::zen_go(&[("", &[ok()])], &["normal-key"]).await;
+    let (status, body) = h.protocol("/v1/chat/completions", "mimo-v2.5-free").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let call = h.calls.lock().unwrap()[0].clone();
+    assert!(call.authorization.is_none());
+    assert!(call.x_api_key.is_none());
+    assert_eq!(call.opencode_client.as_deref(), Some("cli"));
+    assert_eq!(call.user_agent.as_deref(), Some("opencode"));
+    let session = call
+        .opencode_session
+        .as_deref()
+        .expect("Zen Free must send x-opencode-session");
+    assert!(!session.is_empty());
+    assert_eq!(call.opencode_project.as_deref(), Some(session));
+    assert!(
+        call.opencode_request
+            .as_deref()
+            .is_some_and(|value| !value.is_empty())
+    );
+}
+
+#[tokio::test]
+async fn zen_free_preserves_official_identity_and_replaces_foreign_user_agent() {
+    let h = FallbackHarness::zen_go(&[("", &[ok(), ok()])], &["normal-key"]).await;
+
+    let official = loopback_client()
+        .post(format!("http://127.0.0.1:{}/v1/chat/completions", h.port))
+        .header(reqwest::header::AUTHORIZATION, "Bearer gw-test")
+        .header(reqwest::header::USER_AGENT, "opencode/1.17.7")
+        .header("x-opencode-session", "ses_official")
+        .header("x-opencode-client", "cli")
+        .header("x-opencode-request", "req_official")
+        .header("x-opencode-project", "proj_official")
+        .json(&serde_json::json!({
+            "model": "mimo-v2.5-free",
+            "messages": [{"role": "user", "content": "ping"}],
+            "stream": false
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(official.status(), StatusCode::OK);
+
+    let foreign = loopback_client()
+        .post(format!("http://127.0.0.1:{}/v1/chat/completions", h.port))
+        .header(reqwest::header::AUTHORIZATION, "Bearer gw-test")
+        .header(reqwest::header::USER_AGENT, "Cursor/1.0")
+        .header("x-session-id", "ses_from_custom_provider")
+        .json(&serde_json::json!({
+            "model": "mimo-v2.5-free",
+            "messages": [{"role": "user", "content": "ping"}],
+            "stream": false
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(foreign.status(), StatusCode::OK);
+
+    let calls = h.calls.lock().unwrap().clone();
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[0].opencode_session.as_deref(), Some("ses_official"));
+    assert_eq!(calls[0].opencode_client.as_deref(), Some("cli"));
+    assert_eq!(calls[0].opencode_request.as_deref(), Some("req_official"));
+    assert_eq!(calls[0].opencode_project.as_deref(), Some("proj_official"));
+    assert_eq!(calls[0].user_agent.as_deref(), Some("opencode/1.17.7"));
+    assert_eq!(
+        calls[1].opencode_session.as_deref(),
+        Some("ses_from_custom_provider")
+    );
+    assert_eq!(calls[1].opencode_client.as_deref(), Some("cli"));
+    assert_eq!(calls[1].user_agent.as_deref(), Some("opencode"));
+    assert_eq!(
+        calls[1].opencode_project.as_deref(),
+        Some("ses_from_custom_provider")
+    );
+}
+
+#[tokio::test]
 async fn zen_free_non_stream_success_without_usage_is_still_zero_cost_free() {
     let h = FallbackHarness::zen_go(
         &[("", &[reply(200, SUCCESS_BODY_WITHOUT_USAGE)])],
         &["normal-key"],
     )
     .await;
-    let (status, body) = h.protocol("/v1/chat/completions", "hy3-free").await;
+    let (status, body) = h.protocol("/v1/chat/completions", "mimo-v2.5-free").await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let log = h.state.db.lock().list_forward_logs(1).unwrap().remove(0);
     assert_eq!(log.status, "success");
@@ -1925,7 +2060,7 @@ async fn zen_free_stream_success_without_usage_is_still_zero_cost_free() {
         &["normal-key"],
     )
     .await;
-    let (status, body) = h.stream("/v1/chat/completions", "hy3-free").await;
+    let (status, body) = h.stream("/v1/chat/completions", "mimo-v2.5-free").await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let log = h.state.db.lock().list_forward_logs(1).unwrap().remove(0);
     assert_eq!(log.status, "success");
@@ -1953,14 +2088,14 @@ async fn zen_free_401_and_403_stop_without_touching_a_normal_credential() {
     )
     .await;
 
-    let (status, body) = h.protocol("/v1/chat/completions", "hy3-free").await;
+    let (status, body) = h.protocol("/v1/chat/completions", "mimo-v2.5-free").await;
     assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
     assert!(
         body.to_string().contains("anonymous route disabled"),
         "{body}"
     );
 
-    let (status, body) = h.protocol("/v1/chat/completions", "hy3-free").await;
+    let (status, body) = h.protocol("/v1/chat/completions", "mimo-v2.5-free").await;
     assert_eq!(status, StatusCode::BAD_GATEWAY, "{body}");
     assert!(body.to_string().contains("403"), "{body}");
     let captured = h.calls.lock().unwrap().clone();
@@ -1977,7 +2112,7 @@ async fn ordered_zen_candidate_429_falls_through_to_the_next_normal_card() {
     )
     .await;
 
-    let (status, body) = h.protocol("/v1/chat/completions", "hy3").await;
+    let (status, body) = h.protocol("/v1/chat/completions", "mimo-v2.5").await;
     assert_eq!(status, 200, "{body}");
     let captured = h.calls.lock().unwrap().clone();
     assert_eq!(
@@ -1987,9 +2122,9 @@ async fn ordered_zen_candidate_429_falls_through_to_the_next_normal_card() {
             .collect::<Vec<_>>(),
         ["", "normal-key"]
     );
-    assert!(captured[0].body.contains("hy3-free"));
-    assert!(captured[1].body.contains("hy3"));
-    assert!(!captured[1].body.contains("hy3-free"));
+    assert!(captured[0].body.contains("mimo-v2.5-free"));
+    assert!(captured[1].body.contains("mimo-v2.5"));
+    assert!(!captured[1].body.contains("mimo-v2.5-free"));
     let logs = h.logs();
     assert_eq!(logs.len(), 2);
     assert!(logs.iter().any(|log| {
@@ -2010,14 +2145,14 @@ async fn shared_alias_strict_priority_follows_the_persisted_card_order() {
         .reorder_accounts(&["acct-1".into(), ZEN_FREE_ACCOUNT_ID.into()])
         .unwrap();
     let h = p.bind().await;
-    let (status, body) = h.protocol("/v1/chat/completions", "hy3").await;
+    let (status, body) = h.protocol("/v1/chat/completions", "mimo-v2.5").await;
     assert_eq!(status, 200, "{body}");
     h.state
         .db
         .lock()
         .reorder_accounts(&[ZEN_FREE_ACCOUNT_ID.into(), "acct-1".into()])
         .unwrap();
-    let (status, body) = h.protocol("/v1/chat/completions", "hy3").await;
+    let (status, body) = h.protocol("/v1/chat/completions", "mimo-v2.5").await;
     assert_eq!(status, 200, "{body}");
     assert_eq!(h.call_keys(), ["normal-key", ""]);
 }
@@ -2210,6 +2345,128 @@ async fn mixed_goat_cooldown_and_sticky_state_are_independent() {
         sync.as_ref()
             .is_none_or(|state| state.next_eligible_at.is_none()),
         "GOAT 429 must not schedule OpenCode Go usage sync: {sync:?}"
+    );
+}
+
+async fn v3_post(
+    port: u16,
+    path: &str,
+    body: serde_json::Value,
+) -> (StatusCode, serde_json::Value) {
+    let response = loopback_client()
+        .post(format!("http://127.0.0.1:{port}/dashboard/api/v3{path}"))
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+    let status = response.status();
+    let parsed = response.json().await.unwrap_or(serde_json::Value::Null);
+    (status, parsed)
+}
+
+fn v3_cas(state: &CoreStateInner, patch: serde_json::Value) -> serde_json::Value {
+    let mut body = patch.as_object().cloned().unwrap_or_default();
+    body.insert(
+        "expectedRevision".into(),
+        serde_json::json!(state.settings_revision()),
+    );
+    body.insert(
+        "processGeneration".into(),
+        serde_json::json!(state.process_generation()),
+    );
+    serde_json::Value::Object(body)
+}
+
+#[tokio::test]
+async fn dynamic_429_uses_generic_cooldown_skips_go_windows_and_falls_through() {
+    let p =
+        PreparedFallback::go(&[("dyn-first", &[limited()]), ("dyn-second", &[ok()])], &[]).await;
+    let origin = p.base_url.clone();
+    let h = p.bind().await;
+    let (status, created) = v3_post(
+        h.port,
+        "/providers",
+        v3_cas(
+            &h.state,
+            serde_json::json!({
+                "name": "Lab",
+                "endpointUrl": origin,
+                "upstreamProtocol": "chat_completions",
+                "authKind": "bearer",
+                "key": "dyn-first",
+                "models": [{
+                    "publicModel": "lab-opus",
+                    "upstreamModel": "vendor/opus"
+                }]
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    let provider_id = created["provider"]["id"].as_str().unwrap().to_string();
+    let first_id = h
+        .state
+        .db
+        .lock()
+        .list_accounts()
+        .unwrap()
+        .into_iter()
+        .find(|account| account.provider_id == provider_id)
+        .map(|account| account.id)
+        .expect("dynamic provider creates a first account");
+    let (status, second) = v3_post(
+        h.port,
+        "/accounts",
+        v3_cas(
+            &h.state,
+            serde_json::json!({
+                "name": "second",
+                "providerId": provider_id,
+                "key": "dyn-second"
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{second}");
+    let second_id = second["account"]["id"].as_str().unwrap().to_string();
+
+    let (status, body) = h.protocol("/v1/chat/completions", "lab-opus").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(h.call_keys(), ["dyn-first", "dyn-second"]);
+    assert!(
+        h.calls
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|call| call.path == "/v1/chat/completions")
+    );
+    assert!(
+        h.calls
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|call| call.body.contains("vendor/opus")),
+        "{:?}",
+        h.calls.lock().unwrap()
+    );
+    let first = h.account(&first_id);
+    let second = h.account(&second_id);
+    assert!(first.cooldown_until.is_some());
+    assert!(first.cooldown_generic_until.is_some());
+    assert!(first.cooldown_5h_until.is_none());
+    assert!(first.cooldown_week_until.is_none());
+    assert!(first.cooldown_month_until.is_none());
+    assert!(second.cooldown_until.is_none());
+    let sync = h
+        .state
+        .db
+        .lock()
+        .account_usage_sync_state(&first_id)
+        .unwrap();
+    assert!(
+        sync.as_ref()
+            .is_none_or(|state| state.next_eligible_at.is_none()),
+        "dynamic 429 must not schedule OpenCode Go usage sync: {sync:?}"
     );
 }
 
@@ -2412,6 +2669,160 @@ async fn explicit_conversation_bindings_are_sticky_and_private() {
         ["key-1", "key-2", "key-1", "key-2"]
     );
     assert!(calls.iter().all(|call| call.conversation_header.is_none()));
+    let sessions = calls
+        .iter()
+        .map(|call| call.opencode_session.as_deref().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(sessions[0], sessions[2]);
+    assert_eq!(sessions[1], sessions[3]);
+    assert_ne!(sessions[0], sessions[1]);
+}
+
+#[tokio::test]
+async fn explicit_opencode_session_is_preserved_for_go_and_zen_free() {
+    let go = FallbackHarness::go(&[("key-1", &[ok()])], &["key-1"]).await;
+    let zen = FallbackHarness::zen_go(&[("", &[ok()]), ("key-1", &[ok()])], &["key-1"]).await;
+    let (goat, _) = start_goat(
+        &[("goat-key", &[ok()])],
+        &[COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM],
+        true,
+        true,
+    )
+    .await;
+    for (h, model, expected) in [
+        (&go, "deepseek-v4-flash", Some("private-go-session")),
+        (&zen, "mimo-v2.5-free", Some("private-go-session")),
+        (&goat, COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM, None),
+    ] {
+        let response = loopback_client()
+            .post(format!("http://127.0.0.1:{}/v1/chat/completions", h.port))
+            .header(reqwest::header::AUTHORIZATION, "Bearer gw-test")
+            .header("x-opencode-session", "private-go-session")
+            .header("x-session-id", "lower-priority-session")
+            .json(&serde_json::json!({
+                "model": model,
+                "messages": [{"role": "user", "content": "ping"}],
+                "stream": false
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "{}",
+            response.text().await.unwrap()
+        );
+        assert_eq!(
+            h.calls.lock().unwrap()[0].opencode_session.as_deref(),
+            expected
+        );
+    }
+}
+
+#[tokio::test]
+async fn opencode_identity_headers_are_go_zen_only_and_preserve_explicit_values() {
+    let go = FallbackHarness::go(&[("key-1", &[ok()])], &["key-1"]).await;
+    let zen = FallbackHarness::zen_go(&[("", &[ok()]), ("key-1", &[ok()])], &["key-1"]).await;
+    let (goat, _) = start_goat(
+        &[("goat-key", &[ok()])],
+        &[COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM],
+        true,
+        true,
+    )
+    .await;
+
+    for (h, model) in [
+        (&go, "deepseek-v4-flash"),
+        (&zen, "mimo-v2.5-free"),
+        (&goat, COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM),
+    ] {
+        let response = loopback_client()
+            .post(format!("http://127.0.0.1:{}/v1/chat/completions", h.port))
+            .header(reqwest::header::AUTHORIZATION, "Bearer gw-test")
+            .header("x-opencode-session", "ses_explicit")
+            .header("x-opencode-client", "desktop")
+            .header("x-opencode-request", "req_explicit")
+            .header("x-opencode-project", "proj_explicit")
+            .header("x-session-id", "ses_id_explicit")
+            .header("x-session-affinity", "ses_aff_explicit")
+            .json(&serde_json::json!({
+                "model": model,
+                "messages": [{"role": "user", "content": "ping"}],
+                "stream": false
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "{}",
+            response.text().await.unwrap()
+        );
+    }
+
+    let go_call = go.calls.lock().unwrap()[0].clone();
+    assert_eq!(go_call.opencode_session.as_deref(), Some("ses_explicit"));
+    assert_eq!(go_call.opencode_client.as_deref(), Some("desktop"));
+    assert_eq!(go_call.opencode_request.as_deref(), Some("req_explicit"));
+    assert_eq!(go_call.opencode_project.as_deref(), Some("proj_explicit"));
+    assert!(go_call.session_id.is_none(), "{go_call:?}");
+    assert!(go_call.session_affinity.is_none(), "{go_call:?}");
+
+    let zen_call = zen.calls.lock().unwrap()[0].clone();
+    assert_eq!(zen_call.opencode_session.as_deref(), Some("ses_explicit"));
+    assert_eq!(zen_call.opencode_client.as_deref(), Some("desktop"));
+    assert_eq!(zen_call.opencode_request.as_deref(), Some("req_explicit"));
+    assert_eq!(zen_call.opencode_project.as_deref(), Some("proj_explicit"));
+    assert!(zen_call.session_id.is_none(), "{zen_call:?}");
+    assert!(zen_call.session_affinity.is_none(), "{zen_call:?}");
+
+    let goat_call = goat.calls.lock().unwrap()[0].clone();
+    assert!(goat_call.opencode_session.is_none(), "{goat_call:?}");
+    assert!(goat_call.opencode_client.is_none(), "{goat_call:?}");
+    assert!(goat_call.opencode_request.is_none(), "{goat_call:?}");
+    assert!(goat_call.opencode_project.is_none(), "{goat_call:?}");
+    assert!(goat_call.session_id.is_none(), "{goat_call:?}");
+    assert!(goat_call.session_affinity.is_none(), "{goat_call:?}");
+}
+
+#[tokio::test]
+async fn client_session_id_is_forwarded_as_the_opencode_go_session() {
+    let h = FallbackHarness::routing(
+        &[("key-1", &[ok()])],
+        &["key-1"],
+        RoutingMode::StrictPriority,
+        false,
+    )
+    .await;
+
+    let response = loopback_client()
+        .post(format!("http://127.0.0.1:{}/v1/chat/completions", h.port))
+        .header(reqwest::header::AUTHORIZATION, "Bearer gw-test")
+        .header("x-session-id", "ses_from_opencode_client")
+        .json(&serde_json::json!({
+            "model": "deepseek-v4-flash",
+            "messages": [{"role": "user", "content": "ping"}],
+            "max_tokens": 3,
+            "stream": false
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let call = h.calls.lock().unwrap()[0].clone();
+    assert_eq!(
+        call.opencode_session.as_deref(),
+        Some("ses_from_opencode_client")
+    );
+    assert!(
+        call.opencode_client.is_none(),
+        "Go must not synthesize Zen Free client identity: {:?}",
+        call.opencode_client
+    );
+    assert_ne!(call.user_agent.as_deref(), Some("opencode"));
 }
 
 #[tokio::test]
@@ -2906,7 +3317,7 @@ async fn list_mode_free_fallback_reroutes_to_the_default_leg_mid_request() {
         &state,
         format!("{upstream_base}/zen/go"),
         &proxy_base,
-        &["hy3-free"],
+        &["mimo-v2.5-free"],
     );
     state
         .db
@@ -2917,7 +3328,7 @@ async fn list_mode_free_fallback_reroutes_to_the_default_leg_mid_request() {
     h.push_stop(stop_upstream);
     h.push_stop(stop_proxy);
 
-    let (status, _) = h.protocol("/v1/chat/completions", "hy3").await;
+    let (status, _) = h.protocol("/v1/chat/completions", "mimo-v2.5").await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
         proxy_calls.lock().unwrap().len(),
@@ -2933,7 +3344,7 @@ async fn list_mode_free_fallback_reroutes_to_the_default_leg_mid_request() {
     let logs = h.logs();
     let free_row = logs
         .iter()
-        .find(|log| log.model == "hy3-free")
+        .find(|log| log.model == "mimo-v2.5-free")
         .expect("free attempt row");
     assert_eq!(
         free_row.route, "proxy",
@@ -2941,7 +3352,7 @@ async fn list_mode_free_fallback_reroutes_to_the_default_leg_mid_request() {
     );
     let go_row = logs
         .iter()
-        .find(|log| log.model == "hy3" && log.status == "success")
+        .find(|log| log.model == "mimo-v2.5" && log.status == "success")
         .expect("Go fallback success row");
     assert_eq!(go_row.route, "direct");
 }
@@ -3236,4 +3647,82 @@ async fn explicit_probe_can_add_ceiling_protocol_and_failure_does_not() {
             .any(|call| call.path == "/v1/chat/completions" && call.body.contains("grok-4.5")),
         "probed Chat must become the selected production path: {recorded:?}"
     );
+}
+
+#[tokio::test]
+async fn cpa_fake_upstream_production_forwarding_uses_bearer_and_bypasses_global_proxy() {
+    let replies = script(&[("cpa-inference-key", &[ok()])]);
+    let (base_url, calls, stop_mock) = start_fake_upstream(replies).await;
+    let (state, dir) = build_state(base_url.clone(), &[]);
+    let now = Utc::now();
+    let account = Account {
+        id: CPA_ACCOUNT_ID.to_string(),
+        provider_id: CPA_PROVIDER_ID.to_string(),
+        credential_kind: CredentialKind::ApiKey,
+        quota_scope: QuotaScope::Key,
+        name: CPA_ACCOUNT_NAME.to_string(),
+        username: None,
+        password_cipher: None,
+        key_cipher: state.encrypt_key("cpa-inference-key").unwrap(),
+        enabled: true,
+        account_type: AccountType::Key,
+        setup_step: AccountSetupStep::Ready,
+        referral_code: None,
+        purchase_date: String::new(),
+        expires_on: String::new(),
+        cooldown_until: None,
+        cooldown_generic_until: None,
+        cooldown_5h_until: None,
+        cooldown_week_until: None,
+        cooldown_month_until: None,
+        cooldown_free_until: None,
+        last_error: None,
+        auth_error: None,
+        notes: None,
+        created_at: now,
+        updated_at: now,
+    };
+    let management = state.encrypt_key("cpa-management-key").unwrap();
+    state
+        .db
+        .lock()
+        .upsert_cpa_integration(&account, &base_url, &management)
+        .unwrap();
+    state
+        .activate_cpa_model_catalog(vec!["cpa-forward-model".into()], &base_url, now)
+        .unwrap();
+    let mut config = state.config();
+    config.proxy_mode = ProxyMode::Manual;
+    config.proxy_url = "http://127.0.0.1:1".into();
+    state.set_config(config).unwrap();
+
+    let h = FallbackHarness::from_parts(state, dir, calls, Some(stop_mock), None).await;
+    let (status, body) = h
+        .protocol("/v1/chat/completions", "cpa-forward-model")
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let captured = h.calls.lock().unwrap().clone();
+    assert_eq!(captured.len(), 1);
+    assert_eq!(captured[0].path, "/v1/chat/completions");
+    assert_eq!(
+        captured[0].authorization.as_deref(),
+        Some("Bearer cpa-inference-key")
+    );
+    assert!(
+        captured[0].body.contains("\"cpa-forward-model\""),
+        "CPA must forward the exact catalog model: {}",
+        captured[0].body
+    );
+    let logs = h.logs();
+    assert!(
+        logs.iter().any(|log| {
+            log.provider_id.as_deref() == Some(CPA_PROVIDER_ID)
+                && log.route_account_id.as_deref() == Some(CPA_ACCOUNT_ID)
+                && log.model == "cpa-forward-model"
+                && log.http_status == Some(200)
+        }),
+        "CPA attribution missing: {logs:?}"
+    );
+    h.stop();
 }

@@ -15,7 +15,6 @@ export interface ConnectionDraftContext {
   gateway_port: number;
   gateway_key: string;
   client_root_url: string;
-  upstream_base_url: string;
 }
 
 export function connectionDraftContextChanged(
@@ -24,8 +23,7 @@ export function connectionDraftContextChanged(
 ): boolean {
   return previous.gateway_port !== next.gateway_port
     || previous.gateway_key !== next.gateway_key
-    || previous.client_root_url !== next.client_root_url
-    || previous.upstream_base_url !== next.upstream_base_url;
+    || previous.client_root_url !== next.client_root_url;
 }
 
 export function reconcileConnectionDrafts(
@@ -121,13 +119,4 @@ function isInsecureHttp(rootUrl: string): boolean {
     || hostname === "::1"
     || /^127(?:\.\d{1,3}){3}$/.test(hostname);
   return !loopback;
-}
-
-export async function writeConnectionValue(
-  writeText: ((value: string) => Promise<void>) | undefined,
-  value: string,
-): Promise<void> {
-  if (!value) throw new Error(t("没有可复制的内容"));
-  if (!writeText) throw new Error(t("当前环境不支持剪贴板"));
-  await writeText(value);
 }

@@ -12,7 +12,6 @@ import type {
   ProviderContracts as V3ProviderContracts,
   ProviderPricing as V3ProviderPricing,
   ProviderPricingSnapshot as V3ProviderPricingSnapshot,
-  ProviderModels as V3ProviderModels,
   ProviderUsage as V3ProviderUsage,
   ProtocolOverrideState as V3ProtocolOverrideState,
   ProtocolProbeResponse as V3ProtocolProbeResponse,
@@ -179,8 +178,6 @@ export interface ProviderUsageResponse {
 
 export interface ProviderSettingsUpdate {
   enabled: boolean;
-  /** Settings revision guard; omit only when no revision has been loaded. */
-  expected_revision?: number;
 }
 
 export interface ProviderSettingsResponse {
@@ -318,30 +315,13 @@ export interface ProtocolProbeResponse {
   contract: EffectiveModelContract | null;
 }
 
-export interface CustomCatalogRefreshResponse {
-  scope_kind: ContractScopeKind;
-  scope_id: string;
-  models: string[];
-  truncated: boolean;
-  refreshed_at: string;
-  source: string;
-  declared_capabilities_unchanged: boolean;
-}
-
-export type ProviderModelsRefreshResponse = ZenFreeModelsResponse | CustomCatalogRefreshResponse | V3ProviderModels;
-
-export function isCustomCatalogRefreshResponse(
-  value: ProviderModelsRefreshResponse,
-): value is CustomCatalogRefreshResponse {
-  return "scope_kind" in value && "truncated" in value;
-}
-
 function creationAvailability(value: string): ProviderCatalogEntry["creation_availability"] {
   return value === "available" ? "available" : "unavailable";
 }
 
 function verificationPolicy(value: string): ProviderCatalogEntry["verification_policy"] {
-  return value === "required" ? "required" : "not_required";
+  if (value === "required" || value === "not_required") return value;
+  throw new Error(`unknown verification policy: ${value}`);
 }
 
 function verificationRuntime(value: string): ProviderCatalogEntry["verification_runtime_availability"] {
@@ -360,9 +340,9 @@ function usageAvailability(value: string): ProviderCatalogEntry["usage_availabil
 }
 
 function formFieldKind(value: string): ProviderCatalogFormField["kind"] {
-  if (value === "secret" || value === "date"
+  if (value === "text" || value === "secret" || value === "date"
     || value === "url" || value === "select" || value === "models") return value;
-  return "text";
+  throw new Error(`unknown form field kind: ${value}`);
 }
 
 export function presentDynamicProvider(value: V3DynamicProvider): DynamicProviderView {
@@ -650,23 +630,8 @@ export const providerApi = {
       }, expectation)
     )));
   },
-  getGoPricing: async (): Promise<PricingSnapshot> => {
-    const result = await dashboardV3.getProviderPricing("opencode");
-    if (!result.snapshot) throw new Error("OpenCode Go pricing is not available");
-    return presentPricing(result.snapshot);
-  },
   getZenFreeSettings: async (): Promise<ZenFreeSettings> => dashboardV3.getZenFreeSettings(),
   getZenFreeModels: async (): Promise<ZenFreeModelsResponse> => presentZenModels(await dashboardV3.getZenFreeModels()),
-  setZenFreeEnabled: async (enabled: boolean): Promise<ZenFreeSettings> => {
-    const control = useControlPlaneStore();
-    if (!control.hasTokens()) await control.refresh();
-    try {
-      return await control.runMutation((expectation) => dashboardV3.patchZenFreeSettings(enabled, expectation));
-    } catch (cause) {
-      if (isRevisionConflict(cause)) await dashboardV3.getZenFreeSettings();
-      throw cause;
-    }
-  },
   refreshZenFreeModels: async (): Promise<ZenFreeModelsResponse> => {
     const control = useControlPlaneStore();
     if (!control.hasTokens()) await control.refresh();
@@ -700,42 +665,6 @@ export const providerApi = {
     }
     const refreshed = await dashboardV3.getAccount(accountId);
     return { account: presentAccount(refreshed), revision: refreshed.revision };
-  },
-  getProviderModels: async (accountId: string) => {
-    const account = await dashboardV3.getAccount(accountId);
-    if (account.providerId !== "custom") return presentZenModels(await dashboardV3.getZenFreeModels());
-    const config = account.customConfig;
-    if (!config) throw new Error("Custom account has no configured destination");
-    const discovered = await dashboardV3.discoverCustomModels({
-      accountId,
-      endpointUrl: config.endpointUrl,
-      upstreamProtocol: config.upstreamProtocol,
-    });
-    return {
-      scope_kind: "custom_endpoint",
-      scope_id: accountId,
-      models: discovered.models,
-      truncated: discovered.truncated,
-      refreshed_at: "",
-      source: "discovered",
-      declared_capabilities_unchanged: true,
-    } satisfies CustomCatalogRefreshResponse;
-  },
-  refreshProviderModels: async (accountId: string) => {
-    const account = await dashboardV3.getAccount(accountId);
-    if (account.providerId === "custom") {
-      return providerApi.getProviderModels(accountId);
-    }
-    const control = useControlPlaneStore();
-    if (!control.hasTokens()) await control.refresh();
-    if (account.providerId === "opencode-zen-free") {
-      return presentZenModels(await control.runMutation((expectation) => dashboardV3.refreshZenFreeModels(expectation)));
-    }
-    return control.runMutation((expectation) => dashboardV3.refreshProviderModels(
-      account.providerId,
-      accountId,
-      expectation,
-    ));
   },
   refreshContractCatalog: async (scopeKind: ContractScopeKind, scopeId: string) => {
     const control = useControlPlaneStore();

@@ -1,5 +1,5 @@
 use super::*;
-use crate::alias::{self, ResolvedModel};
+use crate::alias::{self, ResolvedModel, RuntimeCatalogs};
 use crate::crypto::{KeyCipher, StaticKeyCipher};
 use crate::custom::CustomAccountRuntime;
 use crate::gateway::protocol::{ApiFormat, parse_client_request};
@@ -18,6 +18,45 @@ use crate::provider::{
 use chrono::Utc;
 use serde_json::json;
 use std::sync::Arc;
+
+const NO_IDS: &[String] = &[];
+
+fn catalogs<'a>(
+    zen_free: &'a [String],
+    custom: &'a [String],
+    command_code: &'a [String],
+) -> RuntimeCatalogs<'a> {
+    RuntimeCatalogs {
+        go: NO_IDS,
+        zen_free,
+        custom,
+        command_code,
+        minimax: NO_IDS,
+        kimi: NO_IDS,
+        cpa: NO_IDS,
+        ollama: NO_IDS,
+        ollama_pinned: NO_IDS,
+        extra: &[],
+    }
+}
+
+fn resolve_with_custom(requested: &str, custom_model_ids: &[String]) -> ResolvedModel {
+    alias::resolve_with_runtime_catalogs(requested, catalogs(NO_IDS, custom_model_ids, NO_IDS))
+        .unwrap()
+}
+
+fn resolve_with_catalogs(
+    requested: &str,
+    zen_free_models: &[String],
+    custom_model_ids: &[String],
+    goat_model_ids: &[String],
+) -> ResolvedModel {
+    alias::resolve_with_runtime_catalogs(
+        requested,
+        catalogs(zen_free_models, custom_model_ids, goat_model_ids),
+    )
+    .unwrap()
+}
 
 fn chat_body(model: &str) -> Bytes {
     Bytes::from(
@@ -295,7 +334,7 @@ fn mixed_case_go_alias_preserves_requested_casing() {
 fn zen_free_alias_materializes_anonymous_channel() {
     let config = AppConfig::default();
     let set = routes_for(
-        "hy3-free",
+        "mimo-v2.5-free",
         &[go_account("go-1"), zen_account()],
         &config,
         true,
@@ -304,27 +343,32 @@ fn zen_free_alias_materializes_anonymous_channel() {
     assert_eq!(set.routes.len(), 1);
     assert_eq!(set.routes[0].routing.account.id, ZEN_FREE_ACCOUNT_ID);
     assert_eq!(set.routes[0].plan.channel, UpstreamChannel::Free);
-    assert_eq!(set.routes[0].plan.model, "hy3-free");
+    assert_eq!(set.routes[0].plan.model, "mimo-v2.5-free");
     assert!(set.routes[0].plan.upstream_base_override.is_some());
 }
 
 #[test]
 fn shared_alias_builds_go_and_free_candidates_in_account_order() {
     let config = AppConfig::default();
-    let set = routes_for("hy3", &[go_account("go-1"), zen_account()], &config, true);
+    let set = routes_for(
+        "mimo-v2.5",
+        &[go_account("go-1"), zen_account()],
+        &config,
+        true,
+    );
     assert_eq!(set.routes.len(), 2);
     assert_eq!(set.routes[0].routing.account.id, "go-1");
     assert_eq!(set.routes[0].plan.channel, UpstreamChannel::Go);
     assert_eq!(set.routes[1].routing.account.id, ZEN_FREE_ACCOUNT_ID);
     assert_eq!(set.routes[1].plan.channel, UpstreamChannel::Free);
-    assert_eq!(set.routes[1].plan.model, "hy3-free");
-    assert_eq!(set.routes[1].plan.client_model, "hy3");
+    assert_eq!(set.routes[1].plan.model, "mimo-v2.5-free");
+    assert_eq!(set.routes[1].plan.client_model, "mimo-v2.5");
     assert!(set.routes[1].plan.original_model.is_none());
     assert!(!set.routes[1].plan.allow_go_fallback);
     let free_identity = native_log_identity(&set.routes[1].plan);
-    assert_eq!(free_identity.requested_model, "hy3");
-    assert_eq!(free_identity.resolved_alias.as_deref(), Some("hy3"));
-    assert_eq!(free_identity.upstream_model, "hy3-free");
+    assert_eq!(free_identity.requested_model, "mimo-v2.5");
+    assert_eq!(free_identity.resolved_alias.as_deref(), Some("mimo-v2.5"));
+    assert_eq!(free_identity.upstream_model, "mimo-v2.5-free");
 }
 
 #[test]
@@ -385,7 +429,7 @@ fn mapping_plans_follow_registry_order_while_candidates_keep_account_order() {
             crate::alias::ProviderMapping {
                 provider_id: OPENCODE_ZEN_FREE_PROVIDER_ID.to_string(),
 
-                upstream_model: "hy3-free".into(),
+                upstream_model: "mimo-v2.5-free".into(),
                 routeable: true,
             },
             crate::alias::ProviderMapping {
@@ -418,7 +462,7 @@ fn mapping_plans_follow_registry_order_while_candidates_keep_account_order() {
     assert_eq!(set.routes[0].plan.model, "glm-5.2");
     assert_eq!(set.routes[1].routing.account.id, ZEN_FREE_ACCOUNT_ID);
     assert_eq!(set.routes[1].plan.channel, UpstreamChannel::Free);
-    assert_eq!(set.routes[1].plan.model, "hy3-free");
+    assert_eq!(set.routes[1].plan.model, "mimo-v2.5-free");
 }
 
 #[test]
@@ -501,13 +545,12 @@ fn goat_slash_raw_pins_through_loopback_as_chat() {
         install_goat_loopback_route_for_test(goat.id.clone(), "http://127.0.0.1:9").unwrap();
     let body = chat_body(COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM);
     let parsed = parse_client_request(ApiFormat::ChatCompletions, body.clone()).unwrap();
-    let resolved = crate::alias::resolve_with_catalogs(
+    let resolved = resolve_with_catalogs(
         COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM,
         &[],
         &[],
         &[COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM.into()],
-    )
-    .unwrap();
+    );
     let set = materialize_account_routes(
         &[goat, go_account("go-1")],
         &config,
@@ -554,13 +597,8 @@ fn goat_anthropic_alias_uses_messages_and_converts_client_responses() {
         .unwrap(),
     );
     let parsed = parse_client_request(ApiFormat::Responses, body.clone()).unwrap();
-    let resolved = crate::alias::resolve_with_catalogs(
-        "claude-sonnet-4-6",
-        &[],
-        &[],
-        &["claude-sonnet-4-6".into()],
-    )
-    .unwrap();
+    let resolved =
+        resolve_with_catalogs("claude-sonnet-4-6", &[], &[], &["claude-sonnet-4-6".into()]);
     let set = materialize_account_routes(
         &[goat],
         &config,
@@ -759,7 +797,7 @@ fn materialize_dispatches_builtin_and_custom_through_adapter_kinds() {
 
 #[test]
 fn custom_candidate_diagnostic_passthrough_keeps_client_protocol() {
-    let resolved = alias::resolve_with_custom("local-custom", &["local-custom".into()]).unwrap();
+    let resolved = resolve_with_custom("local-custom", &["local-custom".into()]);
     assert_eq!(
         diagnostic_forced_upstream(&resolved, ApiFormat::Responses),
         Some(ApiFormat::Responses)
@@ -768,7 +806,7 @@ fn custom_candidate_diagnostic_passthrough_keeps_client_protocol() {
         diagnostic_forced_upstream(&resolved, ApiFormat::Messages),
         Some(ApiFormat::Messages)
     );
-    let mixed = alias::resolve_with_custom("hy3", &["hy3".into()]).unwrap();
+    let mixed = resolve_with_custom("hy3", &["hy3".into()]);
     assert_eq!(
         diagnostic_forced_upstream(&mixed, ApiFormat::Responses),
         Some(ApiFormat::Responses)
@@ -778,13 +816,7 @@ fn custom_candidate_diagnostic_passthrough_keeps_client_protocol() {
         diagnostic_forced_upstream(&builtin, ApiFormat::Responses),
         None
     );
-    let goat = crate::alias::resolve_with_catalogs(
-        "claude-sonnet-4-6",
-        &[],
-        &[],
-        &["claude-sonnet-4-6".into()],
-    )
-    .unwrap();
+    let goat = resolve_with_catalogs("claude-sonnet-4-6", &[], &[], &["claude-sonnet-4-6".into()]);
     assert_eq!(
         diagnostic_forced_upstream(&goat, ApiFormat::Responses),
         Some(ApiFormat::Responses)
@@ -792,6 +824,20 @@ fn custom_candidate_diagnostic_passthrough_keeps_client_protocol() {
     assert_eq!(
         diagnostic_forced_upstream(&goat, ApiFormat::Messages),
         Some(ApiFormat::Messages)
+    );
+    let zen = resolve_with_catalogs(
+        "brand-new-promo",
+        &["brand-new-promo-free".into()],
+        &[],
+        &[],
+    );
+    assert_eq!(
+        diagnostic_forced_upstream(&zen, ApiFormat::ChatCompletions),
+        Some(ApiFormat::ChatCompletions)
+    );
+    assert_eq!(
+        diagnostic_forced_upstream(&zen, ApiFormat::Messages),
+        Some(ApiFormat::ChatCompletions)
     );
 }
 
@@ -813,7 +859,7 @@ fn custom_native_responses_structured_format_does_not_guess_chat() {
         .unwrap(),
     );
     let parsed = parse_client_request(ApiFormat::Responses, body.clone()).unwrap();
-    let resolved = alias::resolve_with_custom("local-custom", &["local-custom".into()]).unwrap();
+    let resolved = resolve_with_custom("local-custom", &["local-custom".into()]);
     let account = custom_account("custom-1");
     let runtime = custom_runtime("custom-1", "local-custom", UpstreamProtocolKind::Responses);
     let mut runtimes = std::collections::HashMap::new();
@@ -856,7 +902,7 @@ fn custom_native_messages_structured_format_does_not_guess_chat() {
         .unwrap(),
     );
     let parsed = parse_client_request(ApiFormat::Messages, body.clone()).unwrap();
-    let resolved = alias::resolve_with_custom("local-custom", &["local-custom".into()]).unwrap();
+    let resolved = resolve_with_custom("local-custom", &["local-custom".into()]);
     let account = custom_account("custom-1");
     let runtime = custom_runtime("custom-1", "local-custom", UpstreamProtocolKind::Messages);
     let mut runtimes = std::collections::HashMap::new();
@@ -892,8 +938,7 @@ fn custom_single_protocol_converts_other_client_wire_formats() {
         } else {
             parse_client_request(client, body.clone()).unwrap()
         };
-        let resolved =
-            alias::resolve_with_custom("local-custom", &["local-custom".into()]).unwrap();
+        let resolved = resolve_with_custom("local-custom", &["local-custom".into()]);
         let account = custom_account("custom-single");
         let runtime = custom_runtime(
             "custom-single",
@@ -967,7 +1012,7 @@ fn custom_single_protocol_converts_other_client_wire_formats() {
 fn custom_without_scope_contract_does_not_produce_a_candidate() {
     let body = chat_body("local-custom");
     let parsed = parse_client_request(ApiFormat::ChatCompletions, body.clone()).unwrap();
-    let resolved = alias::resolve_with_custom("local-custom", &["local-custom".into()]).unwrap();
+    let resolved = resolve_with_custom("local-custom", &["local-custom".into()]);
     let account = custom_account("custom-missing-scope");
     let runtime = custom_runtime(
         "custom-missing-scope",

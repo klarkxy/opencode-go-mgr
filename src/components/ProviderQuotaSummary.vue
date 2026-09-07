@@ -74,6 +74,7 @@ function windowLabel(window: ProviderQuotaWindow): string {
   if (kind.startsWith("minimax_weekly:")) return `${t("本周")} · ${scopeLabel(kind.slice(15))}`;
   if (kind === "kimi_usage") return t("本周");
   if (kind === "kimi_5h") return t("5小时");
+  if (kind === "month") return t("本月");
   return scopeLabel(kind);
 }
 
@@ -87,7 +88,13 @@ function usedLabel(window: ProviderQuotaWindow): string {
   if (window.unit === "percent" || window.window_kind.startsWith("kimi_")) {
     return `${usedPercent(window).toLocaleString(undefined, { maximumFractionDigits: 1 })}%`;
   }
-  return `${window.used.toLocaleString()} / ${window.limit_value.toLocaleString()}`;
+  const used = window.used.toLocaleString();
+  const limit = window.limit_value.toLocaleString();
+  if (window.used > window.limit_value) {
+    const extra = (window.used - window.limit_value).toLocaleString();
+    return `${used} / ${limit} · ${t("超出 {amount}", { amount: extra })}`;
+  }
+  return `${used} / ${limit}`;
 }
 </script>
 

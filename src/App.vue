@@ -11,10 +11,10 @@
     <main v-if="authState !== 'ready'" class="auth-page">
       <section class="auth-panel">
         <div class="auth-panel-head">
-          <div class="auth-brand"><span>OCG</span> Manager</div>
+          <div class="auth-brand"><span>OCG</span> Gateway</div>
           <LocaleSwitcher />
         </div>
-        <p class="auth-kicker">OpenCode-Go Console</p>
+        <p class="auth-kicker">Open Console Gateway</p>
         <h1>{{ authState === "register" ? t("创建管理员") : t("管理员登录") }}</h1>
         <p v-if="authState === 'checking'" class="auth-copy">{{ t("正在连接管理服务…") }}</p>
         <n-form
@@ -87,9 +87,9 @@
           @collapse="collapsed = true"
           @expand="collapsed = false"
         >
-          <div class="brand" :class="{ collapsed }">
+          <div class="brand" :class="{ collapsed }" aria-label="Open Console Gateway">
             <span class="brand-mark">OCG</span>
-            <span v-if="!collapsed" class="brand-name">Manager</span>
+            <span v-if="!collapsed" class="brand-name">Gateway</span>
           </div>
           <n-menu
             :collapsed="collapsed"
@@ -200,7 +200,6 @@
               <Accounts v-else-if="activeKey === 'accounts'" />
               <Providers v-else-if="activeKey === 'providers'" />
               <Aliases v-else-if="activeKey === 'aliases'" />
-              <Applications v-else-if="activeKey === 'apps'" />
               <Logs v-else-if="activeKey === 'logs'" />
               <Settings
                 v-else-if="activeKey === 'settings'"
@@ -243,7 +242,6 @@ import {
 } from "naive-ui";
 import type { DropdownMenuProps, DropdownOption, MenuOption } from "naive-ui";
 import {
-  AppstoreOutlined,
   ApiOutlined,
   BgColorsOutlined,
   CheckOutlined,
@@ -295,7 +293,6 @@ type ViewKey = AppViewKey;
 const Dashboard = defineAsyncComponent(() => import("./views/Dashboard.vue"));
 const Keys = defineAsyncComponent(() => import("./views/Keys.vue"));
 const Accounts = defineAsyncComponent(() => import("./views/Accounts.vue"));
-const Applications = defineAsyncComponent(() => import("./views/Applications.vue"));
 const Providers = defineAsyncComponent(() => import("./views/Providers.vue"));
 const Aliases = defineAsyncComponent(() => import("./views/Aliases.vue"));
 const Logs = defineAsyncComponent(() => import("./views/Logs.vue"));
@@ -350,7 +347,6 @@ const navigationIcons: Record<AppNavigationItem["icon"], Component> = {
   accounts: TeamOutlined,
   providers: CloudServerOutlined,
   aliases: LinkOutlined,
-  apps: AppstoreOutlined,
   logs: FileTextOutlined,
   settings: SettingOutlined,
   cpa: ApiOutlined,

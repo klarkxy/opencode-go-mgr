@@ -13,18 +13,10 @@ use crate::models::{UpstreamChannel, UsageWindowKind};
 use chrono::Duration;
 
 pub(crate) use ocg_gateway::classify::{
-    Auth401Policy, PreflightKind, ProviderErrorClass, ProviderErrorPolicy, RateLimit429Policy,
-    RateLimitFallback, RateLimitPolicy, StreamClassifyInput, TransportClassifyInput,
-    classify_preflight, classify_stream, classify_transport, provider_error_policy,
+    PreflightKind, ProviderErrorClass, RateLimitFallback, RateLimitPolicy, StreamClassifyInput,
+    TransportClassifyInput, classify_preflight, classify_stream, classify_transport,
     schedule_go_usage_sync,
 };
-
-const _: fn(&str) -> ProviderErrorPolicy = provider_error_policy;
-const _: fn(ProviderErrorPolicy) -> (Auth401Policy, RateLimit429Policy) = split_provider_policy;
-
-const fn split_provider_policy(policy: ProviderErrorPolicy) -> (Auth401Policy, RateLimit429Policy) {
-    (policy.inference_401, policy.rate_limit_429)
-}
 
 /// Host compatibility wrapper: converts [`UpstreamChannel::Free`] to the
 /// gateway classifier's `free_channel` flag.
@@ -92,51 +84,6 @@ pub(crate) fn rate_limit_fallback(window: Option<UsageWindowKind>) -> RateLimitF
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::any::TypeId;
-
-    #[test]
-    fn facade_reexports_gateway_classify_types_without_widening() {
-        assert_eq!(
-            TypeId::of::<Auth401Policy>(),
-            TypeId::of::<ocg_gateway::classify::Auth401Policy>()
-        );
-        assert_eq!(
-            TypeId::of::<PreflightKind>(),
-            TypeId::of::<ocg_gateway::classify::PreflightKind>()
-        );
-        assert_eq!(
-            TypeId::of::<ProviderErrorClass>(),
-            TypeId::of::<ocg_gateway::classify::ProviderErrorClass>()
-        );
-        assert_eq!(
-            TypeId::of::<ProviderErrorPolicy>(),
-            TypeId::of::<ocg_gateway::classify::ProviderErrorPolicy>()
-        );
-        assert_eq!(
-            TypeId::of::<RateLimit429Policy>(),
-            TypeId::of::<ocg_gateway::classify::RateLimit429Policy>()
-        );
-        assert_eq!(
-            TypeId::of::<RateLimitFallback>(),
-            TypeId::of::<ocg_gateway::classify::RateLimitFallback>()
-        );
-        assert_eq!(
-            TypeId::of::<RateLimitPolicy>(),
-            TypeId::of::<ocg_gateway::classify::RateLimitPolicy>()
-        );
-        assert_eq!(
-            TypeId::of::<StreamClassifyInput>(),
-            TypeId::of::<ocg_gateway::classify::StreamClassifyInput>()
-        );
-        assert_eq!(
-            TypeId::of::<TransportClassifyInput>(),
-            TypeId::of::<ocg_gateway::classify::TransportClassifyInput>()
-        );
-        let _: fn(&str) -> ProviderErrorPolicy = provider_error_policy;
-        let _: fn(&str) -> ProviderErrorPolicy = ocg_gateway::classify::provider_error_policy;
-        let _: fn(PreflightKind) -> ProviderErrorClass = classify_preflight;
-        let _: fn(ProviderErrorClass) -> bool = schedule_go_usage_sync;
-    }
 
     #[test]
     fn free_429_does_not_rotate_keys() {

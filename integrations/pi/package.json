@@ -2,7 +2,7 @@
   "name": "ocg-manager-pi",
   "version": "0.0.0",
   "private": true,
-  "description": "OCG Manager provider package for Pi",
+  "description": "Open Console Gateway provider package for Pi",
   "keywords": [
     "pi-package",
     "ocg-manager"

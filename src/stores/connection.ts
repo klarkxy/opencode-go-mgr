@@ -19,27 +19,50 @@ export const useConnectionStore = defineStore("connection", () => {
   const loading = ref(false);
   const error = ref("");
 
+  // `load` and `reloadAfterMutation` share one generation so a slow pending
+  // load can never clobber fresher post-mutation state; `clearSecrets` bumps
+  // it so a load resolving after logout cannot re-populate plaintext.
+  // Stale calls still return/throw to their own caller unchanged.
+  let loadGeneration = 0;
+
   async function load(): Promise<ConnectionInfo> {
+    const generation = ++loadGeneration;
     loading.value = true;
     try {
       const connection = await dashboardApi.getConnection();
+      if (generation !== loadGeneration) return connection;
       info.value = connection;
       error.value = "";
       return connection;
     } catch (e) {
-      error.value = e instanceof Error ? e.message : String(e);
+      if (generation === loadGeneration) {
+        error.value = e instanceof Error ? e.message : String(e);
+      }
       throw e;
     } finally {
-      loading.value = false;
+      if (generation === loadGeneration) loading.value = false;
     }
   }
 
   /** Refresh after a key mutation; the mutation ack has no plaintext. */
   async function reloadAfterMutation(): Promise<ConnectionInfo> {
-    const connection = await dashboardApi.getConnection();
-    info.value = connection;
-    error.value = "";
-    return connection;
+    const generation = ++loadGeneration;
+    try {
+      const connection = await dashboardApi.getConnection();
+      if (generation !== loadGeneration) return connection;
+      info.value = connection;
+      error.value = "";
+      return connection;
+    } catch (e) {
+      if (generation === loadGeneration) {
+        error.value = e instanceof Error ? e.message : String(e);
+      }
+      throw e;
+    } finally {
+      // Latest request owns the flag, including releasing a superseded
+      // in-flight `load` whose own finally no longer clears it.
+      if (generation === loadGeneration) loading.value = false;
+    }
   }
 
   async function runKeyMutation<T>(run: () => Promise<T>): Promise<T> {
@@ -82,13 +105,17 @@ export const useConnectionStore = defineStore("connection", () => {
   }
 
   async function regeneratePrimaryKey(): Promise<string> {
-    return runKeyMutation(() => controlPlane.runMutation((exp) => dashboardApi.regeneratePrimaryKey(exp)));
+    await runKeyMutation(() => controlPlane.runMutation((exp) => dashboardApi.regeneratePrimaryKey(exp)));
+    const connection = await reloadAfterMutation();
+    return connection.primary_key;
   }
 
   /** Drop all plaintext Key material held in memory (401 / logout). */
   function clearSecrets(): void {
+    loadGeneration += 1;
     info.value = null;
     error.value = "";
+    loading.value = false;
   }
 
   return {

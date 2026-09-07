@@ -12,17 +12,34 @@ const MAX_BODY_BYTES: usize = 256 * 1024;
 pub const MINIMAX_USAGE_SOURCE: &str = "minimax-cn-official";
 pub const KIMI_USAGE_SOURCE: &str = "kimi-cn-official";
 
+fn official_usage_target(
+    adapter: ProviderAdapterKind,
+) -> Result<(&'static str, &'static str), String> {
+    match adapter {
+        ProviderAdapterKind::MiniMaxCn => Ok((MINIMAX_CN_USAGE_URL, "MiniMax CN")),
+        ProviderAdapterKind::KimiCn => Ok((KIMI_CN_USAGE_URL, "Kimi Code CN")),
+        _ => Err("this Plan does not expose an official manual usage refresh".to_string()),
+    }
+}
+
 pub async fn fetch(
     config: &AppConfig,
     adapter: ProviderAdapterKind,
     account_id: &str,
     key: &str,
 ) -> Result<Vec<QuotaWindow>, String> {
-    let (url, label) = match adapter {
-        ProviderAdapterKind::MiniMaxCn => (MINIMAX_CN_USAGE_URL, "MiniMax CN"),
-        ProviderAdapterKind::KimiCn => (KIMI_CN_USAGE_URL, "Kimi Code CN"),
-        _ => return Err("this Plan does not expose an official manual usage refresh".to_string()),
-    };
+    let (url, _) = official_usage_target(adapter)?;
+    fetch_from_url(config, adapter, account_id, key, url).await
+}
+
+async fn fetch_from_url(
+    config: &AppConfig,
+    adapter: ProviderAdapterKind,
+    account_id: &str,
+    key: &str,
+    url: &str,
+) -> Result<Vec<QuotaWindow>, String> {
+    let (_, label) = official_usage_target(adapter)?;
     let key = key.trim();
     if key.is_empty() {
         return Err(format!("{label} usage refresh requires a stored Key"));
@@ -199,10 +216,10 @@ fn parse_kimi(
     now: DateTime<Utc>,
 ) -> Result<Vec<QuotaWindow>, String> {
     let mut rows = Vec::new();
-    if let Some(usage) = value.get("usage").and_then(Value::as_object) {
-        if let Some(row) = kimi_window(account_id, "kimi_usage".to_string(), usage, now) {
-            rows.push(row);
-        }
+    if let Some(usage) = value.get("usage").and_then(Value::as_object)
+        && let Some(row) = kimi_window(account_id, "kimi_usage".to_string(), usage, now)
+    {
+        rows.push(row);
     }
     if let Some(limits) = value.get("limits").and_then(Value::as_array) {
         for (index, item) in limits.iter().enumerate() {
@@ -369,5 +386,151 @@ mod tests {
         assert_eq!(rows[0].used, 4.0);
         assert_eq!(rows[1].used, 3.0);
         assert_eq!(rows[1].window_kind, "kimi_5h");
+    }
+
+    #[test]
+    fn official_usage_urls_are_the_fixed_production_constants() {
+        assert_eq!(
+            official_usage_target(ProviderAdapterKind::MiniMaxCn).unwrap(),
+            (MINIMAX_CN_USAGE_URL, "MiniMax CN")
+        );
+        assert_eq!(
+            MINIMAX_CN_USAGE_URL,
+            "https://api.minimaxi.com/v1/token_plan/remains"
+        );
+        assert_eq!(
+            official_usage_target(ProviderAdapterKind::KimiCn).unwrap(),
+            (KIMI_CN_USAGE_URL, "Kimi Code CN")
+        );
+        assert_eq!(KIMI_CN_USAGE_URL, "https://api.kimi.com/coding/v1/usages");
+        assert!(official_usage_target(ProviderAdapterKind::OpenCodeGo).is_err());
+    }
+
+    #[derive(Clone)]
+    struct CapturedUsageCall {
+        method: String,
+        path: String,
+        authorization: Option<String>,
+        accept: Option<String>,
+    }
+
+    async fn start_usage_origin(
+        status: axum::http::StatusCode,
+        body: &'static str,
+        path: &str,
+    ) -> (
+        String,
+        std::sync::Arc<std::sync::Mutex<Vec<CapturedUsageCall>>>,
+    ) {
+        use axum::Router;
+        use axum::extract::OriginalUri;
+        use axum::http::{HeaderMap, Method};
+        use axum::routing::any;
+        let calls = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let calls_for_handler = calls.clone();
+        let app = Router::new().fallback(any(
+            move |method: Method, uri: OriginalUri, headers: HeaderMap| {
+                let calls = calls_for_handler.clone();
+                async move {
+                    calls.lock().unwrap().push(CapturedUsageCall {
+                        method: method.to_string(),
+                        path: uri.path().to_string(),
+                        authorization: headers
+                            .get(axum::http::header::AUTHORIZATION)
+                            .and_then(|value| value.to_str().ok())
+                            .map(str::to_string),
+                        accept: headers
+                            .get(axum::http::header::ACCEPT)
+                            .and_then(|value| value.to_str().ok())
+                            .map(str::to_string),
+                    });
+                    (status, body)
+                }
+            },
+        ));
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        (format!("http://{addr}{path}"), calls)
+    }
+
+    #[tokio::test]
+    async fn minimax_usage_http_sends_bearer_get_and_parses() {
+        let (url, calls) = start_usage_origin(
+            axum::http::StatusCode::OK,
+            r#"{"model_remains":[{"model_name":"MiniMax-M3","current_interval_total_count":100,"current_interval_usage_count":96,"current_interval_status":1,"current_weekly_total_count":200,"current_weekly_usage_count":150,"current_weekly_status":1}]}"#,
+            "/v1/token_plan/remains",
+        )
+        .await;
+        let rows = fetch_from_url(
+            &AppConfig::default(),
+            ProviderAdapterKind::MiniMaxCn,
+            "acct-1",
+            "sk-minimax",
+            &url,
+        )
+        .await
+        .unwrap();
+        assert_eq!(rows[0].used, 4.0);
+        assert_eq!(rows[0].source, MINIMAX_USAGE_SOURCE);
+        let captured = calls.lock().unwrap();
+        assert_eq!(captured.len(), 1);
+        assert_eq!(captured[0].method, "GET");
+        assert_eq!(captured[0].path, "/v1/token_plan/remains");
+        assert_eq!(
+            captured[0].authorization.as_deref(),
+            Some("Bearer sk-minimax")
+        );
+        assert_eq!(captured[0].accept.as_deref(), Some("application/json"));
+    }
+
+    #[tokio::test]
+    async fn kimi_usage_http_sends_bearer_get_and_parses() {
+        let (url, calls) = start_usage_origin(
+            axum::http::StatusCode::OK,
+            r#"{"usage":{"limit":100,"used":4},"limits":[]}"#,
+            "/coding/v1/usages",
+        )
+        .await;
+        let rows = fetch_from_url(
+            &AppConfig::default(),
+            ProviderAdapterKind::KimiCn,
+            "acct-1",
+            "sk-kimi",
+            &url,
+        )
+        .await
+        .unwrap();
+        assert_eq!(rows[0].used, 4.0);
+        assert_eq!(rows[0].source, KIMI_USAGE_SOURCE);
+        let captured = calls.lock().unwrap();
+        assert_eq!(captured[0].method, "GET");
+        assert_eq!(captured[0].path, "/coding/v1/usages");
+        assert_eq!(captured[0].authorization.as_deref(), Some("Bearer sk-kimi"));
+        assert_eq!(captured[0].accept.as_deref(), Some("application/json"));
+    }
+
+    #[tokio::test]
+    async fn usage_http_non_2xx_fails_without_parsing() {
+        let (url, _) = start_usage_origin(
+            axum::http::StatusCode::BAD_GATEWAY,
+            r#"{"error":"down"}"#,
+            "/v1/token_plan/remains",
+        )
+        .await;
+        let error = fetch_from_url(
+            &AppConfig::default(),
+            ProviderAdapterKind::MiniMaxCn,
+            "acct-1",
+            "sk-minimax",
+            &url,
+        )
+        .await
+        .unwrap_err();
+        assert!(error.contains("502"), "{error}");
     }
 }

@@ -21,6 +21,7 @@ const PUBLIC_ADMIN_PASSWORD: &str = "public-admin-password-123";
 const GO_KEY: &str = "sk-transfer-go";
 const CUSTOM_KEY: &str = "custom-transfer-key";
 const GOAT_KEY: &str = "goat-transfer-key";
+static MIGRATION_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 fn cas(harness: &V3Harness, patch: Value) -> Value {
     let mut body = match patch {
@@ -145,6 +146,7 @@ fn custom_pending_but_enabled(harness: &V3Harness) -> String {
 
 #[tokio::test]
 async fn encrypted_account_migration_moves_keys_without_exposing_them() {
+    let _migration_guard = MIGRATION_TEST_LOCK.lock().await;
     let source = start_loopback("account-transfer-source").await;
 
     let oversized = source
@@ -586,4 +588,158 @@ async fn encrypted_account_migration_moves_keys_without_exposing_them() {
     target.stop();
     public.stop();
     collision_target.stop();
+}
+
+#[tokio::test]
+async fn node_migration_merges_dynamic_providers_by_stable_id() {
+    let _migration_guard = MIGRATION_TEST_LOCK.lock().await;
+    let source = start_loopback("dyn-transfer-source").await;
+    let (status, _, created) = send_json(
+        &source,
+        Method::POST,
+        "/providers",
+        &cas(
+            &source,
+            json!({
+                "name": "Lab",
+                "endpointUrl": "http://127.0.0.1:9/v1",
+                "upstreamProtocol": "chat_completions",
+                "authKind": "bearer",
+                "key": "sk-lab-source",
+                "models": [{
+                    "publicModel": "lab-opus",
+                    "upstreamModel": "vendor/opus"
+                }]
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    let source_provider_id = created["provider"]["id"].as_str().unwrap().to_string();
+    let (status, _, exported) = send_json(
+        &source,
+        Method::POST,
+        "/accounts/transfer/export",
+        &json!({ "bundlePassword": BUNDLE_PASSWORD }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{exported}");
+    let bundle = exported["bundle"].as_str().unwrap().to_string();
+
+    let target = start_loopback("dyn-transfer-target").await;
+    let (status, _, dest_only) = send_json(
+        &target,
+        Method::POST,
+        "/providers",
+        &cas(
+            &target,
+            json!({
+                "name": "Lab",
+                "endpointUrl": "http://127.0.0.1:10/v1",
+                "upstreamProtocol": "chat_completions",
+                "authKind": "bearer",
+                "key": "sk-lab-dest-only",
+                "models": [{
+                    "publicModel": "dest-opus",
+                    "upstreamModel": "vendor/dest"
+                }]
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{dest_only}");
+    let dest_only_id = dest_only["provider"]["id"].as_str().unwrap().to_string();
+    assert_ne!(dest_only_id, source_provider_id);
+
+    let (status, _, imported) = send_json(
+        &target,
+        Method::POST,
+        "/accounts/transfer/import",
+        &cas(
+            &target,
+            json!({ "password": BUNDLE_PASSWORD, "bundle": bundle }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{imported}");
+    let target_dynamics = target.state.db.lock().list_dynamic_providers().unwrap();
+    assert!(
+        target_dynamics
+            .iter()
+            .any(|runtime| runtime.id == dest_only_id && runtime.name == "Lab"),
+        "{target_dynamics:?}"
+    );
+    let imported_def = target_dynamics
+        .iter()
+        .find(|runtime| runtime.id == source_provider_id)
+        .unwrap();
+    assert_eq!(imported_def.endpoint_url, "http://127.0.0.1:9/v1");
+    assert_eq!(imported_def.mappings[0].public_model, "lab-opus");
+    let target_accounts = target.state.db.lock().list_accounts().unwrap();
+    assert!(
+        target_accounts
+            .iter()
+            .any(|account| account.provider_id == source_provider_id),
+        "{target_accounts:?}"
+    );
+    assert!(
+        target_accounts
+            .iter()
+            .any(|account| account.provider_id == dest_only_id),
+        "{target_accounts:?}"
+    );
+
+    let (status, _, patched) = send_json(
+        &target,
+        Method::PATCH,
+        &format!("/providers/{source_provider_id}"),
+        &cas(
+            &target,
+            json!({
+                "name": "OldLab",
+                "endpointUrl": "http://127.0.0.1:11/v1",
+                "upstreamProtocol": "chat_completions",
+                "authKind": "bearer",
+                "models": [{
+                    "publicModel": "old-opus",
+                    "upstreamModel": "vendor/old"
+                }]
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{patched}");
+    let (status, _, merged) = send_json(
+        &target,
+        Method::POST,
+        "/accounts/transfer/import",
+        &cas(
+            &target,
+            json!({ "password": BUNDLE_PASSWORD, "bundle": bundle }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{merged}");
+    let matching_def = target
+        .state
+        .db
+        .lock()
+        .get_dynamic_provider(&source_provider_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(matching_def.name, "Lab");
+    assert_eq!(matching_def.endpoint_url, "http://127.0.0.1:9/v1");
+    assert_eq!(matching_def.mappings[0].public_model, "lab-opus");
+    assert!(
+        target
+            .state
+            .db
+            .lock()
+            .get_dynamic_provider(&dest_only_id)
+            .unwrap()
+            .is_some()
+    );
+
+    source.stop();
+    target.stop();
 }

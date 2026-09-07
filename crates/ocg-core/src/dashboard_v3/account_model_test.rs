@@ -8,8 +8,10 @@
 use axum::Json;
 use axum::body::Bytes;
 use axum::extract::{Path, State};
+use std::sync::Arc;
 use std::time::Instant;
 
+use crate::dynamic::DynamicProviderRuntime;
 use crate::models::Account as ModelAccount;
 use crate::provider::{
     ProviderAdapterKind, UpstreamProtocolKind, builtin_provider, plan_requires_custom_config,
@@ -30,13 +32,16 @@ pub(super) async fn test_account_model(
     let prepared = prepare_account_model_test(&state, &id, input)?;
     let started = Instant::now();
     let (success, http_status, error) = match crate::protocol_probe::execute_account_model_test(
-        &state,
-        &prepared.config,
-        &prepared.account,
-        prepared.adapter,
-        &prepared.upstream_model,
-        prepared.protocol,
-        prepared.custom_endpoint_url.as_deref(),
+        crate::protocol_probe::AccountModelTestInput {
+            state: &state,
+            config: &prepared.config,
+            account: &prepared.account,
+            adapter: prepared.adapter,
+            model_id: &prepared.upstream_model,
+            protocol: prepared.protocol,
+            custom_endpoint_url: prepared.custom_endpoint_url.as_deref(),
+            dynamics: &prepared.dynamics,
+        },
     )
     .await
     {
@@ -62,6 +67,7 @@ struct PreparedAccountModelTest {
     upstream_model: String,
     protocol: UpstreamProtocolKind,
     custom_endpoint_url: Option<String>,
+    dynamics: Arc<Vec<DynamicProviderRuntime>>,
 }
 
 fn prepare_account_model_test(
@@ -79,6 +85,22 @@ fn prepare_account_model_test(
     let model_id = input.model_id.trim();
     if model_id.is_empty() {
         return Err(V3ApiError::invalid_request_at(state, "modelId is required"));
+    }
+    let dynamics = state.dynamic_providers();
+    if let Some(runtime) = crate::dynamic::find_runtime(&dynamics, &account.provider_id) {
+        let mapping = runtime.mapping_for_public(model_id).ok_or_else(|| {
+            V3ApiError::invalid_request_at(state, "model is not routable for this provider")
+        })?;
+        return Ok(PreparedAccountModelTest {
+            account,
+            config: state.config(),
+            adapter: ProviderAdapterKind::ConfigurableHttp,
+            public_model: model_id.to_string(),
+            upstream_model: mapping.upstream_model.clone(),
+            protocol: runtime.upstream_protocol,
+            custom_endpoint_url: None,
+            dynamics,
+        });
     }
     let plan = builtin_provider(&account.provider_id)
         .ok_or_else(|| V3ApiError::invalid_request_at(state, "unknown provider offering"))?;
@@ -139,5 +161,6 @@ fn prepare_account_model_test(
         upstream_model,
         protocol,
         custom_endpoint_url,
+        dynamics,
     })
 }

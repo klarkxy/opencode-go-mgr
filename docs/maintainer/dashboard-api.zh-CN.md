@@ -12,6 +12,8 @@
 - `process_generation` — 每个 `CoreState` 赋值一次，不会持久化。上一进程的 CAS 令牌在重启后不能复用。
 - `pricingRevision` — 不可变快照 id。价格变更还要带 `expectedPricingRevision`。
 
+`GET /contract` 返回当前进程的 live revision / generation token（`ControlRevision`：`revision`、`processGeneration`、`pricingRevision`）。
+
 变更要求顶层 `expectedRevision` 与 `processGeneration`，包括 `/auth/register`、`/auth/login`、`/auth/logout` 以及 `POST /accounts/{id}/usage/refresh`。缺少 `expectedRevision` 返回 `400` `missingExpectedRevision`；不匹配返回 `409` `revisionConflict`，错误信封携带 `currentRevision` / `processGeneration`。Vue `controlPlane` store 从每个 V3 载荷记录两个令牌。遇到 409 时，客户端会刷新控制令牌与受影响资源，但不会自动重放变更；用户确认当前状态后可再次提交。revision 与 generation 令牌只属于当前进程，不协调共用同一数据目录的多个进程。
 
 非变更操作跳过 CAS 且不 bump revision：诊断类如 `POST /settings/test-proxy`、`POST /custom/models/discover`；更新检查如 `GET /settings/check-update`、`GET /settings/update-status` 捕获令牌但不 bump。`POST /settings/install-update` 需要 CAS，原子启动，不 bump，不持有网络/DB 锁。
@@ -20,7 +22,7 @@
 
 冻结契约是 `schema/dashboard-api-v3.schema.json`，由 `dashboard_v3::contract_schema_pretty()` 经 `crates/ocg-core/examples/export_dashboard_v3_schema.rs` 生成。生成的 TypeScript（`src/api/generated/dashboard-v3.ts`）只有类型，没有 HTTP 封装。`dashboard_v3/types.rs` 的 `CATALOG_TYPE_NAMES` 是有序 `$defs` 目录；追加时必须保持既有 definition 对象字节一致。
 
-前端：Pinia store 直接调用 `dashboardV3`。仍使用旧字段名的页面走 `src/api/dashboard.ts` presenter。请勿加入 V2 导入、路由回退或递归大小写转换。
+前端：Pinia store 直接调用 `dashboardV3`。仍使用旧字段名的页面走 `src/api/dashboard.ts` presenter。
 
 `dashboard.rs` 提供 SPA 并保留 V2 鉴权与浏览器 WebSocket 处理器。已退役的 `/dashboard/api/...` REST 路径在到达 `dashboard.rs` 之前由 `host_router` 墓碑拦截。
 
@@ -39,7 +41,7 @@ CAS 成功后，Host 先持久化新设置并释放设置锁。只有端口发�
 受保护的 Dashboard V2 REST 已退役。
 
 - 匿名已退役 REST：空 body 的 **401**（鉴权先于墓碑）。
-- 已鉴权的已退役 REST（含回环本地模式）：**410**，body 为 `{ "code": "dashboardV2Removed", "message": "Dashboard API V2 has been removed; refresh the page and retry. " }`。
+- 已鉴权的已退役 REST（含回环本地模式）：**410**，body 为 `{ "code": "dashboardV2Removed", "message": "Dashboard API V2 has been removed; refresh the page and retry." }`。
 - 既非 V3 也非保留家族的未知 `/dashboard/api/...` 路径，在已鉴权时同样 410。
 
 保留的 `/dashboard/api` 家族（精确路径，无尾斜杠，无额外段）：

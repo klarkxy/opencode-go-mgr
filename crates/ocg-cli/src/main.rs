@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 #[derive(Parser)]
 #[command(name = "ocg-manager-cli")]
-#[command(about = "Headless CLI for OCG Manager gateway")]
+#[command(about = "Headless CLI for Open Console Gateway")]
 #[command(version)]
 struct Cli {
     /// Data directory for the CLI (default: ~/.ocg-mgr-cli)
@@ -100,8 +100,13 @@ enum KeyAction {
     },
 }
 
+fn main() -> Result<()> {
+    ocg_core::cpa_runtime::host::run_internal_supervisor_if_requested();
+    run_cli()
+}
+
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn run_cli() -> Result<()> {
     let cli = Cli::parse();
     let data_dir = resolve_data_dir(cli.data_dir);
     let cipher = resolve_cipher(&data_dir, cli.encryption_key)?;
@@ -182,6 +187,7 @@ async fn start_serve(
     dashboard_dir: Option<PathBuf>,
 ) -> Result<Arc<CoreStateInner>> {
     let state = build_state(data_dir, cipher)?;
+    ocg_core::cpa_runtime::host::register_owned_host(&state);
     let executable = if dashboard_dir.is_none() {
         std::env::current_exe().ok()
     } else {
@@ -201,7 +207,10 @@ async fn start_serve(
     println!("gateway started on http://{}:{}", host, handle.port);
     println!("gateway key: {}", config.gateway_key);
     println!("dashboard: http://{}:{}/dashboard/", host, handle.port);
-    println!("upstream: {}", config.upstream_base_url);
+    println!(
+        "upstream: {}",
+        ocg_core::gateway::free_models::opencode_go_base_url(&config.upstream_base_url)
+    );
 
     {
         let mut gateway_lock = state.gateway.lock();
@@ -217,6 +226,7 @@ async fn start_serve(
 }
 
 async fn stop_serve(state: &CoreStateInner) {
+    state.stop_owned_cpa_runtime();
     let handle = state.gateway.lock().take();
     if let Some(handle) = handle {
         let _ = GatewayLifecycle::stop_and_wait(handle).await;
@@ -339,7 +349,10 @@ async fn status_command(data_dir: PathBuf, cipher: Arc<dyn KeyCipher + Send + Sy
     println!("data dir: {:?}", state.data_dir());
     println!("gateway port: {}", config.gateway_port);
     println!("gateway key: {}", config.gateway_key);
-    println!("upstream: {}", config.upstream_base_url);
+    println!(
+        "upstream: {}",
+        ocg_core::gateway::free_models::opencode_go_base_url(&config.upstream_base_url)
+    );
     println!("accounts: {} total, {} enabled", accounts.len(), enabled);
     Ok(())
 }
@@ -360,7 +373,7 @@ async fn ping_one(
     let (config, client) = state.upstream_context();
     let url = format!(
         "{}/v1/chat/completions",
-        config.upstream_base_url.trim_end_matches('/')
+        ocg_core::gateway::free_models::opencode_go_base_url(&config.upstream_base_url)
     );
     let body = serde_json::json!({
         "model": model,

@@ -24,6 +24,7 @@ export type PricingAvailability = "available" | "unavailable" | "not_applicable"
 export type PlanPricingContent =
   | { kind: "opencode-go"; snapshot: PricingSnapshot | null }
   | { kind: "goat-reference"; snapshot: ProviderNeutralPricingSnapshot | null }
+  | { kind: "ollama-reference"; snapshot: ProviderNeutralPricingSnapshot | null }
   | { kind: "free"; snapshot: null }
   | { kind: "api-key"; snapshot: StoredProviderPricingSnapshot | null }
   | { kind: "custom"; snapshot: StoredProviderPricingSnapshot | null };
@@ -59,6 +60,7 @@ export type ProviderSnapshots = Partial<Record<PlanId, ProviderPricingResponse>>
 export const PRICING_PLAN_IDS = [
   "opencode-go",
   "command-code-goat",
+  "ollama-cloud",
 ] as const satisfies readonly PlanId[];
 
 const pricingPlanIdSet = new Set<PlanId>(PRICING_PLAN_IDS);
@@ -68,7 +70,7 @@ export const PRICING_PLAN_DEFINITIONS = PLAN_DEFINITIONS.filter(
 );
 
 function defaultPricingAvailability(plan: PlanDefinition): PricingAvailability {
-  if (plan.id === "opencode-go" || plan.id === "command-code-goat") return "available";
+  if (plan.id === "opencode-go" || plan.id === "command-code-goat" || plan.id === "ollama-cloud") return "available";
   if (plan.id === "zen-free") return "not_applicable";
   if (plan.id === "custom-endpoint") return "unpriced";
   return "unavailable";
@@ -88,6 +90,14 @@ function buildContent(
     const snapshot = providerSnapshots[plan.id]?.snapshot;
     return {
       kind: "goat-reference",
+      snapshot: snapshot && "values" in snapshot ? snapshot : null,
+    };
+  }
+
+  if (plan.id === "ollama-cloud") {
+    const snapshot = providerSnapshots[plan.id]?.snapshot;
+    return {
+      kind: "ollama-reference",
       snapshot: snapshot && "values" in snapshot ? snapshot : null,
     };
   }
@@ -128,7 +138,7 @@ export function resolvePlanPricingDisplay(
   if (error) {
     return { state: "error", messageKey: "加载额度价格表失败: {error}", error };
   }
-  if (group.content.kind === "goat-reference") {
+  if (group.content.kind === "goat-reference" || group.content.kind === "ollama-reference") {
     return {
       state: "reference",
       messageKey: "未知价格不会参与费用估算",

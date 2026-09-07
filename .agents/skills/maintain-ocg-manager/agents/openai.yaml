@@ -1,4 +1,0 @@
-interface:
-  display_name: "Maintain OCG Manager"
-  short_description: "Maintain OCG Manager safely"
-  default_prompt: "Use $maintain-ocg-manager to make and verify this OCG Manager change."

@@ -36,7 +36,8 @@ const CLIENT_ROOT_URL_ENV: &str = "OCG_CLIENT_ROOT_URL";
 
 // Note: Mutex lock ordering is (1) settings_update, (2) db, (3) config,
 // (4) http_client, (5) gateway, (6) pricing, (7) zen_free_models,
-// (8) cpa_models, (9) provider_contracts, (10) routing, (11) credential_snapshot.
+// (8) cpa_models, (9) provider_contracts, (10) dynamic_providers, (11) routing,
+// (12) credential_snapshot.
 // The CPA runtime status mutex is never held while acquiring another sync lock.
 // `activate_zen_free_model_catalog` acquires db → http_client →
 // zen_free_models → provider_contracts, then drops those before
@@ -101,8 +102,9 @@ pub struct CoreStateInner {
     /// Serializes typed operations against the one local CPA integration.
     /// Network calls may hold this async gate but never the SQLite mutex.
     pub cpa_operations: tokio::sync::Mutex<()>,
-    /// Process-owned CPA runtime Host. Unset outside installed Windows x64
-    /// desktop. Dashboard CPA mutations are serialized by `cpa_operations`.
+    /// Process-owned CPA runtime Host. Registered by the desktop app and CLI
+    /// at startup on Windows/Unix; unset only on other targets. Dashboard CPA
+    /// mutations are serialized by `cpa_operations`.
     pub(crate) cpa_runtime: crate::cpa_runtime::CpaRuntimeCapabilities,
     provider_contracts: RwLock<Arc<crate::provider_contracts::EffectiveContractSet>>,
     dynamic_providers: RwLock<Arc<Vec<crate::dynamic::DynamicProviderRuntime>>>,
@@ -126,6 +128,7 @@ pub(crate) struct ImportedNodeRuntime {
     http_client: crate::http_client::ForwardRouteSet,
     zen_free_models: crate::kernel::zen::ZenFreeModelCatalog,
     provider_contracts: crate::provider_contracts::EffectiveContractSet,
+    dynamic_providers: Vec<crate::dynamic::DynamicProviderRuntime>,
     credentials: crate::gateway_keys::CredentialSnapshot,
 }
 
@@ -315,7 +318,7 @@ impl CoreStateInner {
         let zen_free_models = db.zen_free_model_catalog()?.unwrap_or_default();
         let cpa_models = db
             .cpa_model_catalog()?
-            .map(|catalog| catalog.models)
+            .map(|catalog| crate::db::CpaCatalogModel::ids(&catalog.models))
             .unwrap_or_default();
         let custom_runtimes = db.list_custom_account_runtimes()?;
         let dynamic_providers = db.list_dynamic_providers()?;
@@ -460,14 +463,14 @@ impl CoreStateInner {
 
     pub fn activate_cpa_model_catalog(
         &self,
-        models: Vec<String>,
+        models: Vec<crate::db::CpaCatalogModel>,
         source_url: &str,
         refreshed_at: chrono::DateTime<chrono::Utc>,
     ) -> crate::Result<()> {
-        anyhow::ensure!(!models.is_empty(), "CPA model catalog cannot be empty");
+        let ids = crate::db::CpaCatalogModel::ids(&models);
         let zen = self.zen_free_model_catalog();
         let contracts = self.provider_contracts();
-        let provider_models = sealed_proxy_model_ids(&contracts, &models);
+        let provider_models = sealed_proxy_model_ids(&contracts, &ids);
         let route_set = crate::http_client::build_route_set_with_provider_models(
             &self.config(),
             &zen,
@@ -479,7 +482,7 @@ impl CoreStateInner {
             let mut active = self.cpa_models.write();
             db.replace_cpa_model_catalog(&models, source_url, refreshed_at)?;
             *http_client = Arc::new(route_set);
-            *active = Arc::new(models);
+            *active = Arc::new(ids);
         }
         self.routing.reset();
         Ok(())
@@ -597,11 +600,13 @@ impl CoreStateInner {
             &provider_models,
         )?;
         let credentials = crate::gateway_keys::build_credential_snapshot(db, &config.gateway_key)?;
+        let dynamic_providers = db.list_dynamic_providers()?;
         Ok(ImportedNodeRuntime {
             config,
             http_client: route_set,
             zen_free_models: zen,
             provider_contracts: contracts,
+            dynamic_providers,
             credentials,
         })
     }
@@ -613,8 +618,20 @@ impl CoreStateInner {
         *self.http_client.lock() = Arc::new(runtime.http_client);
         *self.zen_free_models.write() = Arc::new(runtime.zen_free_models);
         *self.provider_contracts.write() = Arc::new(runtime.provider_contracts);
+        *self.dynamic_providers.write() = Arc::new(runtime.dynamic_providers);
         self.routing.reset();
         *self.credential_snapshot.write() = runtime.credentials;
+        self.settings_revision.fetch_add(1, Ordering::AcqRel);
+    }
+
+    /// Install a dynamic Provider snapshot built before the matching SQLite
+    /// commit. Assignment and the revision bump cannot fail.
+    pub(crate) fn install_dynamic_providers_snapshot(
+        &self,
+        providers: Vec<crate::dynamic::DynamicProviderRuntime>,
+    ) {
+        *self.dynamic_providers.write() = Arc::new(providers);
+        self.routing.reset();
         self.settings_revision.fetch_add(1, Ordering::AcqRel);
     }
 
@@ -1176,14 +1193,14 @@ impl CoreStateInner {
         // the process.
         {
             let mut snapshot = self.credential_snapshot.write();
-            if let Some(existing) = snapshot.get(&config.gateway_key) {
-                if existing.id != crate::gateway_keys::PRIMARY_KEY_ID {
-                    eprintln!(
-                        "warning: primary key value collides with sub key `{}`; \
+            if let Some(existing) = snapshot.get(&config.gateway_key)
+                && existing.id != crate::gateway_keys::PRIMARY_KEY_ID
+            {
+                eprintln!(
+                    "warning: primary key value collides with sub key `{}`; \
                          the API-layer gate should have rejected this write",
-                        existing.name
-                    );
-                }
+                    existing.name
+                );
             }
             let stale_value = snapshot
                 .iter()
@@ -1425,6 +1442,25 @@ impl crate::account_control::AccountControlHost for CoreStateInner {
 
     fn reload_provider_contracts(&self) -> anyhow::Result<()> {
         CoreStateInner::reload_provider_contracts(self)
+    }
+
+    fn ensure_provider_can_enable(
+        &self,
+        provider_id: &str,
+    ) -> Result<(), crate::provider::ProviderBindingError> {
+        match crate::provider::ensure_provider_can_enable(provider_id) {
+            Ok(()) => Ok(()),
+            Err(crate::provider::ProviderBindingError::UnknownProvider { .. }) => {
+                if crate::dynamic::find_runtime(&self.dynamic_providers(), provider_id).is_some() {
+                    Ok(())
+                } else {
+                    Err(crate::provider::ProviderBindingError::UnknownProvider {
+                        provider_id: provider_id.to_string(),
+                    })
+                }
+            }
+            Err(error) => Err(error),
+        }
     }
 
     fn create_account_with_contract(&self, account: &crate::models::Account) -> anyhow::Result<()> {

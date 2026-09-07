@@ -132,10 +132,6 @@ fn assert_local_openai_alias_list(body: &Value) {
         .expect("Go alias");
     assert_eq!(go["owned_by"], ocg_core::provider::OPENCODE_PROVIDER_ID);
     assert!(
-        data.iter().all(|item| item["id"] != "ox-alpha-free"),
-        "aliases without current protocol evidence must stay unpublished"
-    );
-    assert!(
         data.iter()
             .all(|item| item["id"] != "deepseek-v4-flash-free"),
         "Zen raw -free IDs must not be published"

@@ -89,3 +89,12 @@ export function dynamicProviderAliasRows(
     custom_account_id: null,
   })));
 }
+
+/** Production Alias table: built-in/Custom rows, then definition-level dynamic rows. */
+export function mergeProviderAliasRows(
+  scopes: readonly ProviderScopeView[],
+  accounts: readonly Account[],
+  providers: readonly DynamicProviderView[],
+): ProviderAliasRow[] {
+  return [...providerAliasRows(scopes, accounts), ...dynamicProviderAliasRows(providers)];
+}

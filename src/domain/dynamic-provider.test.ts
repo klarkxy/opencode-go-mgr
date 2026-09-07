@@ -6,12 +6,9 @@ import {
   buildDynamicProviderUpdateBody,
   dynamicAuthRequiresKey,
   dynamicProviderActionNeedsConfirm,
-  dynamicProviderFormEnterAction,
   emptyDynamicProviderDraft,
   isDynamicCatalogEntry,
   normalizeDynamicMappings,
-  omitSecretFromRecord,
-  providerSourceLabel,
   sanitizeDynamicProviderDraft,
   validateDynamicProviderDraft,
 } from "./dynamic-provider.ts";
@@ -44,8 +41,7 @@ function entry(extra: Partial<ProviderCatalogEntry> = {}): ProviderCatalogEntry 
 }
 
 test("source labels distinguish built-in catalog rows from user-defined Providers", () => {
-  assert.equal(providerSourceLabel(entry()), "builtin");
-  assert.equal(providerSourceLabel(entry({ model_source: "dynamic_provider" })), "user-defined");
+  assert.equal(isDynamicCatalogEntry(entry()), false);
   assert.equal(isDynamicCatalogEntry(entry({ model_source: "dynamic_provider" })), true);
 });
 
@@ -103,11 +99,24 @@ test("edit from none to keyed requires an explicit replacement Key", () => {
   assert.equal(body.key, "sk-now");
 });
 
+test("ordinary keyed edit omits a discover/test Key while create still sends it", () => {
+  const draft = emptyDynamicProviderDraft();
+  draft.name = "Lab";
+  draft.endpoint_url = "http://127.0.0.1:9";
+  draft.auth_kind = "bearer";
+  draft.models = [{ public_model: "lab-opus", upstream_model: "vendor/opus" }];
+  draft.key = "sk-probe";
+  const update = buildDynamicProviderUpdateBody(draft, "bearer");
+  assert.equal("key" in update, false);
+  assert.equal(update.key, undefined);
+  const created = buildDynamicProviderCreateBody(draft);
+  assert.equal(created.key, "sk-probe");
+});
+
 test("sanitization drops the write-only Key from draft and response-shaped records", () => {
   const draft = emptyDynamicProviderDraft();
   draft.key = "sk-secret";
   assert.equal(sanitizeDynamicProviderDraft(draft).key, "");
-  assert.deepEqual(omitSecretFromRecord({ name: "Lab", key: "sk-secret", apiKey: "x" }), { name: "Lab" });
 });
 
 test("save does not require discovery or a prior model test", () => {
@@ -123,7 +132,6 @@ test("save does not require discovery or a prior model test", () => {
 });
 
 test("paid tests and deletes require confirmation; Enter submits save", () => {
-  assert.equal(dynamicProviderFormEnterAction(), "save");
   assert.equal(dynamicProviderActionNeedsConfirm("test"), true);
   assert.equal(dynamicProviderActionNeedsConfirm("delete"), true);
   assert.equal(dynamicProviderActionNeedsConfirm("save"), false);

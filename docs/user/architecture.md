@@ -2,23 +2,21 @@
 
 # Architecture
 
-OCG Manager is one local node. Desktop, CLI, and Docker are alternative hosts
-for the same `ocg-core` process; they do not create separate control planes.
-The default listener is `127.0.0.1:9042`, with no remote sync, Admin API, or
-telemetry.
+Open Console Gateway is one local node. Desktop, CLI, and Docker are alternative hosts
+for the same `ocg-core` process. The default listener is `127.0.0.1:9042`.
+Each node stores its own data locally.
 
 ## One local node
 
-[![OCG Manager local-node architecture](../diagrams/local-node.visual-check.1440x900.light.png)](https://klarkxy.github.io/opencode-go-mgr/diagrams/local-node/)
+[![Open Console Gateway local-node architecture](../diagrams/local-node.visual-check.1440x900.light.png)](https://klarkxy.github.io/opencode-go-mgr/diagrams/local-node/)
 
 [Open the interactive diagram on GitHub Pages](https://klarkxy.github.io/opencode-go-mgr/diagrams/local-node/) to switch themes,
 trace relationships, or export another format.
 
 The Dashboard and inference endpoints share port `9042`, but they use different
-credentials. A client **Key** authenticates an AI tool to OCG Manager. After
+credentials. A client **Key** authenticates an AI tool to Open Console Gateway. After
 selection, the account credential is sent only to that account's configured
-upstream; Zen Free has no credential. The Vue SPA talks HTTP Dashboard V3 and
-does not use a Tauri `invoke` data path.
+upstream; Zen Free has no credential. The Vue SPA talks HTTP Dashboard V3.
 
 ## Request lifecycle
 
@@ -30,34 +28,33 @@ One inference request follows a fixed order:
 3. Materialize compatible accounts, then apply card order and the selected
    strict-priority, global-sticky, or round-robin policy.
 4. Build one sealed adapter attempt, resolve that account's credential, and
-   send one upstream request. The request path never probes a protocol.
+   send one upstream request. Protocol selection uses the saved contract.
 5. Convert the response or SSE stream back to the client format, then record
    request identity, upstream identity, usage, and cooldown state.
 
 Unknown model names return `400`. Ambiguous exact raw IDs return
-`ambiguous_model_id` without an upstream call. Account fallback may continue
-after eligible pre-send or provider-specific failures; ambiguous or unsafe
-requests fail before selection.
+`ambiguous_model_id` and stay local. Account fallback may continue after
+eligible pre-send or provider-specific failures; ambiguous or unsafe requests
+fail before selection.
 
 ## Product ownership
 
-| Surface | Owns | Does not own |
+| Surface | Owns | Related surface |
 | --- | --- | --- |
-| **Access Keys** | Client-facing primary and sub Keys | Upstream account credentials |
-| **Accounts** | Account Key, enablement, order, notes, cooldown, usage state | Provider catalogs or shared protocol contracts |
-| **Providers** | Built-in catalogs, model/protocol contracts, pricing scopes, typed user-defined Provider Endpoint/auth/mappings | Custom API account mappings |
-| **Custom API account** | One API URL, one account-wide upstream protocol, public-model → upstream-ID mappings | Dynamic adapter code or shared Provider definitions |
-| **Extensions / CPA** | One approved local external-integration boundary | General plugins or arbitrary remote process control |
-| **Applications** | Client guides and optional local Desktop connectors | A second Gateway or remote configuration service |
+| **Access Keys** | Client-facing primary and sub Keys | Account credentials live on **Accounts** |
+| **Accounts** | Account Key, enablement, order, notes, cooldown, usage state | Catalogs and protocol contracts live on **Providers** |
+| **Providers** | Built-in catalogs, model/protocol contracts, pricing scopes, typed user-defined Provider Endpoint/auth/mappings | Custom API mappings stay on the account card |
+| **Custom API account** | One API URL, one account-wide upstream protocol, public-model → upstream-ID mappings | Shared Provider definitions live on **Providers** |
+| **Extensions / CPA** | One approved local external-integration boundary | Built-in routing families stay under **Accounts** / **Providers** |
+| **Application guides** | Client tutorials in this user guide and `application-guides.ts`; Desktop connector code in `Applications.vue` | Gateway endpoints stay on this node |
 
 The Adapter Registry is static and sealed. User-defined Providers persist as
-typed data and always bind Configurable HTTP. OCG Manager never loads user
-scripts, adapter plugins, or binaries.
+typed data and always bind Configurable HTTP.
 
 ## Local model lists
 
-These reads use local state and never perform request-time upstream discovery.
-Catalog refreshes are explicit actions on **Providers**.
+These reads use saved local state. Catalog refreshes are explicit actions on
+**Providers**.
 
 | Endpoint | Published models |
 | --- | --- |
@@ -65,9 +62,8 @@ Catalog refreshes are explicit actions on **Providers**.
 | `GET /dashboard/api/v3/application-models` | Go-routeable Aliases intersected with the current Go pricing snapshot; excludes Custom API, user-defined Providers, and CN Plans |
 | `GET /claude-desktop/v1/models` | The three Claude Desktop role aliases only |
 
-Saved catalog rows do not invent new built-in Aliases. Unknown rows remain
-exact raw pins until code assigns an Alias, and a Custom ID cannot take over an
-already published built-in Alias.
+Saved catalog rows keep exact raw pins until code assigns an Alias. A Custom ID
+that collides with a published built-in Alias is excluded from publication.
 
 ## Protocol conversion
 
@@ -75,8 +71,8 @@ Clients may use OpenAI Chat Completions, OpenAI Responses, Anthropic Messages,
 Gemini `generateContent` / `streamGenerateContent`, or Claude Desktop entry
 points. A supported and enabled client/upstream pair passes through; otherwise
 the whole request and response are converted to and from the model's effective
-upstream protocol. Gemini is a client format only—OCG Manager does not send the
-request to Google.
+upstream protocol. Gemini is a client format: the gateway converts it to the
+selected Plan's Chat Completions or Messages upstream.
 
 The complete preferred/supported matrix and conversion limits live in
 [Protocol conversion](protocol-conversion.md).

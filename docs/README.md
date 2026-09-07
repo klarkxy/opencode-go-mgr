@@ -2,9 +2,9 @@
 
 # Documentation index
 
-OCG Manager documentation is split by audience. Start with the guide for your
-role, then follow its chapter links. When a guide conflicts with the current
-implementation, code is authoritative.
+Open Console Gateway documentation is split by audience. Start
+with the guide for your role, then follow its chapter links. When a guide
+conflicts with the current implementation, code is authoritative.
 
 ## Start here
 
@@ -20,6 +20,4 @@ implementation, code is authoritative.
 
 ## Editing documentation
 
-Keep paired English and Chinese guides structurally aligned. Source ownership,
-current-fact rules, version-pin updates, and documentation editing conventions
-are in [maintainer/conventions.md](maintainer/conventions.md).
+Paired-guide rules are in [maintainer/conventions.md](maintainer/conventions.md).

@@ -1,4 +1,4 @@
-//! HTTP-only helpers for the v2 alias / multi-Plan black-box suite.
+//! HTTP-only helpers for the alias / multi-Plan black-box suite.
 //!
 //! Tests talk to Gateway and dashboard JSON. They do not construct private
 //! gateway types. `CoreStateInner` is used only to boot an isolated data dir.
@@ -38,15 +38,11 @@ pub(crate) const CUSTOM_UNROUTABLE_MODEL_ID: &str = "custom-unroutable-model";
 
 pub(crate) const GO_ALIAS: &str = "deepseek-v4-flash";
 pub(crate) const GOAT_UNIQUE_RAW_ID: &str = "deepseek/deepseek-v4-flash";
-pub(crate) const FREE_MODEL: &str = "hy3-free";
+pub(crate) const FREE_MODEL: &str = "mimo-v2.5-free";
 pub(crate) const AMBIGUOUS_ERROR_TYPE: &str = "ambiguous_model_id";
 pub(crate) const CUSTOM_OVERLAP_RAW_ID: &str = "shared-raw-model";
 
 pub(crate) const SUCCESS_CHAT_BODY: &str = r#"{"id":"ok","object":"chat.completion","model":"upstream-should-not-leak","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":2,"prompt_tokens_details":{"cached_tokens":0}}}"#;
-
-pub(crate) const MIXED_UPSTREAM_MODELS_BODY: &str = r#"{"object":"list","data":[{"id":"deepseek-v4-flash"},{"id":"deepseek/deepseek-v4-flash"},{"id":"vendor-raw-not-an-alias"},{"id":"minimax-m2.7"},{"id":"grok-4.5"}]}"#;
-
-pub(crate) const CATALOG_CONTRACT: &str = include_str!("catalog_contract.json");
 
 const CHAT_STREAM_HEAD: &str = "data: {\"id\":\"chat-stream\",\"model\":\"deepseek-v4-flash\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"ok\"},\"finish_reason\":null}]}\n\n";
 
@@ -57,11 +53,7 @@ pub(crate) fn loopback_client() -> reqwest::Client {
         .expect("v2 test client should build")
 }
 
-pub(crate) fn catalog_contract() -> Value {
-    serde_json::from_str(CATALOG_CONTRACT).expect("catalog contract fixture")
-}
-
-pub(crate) struct V2Harness {
+pub(crate) struct BlackBoxHarness {
     pub state: Arc<CoreStateInner>,
     pub dir: PathBuf,
     pub handle: GatewayHandle,
@@ -73,7 +65,7 @@ pub(crate) struct V2Harness {
     stop_fake: Option<tokio::sync::oneshot::Sender<()>>,
 }
 
-impl V2Harness {
+impl BlackBoxHarness {
     pub(crate) async fn start() -> Self {
         Self::start_with_upstream(None).await
     }
@@ -380,7 +372,7 @@ pub(crate) async fn start_output_then_disconnect_upstream() -> (
     start_raw_disconnect_upstream(raw).await
 }
 
-pub(crate) async fn start_v2_with_disconnect_upstream() -> V2Harness {
+pub(crate) async fn start_v2_with_disconnect_upstream() -> BlackBoxHarness {
     let dir = temp_data_dir();
     let db = Database::open(dir.clone()).unwrap();
     let cipher: Arc<dyn KeyCipher + Send + Sync> = Arc::new(StaticKeyCipher::new("v2-tests"));
@@ -396,7 +388,7 @@ pub(crate) async fn start_v2_with_disconnect_upstream() -> V2Harness {
         .unwrap();
     let client = loopback_client();
     wait_ready(&client, handle.port).await;
-    V2Harness {
+    BlackBoxHarness {
         state,
         dir,
         port: handle.port,
@@ -542,32 +534,6 @@ pub(crate) fn client_model_ids(body: &Value) -> Vec<String> {
         .collect()
 }
 
-pub(crate) fn required_catalog_fields() -> Vec<String> {
-    catalog_contract()["required_entry_fields"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|value| value.as_str().map(str::to_string))
-        .collect()
-}
-
-pub(crate) fn risk_notice_fields() -> Vec<String> {
-    catalog_contract()["risk_notice_fields"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|value| value.as_str().map(str::to_string))
-        .collect()
-}
-
-pub(crate) fn missing_fields(entry: &Value, fields: &[String]) -> Vec<String> {
-    fields
-        .iter()
-        .filter(|field| entry.get(field.as_str()).is_none() || entry[field.as_str()].is_null())
-        .cloned()
-        .collect()
-}
-
 fn temp_data_dir() -> PathBuf {
     let dir = std::env::temp_dir().join(format!("ocg-v2-contract-{}", uuid::Uuid::new_v4()));
     fs::create_dir_all(&dir).unwrap();
@@ -664,31 +630,31 @@ fn adapt_v3_response(path: &str, status: StatusCode, body: Value) -> Value {
     if !status.is_success() {
         return body;
     }
-    if path == "/providers" || path == "/providers/catalog" {
-        if let Some(entries) = body.get("entries") {
-            return entries.clone();
-        }
+    if (path == "/providers" || path == "/providers/catalog")
+        && let Some(entries) = body.get("entries")
+    {
+        return entries.clone();
     }
-    if path == "/accounts" {
-        if let Some(accounts) = body.get("accounts").and_then(Value::as_array) {
-            return Value::Array(
-                accounts
-                    .iter()
-                    .cloned()
-                    .map(|account| normalize_account(account, None))
-                    .collect(),
-            );
-        }
+    if path == "/accounts"
+        && let Some(accounts) = body.get("accounts").and_then(Value::as_array)
+    {
+        return Value::Array(
+            accounts
+                .iter()
+                .cloned()
+                .map(|account| normalize_account(account, None))
+                .collect(),
+        );
     }
-    if path == "/application-models" {
-        if let Some(models) = body.get("models") {
-            return models.clone();
-        }
+    if path == "/application-models"
+        && let Some(models) = body.get("models")
+    {
+        return models.clone();
     }
-    if let Some(account) = body.get("account") {
-        if !account.is_null() {
-            return normalize_account(account.clone(), body.get("revision").cloned());
-        }
+    if let Some(account) = body.get("account")
+        && !account.is_null()
+    {
+        return normalize_account(account.clone(), body.get("revision").cloned());
     }
     if body.get("id").is_some() && body.get("provider_id").is_some() {
         return normalize_account(body, None);

@@ -1,24 +1,24 @@
 [English](extending.md)
 
-# 扩展 OCG Manager
+# 扩展 Open Console Gateway
 
-扩展必须走以下三条明确路径之一。它们有意不同；不要为了复用名称而把新表面伪装成供应商。
+扩展必须走以下三条明确路径之一。它们有意不同。
 
 ## 1. 供应商或套餐：静态、密封
 
 只用于 OCG 自己拥有完整路由、目录、协议、Key 与故障契约的上游家族。
 
-1. 在 `ocg-domain`（`ids.rs`、`provider.rs`）加入身份与目录事实，穷尽扩展 `ProviderAdapterKind`，并保持每个静态 Provider 的合约范围稳定。Provider 与 Plan 是同一个 `provider_id` 身份；不得重新引入 Offering 维度或在运行时推导身份。Custom 保持 `ConfigurableHttp`，不是超类。
-2. 在 `ocg-domain::protocol` 加所需协议行，在 `ocg-gateway::alias` 加 Alias mapping。请求路径不会用来试探协议。
+1. 在 `ocg-domain`（`ids.rs`、`provider.rs`）加入身份与目录事实，穷尽扩展 `ProviderAdapterKind`，并保持每个静态 Provider 的合约范围稳定。Provider 与 Plan 是同一个 `provider_id` 身份。Custom 保持 `ConfigurableHttp`。
+2. 在 `ocg-domain::protocol` 加所需协议行，在 `ocg-gateway::alias` 加 Alias mapping。请求路径使用已保存的合约。
 3. 在 `ocg-core` 实现只返回 `AttemptSpec` 的 `resolve_route`。适配器不能持有 DB、`CoreState` 或原始 reqwest client。
 4. 控制面与路由语义未完成前保持 fail closed，完成后测试 domain、gateway 与 core 边界。
 
-Provider 注册表始终静态、密封；不提供插件加载器、动态库、用户脚本或运行时发现的适配器。
+Provider 注册表始终静态、密封。
 每个静态 Provider 在自己的单一 `provider_id` 身份下拥有目录、证据与覆盖状态。
 
 ## 2. 应用连接器：本机 Desktop 能力
 
-用于客户端配置或包接入。遵循应用教程/连接器边界：它由 Desktop Host 进程拥有，采用有文档的字段归属，不增加服务、daemon、远端同步路径或 Provider 注册表项。
+用于客户端配置或包接入。遵循应用教程/连接器边界：它由 Desktop Host 进程拥有，采用有文档的字段归属，也不进入 Provider 注册表。
 
 ## 3. 外部接入：静态本机服务适配器
 
@@ -36,7 +36,7 @@ CPA 是此路径的第一个实例。第二个获批接入尚未证明共同需�
 1. 在 `dashboard_v3/types.rs` 增加或扩展 DTO，并把新名字追加到 `CATALOG_TYPE_NAMES`；既有 `$defs` 不变。
 2. 在 `dashboard_v3/mod.rs` 挂路由；写入走 `parse_mutation_json` 与 `check_expectation`，保持秘密脱敏。
 3. 优先复用已有持久化/控制 helper，`dashboard_v3` 继续不依赖 `gateway`。
-4. 补聚焦集成测试、更新 `src/api/dashboard-v3.ts`，并运行 `pnpm run contract:v3:check`。退役的 `/dashboard/api` REST 继续退役。
+4. 补聚焦集成测试、更新 `src/api/dashboard-v3.ts`，并运行 `pnpm run contract:v3:check`。
 
 ---
 

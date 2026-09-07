@@ -479,7 +479,7 @@ async fn opencode_static_protocol_reset_is_cas_protected_and_restores_current_ca
         .iter()
         .find(|provider| provider["providerId"] == OPENCODE_PROVIDER_ID)
         .unwrap();
-    assert_eq!(opencode["staticProtocolSnapshotDate"], "2026-09-01");
+    assert_eq!(opencode["staticProtocolSnapshotDate"], "2026-09-06");
     assert_eq!(opencode["catalog"]["models"], json!(models));
     let grok = opencode["models"]
         .as_array()
@@ -566,7 +566,7 @@ async fn zen_static_protocol_reset_restores_official_pairs_and_defaults_other_ca
         .iter()
         .find(|provider| provider["providerId"] == OPENCODE_ZEN_FREE_PROVIDER_ID)
         .unwrap();
-    assert_eq!(zen["staticProtocolSnapshotDate"], "2026-09-01");
+    assert_eq!(zen["staticProtocolSnapshotDate"], "2026-09-06");
     let official = zen["models"]
         .as_array()
         .unwrap()
@@ -631,7 +631,7 @@ async fn goat_static_protocol_reset_restores_official_family_without_enabling_ex
         .iter()
         .find(|provider| provider["providerId"] == COMMAND_CODE_PROVIDER_ID)
         .unwrap();
-    assert_eq!(goat["staticProtocolSnapshotDate"], "2026-09-01");
+    assert_eq!(goat["staticProtocolSnapshotDate"], "2026-09-06");
     let fable = goat["models"]
         .as_array()
         .unwrap()
@@ -727,7 +727,7 @@ async fn fixed_provider_resets_restore_documented_chat_and_messages() {
             .iter()
             .find(|provider| provider["providerId"] == provider_id)
             .unwrap();
-        assert_eq!(provider["staticProtocolSnapshotDate"], "2026-09-01");
+        assert_eq!(provider["staticProtocolSnapshotDate"], "2026-09-06");
         let model = provider["models"]
             .as_array()
             .unwrap()
@@ -1256,7 +1256,7 @@ async fn zen_protocol_probe_omits_auth_and_selects_the_singleton_internally() {
         &cas(
             &harness,
             json!({
-                "modelId": "hy3-free",
+                "modelId": "mimo-v2.5-free",
                 "protocols": ["chat_completions"]
             }),
         ),

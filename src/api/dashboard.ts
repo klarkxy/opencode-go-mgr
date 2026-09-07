@@ -194,26 +194,26 @@ export const dashboardApi = {
   updateAccount: (id: string, update: AccountUpdate): Promise<Account> =>
     mutatedAccount(withCas((expectation) => dashboardV3.updateAccount(id, accountUpdateInput(update), expectation))),
 
-  reorderAccounts: async (accountIds: string[], _ignoredRevision?: number): Promise<Account[]> =>
+  reorderAccounts: async (accountIds: string[]): Promise<Account[]> =>
     (await withCas((expectation) => dashboardV3.reorderAccounts(accountIds, expectation))).accounts.map(presentAccount),
 
-  deleteAccount: async (id: string, _ignoredRevision?: number): Promise<void> => {
+  deleteAccount: async (id: string): Promise<void> => {
     await withCas((expectation) => dashboardV3.deleteAccount(id, expectation));
   },
 
-  toggleAccount: (id: string, _ignoredRevision?: number): Promise<Account> =>
+  toggleAccount: (id: string): Promise<Account> =>
     mutatedAccount(withCas((expectation) => dashboardV3.toggleAccount(id, expectation))),
 
-  resetAccountCooldown: (id: string, _ignoredRevision?: number): Promise<Account> =>
+  resetAccountCooldown: (id: string): Promise<Account> =>
     mutatedAccount(withCas((expectation) => dashboardV3.resetAccountCooldown(id, expectation))),
 
-  advanceAccountSetup: (id: string, setupStep: AccountSetupStep, _ignoredRevision?: number): Promise<Account> =>
+  advanceAccountSetup: (id: string, setupStep: AccountSetupStep): Promise<Account> =>
     mutatedAccount(withCas((expectation) => dashboardV3.advanceAccountSetup(id, setupStep, expectation))),
 
-  verifyManagedAccountKey: (id: string, key: string, _ignoredRevision?: number): Promise<Account> =>
+  verifyManagedAccountKey: (id: string, key: string): Promise<Account> =>
     mutatedAccount(withCas((expectation) => dashboardV3.verifyManagedAccountKey(id, key, expectation))),
 
-  verifyAccountConnection: (id: string, _ignoredRevision?: number): Promise<Account> =>
+  verifyAccountConnection: (id: string): Promise<Account> =>
     mutatedAccount(withCas((expectation) => dashboardV3.verifyAccount(id, expectation))),
 
   testAccountModel: (id: string, modelId: string): Promise<AccountModelTestResponse> =>
@@ -222,7 +222,6 @@ export const dashboardApi = {
   updateAccountCustomConfig: (
     id: string,
     config: AccountCustomConfigUpdateInput,
-    _ignoredRevision?: number,
   ): Promise<Account> => mutatedAccount(withCas((expectation) => {
     const payload = {
       endpointUrl: config.endpoint_url,
@@ -244,7 +243,6 @@ export const dashboardApi = {
   updateAccountModelCapabilities: (
     id: string,
     capabilities: AccountModelCapabilityInput[],
-    _ignoredRevision?: number,
   ): Promise<Account> => mutatedAccount(withCas((expectation) => dashboardV3.putAccountModelCapabilities(id, {
     capabilities: capabilities.map((capability) => ({
       publicModel: capability.public_model,
@@ -267,7 +265,7 @@ export const dashboardApi = {
   getBrowserCapabilities: async () => presentBrowserCapabilities(await dashboardV3.getBrowserCapabilities()),
   openAccountBrowser: async (id: string, target: BrowserTarget) =>
     presentBrowserOpen(await withCas((expectation) => dashboardV3.openAccountBrowser(id, target, expectation))),
-  resetAccountBrowserProfile: (id: string, _ignoredRevision?: number): Promise<Account> =>
+  resetAccountBrowserProfile: (id: string): Promise<Account> =>
     mutatedAccount(withCas((expectation) => dashboardV3.resetAccountBrowserProfile(id, expectation))),
 
   getAccountUsage: async (id: string) => presentUsage(await dashboardV3.getAccountUsage(id)),

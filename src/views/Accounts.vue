@@ -143,7 +143,7 @@
       :invite-missing="!opencodeInviteUrl"
       @import-key="openCreateModal(OPENCODE_GO_PLAN)"
       @register-managed="openManagedCreateModal"
-      @open-settings="openSettings"
+      @open-invite-url="openInviteUrl"
       @select-plan="handleSelectPlan"
     />
 
@@ -212,7 +212,7 @@
         </n-form-item>
       </n-form>
       <n-alert type="warning" :show-icon="false">
-        {{ t("请确认邀请链接是你自己的（默认仅演示）。修改后会写入设置。草稿可随时继续。") }}
+        {{ t("请确认邀请链接是你自己的（默认仅演示）。修改后会写入 OpenCode Go 供应商。草稿可随时继续。") }}
       </n-alert>
       <template #footer>
         <n-space justify="end">
@@ -267,7 +267,7 @@ import {
   useMessage,
 } from "naive-ui";
 import { PlusOutlined } from "@vicons/antd";
-import { DashboardRequestError, dashboardApi } from "../api/dashboard";
+import { DashboardRequestError, dashboardApi, isRevisionConflict } from "../api/dashboard";
 import { providerApi } from "../api/providers.ts";
 import { useAccountsStore } from "../stores/accounts.ts";
 import type { ProviderCatalogEntry } from "../api/providers.ts";
@@ -281,7 +281,7 @@ import type {
 } from "../api/dashboard";
 import { isCooling } from "../domain/accounts-usage.ts";
 import { accountIsReady, accountMenuOptions } from "../domain/account-display.ts";
-import { isCommandCodeGoatAccount, isOfficialCnPlanAccount, isZenFreeAccount } from "../domain/account-providers.ts";
+import { DEFAULT_PROVIDER_ID, isCommandCodeGoatAccount, isOllamaCloudAccount, isOfficialCnPlanAccount, isZenFreeAccount } from "../domain/account-providers.ts";
 import {
   executeCustomAccountEdit,
   isCustomApiAccount,
@@ -304,12 +304,11 @@ import {
 import { isDynamicCatalogEntry } from "../domain/dynamic-provider.ts";
 import { t, type MessageKey } from "../i18n/index.ts";
 import { dashboardErrorDetail } from "../utils/errors.ts";
-import { readAccountDeepLink } from "./app-navigation.ts";
+import { applyAppViewSearchParams, PROVIDER_OTHER_TAB, readAccountDeepLink } from "./app-navigation.ts";
 import { mapWithConcurrency } from "../utils/async.ts";
 import { useLocalizedModalCloseLabel } from "../utils/modal-close-label.ts";
 import {
   reconcileEditingAccount,
-  withFreshAccountRevision,
 } from "./account-cas.ts";
 import {
   DEFAULT_OPENCODE_INVITE_URL,
@@ -362,6 +361,8 @@ const openingBrowserTarget = ref<BrowserTarget | null>(null);
 const busy = ref(false);
 const now = ref(Date.now());
 const planFilter = ref<AccountPlanFilter>("all");
+const OLLAMA_WEBSITE_URL = "https://ollama.com";
+
 const statusFilter = ref<AccountStatusFilter>("all");
 const providerCatalog = ref<ProviderCatalogEntry[] | null>(null);
 const catalogLoading = ref(false);
@@ -424,7 +425,7 @@ const managedInvitePreview = computed(() => {
     return {
       status: undefined as "error" | undefined,
       feedback: normalized
-        ? t("将用于打开邀请页；与设置不同时会写回设置。")
+        ? t("将用于打开邀请页；与 OpenCode Go 供应商中的值不同时会写回。")
         : t("必填。仅接受 opencode.ai 官方 HTTPS 链接。"),
       normalized,
     };
@@ -476,6 +477,8 @@ function handleMenuSelect(key: string | number, accountId: string) {
     openCpa();
   } else if (key === "open-console") {
     void openAccountBrowser(accountId, "console");
+  } else if (key === "open-site") {
+    window.open(OLLAMA_WEBSITE_URL, "_blank", "noopener,noreferrer");
   } else if (key === "continue-setup") {
     openManagedWizard(accountId);
   } else if (key === "edit") {
@@ -588,10 +591,13 @@ function openManagedWizard(accountId: string): void {
   showManagedWizard.value = true;
 }
 
-function openSettings(): void {
+function openInviteUrl(): void {
   showAddModal.value = false;
-  const url = new URL(window.location.href);
-  url.searchParams.set("view", "settings");
+  const url = applyAppViewSearchParams(new URL(window.location.href), "providers", {
+    scope_kind: "provider",
+    scope_id: DEFAULT_PROVIDER_ID,
+    tab: PROVIDER_OTHER_TAB,
+  });
   url.searchParams.delete("session");
   url.hash = "";
   window.history.pushState(null, "", url);
@@ -661,10 +667,9 @@ async function createManagedAccount(): Promise<void> {
   try {
     await ensureInviteUrlSaved(inviteUrl);
     const username = managedDraft.value.username.trim();
-    const created = await runWithFreshSettingsRevision((revision) => dashboardApi.createManagedAccount({
+    const created = await runWithFreshSettingsRevision(() => dashboardApi.createManagedAccount({
       name,
       ...(username ? { username } : {}),
-      expected_revision: revision,
     }));
     addAccount(created);
     showManagedCreate.value = false;
@@ -683,8 +688,8 @@ async function advanceManagedSetup(accountId: string, setupStep: AccountSetupSte
   if (busy.value) return;
   busy.value = true;
   try {
-    const updated = await runWithFreshSettingsRevision((revision) => (
-      dashboardApi.advanceAccountSetup(accountId, setupStep, revision)
+    const updated = await runWithFreshSettingsRevision(() => (
+      dashboardApi.advanceAccountSetup(accountId, setupStep)
     ));
     replaceAccount(updated);
     message.success(t("注册进度已保存"));
@@ -701,8 +706,8 @@ async function verifyManagedKey(accountId: string, key: string): Promise<void> {
   if (busy.value) return;
   busy.value = true;
   try {
-    const updated = await runWithFreshSettingsRevision((revision) => (
-      dashboardApi.verifyManagedAccountKey(accountId, key, revision)
+    const updated = await runWithFreshSettingsRevision(() => (
+      dashboardApi.verifyManagedAccountKey(accountId, key)
     ));
     replaceAccount(updated);
     if (accountIsReady(updated)) {
@@ -758,8 +763,8 @@ async function openAccountBrowser(accountId: string, target: BrowserTarget): Pro
 
 async function resetBrowserProfile(accountId: string): Promise<void> {
   try {
-    const updated = await runWithFreshSettingsRevision((revision) => (
-      dashboardApi.resetAccountBrowserProfile(accountId, revision)
+    const updated = await runWithFreshSettingsRevision(() => (
+      dashboardApi.resetAccountBrowserProfile(accountId)
     ));
     replaceAccount(updated);
     if (!accountIsReady(updated)) {
@@ -799,6 +804,7 @@ function removeAccountState(id: string): void {
 function accountHasUsageDisplay(account: Account): boolean {
   return isCommandCodeGoatAccount(account)
     || isOfficialCnPlanAccount(account)
+    || isOllamaCloudAccount(account)
     || account.provider_id === "opencode";
 }
 
@@ -849,6 +855,7 @@ async function loadAccounts() {
       quotaLimits.value
       || loaded.some(isCommandCodeGoatAccount)
       || loaded.some(isOfficialCnPlanAccount)
+      || loaded.some(isOllamaCloudAccount)
     ) {
       await mapWithConcurrency(
         loaded.filter((account) => (
@@ -856,6 +863,7 @@ async function loadAccounts() {
           && (
             isCommandCodeGoatAccount(account)
             || isOfficialCnPlanAccount(account)
+            || isOllamaCloudAccount(account)
             || (
               quotaLimits.value
               && account.provider_id === "opencode"
@@ -934,12 +942,12 @@ async function onFormSave(payload: AccountInput | AccountFormPayload) {
       notes: payload.notes ?? "",
     };
     if (payload.key !== undefined) update.key = payload.key;
+    if (payload.ollama_billing_tier !== undefined) {
+      update.ollama_billing_tier = payload.ollama_billing_tier;
+    }
     busy.value = true;
     try {
-      const saved = await runWithFreshSettingsRevision((revision) => dashboardApi.updateAccount(editing.id, {
-        ...update,
-        expected_revision: revision,
-      }));
+      const saved = await runWithFreshSettingsRevision(() => dashboardApi.updateAccount(editing.id, update));
       replaceAccount(saved);
       // purchase_date defines the monthly usage window and changing it clears
       // the persisted calibration offset, so the local usage snapshot must be
@@ -954,19 +962,17 @@ async function onFormSave(payload: AccountInput | AccountFormPayload) {
       busy.value = false;
     }
   } else {
-    // Preserve every catalog-gated create field (Custom config and
-    // capabilities) rather than rebuilding a legacy-only DTO.
-    const input: AccountInput = { ...payload, key: payload.key || "" };
+    const input = {
+      ...(payload as AccountInput),
+      key: payload.key || "",
+    };
     busy.value = true;
     try {
-      const created = await runWithFreshSettingsRevision((revision) => dashboardApi.createAccount({
-        ...input,
-        expected_revision: revision,
-      }));
-      message.success(t("账号已添加"));
+      const created = await runWithFreshSettingsRevision(() => dashboardApi.createAccount(input));
       addAccount(created);
       settingsRevision.value = created.revision ?? settingsRevision.value;
-      // Go uses official usage; GOAT projects locally priced OCG request logs.
+      message.success(t("账号已添加"));
+      // Go uses official usage; GOAT and Ollama project locally priced OCG request logs.
       if (accountHasUsageDisplay(created) && accountIsReady(created)) {
         await loadAccountUsage(created.id);
       }
@@ -993,9 +999,8 @@ async function updatePurchaseDate(accountId: string, purchaseDate: string): Prom
 
   purchaseDateSaving.value[accountId] = true;
   try {
-    const saved = await runWithFreshSettingsRevision((revision) => dashboardApi.updateAccount(accountId, {
+    const saved = await runWithFreshSettingsRevision(() => dashboardApi.updateAccount(accountId, {
       purchase_date: purchaseDate,
-      expected_revision: revision,
     }));
     replaceAccount(saved);
     if (accountHasUsageDisplay(saved)) await loadAccountUsage(saved.id);
@@ -1031,21 +1036,17 @@ async function saveCustomAccountEdit(
   try {
     await executeCustomAccountEdit(editing, payload, {
       account: async (update) => {
-        replaceAccount(await runWithFreshSettingsRevision((revision) => dashboardApi.updateAccount(editing.id, {
-          ...update,
-          expected_revision: revision,
-        })));
+        replaceAccount(await runWithFreshSettingsRevision(() => dashboardApi.updateAccount(editing.id, update)));
       },
       customConfig: async (config) => {
-        replaceAccount(await runWithFreshSettingsRevision((revision) => dashboardApi.updateAccountCustomConfig(
+        replaceAccount(await runWithFreshSettingsRevision(() => dashboardApi.updateAccountCustomConfig(
           editing.id,
           config,
-          revision,
         )));
       },
       capabilities: async (capabilities) => {
-        replaceAccount(await runWithFreshSettingsRevision((revision) => (
-          dashboardApi.updateAccountModelCapabilities(editing.id, capabilities, revision)
+        replaceAccount(await runWithFreshSettingsRevision(() => (
+          dashboardApi.updateAccountModelCapabilities(editing.id, capabilities)
         )));
       },
     });
@@ -1074,7 +1075,7 @@ async function toggleAccount(id: string) {
     return;
   }
   try {
-    const updated = await runWithFreshSettingsRevision((revision) => dashboardApi.toggleAccount(id, revision));
+    const updated = await runWithFreshSettingsRevision(() => dashboardApi.toggleAccount(id));
     replaceAccount(updated);
   } catch (e) {
     if (await recoverAccountMutationConflict(e)) return;
@@ -1083,18 +1084,9 @@ async function toggleAccount(id: string) {
 }
 
 async function runWithFreshSettingsRevision<T>(
-  mutation: (revision: number) => Promise<T>,
+  mutation: () => Promise<T>,
 ): Promise<T> {
-  return withFreshAccountRevision(async () => {
-    try {
-      const settings = await dashboardApi.getSettings();
-      settingsRevision.value = settings.revision;
-      return settings.revision;
-    } catch {
-      settingsRevision.value = null;
-      return null;
-    }
-  }, mutation);
+  return mutation();
 }
 
 async function reloadAfterControlPlaneConflict(): Promise<void> {
@@ -1128,7 +1120,10 @@ async function reloadAfterControlPlaneConflict(): Promise<void> {
 }
 
 async function recoverAccountMutationConflict(error: unknown): Promise<boolean> {
-  if (!(error instanceof DashboardRequestError) || error.status !== 409) return false;
+  // Only a CAS revision conflict reloads the world. Domain 409s (enable before
+  // verify, reorder set mismatch, refresh already running, …) keep the actual
+  // backend message and the user's draft instead of a misleading reload.
+  if (!isRevisionConflict(error)) return false;
   await reloadAfterControlPlaneConflict();
   message.warning(t("账号设置已被其他操作修改，已重新加载最新状态，请重试"));
   return true;
@@ -1148,9 +1143,8 @@ async function saveZenProviderSettings(
   if (providerSettingsSaving.value[account.id]) return;
   providerSettingsSaving.value[account.id] = true;
   try {
-    const result = await runWithFreshSettingsRevision((revision) => providerApi.updateProviderSettings(account.id, {
+    const result = await runWithFreshSettingsRevision(() => providerApi.updateProviderSettings(account.id, {
       enabled,
-      expected_revision: revision,
     }));
     settingsRevision.value = result.revision;
     replaceAccount(result.account);
@@ -1166,7 +1160,7 @@ async function saveZenProviderSettings(
 
 async function deleteAccount(id: string) {
   try {
-    await runWithFreshSettingsRevision((revision) => dashboardApi.deleteAccount(id, revision));
+    await runWithFreshSettingsRevision(() => dashboardApi.deleteAccount(id));
     // DELETE returns the new revision in a response header; the shared JSON
     // transport intentionally stays body-only, so reload it before the next
     // mutation instead of guessing the counter.
@@ -1181,8 +1175,8 @@ async function deleteAccount(id: string) {
 
 async function resetCooldown(id: string) {
   try {
-    const updated = await runWithFreshSettingsRevision((revision) => (
-      dashboardApi.resetAccountCooldown(id, revision)
+    const updated = await runWithFreshSettingsRevision(() => (
+      dashboardApi.resetAccountCooldown(id)
     ));
     replaceAccount(updated);
     message.success(t("已重置冷却"));

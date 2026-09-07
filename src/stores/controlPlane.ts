@@ -26,6 +26,17 @@ export const useControlPlaneStore = defineStore("controlPlane", () => {
   const pricingRevision = ref<string | null>(null);
 
   function sync(tokens: ControlPlaneTokens): void {
+    // A delayed older GET must not roll the CAS revision back within the same
+    // backend process generation. Across generations there is no comparable
+    // ordering, so a different generation is always adopted as-is.
+    if (
+      processGeneration.value !== null
+      && tokens.processGeneration === processGeneration.value
+      && revision.value !== null
+      && tokens.revision < revision.value
+    ) {
+      return;
+    }
     revision.value = tokens.revision;
     processGeneration.value = tokens.processGeneration;
     if (typeof tokens.pricingRevision === "string") {

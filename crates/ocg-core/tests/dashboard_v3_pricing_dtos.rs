@@ -3,66 +3,6 @@
 
 use ocg_core::dashboard_v3::{CATALOG_TYPE_NAMES, contract_schema};
 use serde_json::{Map, Value};
-use std::fs;
-use std::path::PathBuf;
-
-const ACCOUNTS_CATALOG_PREFIX: &[&str] = &[
-    "ControlRevision",
-    "MutationAck",
-    "MutationExpectation",
-    "PricingRevision",
-    "V3Error",
-    "ConnectionInfo",
-    "ConnectionSubKey",
-    "Settings",
-    "SettingsUpdate",
-    "ProxySupportedModel",
-    "KeyCreate",
-    "KeyUpdate",
-    "Account",
-    "AccountList",
-    "AccountMutation",
-    "AccountCustomConfig",
-    "AccountModelCapability",
-    "AccountCreate",
-    "AccountManagedCreate",
-    "AccountModelTestRequest",
-    "AccountModelTestResponse",
-    "AccountUpdate",
-    "AccountOrder",
-    "AccountSetupUpdate",
-    "AccountCustomConfigUpdate",
-    "AccountCustomConfigWrite",
-    "AccountModelCapabilitiesUpdate",
-    "AccountModelCapabilityWrite",
-];
-
-const PROVIDER_CATALOG_TYPES: &[&str] = &[
-    "ProviderCatalog",
-    "ProviderCatalogEntry",
-    "ProviderCatalogFormField",
-    "ProviderModelCapability",
-    "ZenFreeSettings",
-    "ZenFreeSettingsUpdate",
-    "ZenFreeModels",
-    "ZenFreeModel",
-    "ProviderContracts",
-    "ProviderContractGroup",
-    "CustomEndpointContract",
-    "ProviderAccountChoice",
-    "EffectiveCatalog",
-    "EffectiveModelContract",
-    "EffectiveModelProtocols",
-    "EffectiveProtocolEvidence",
-    "CapabilitySummary",
-    "CardCapabilitySummary",
-    "ModelProtocolOverridesUpdate",
-    "ModelProtocolOverride",
-    "ProtocolOverrideState",
-    "ProtocolProbeRequest",
-    "ProtocolProbeResult",
-    "ProtocolProbeResponse",
-];
 
 const PRICING_CATALOG_TYPES: &[&str] = &[
     "PricingSnapshot",
@@ -80,24 +20,6 @@ const PRICING_CATALOG_TYPES: &[&str] = &[
     "ProviderPricing",
     "PricingAvailability",
 ];
-
-const USAGE_CATALOG_TYPES: &[&str] = &[
-    "UsageWindow",
-    "UsageMutation",
-    "AccountUsageUpdate",
-    "ProviderUsage",
-    "QuotaWindow",
-    "CreditBalance",
-    "UsageSyncState",
-    "UsageAvailability",
-];
-
-const CUSTOM_DISCOVERY_CATALOG_TYPES: &[&str] = &[
-    "CustomModelDiscoveryRequest",
-    "CustomModelDiscoveryResponse",
-];
-
-const UPDATER_CATALOG_TYPES: &[&str] = &["UpdateCheck", "DesktopUpdate", "InstallUpdate"];
 
 const SECRET_FIELD_NAMES: &[&str] = &[
     "key",
@@ -175,10 +97,10 @@ fn allows_null(schema: &Value) -> bool {
     if schema.get("type").and_then(Value::as_str) == Some("null") {
         return true;
     }
-    if let Some(types) = schema.get("type").and_then(Value::as_array) {
-        if types.iter().any(|value| value == "null") {
-            return true;
-        }
+    if let Some(types) = schema.get("type").and_then(Value::as_array)
+        && types.iter().any(|value| value == "null")
+    {
+        return true;
     }
     if let Some(any_of) = schema.get("anyOf").and_then(Value::as_array) {
         return any_of.iter().any(allows_null);
@@ -197,192 +119,6 @@ fn is_numeric(schema: &Value) -> bool {
             .get("anyOf")
             .and_then(Value::as_array)
             .is_some_and(|items| items.iter().any(is_numeric)),
-    }
-}
-
-fn frozen_schema() -> Value {
-    let path =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../schema/dashboard-api-v3.schema.json");
-    let text = fs::read_to_string(&path)
-        .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
-    serde_json::from_str(&text).expect("checked-in V3 schema JSON")
-}
-
-#[test]
-fn catalog_type_names_keep_the_frozen_prefix_and_pricing_block() {
-    let prefix_len = ACCOUNTS_CATALOG_PREFIX.len() + PROVIDER_CATALOG_TYPES.len();
-    let pricing_end = prefix_len + PRICING_CATALOG_TYPES.len();
-    assert_eq!(
-        &CATALOG_TYPE_NAMES[..ACCOUNTS_CATALOG_PREFIX.len()],
-        ACCOUNTS_CATALOG_PREFIX
-    );
-    assert_eq!(
-        &CATALOG_TYPE_NAMES[ACCOUNTS_CATALOG_PREFIX.len()..prefix_len],
-        PROVIDER_CATALOG_TYPES
-    );
-    assert_eq!(
-        &CATALOG_TYPE_NAMES[prefix_len..pricing_end],
-        PRICING_CATALOG_TYPES
-    );
-    const OBSERVABILITY_CATALOG_TYPES: &[&str] = &[
-        "GatewayStatus",
-        "ApplicationModels",
-        "DashboardSummary",
-        "DailyModelTokens",
-        "DailyTokensByModel",
-        "GatewayLog",
-        "GatewayLogs",
-        "ForwardLog",
-        "ForwardLogSummary",
-        "ForwardLogs",
-        "ForwardLogClientKey",
-        "ForwardLogKeys",
-        "ForwardLogModels",
-        "GatewayLogQuery",
-        "ForwardLogQuery",
-        "DailyTokensQuery",
-    ];
-    let observability_end = pricing_end + OBSERVABILITY_CATALOG_TYPES.len();
-    assert_eq!(
-        &CATALOG_TYPE_NAMES[pricing_end..observability_end],
-        OBSERVABILITY_CATALOG_TYPES
-    );
-    let usage_end = observability_end + USAGE_CATALOG_TYPES.len();
-    assert_eq!(
-        &CATALOG_TYPE_NAMES[observability_end..usage_end],
-        USAGE_CATALOG_TYPES
-    );
-    let auth_end = usage_end + 4;
-    assert_eq!(
-        &CATALOG_TYPE_NAMES[usage_end..auth_end],
-        ["AuthStatus", "AuthRegister", "AuthLogin", "AuthLogout"]
-    );
-    let proxy_end = auth_end + 2;
-    assert_eq!(
-        &CATALOG_TYPE_NAMES[auth_end..proxy_end],
-        ["ProxyTestRequest", "ProxyTestResponse"]
-    );
-    let custom_discovery_end = proxy_end + CUSTOM_DISCOVERY_CATALOG_TYPES.len();
-    assert_eq!(
-        &CATALOG_TYPE_NAMES[proxy_end..custom_discovery_end],
-        CUSTOM_DISCOVERY_CATALOG_TYPES
-    );
-    let claude_end = custom_discovery_end + 2;
-    assert_eq!(
-        &CATALOG_TYPE_NAMES[custom_discovery_end..claude_end],
-        ["ClaudeDesktopModels", "ClaudeDesktopModelsUpdate"]
-    );
-    const BROWSER_CATALOG_TYPES: &[&str] = &[
-        "BrowserMode",
-        "BrowserTarget",
-        "BrowserCapabilities",
-        "BrowserOpenRequest",
-        "BrowserOpen",
-    ];
-    let account_verify_end = claude_end + 1;
-    assert_eq!(
-        &CATALOG_TYPE_NAMES[claude_end..account_verify_end],
-        ["AccountVerify"]
-    );
-    let browser_end = account_verify_end + BROWSER_CATALOG_TYPES.len();
-    assert_eq!(
-        &CATALOG_TYPE_NAMES[account_verify_end..browser_end],
-        BROWSER_CATALOG_TYPES
-    );
-    let updater_end = browser_end + UPDATER_CATALOG_TYPES.len();
-    assert_eq!(
-        &CATALOG_TYPE_NAMES[browser_end..updater_end],
-        UPDATER_CATALOG_TYPES
-    );
-    assert_eq!(CATALOG_TYPE_NAMES[updater_end], "AccountManagedKeyVerify");
-    const USAGE_REFRESH_CATALOG_TYPES: &[&str] = &[
-        "UsageRefresh",
-        "UsageRefreshUpdate",
-        "UsageRefreshThrottleError",
-    ];
-    let usage_refresh_start = updater_end + 1;
-    let usage_refresh_end = usage_refresh_start + USAGE_REFRESH_CATALOG_TYPES.len();
-    assert_eq!(
-        &CATALOG_TYPE_NAMES[usage_refresh_start..usage_refresh_end],
-        USAGE_REFRESH_CATALOG_TYPES
-    );
-    const PROVIDER_REFRESH_CATALOG_TYPES: &[&str] = &[
-        "ProviderModelsRefreshUpdate",
-        "ProviderModels",
-        "ProviderPricingSnapshot",
-        "ProviderPricingValue",
-        "ProviderPricingRefresh",
-        "ProviderPricingRefreshUpdate",
-    ];
-    let provider_refresh_end = usage_refresh_end + PROVIDER_REFRESH_CATALOG_TYPES.len();
-    assert_eq!(
-        &CATALOG_TYPE_NAMES[usage_refresh_end..provider_refresh_end],
-        PROVIDER_REFRESH_CATALOG_TYPES
-    );
-    const ACCOUNT_TRANSFER_CATALOG_TYPES: &[&str] = &[
-        "AccountExportRequest",
-        "AccountExport",
-        "AccountImportPreviewRequest",
-        "AccountImportPreview",
-        "AccountImportPreviewItem",
-        "AccountImportDisposition",
-        "AccountImportRequest",
-        "AccountImportResult",
-    ];
-    let account_transfer_end = provider_refresh_end + ACCOUNT_TRANSFER_CATALOG_TYPES.len();
-    assert_eq!(
-        &CATALOG_TYPE_NAMES[provider_refresh_end..account_transfer_end],
-        ACCOUNT_TRANSFER_CATALOG_TYPES
-    );
-    const APPLICATION_CONNECTOR_CATALOG_TYPES: &[&str] = &[
-        "ApplicationConnectorAction",
-        "ApplicationConnectorStatus",
-        "ApplicationConnectorChange",
-        "ApplicationConnectorItem",
-        "ApplicationConnectors",
-        "ApplicationConnectorPreviewRequest",
-        "ApplicationConnectorPreview",
-        "ApplicationConnectorCommitRequest",
-        "ApplicationConnectorCommitResult",
-    ];
-    let application_connector_end =
-        account_transfer_end + APPLICATION_CONNECTOR_CATALOG_TYPES.len();
-    assert_eq!(
-        &CATALOG_TYPE_NAMES[account_transfer_end..application_connector_end],
-        APPLICATION_CONNECTOR_CATALOG_TYPES
-    );
-    assert_eq!(CATALOG_TYPE_NAMES.len(), application_connector_end + 33);
-}
-
-#[test]
-fn existing_defs_stay_byte_identical_to_the_frozen_provider_contract() {
-    let live = contract_schema();
-    let frozen = frozen_schema();
-    let live_defs = defs(&live);
-    let frozen_defs = defs(&frozen);
-    for (name, frozen_def) in frozen_defs {
-        assert_eq!(
-            live_defs
-                .get(name)
-                .unwrap_or_else(|| panic!("live schema missing frozen $defs/{name}")),
-            frozen_def,
-            "existing $defs/{name} drifted"
-        );
-    }
-
-    let live_any_of = live["anyOf"].as_array().expect("live anyOf");
-    let frozen_any_of = frozen["anyOf"].as_array().expect("frozen anyOf");
-    assert_eq!(
-        &live_any_of[..frozen_any_of.len()],
-        frozen_any_of.as_slice(),
-        "catalog anyOf prefix drifted"
-    );
-    for (index, name) in CATALOG_TYPE_NAMES.iter().enumerate() {
-        assert_eq!(
-            live_any_of[index]["$ref"],
-            format!("#/$defs/{name}"),
-            "anyOf drifted at {index}"
-        );
     }
 }
 

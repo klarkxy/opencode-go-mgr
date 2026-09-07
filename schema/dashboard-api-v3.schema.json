@@ -102,6 +102,17 @@
             "null"
           ]
         },
+        "ollamaBillingTier": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OllamaBillingTier"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "planRoutable": {
           "type": "boolean"
         },
@@ -190,7 +201,8 @@
         "verificationError",
         "planRoutable",
         "customConfig",
-        "modelCapabilities"
+        "modelCapabilities",
+        "ollamaBillingTier"
       ],
       "type": "object"
     },
@@ -237,6 +249,16 @@
           "type": [
             "string",
             "null"
+          ]
+        },
+        "ollamaBillingTier": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OllamaBillingTier"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "password": {
@@ -1020,6 +1042,16 @@
             "null"
           ]
         },
+        "ollamaBillingTier": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OllamaBillingTier"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "password": {
           "type": [
             "string",
@@ -1411,7 +1443,7 @@
     },
     "ApplicationModels": {
       "additionalProperties": false,
-      "description": "Local Applications picker: Go routable Alias ∩ current pricing snapshot.",
+      "description": "Local Applications picker: Go routable Alias 鈭?current pricing snapshot.",
       "properties": {
         "models": {
           "items": {
@@ -1596,7 +1628,7 @@
     },
     "BrowserOpen": {
       "additionalProperties": false,
-      "description": "POST `/accounts/{id}/browser` result. Distinct from `browser::BrowserOpenResult`.\n\nNative mode always emits `sessionToken: null`. Remote mode emits only the\nopaque dashboard-bound display token — never a worker URL or control token.",
+      "description": "POST `/accounts/{id}/browser` result. Distinct from `browser::BrowserOpenResult`.\n\nNative mode always emits `sessionToken: null`. Remote mode emits only the\nopaque dashboard-bound display token —never a worker URL or control token.",
       "properties": {
         "mode": {
           "$ref": "#/$defs/BrowserMode"
@@ -1798,15 +1830,11 @@
             "$ref": "#/$defs/ConnectionSubKey"
           },
           "type": "array"
-        },
-        "upstreamBaseUrl": {
-          "type": "string"
         }
       },
       "required": [
         "gatewayPort",
         "clientRootUrl",
-        "upstreamBaseUrl",
         "primaryKey",
         "subKeys",
         "revision",
@@ -2275,12 +2303,31 @@
       ],
       "type": "object"
     },
+    "CpaModel": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "ownedBy": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "ownedBy"
+      ],
+      "type": "object"
+    },
     "CpaModels": {
       "additionalProperties": false,
       "properties": {
         "models": {
           "items": {
-            "type": "string"
+            "$ref": "#/$defs/CpaModel"
           },
           "type": "array"
         },
@@ -2299,10 +2346,17 @@
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
+        },
+        "sourceUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
         "models",
+        "sourceUrl",
         "refreshedAt",
         "revision",
         "processGeneration"
@@ -2487,7 +2541,7 @@
     },
     "CpaRuntime": {
       "additionalProperties": false,
-      "description": "Secret-free CPA runtime snapshot. `supported` is true only on the\ninstalled Windows x64 desktop Host.",
+      "description": "Secret-free CPA runtime snapshot. `supported` is true only on an\ninstalled desktop Host on Windows x64, macOS, or Linux x64.",
       "properties": {
         "assetSha256": {
           "type": [
@@ -4544,6 +4598,15 @@
       ],
       "type": "object"
     },
+    "OllamaBillingTier": {
+      "description": "Paid Ollama Cloud billing profile. Wire values are exactly `pro`, `max`,\nand `team`. Absence of a stored row (migrated/unconfigured) and non-Ollama\naccounts serialize the account field as `null`.",
+      "enum": [
+        "pro",
+        "max",
+        "team"
+      ],
+      "type": "string"
+    },
     "PricingAdjustment": {
       "additionalProperties": false,
       "description": "One documented local adjustment on a model row.",
@@ -6156,9 +6219,6 @@
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
-        },
-        "upstreamBaseUrl": {
-          "type": "string"
         }
       },
       "required": [
@@ -6166,7 +6226,6 @@
         "processGeneration",
         "gatewayPort",
         "gatewayPortFromEnv",
-        "upstreamBaseUrl",
         "proxyMode",
         "proxyUrl",
         "proxyListDirection",
@@ -6306,12 +6365,6 @@
           "minimum": 0,
           "type": [
             "integer",
-            "null"
-          ]
-        },
-        "upstreamBaseUrl": {
-          "type": [
-            "string",
             "null"
           ]
         }
@@ -7189,6 +7242,9 @@
       "$ref": "#/$defs/CpaConnectionReport"
     },
     {
+      "$ref": "#/$defs/CpaModel"
+    },
+    {
       "$ref": "#/$defs/CpaModels"
     },
     {
@@ -7274,6 +7330,9 @@
     },
     {
       "$ref": "#/$defs/DynamicProviderTestResponse"
+    },
+    {
+      "$ref": "#/$defs/OllamaBillingTier"
     }
   ],
   "title": "DashboardApiV3"

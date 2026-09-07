@@ -15,7 +15,7 @@ Authenticated parse, validation, or routing failures that happen before account
 selection also appear here with unresolved/Gateway attribution. Runtime Logs are
 reserved for process and control-plane events.
 Each stored row keeps the request identity separate from the upstream
-identity. There is no `requested_alias` field:
+identity:
 
 - `requested_model` — the public name or Alias the client sent
 - `resolved_alias` — the resolved public Alias when one exists
@@ -28,7 +28,7 @@ and present only when the provider supplies enough pricing evidence.
 
 Each row also stores raw supplier cost, quota debit, and effective paid cost
 when the selected provider supplies enough pricing evidence. An allowance only
-changes the quota-debit multiplier; it does not make a model or provider routable.
+changes the quota-debit multiplier.
 
 - Chat streaming requests set `stream_options.include_usage` so OpenAI-compatible
   upstreams emit a usage chunk. Rows with `success_no_usage` mean the stream
@@ -36,12 +36,14 @@ changes the quota-debit multiplier; it does not make a model or provider routabl
   summary shows total tokens (input + output). Quota use is estimated from the
   selected provider's verified pricing snapshot: OpenCode Go uses its active
   snapshot, while Command Code GOAT uses its separately refreshed model prices
-  and multipliers. Existing rows are not retroactively repriced. Registered
+  and multipliers. Ollama Cloud prices from the manual `https://ollama.com/pricing`
+  snapshot with quota multiplier `1.0`; those priced rows feed one monthly
+  USD-credits window and may exceed the soft Pro/Max/Team limit without changing
+  routing. Existing rows are not retroactively repriced. Registered
   Zen free models (`big-pickle`, `mimo-v2.5-free`, and other ids on the Zen
   allowlist) record tokens with `cost_state=free` and do not enter Go quota
-  totals. Go models whose names contain `free` (currently `ox-alpha-free`) stay
-  on Go and are unpriced while the official table lists dash rates. Custom API
-  rows record `cost_state=unknown` with no provider quota debit. Expand a row to
+  totals. Custom API rows record `cost_state=unknown` with no provider quota
+  debit. Expand a row to
   see the request ID and diagnostic
   detail.
 - An `outcome_unknown` row means the upstream may already have completed and
@@ -60,11 +62,10 @@ The **Settings** view holds the gateway's persistent configuration:
 - **Gateway Port** — the port the gateway binds (default `9042`). Desktop builds
   also accept the read-only `OCG_GATEWAY_PORT` runtime override; while it is set,
   the Settings field is disabled and the saved value is unchanged.
-- **Upstream URL** — the OpenCode-Go base URL.
 - **Routing mode** — strict priority, global sticky, or round robin. All three
   modes apply the one global card order only after filtering incompatible,
-  disabled, cooling, or already-failed cards; they do not create a provider or
-  model routing table. Only one base mode is active at a time.
+  disabled, cooling, or already-failed cards. Only one base mode is active at
+  a time.
 - **Conversation sticky** — an overlay switch, not a fourth routing mode.
   When on, the gateway prefers the `X-OCG-Conversation-Id` request header;
   without it, it uses a prompt fingerprint (system / tools / first user
@@ -87,7 +88,8 @@ The **Settings** view holds the gateway's persistent configuration:
   authenticated `GET /v1/models` and protected
   `GET /dashboard/api/v3/application-models` are local lists and do not use
   this outbound path. The browser sidecar is outside its scope. **Test
-  connection** uses the unsaved form values against the current upstream. Any
+  connection** uses the unsaved form values against the sealed OpenCode Go
+  origin. Any
   HTTP status proves network reachability, without running model inference or
   incurring model usage. In list mode it probes only the
   direction's default leg, not a listed model's real forwarding path.
@@ -114,14 +116,11 @@ The **Settings** view holds the gateway's persistent configuration:
   recorded". List mode requires this version or newer; an older binary cannot
   start on a config saved with `list` mode — switch back to manual or direct
   mode first when rolling back.
-- **OpenCode Go invite URL** — the restricted HTTPS invite used by managed
-  account onboarding. Fresh installs may ship a demo default; replace it with
-  your own link before a real signup. Creating a managed draft can also edit
-  and write this value back.
 - **Downstream Access Root** — see [Connection Center](dashboard.md#connection-center).
-- **Auto-start on login** — only the installed Windows desktop build exposes
-  this switch. Development builds, the CLI, Docker, macOS, and Linux
-  dashboards hide it.
+- **Auto-start on login** — installed Windows x64, macOS, and Linux x64
+  desktop builds expose this switch. Development builds, the CLI, and Docker
+  dashboards hide it. Linux AppImage startup entries point to the AppImage file;
+  keep that file at the saved location, or toggle auto-start again after moving it.
 - **Dock icon** — only the macOS desktop build exposes this switch. Turning
   it off keeps the menu-bar icon available. Windows, Linux, CLI, and Docker
   dashboards hide it.
@@ -142,7 +141,7 @@ The **Settings** view holds the gateway's persistent configuration:
 Settings are written to SQLite and reloaded on the next start. The Settings
 resource never includes Key plaintext. Saves use the same `expectedRevision` /
 `processGeneration` tokens as other Dashboard V3 writes. The update check is
-on-demand and is not persisted.
+on-demand.
 
 ---
 

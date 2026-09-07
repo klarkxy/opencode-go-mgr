@@ -97,6 +97,20 @@
         </n-form-item>
 
         <n-form-item
+          v-if="hasField('ollama_billing_tier')"
+          path="ollamaBillingTier"
+          :label="t('计费档位')"
+        >
+          <n-select
+            v-model:value="form.ollamaBillingTier"
+            :options="ollamaBillingOptions"
+            :placeholder="t('选择计费档位')"
+            :aria-label="t('计费档位')"
+          />
+          <p class="field-hint">{{ t("新建须选择 Pro / Max / Team 并填写购买日期；未配置的既有账号仍可路由。") }}</p>
+        </n-form-item>
+
+        <n-form-item
           v-if="isCustomPlan"
           path="endpointUrl"
           :label="t('API 地址')"
@@ -301,6 +315,7 @@ export type AccountFormPayload = {
     upstream_model: string;
     protocol: AccountProtocol;
   }>;
+  ollama_billing_tier?: "pro" | "max" | "team";
 };
 
 type FormModel = {
@@ -312,6 +327,7 @@ type FormModel = {
   endpointUrl: string;
   upstreamProtocol: AccountProtocol | null;
   modelCapabilities: EditableModelCapability[];
+  ollamaBillingTier: "pro" | "max" | "team" | null;
 };
 
 type EditableModelCapability = AccountCreateCapability & { row_id: number };
@@ -379,6 +395,13 @@ const effectivePlan = computed<PlanDefinition | null>(() => {
 });
 
 const isCustomPlan = computed(() => effectivePlan.value?.id === "custom-endpoint");
+const isOllamaPlan = computed(() => effectivePlan.value?.id === "ollama-cloud");
+const ollamaBillingOptions = [
+  { value: "pro", label: "Pro · $60" },
+  { value: "max", label: "Max · $300" },
+  { value: "team", label: "Team · $1000" },
+];
+const ollamaPaidTier = computed(() => form.value.ollamaBillingTier !== null);
 const isDynamicPlan = computed(() => effectivePlan.value?.id === "dynamic-http");
 
 const catalogEntry = computed<ProviderCatalogEntry | undefined>(() => {
@@ -407,7 +430,9 @@ const keyPlaceholder = computed(() => {
   return "sk-...";
 });
 
-const purchaseDateRequired = computed(() => fieldRequired("purchase_date"));
+const purchaseDateRequired = computed(() => (
+  fieldRequired("purchase_date") || (isOllamaPlan.value && ollamaPaidTier.value)
+));
 const isPurchaseDateToday = computed(() => (
   form.value.purchaseDate !== null
   && localDateString(form.value.purchaseDate) === localDateString()
@@ -446,7 +471,7 @@ const rules = computed<FormRules>(() => {
     },
   };
 
-  if (fieldRequired("purchase_date")) {
+  if (purchaseDateRequired.value) {
     base.purchaseDate = [
       {
         required: true,
@@ -463,6 +488,14 @@ const rules = computed<FormRules>(() => {
         trigger: ["change", "blur"],
       },
     ];
+  }
+
+  if (hasField("ollama_billing_tier")) {
+    base.ollamaBillingTier = {
+      required: true,
+      message: t("选择计费档位"),
+      trigger: ["change", "blur"],
+    };
   }
 
   if (hasField("key") && !isEdit.value) {
@@ -572,6 +605,7 @@ function blankForm(): FormModel {
     endpointUrl: "",
     upstreamProtocol: "chat_completions",
     modelCapabilities: [],
+    ollamaBillingTier: null,
   };
 }
 
@@ -592,6 +626,7 @@ function formFromAccount(account: Account): FormModel {
     endpointUrl: account.custom_config?.endpoint_url ?? "",
     upstreamProtocol: account.custom_config?.upstream_protocol ?? "chat_completions",
     modelCapabilities,
+    ollamaBillingTier: account.ollama_billing_tier ?? null,
   };
 }
 
@@ -704,6 +739,9 @@ async function handleSave() {
         protocol: form.value.upstreamProtocol ?? "chat_completions",
       }));
     }
+    if (hasField("ollama_billing_tier") && form.value.ollamaBillingTier) {
+      payload.ollama_billing_tier = form.value.ollamaBillingTier;
+    }
     emit("save", payload);
     return;
   }
@@ -738,6 +776,9 @@ async function handleSave() {
 
   try {
     const payload = buildCreateAccountPayload(plan, values);
+    if (hasField("ollama_billing_tier") && form.value.ollamaBillingTier) {
+      payload.ollama_billing_tier = form.value.ollamaBillingTier;
+    }
     emit("save", payload);
   } catch (error) {
     // Never submit a degraded payload: the backend rejects incomplete Custom

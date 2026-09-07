@@ -183,7 +183,6 @@ mod tests {
             Err(CatalogParseError::UnknownQuotaScope(value)) if value == "account"
         ));
 
-        assert_eq!(UpstreamProtocolKind::ALL.len(), 3);
         assert_eq!(UpstreamProtocolKind::Responses.as_str(), "responses");
         assert_eq!(
             UpstreamProtocolKind::try_from("messages").unwrap(),

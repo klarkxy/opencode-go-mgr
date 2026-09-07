@@ -1,8 +1,8 @@
 # Contributors / 贡献者
 
-OCG Manager is maintained by [Klarkxy](https://github.com/klarkxy) and improved by community contributions. Thank you to everyone who reports issues, proposes changes, reviews code, and helps validate releases.
+Open Console Gateway is maintained by [Klarkxy](https://github.com/klarkxy) and improved by community contributions. Thank you to everyone who reports issues, proposes changes, reviews code, and helps validate releases.
 
-OCG Manager 由 [Klarkxy](https://github.com/klarkxy) 维护，也受益于社区的代码贡献、问题反馈、审查与发布验证。感谢每一位参与者。
+Open Console Gateway 由 [Klarkxy](https://github.com/klarkxy) 维护，也受益于社区的代码贡献、问题反馈、审查与发布验证。感谢每一位参与者。
 
 ## Community contributors / 社区贡献者
 

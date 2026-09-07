@@ -55,20 +55,20 @@ impl NativePluginCommandRunner for FakeRunner {
     fn run(&self, command: &NativePluginCommand) -> Result<NativePluginCommandOutput, String> {
         self.commands.lock().unwrap().push(command.clone());
         let output = self.output.lock().unwrap().clone();
-        if output.success {
-            if let Some(update) = self.updates.lock().unwrap().pop_front() {
-                match update {
-                    RegistryUpdate::Write(path, bytes) => {
-                        fs::create_dir_all(path.parent().ok_or("registry path has no parent")?)
-                            .map_err(|error| error.to_string())?;
-                        fs::write(path, bytes).map_err(|error| error.to_string())?;
-                    }
-                    RegistryUpdate::Remove(path) => match fs::remove_file(path) {
-                        Ok(()) => {}
-                        Err(error) if error.kind() == ErrorKind::NotFound => {}
-                        Err(error) => return Err(error.to_string()),
-                    },
+        if output.success
+            && let Some(update) = self.updates.lock().unwrap().pop_front()
+        {
+            match update {
+                RegistryUpdate::Write(path, bytes) => {
+                    fs::create_dir_all(path.parent().ok_or("registry path has no parent")?)
+                        .map_err(|error| error.to_string())?;
+                    fs::write(path, bytes).map_err(|error| error.to_string())?;
                 }
+                RegistryUpdate::Remove(path) => match fs::remove_file(path) {
+                    Ok(()) => {}
+                    Err(error) if error.kind() == ErrorKind::NotFound => {}
+                    Err(error) => return Err(error.to_string()),
+                },
             }
         }
         Ok(output)

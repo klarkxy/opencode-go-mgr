@@ -2,13 +2,14 @@
 
 # Install And First Run
 
-A local gateway that lives on your machine, not in the cloud — install it, launch it, and close the browser tab when you're done. The rest is mostly convincing your OS that small developers exist.
+Install the local gateway, launch it, and close the browser tab when you're
+done. The rest is mostly convincing your OS that small developers exist.
 
 ## Windows 10/11 x64
 
 1. Run the NSIS setup `ocg-manager_<version>_windows-x64-setup.exe`. It
    installs for the current user without administrator rights.
-2. Launch **OCG Manager** from the Start menu. The dashboard opens in your
+2. Launch **Open Console Gateway** from the Start menu. The dashboard opens in your
    system browser; use the tray icon to open it again later.
 3. Current Windows builds are unsigned, so SmartScreen may warn. Click
    **More info → Run anyway** to continue.
@@ -19,7 +20,7 @@ A local gateway that lives on your machine, not in the cloud — install it, lau
 
 ## macOS 11+ Intel / Apple Silicon
 
-1. Open the Universal DMG and drag **OCG Manager** to **Applications**.
+1. Open the Universal DMG and drag **Open Console Gateway** to **Applications**.
 2. The app is ad-hoc signed, so the first launch may be blocked. Open
    **Privacy & Security** and click **Open Anyway**.
 3. Launch the app. The dashboard opens in your system browser; use the tray

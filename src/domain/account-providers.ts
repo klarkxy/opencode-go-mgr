@@ -28,6 +28,7 @@ export const DEFAULT_PROVIDER_ID = "opencode";
 export const COMMAND_CODE_PROVIDER_ID = "command-code";
 export const MINIMAX_PROVIDER_ID = "minimax";
 export const KIMI_PROVIDER_ID = "kimi";
+export const OLLAMA_PROVIDER_ID = "ollama";
 
 /** Built-in singleton Zen Free account; created and owned by the backend. */
 export const ZEN_FREE_ACCOUNT_ID = "00000000-0000-0000-0000-000000000002";
@@ -48,10 +49,6 @@ const ALL_PROVIDER_OFFERINGS: readonly ProviderOffering[] = PLAN_DEFINITIONS.map
 export const ZEN_FREE_OFFERING: ProviderOffering = ALL_PROVIDER_OFFERINGS.find((offering) => (
   offering.provider_id === ZEN_FREE_PROVIDER_ID
 ))!;
-
-export const PROVIDER_OFFERINGS: readonly ProviderOffering[] = ALL_PROVIDER_OFFERINGS.filter(
-  (offering) => offering !== ZEN_FREE_OFFERING,
-);
 
 export function isZenFreeAccount(
   account: Pick<Account, "id" | "provider_id">,
@@ -79,13 +76,13 @@ export function isOfficialCnPlanAccount(
   return account.provider_id === MINIMAX_PROVIDER_ID || account.provider_id === KIMI_PROVIDER_ID;
 }
 
-export function findProviderOffering(providerId: string): ProviderOffering | undefined {
-  return ALL_PROVIDER_OFFERINGS.find((offering) => offering.provider_id === providerId);
+/** Ollama Cloud accounts scrape usage with an account-level web Cookie. */
+export function isOllamaCloudAccount(
+  account: Pick<Account, "provider_id">,
+): boolean {
+  return account.provider_id === OLLAMA_PROVIDER_ID;
 }
 
-export function providerOfferingLabel(
-  account: Pick<Account, "provider_id">,
-): string {
-  return findProviderOffering(account.provider_id)?.label
-    ?? account.provider_id;
+export function findProviderOffering(providerId: string): ProviderOffering | undefined {
+  return ALL_PROVIDER_OFFERINGS.find((offering) => offering.provider_id === providerId);
 }

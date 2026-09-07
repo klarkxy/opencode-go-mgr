@@ -955,6 +955,44 @@ fn legacy_option_wrappers_fail_closed_on_duplicates_and_preserve_state() {
 }
 
 #[test]
+fn disabled_zen_free_row_exhausts_free_until_inclusive_deadline() {
+    let wall = frozen_wall();
+    let mut cooled = zen_account(false);
+    cooled.cooldown_free_until = Some(wall + chrono::Duration::hours(1));
+    let accounts = vec![cooled, account("next", true)];
+
+    assert!(
+        free_channel_is_exhausted_at(&accounts, wall),
+        "a disabled Zen row still exhausts Free while cooldown_free_until is in the future"
+    );
+    assert!(!free_channel_is_exhausted_at(
+        &accounts,
+        wall + chrono::Duration::hours(1),
+    ));
+}
+
+#[test]
+fn free_channel_exhaustion_ignores_go_accounts_and_uses_injected_wall() {
+    let wall = frozen_wall();
+    let mut cooled = zen_account(false);
+    cooled.cooldown_free_until = Some(wall);
+    let accounts = vec![cooled];
+
+    assert!(
+        free_channel_is_exhausted_at(&accounts, wall - chrono::Duration::seconds(1)),
+        "until > now must exhaust Free even on a disabled Zen row"
+    );
+    assert!(
+        !free_channel_is_exhausted_at(&accounts, wall),
+        "until == now must expire Free exhaustion"
+    );
+    assert!(!free_channel_is_exhausted_at(
+        &[account("go", true)],
+        wall - chrono::Duration::seconds(1),
+    ));
+}
+
+#[test]
 fn free_channel_gate_closes_only_free_candidates() {
     let runtime = RoutingRuntime::new();
     let wall = frozen_wall();

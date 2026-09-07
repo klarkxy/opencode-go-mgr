@@ -2,13 +2,13 @@
 
 # Add a Provider
 
-Use this guide when you want OCG Manager to route to another upstream service. There are three different integration paths:
+Use this guide when you want Open Console Gateway to route to another upstream service. There are three different integration paths:
 
 | Goal | Path | Repository change |
 | --- | --- | --- |
 | Add a named Provider this node can reuse across accounts | **Providers** → **New Provider** (user-defined) | No |
 | Connect one OpenAI- or Anthropic-compatible endpoint on a single account | Add a **Custom API** account | No |
-| Ship a named built-in Provider (the product's Provider/Plan identity) to every OCG Manager user | Add a sealed built-in Provider | Yes, reviewed code and tests |
+| Ship a named built-in Provider (the product's Provider/Plan identity) to every Open Console Gateway user | Add a sealed built-in Provider | Yes, reviewed code and tests |
 
 The **Adapter Registry** stays static and sealed. User-defined Providers are typed persisted definitions; every one binds the code-owned Configurable HTTP adapter. OCG never loads user scripts, plugins, or binaries. Unknown `provider_id` values fail closed unless they match a saved definition. Custom API remains a distinct account-owned path: it keeps Endpoint, protocol, and model mappings on the account card.
 
@@ -21,11 +21,11 @@ The **Adapter Registry** stays static and sealed. User-defined Providers are typ
 5. **Test model** is optional. Confirm the warning first: a real test can consume upstream quota or incur charges.
 6. Save. The write is one atomic `POST /providers` and does not require a successful probe.
 
-Edit replaces the whole Provider configuration through `PATCH /providers/{id}`. The Provider id is immutable. Changing no-auth to keyed auth requires an explicit replacement Key. Delete is allowed only after every referencing account is removed; there is no cascade.
+Edit replaces the whole Provider configuration through `PATCH /providers/{id}`. The Provider id is immutable. Changing no-auth to keyed auth requires an explicit replacement Key, written only to that singleton account. An already-keyed Provider rejects any Key on the Provider update; rotate Keys on **Accounts**. Delete is allowed only after every referencing account is removed; there is no cascade.
 
 Provider-owned fields stay on **Providers**. Account **Key**, enablement, order, notes, cooldown, and tests stay on **Accounts**. User-defined Providers are always unpriced: no official usage, quota estimate, or pricing rows. Request logs still attribute provider, account, and model.
 
-Backups use payload V4 with `providerId` only. Schema v35 stores `dynamic_providers` and `dynamic_provider_models`.
+Backups use payload V4 with `providerId` only and include every saved user-defined Provider definition. Schema v35 stores `dynamic_providers` and `dynamic_provider_models`.
 
 ## Connect a compatible upstream now
 
@@ -33,7 +33,7 @@ Backups use payload V4 with `providerId` only. Schema v35 stores `dynamic_provid
 2. Enter a name, the upstream API Key, one API URL, and one upstream protocol: **Chat Completions**, **Responses**, or **Messages**.
 3. Add at least one mapping: a public model name clients request and the exact upstream model ID. **Fetch models** can fill the draft from upstream IDs when the upstream exposes the optional model-list interface below.
 4. Save the account. A valid new account is enabled by default; **Test connection** is an optional real, potentially billable request through that exact account.
-5. Call authenticated `GET /v1/models` on OCG Manager and confirm the routeable public name is published, then send one inference request.
+5. Call authenticated `GET /v1/models` on Open Console Gateway and confirm the routeable public name is published, then send one inference request.
 
 One Custom account uses one upstream protocol for every mapping on that card. Matching client traffic passes through; other supported client formats are converted to the selected upstream protocol. **Fetch models** returns upstream IDs only; importing one makes `public model = upstream ID` exactly, without suffix stripping or generated Aliases. You may then edit the public name while retaining the exact upstream ID.
 
@@ -78,18 +78,18 @@ Each usable row needs a non-empty string `id`. For pagination, set `has_more: tr
 
 ## Add a built-in Provider
 
-A built-in integration is appropriate only when the Provider needs product-owned identity, catalog, account lifecycle, routing, pricing/usage, or other semantics that Custom API cannot express. Start from the current code, not an older requirements document.
+A built-in integration is appropriate only when the Provider needs product-owned identity, catalog, account lifecycle, routing, pricing/usage, or other semantics that Custom API cannot express. Start from the current code.
 
-1. Define one stable `provider_id`, its Provider row, credential/quota semantics, and an exhaustive `ProviderAdapterKind` mapping in `crates/ocg-domain/src/ids.rs` and `provider.rs`. Do not add a separate Offering or Plan identity: Provider and Plan are one product concept.
-2. Add only verified protocol facts to `crates/ocg-domain/src/protocol.rs`. Request routing must never probe a billable endpoint to guess a protocol.
+1. Define one stable `provider_id`, its Provider row, credential/quota semantics, and an exhaustive `ProviderAdapterKind` mapping in `crates/ocg-domain/src/ids.rs` and `provider.rs`. Provider and Plan share `provider_id`.
+2. Add only verified protocol facts to `crates/ocg-domain/src/protocol.rs`. Request routing uses the saved contract.
 3. Add code-owned client Alias mappings in `crates/ocg-gateway/src/alias.rs`. Preserve exact upstream IDs and reject ambiguous raw IDs; a discovered row must not silently invent a public Alias.
 4. Implement the host route resolver in `ocg-core`. The adapter returns an `AttemptSpec`; database access, Key decryption, proxy selection, and outbound HTTP remain host-owned.
 5. Add the account and **Providers** control-plane/UI workflow, including catalog refresh, enablement, verification, errors, cooldown, pricing, and usage only where the Provider actually supports them. Dashboard writes use `/dashboard/api/v3` CAS.
-6. Update the paired user guides and tests. At minimum run `cargo test -p ocg-domain`, `cargo test -p ocg-gateway`, `cargo test -p ocg-core`, the relevant frontend tests, and `pnpm run build:web`. Contract changes also require `pnpm run contract:v3:check`.
+6. Update the paired user guides and tests. Run the checks in [Development](../maintainer/development.md) for the crates and UI you touched.
 
 Before opening a contribution, write down the upstream origin, auth scheme, catalog source, supported model/protocol pairs, streaming behavior, error semantics, quota/price source, and a non-billable validation plan. Keep the new family fail-closed until its complete routing and control-plane path exists.
 
-For repository architecture details, continue with [Extending OCG Manager](../maintainer/extending.md) and [Runtime invariants](../maintainer/runtime-invariants.md).
+For repository architecture details, continue with [Extending Open Console Gateway](../maintainer/extending.md) and [Runtime invariants](../maintainer/runtime-invariants.md).
 
 ---
 

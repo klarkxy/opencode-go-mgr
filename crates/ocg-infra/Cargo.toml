@@ -6,7 +6,7 @@ authors.workspace = true
 license-file.workspace = true
 repository.workspace = true
 rust-version.workspace = true
-description = "Infrastructure implementations for OCG Manager"
+description = "Infrastructure implementations for Open Console Gateway"
 
 [dependencies]
 anyhow = "1"

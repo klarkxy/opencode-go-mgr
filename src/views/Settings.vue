@@ -7,14 +7,6 @@
         </div>
       </div>
       <n-form :model="config" label-placement="top" :show-feedback="false">
-        <n-form-item :label="t('上游地址')">
-          <n-input
-            v-model:value="config.upstream_base_url"
-            :disabled="!loaded || testingProxy"
-            :input-props="{ 'aria-label': t('上游地址') }"
-            placeholder="https://opencode.ai/zen/go"
-          />
-        </n-form-item>
         <section class="settings-subsection proxy-settings" aria-labelledby="proxy-title">
           <h3 id="proxy-title">{{ t("出站代理") }}</h3>
           <p class="field-caption routing-intro">
@@ -107,22 +99,6 @@
             :title="proxyTestResult.title"
           >{{ proxyTestResult.message }}</n-alert>
         </section>
-        <n-form-item
-          :label="t('OpenCode 邀请链接（注册新账号）')"
-          :show-feedback="true"
-          :validation-status="inviteUrlPreview.status"
-          :feedback="inviteUrlPreview.feedback"
-        >
-          <n-input
-            v-model:value="config.opencode_invite_url"
-            :disabled="!loaded"
-            clearable
-            class="mono"
-            :placeholder="DEFAULT_OPENCODE_INVITE_URL"
-            :input-props="{ 'aria-label': t('OpenCode 邀请链接（注册新账号）') }"
-            @blur="normalizeInviteUrlInput"
-          />
-        </n-form-item>
         <div class="downstream-grid">
           <n-form-item :label="t('Gateway 端口')">
             <div class="gateway-port-field">
@@ -179,7 +155,7 @@
           <n-switch
             :value="config.auto_start"
             @update:value="handleAutoStartToggle"
-            :aria-label="t('随 Windows 登录自动启动 OCG Manager')"
+            :aria-label="t('随系统登录自动启动 Open Console Gateway')"
             :disabled="!loaded || saving"
             :loading="saving"
           >
@@ -196,7 +172,7 @@
           <n-switch
             :value="config.show_dock_icon"
             @update:value="handleDockVisibilityToggle"
-            :aria-label="t('在 Dock 中显示 OCG Manager')"
+            :aria-label="t('在 Dock 中显示 Open Console Gateway')"
             :disabled="!loaded || saving"
             :loading="saving"
           >
@@ -310,7 +286,7 @@
       <n-button
         type="primary"
         :loading="saving"
-        :disabled="!loaded || testingProxy || proxyUrlPreview.status === 'error' || clientRootPreview.status === 'error' || inviteUrlPreview.status === 'error'"
+        :disabled="!loaded || testingProxy || proxyUrlPreview.status === 'error' || clientRootPreview.status === 'error'"
         @click="saveSettings"
       >{{ t("保存设置") }}</n-button>
     </section>
@@ -398,7 +374,7 @@
                       :disabled="updateBusy"
                     >{{ t("下载并安装") }}</n-button>
                   </template>
-                  {{ t("将下载并安装 v{version}。安装时 OCG Manager 会短暂退出并自动重新启动，继续吗？", {
+                  {{ t("将下载并安装 v{version}。安装时 Open Console Gateway 会短暂退出并自动重新启动，继续吗？", {
                     version: updateResult.latest_version,
                   }) }}
                 </n-popconfirm>
@@ -429,7 +405,7 @@
                 :show-indicator="updateDownloadPercentage !== null"
               />
               <p v-if="activeUpdateStatus.phase === 'installing' || waitingForRestart">
-                {{ t("OCG Manager 会短暂离线并自动重新启动。") }}
+                {{ t("Open Console Gateway 会短暂离线并自动重新启动。") }}
               </p>
               <p v-if="activeUpdateStatus.phase === 'failed'">
                 {{ activeUpdateStatus.error || t("升级未完成，请重试。") }}
@@ -443,7 +419,7 @@
                 <template #trigger>
                   <n-button size="small" type="primary">{{ t("重试升级") }}</n-button>
                 </template>
-                {{ t("将下载并安装 v{version}。安装时 OCG Manager 会短暂退出并自动重新启动，继续吗？", {
+                {{ t("将下载并安装 v{version}。安装时 Open Console Gateway 会短暂退出并自动重新启动，继续吗？", {
                   version: updateResult?.latest_version || updateTargetVersion,
                 }) }}
               </n-popconfirm>
@@ -499,7 +475,7 @@ import {
   normalizeClientRootUrl,
   resolveConnectionUrls,
 } from "./dashboard-connection";
-import { DEFAULT_OPENCODE_INVITE_URL, normalizeOpenCodeInviteUrl } from "../domain/managed-account.ts";
+import { DEFAULT_OPENCODE_INVITE_URL } from "../domain/managed-account.ts";
 import { mergeUnsavedSettings } from "./settings-merge";
 import { normalizeProxyUrl, validateProxyList } from "./settings-proxy";
 import {
@@ -553,7 +529,6 @@ const config = ref<AppConfig>({
   revision: 0,
   gateway_port: 9042,
   gateway_port_from_env: false,
-  upstream_base_url: "https://opencode.ai/zen/go",
   proxy_mode: "auto",
   proxy_url: "",
   proxy_list_direction: "whitelist",
@@ -694,7 +669,6 @@ watch(
     config.value.proxy_url,
     config.value.proxy_list_direction,
     config.value.proxy_list_models,
-    config.value.upstream_base_url,
   ],
   () => { proxyTestResult.value = null; },
 );
@@ -745,25 +719,6 @@ const clientRootPreview = computed<{
     return {
       status: "error",
       feedback: error instanceof Error ? error.message : t("地址格式无效"),
-    };
-  }
-});
-
-const inviteUrlPreview = computed<{ status?: "error"; feedback: string }>(() => {
-  try {
-    const normalized = normalizeOpenCodeInviteUrl(config.value.opencode_invite_url);
-    if (!normalized) {
-      return {
-        feedback: t("留空时“注册新账号”入口不可用。仅接受 opencode.ai 官方 HTTPS 链接。"),
-      };
-    }
-    return {
-      feedback: t("仅用于注册向导打开邀请页面。注册前请改为你自己的邀请链接；默认链接仅作演示，注册收益归链接所有者。"),
-    };
-  } catch (error) {
-    return {
-      status: "error",
-      feedback: error instanceof Error ? t(error.message as MessageKey) : t("邀请链接格式无效"),
     };
   }
 });
@@ -855,7 +810,6 @@ async function saveSettings() {
   if (!loaded.value) return;
   if (!validateGatewayPort()) return;
   if (!normalizeClientRootInput()) return;
-  if (!normalizeInviteUrlInput()) return;
   if (!normalizeProxyInput()) return;
   if (!normalizeProxyListInput()) return;
   if (!validateTimeouts()) return;
@@ -922,7 +876,6 @@ async function testProxyConnection() {
     proxy_mode: config.value.proxy_mode,
     proxy_url: config.value.proxy_url,
     proxy_list_direction: config.value.proxy_list_direction,
-    upstream_base_url: config.value.upstream_base_url,
   };
   testingProxy.value = true;
   proxyTestResult.value = null;
@@ -932,7 +885,6 @@ async function testProxyConnection() {
       config.value.proxy_mode !== request.proxy_mode
       || config.value.proxy_url !== request.proxy_url
       || config.value.proxy_list_direction !== request.proxy_list_direction
-      || config.value.upstream_base_url !== request.upstream_base_url
     ) {
       return;
     }
@@ -949,7 +901,6 @@ async function testProxyConnection() {
       config.value.proxy_mode !== request.proxy_mode
       || config.value.proxy_url !== request.proxy_url
       || config.value.proxy_list_direction !== request.proxy_list_direction
-      || config.value.upstream_base_url !== request.upstream_base_url
     ) {
       return;
     }
@@ -1016,16 +967,6 @@ function normalizeClientRootInput(): boolean {
     return true;
   } catch (error) {
     message.error(error instanceof Error ? error.message : t("下游访问根地址无效"));
-    return false;
-  }
-}
-
-function normalizeInviteUrlInput(): boolean {
-  try {
-    config.value.opencode_invite_url = normalizeOpenCodeInviteUrl(config.value.opencode_invite_url);
-    return true;
-  } catch (error) {
-    message.error(error instanceof Error ? t(error.message as MessageKey) : t("邀请链接格式无效"));
     return false;
   }
 }

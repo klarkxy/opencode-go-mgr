@@ -2,7 +2,7 @@
 
 # CLI
 
-CLI 是桌面端的无头版本：同样的 Gateway，没有托盘图标。下载对应平台压缩包并解压，让 `dist/` 与可执行文件同级——否则 `serve` 无面板可发。Windows 下可执行文件是 `ocg-manager-cli.exe`；Linux 解压后可能需要 `chmod +x ocg-manager-cli`。
+CLI 是同一个 `ocg-core` 进程的无头宿主。下载对应平台压缩包并解压，让 `dist/` 与可执行文件同级——否则 `serve` 无面板可发。Windows 下可执行文件是 `ocg-manager-cli.exe`；Linux 解压后可能需要 `chmod +x ocg-manager-cli`。
 
 CLI 数据目录默认 `~/.ocg-mgr-cli`，所有平台一致，可用 `--data-dir <path>` 覆盖。混淆密钥默认放在 `<data-dir>/.encryption-key`，也可用 `--encryption-key <key>` 参数或 `OCG_MANAGER_ENCRYPTION_KEY` 环境变量覆盖。
 

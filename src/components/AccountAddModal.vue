@@ -99,8 +99,8 @@
         >
           <div class="account-add-hint__content">
             <span>{{ managedReason }}</span>
-            <n-button v-if="inviteMissing" text type="primary" @click="$emit('openSettings')">
-              {{ t("前往设置邀请链接") }}
+            <n-button v-if="inviteMissing" text type="primary" @click="$emit('openInviteUrl')">
+              {{ t("前往 OpenCode Go 填写邀请链接") }}
             </n-button>
           </div>
         </n-alert>
@@ -185,7 +185,7 @@ const emit = defineEmits<{
   (event: "update:show", value: boolean): void;
   (event: "importKey"): void;
   (event: "registerManaged"): void;
-  (event: "openSettings"): void;
+  (event: "openInviteUrl"): void;
   (event: "selectPlan", plan: PlanDefinition): void;
 }>();
 

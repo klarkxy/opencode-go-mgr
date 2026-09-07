@@ -1,13 +1,14 @@
-//! OCG-owned CPA runtime: Windows x64 install/lifecycle, bounded logs, and
-//! managed client inference keys.
+//! OCG-owned CPA runtime: desktop/CLI install/lifecycle, bounded logs,
+//! and managed client inference keys.
 //!
 //! External user-operated CPA remains a connect-only integration. This module
 //! never stops, replaces, or deletes a process OCG did not start.
 
 mod extract;
+pub mod host;
 
 use crate::cpa::{CpaClient, CpaError};
-use crate::db::{CpaCatalogRecord, CpaIntegrationRecord};
+use crate::db::{CpaCatalogModel, CpaCatalogRecord, CpaIntegrationRecord};
 use crate::http_client;
 use crate::models::{Account as ModelAccount, AccountSetupStep, AccountType, AppConfig};
 use crate::provider::{
@@ -30,8 +31,67 @@ pub const CPA_GITHUB_LATEST_API: &str =
     "https://api.github.com/repos/router-for-me/CLIProxyAPI/releases/latest";
 pub const CPA_GITHUB_RELEASES_URL: &str = "https://github.com/router-for-me/CLIProxyAPI/releases";
 pub const WINDOWS_AMD64_ASSET_MARKER: &str = "_windows_amd64.zip";
-pub const UNAVAILABLE_REASON: &str =
-    "CPA runtime management is available only in the installed Windows x64 desktop app";
+pub const DARWIN_AMD64_ASSET_MARKER: &str = "_darwin_amd64.tar.gz";
+pub const DARWIN_AARCH64_ASSET_MARKER: &str = "_darwin_aarch64.tar.gz";
+pub const LINUX_AMD64_ASSET_MARKER: &str = "_linux_amd64.tar.gz";
+pub const UNAVAILABLE_REASON: &str = "CPA runtime management needs an official CLIProxyAPI build for this OS/CPU (supported: Windows x64, macOS, Linux x64)";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CpaReleaseAsset {
+    WindowsAmd64Zip,
+    DarwinAmd64TarGz,
+    DarwinAarch64TarGz,
+    LinuxAmd64TarGz,
+}
+
+impl CpaReleaseAsset {
+    pub fn file_name(self, version: &str) -> String {
+        let marker = match self {
+            Self::WindowsAmd64Zip => WINDOWS_AMD64_ASSET_MARKER,
+            Self::DarwinAmd64TarGz => DARWIN_AMD64_ASSET_MARKER,
+            Self::DarwinAarch64TarGz => DARWIN_AARCH64_ASSET_MARKER,
+            Self::LinuxAmd64TarGz => LINUX_AMD64_ASSET_MARKER,
+        };
+        format!("CLIProxyAPI_{version}{marker}")
+    }
+
+    pub fn archive_kind(self) -> extract::CpaArchiveKind {
+        match self {
+            Self::WindowsAmd64Zip => extract::CpaArchiveKind::Zip,
+            Self::DarwinAmd64TarGz | Self::DarwinAarch64TarGz | Self::LinuxAmd64TarGz => {
+                extract::CpaArchiveKind::TarGz
+            }
+        }
+    }
+}
+
+pub fn current_cpa_release_asset() -> Option<CpaReleaseAsset> {
+    #[cfg(all(windows, target_arch = "x86_64"))]
+    {
+        Some(CpaReleaseAsset::WindowsAmd64Zip)
+    }
+    #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+    {
+        Some(CpaReleaseAsset::DarwinAmd64TarGz)
+    }
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    {
+        Some(CpaReleaseAsset::DarwinAarch64TarGz)
+    }
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    {
+        Some(CpaReleaseAsset::LinuxAmd64TarGz)
+    }
+    #[cfg(not(any(
+        all(windows, target_arch = "x86_64"),
+        all(target_os = "macos", target_arch = "x86_64"),
+        all(target_os = "macos", target_arch = "aarch64"),
+        all(target_os = "linux", target_arch = "x86_64"),
+    )))]
+    {
+        None
+    }
+}
 const CHECKSUMS_NAME: &str = "checksums.txt";
 const MANAGED_NAME: &str = "managed.json";
 const CONFIG_NAME: &str = "config.yaml";
@@ -312,7 +372,7 @@ pub fn managed_path(data_dir: &Path) -> PathBuf {
 }
 
 pub fn windows_amd64_asset_name(version: &str) -> String {
-    format!("CLIProxyAPI_{version}{WINDOWS_AMD64_ASSET_MARKER}")
+    CpaReleaseAsset::WindowsAmd64Zip.file_name(version)
 }
 
 pub fn normalize_release_version(tag: &str) -> Result<String, CpaRuntimeError> {
@@ -695,7 +755,7 @@ impl CoreStateInner {
             let expected = normalize_release_version(expected)?;
             if expected != release.version {
                 return Err(CpaRuntimeError::Invalid(
-                    "CPA expectedVersion does not match the latest Windows x64 release".into(),
+                    "CPA expectedVersion does not match the latest official release".into(),
                 ));
             }
         }
@@ -728,20 +788,20 @@ impl CoreStateInner {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => return Err(fs_error(error)),
         }
-        let staging = root.join("versions").join(format!(
-            ".staging-{}-{}",
-            release.version,
-            uuid::Uuid::new_v4().simple()
+        let token = format!("{}-{}", release.version, uuid::Uuid::new_v4().simple());
+        let staging = root.join("versions").join(format!(".staging-{token}"));
+        let archive_path = root.join("versions").join(format!(
+            ".staging-{token}.{}",
+            release.archive_kind.extension()
         ));
-        let zip_path = staging.with_extension("zip");
-        fs::write(&zip_path, &archive).map_err(fs_error)?;
+        fs::write(&archive_path, &archive).map_err(fs_error)?;
         let prepared = (|| {
-            extract::extract_zip(&zip_path, &staging)?;
-            find_windows_executable(&staging)?;
+            extract::extract_release(&archive_path, &staging, release.archive_kind)?;
+            find_managed_executable(&staging)?;
             atomic_write(&staging.join(ASSET_SHA_NAME), sha256.as_bytes())?;
             fs::rename(&staging, &candidate_dir).map_err(fs_error)
         })();
-        let _ = fs::remove_file(&zip_path);
+        let _ = fs::remove_file(&archive_path);
         if let Err(error) = prepared {
             let _ = remove_known_path(&staging);
             return Err(error);
@@ -1058,7 +1118,7 @@ impl CoreStateInner {
             .map_err(|_| CpaRuntimeError::Invalid("previous CPA config.yaml is missing".into()))?;
         let previous_dir = version_dir(&self.data_dir, &previous_version)?;
         reject_reparse_tree(&previous_dir)?;
-        find_windows_executable(&previous_dir)?;
+        find_managed_executable(&previous_dir)?;
         let previous_sha = read_asset_sha(&previous_dir)?;
         let secrets = self.load_saved_secrets()?;
         let _ = config_extras(&current_config_bytes, &secrets.inference_key)?;
@@ -1070,24 +1130,22 @@ impl CoreStateInner {
         }
         atomic_write(&config_path, &previous_config_bytes)?;
         self.cpa_runtime.set_phase(CpaRuntimePhase::Starting, None);
+        let restore = RollbackRestore {
+            host: &host,
+            managed: &managed,
+            config_path: &config_path,
+            current_config: &current_config_bytes,
+            was_running,
+            management_key: &secrets.management_key,
+            inference_key: &secrets.inference_key,
+        };
         if let Err(error) = self.start_version(
             &host,
             &previous_version,
             &config_path,
             &secrets.management_key,
         ) {
-            return self
-                .rollback_failed(
-                    error,
-                    &host,
-                    &managed,
-                    &config_path,
-                    &current_config_bytes,
-                    was_running,
-                    &secrets.management_key,
-                    &secrets.inference_key,
-                )
-                .await;
+            return self.rollback_failed(error, restore).await;
         }
         let models = match self
             .probe_candidate(
@@ -1099,63 +1157,17 @@ impl CoreStateInner {
         {
             Ok(models) => models,
             Err(error) => {
-                return self
-                    .rollback_failed(
-                        error,
-                        &host,
-                        &managed,
-                        &config_path,
-                        &current_config_bytes,
-                        was_running,
-                        &secrets.management_key,
-                        &secrets.inference_key,
-                    )
-                    .await;
+                return self.rollback_failed(error, restore).await;
             }
         };
         if let Err(error) = self.ensure_cas(expected_revision, expected_generation) {
-            return self
-                .rollback_failed(
-                    error,
-                    &host,
-                    &managed,
-                    &config_path,
-                    &current_config_bytes,
-                    was_running,
-                    &secrets.management_key,
-                    &secrets.inference_key,
-                )
-                .await;
+            return self.rollback_failed(error, restore).await;
         }
-        if !was_running {
-            if let Err(error) = host.stop_owned() {
-                return self
-                    .rollback_failed(
-                        error,
-                        &host,
-                        &managed,
-                        &config_path,
-                        &current_config_bytes,
-                        was_running,
-                        &secrets.management_key,
-                        &secrets.inference_key,
-                    )
-                    .await;
-            }
+        if !was_running && let Err(error) = host.stop_owned() {
+            return self.rollback_failed(error, restore).await;
         }
         if let Err(error) = atomic_write(&previous_config, &current_config_bytes) {
-            return self
-                .rollback_failed(
-                    error,
-                    &host,
-                    &managed,
-                    &config_path,
-                    &current_config_bytes,
-                    was_running,
-                    &secrets.management_key,
-                    &secrets.inference_key,
-                )
-                .await;
+            return self.rollback_failed(error, restore).await;
         }
         let next_managed = ManagedCpa {
             current_version: previous_version,
@@ -1188,18 +1200,7 @@ impl CoreStateInner {
         };
         if let Err(error) = committed {
             let _ = restore_optional_file(&previous_config, Some(&previous_config_bytes));
-            return self
-                .rollback_failed(
-                    error,
-                    &host,
-                    &managed,
-                    &config_path,
-                    &current_config_bytes,
-                    was_running,
-                    &secrets.management_key,
-                    &secrets.inference_key,
-                )
-                .await;
+            return self.rollback_failed(error, restore).await;
         }
         Ok(self.cpa_runtime_snapshot())
     }
@@ -1412,7 +1413,8 @@ impl CoreStateInner {
         validate_managed_secret(management_password)?;
         let working_dir = version_dir(&self.data_dir, version)?;
         reject_reparse_tree(&working_dir)?;
-        let executable = find_windows_executable(&working_dir)?;
+        let executable = find_managed_executable(&working_dir)?;
+        ensure_unix_executable(&executable)?;
         let config = fs::read_to_string(config_path).map_err(fs_error)?;
         let log_secrets = parse_api_keys_from_yaml(&config)?
             .into_iter()
@@ -1477,27 +1479,30 @@ impl CoreStateInner {
     async fn rollback_failed(
         &self,
         original: CpaRuntimeError,
-        host: &CpaRuntimeHost,
-        managed: &ManagedCpa,
-        config_path: &Path,
-        current_config: &[u8],
-        was_running: bool,
-        management_key: &str,
-        inference_key: &str,
+        restore: RollbackRestore<'_>,
     ) -> Result<CpaRuntimeSnapshot, CpaRuntimeError> {
         let compensation = (|| {
-            host.stop_owned()?;
-            self.cpa_runtime.cache_failure_logs(host.logs());
-            atomic_write(config_path, current_config)?;
-            save_managed(&self.data_dir, managed)?;
-            if was_running {
-                self.start_version(host, &managed.current_version, config_path, management_key)?;
+            restore.host.stop_owned()?;
+            self.cpa_runtime.cache_failure_logs(restore.host.logs());
+            atomic_write(restore.config_path, restore.current_config)?;
+            save_managed(&self.data_dir, restore.managed)?;
+            if restore.was_running {
+                self.start_version(
+                    restore.host,
+                    &restore.managed.current_version,
+                    restore.config_path,
+                    restore.management_key,
+                )?;
             }
             Ok::<(), CpaRuntimeError>(())
         })();
         let compensation = match compensation {
-            Ok(()) if was_running => self
-                .probe_candidate(managed.port, management_key, inference_key)
+            Ok(()) if restore.was_running => self
+                .probe_candidate(
+                    restore.managed.port,
+                    restore.management_key,
+                    restore.inference_key,
+                )
                 .await
                 .map(|_| ()),
             other => other,
@@ -1564,7 +1569,7 @@ impl CoreStateInner {
         port: u16,
         management_key: &str,
         inference_key: &str,
-    ) -> Result<Vec<String>, CpaRuntimeError> {
+    ) -> Result<Vec<CpaCatalogModel>, CpaRuntimeError> {
         // `/v1/models` is CPA's strongest non-billable Inference-Key check.
         // A real completion would prove provider usability but could consume a
         // subscription, so installation separately proves health, Management
@@ -1742,35 +1747,35 @@ impl CoreStateInner {
                         &protected,
                         &extras,
                     )?;
-                    if previous_config_path.exists() {
-                        if let Err(error) = write_config_yaml(
+                    if previous_config_path.exists()
+                        && let Err(error) = write_config_yaml(
                             &previous_config_path,
                             managed.port,
                             &runtime_dir(&self.data_dir).join("auth"),
                             &protected,
                             &extras,
-                        ) {
-                            let _ = atomic_write(&config_path, &config_before);
-                            return Err(error);
-                        }
+                        )
+                    {
+                        let _ = atomic_write(&config_path, &config_before);
+                        return Err(error);
                     }
-                    if let Some(new_protected) = new_protected.as_deref() {
-                        if let Err(error) = self.persist_inference_key(new_protected) {
-                            let restore = atomic_write(&config_path, &config_before);
-                            let previous_restore = restore_optional_file(
-                                &previous_config_path,
-                                previous_config_before.as_deref(),
-                            );
-                            return match restore {
-                                Ok(()) if previous_restore.is_ok() => Err(error),
-                                Err(restore) => Err(CpaRuntimeError::Failed(format!(
-                                    "{error}; restoring managed CPA config also failed: {restore}"
-                                ))),
-                                Ok(()) => Err(CpaRuntimeError::Failed(format!(
-                                    "{error}; restoring previous CPA config also failed"
-                                ))),
-                            };
-                        }
+                    if let Some(new_protected) = new_protected.as_deref()
+                        && let Err(error) = self.persist_inference_key(new_protected)
+                    {
+                        let restore = atomic_write(&config_path, &config_before);
+                        let previous_restore = restore_optional_file(
+                            &previous_config_path,
+                            previous_config_before.as_deref(),
+                        );
+                        return match restore {
+                            Ok(()) if previous_restore.is_ok() => Err(error),
+                            Err(restore) => Err(CpaRuntimeError::Failed(format!(
+                                "{error}; restoring managed CPA config also failed: {restore}"
+                            ))),
+                            Ok(()) => Err(CpaRuntimeError::Failed(format!(
+                                "{error}; restoring previous CPA config also failed"
+                            ))),
+                        };
                     }
                     self.bump_settings_revision();
                     Ok(())
@@ -1779,16 +1784,16 @@ impl CoreStateInner {
         if let Err(error) = local_result {
             let _ = atomic_write(&config_path, &config_before);
             let _ = restore_optional_file(&previous_config_path, previous_config_before.as_deref());
-            if let Some(upstream_before) = upstream_before {
-                if let Err(compensation) = client.replace_api_keys(&upstream_before).await {
-                    let mut secrets = next_keys.iter().map(String::as_str).collect::<Vec<_>>();
-                    secrets.extend(upstream_before.iter().map(String::as_str));
-                    secrets.push(saved.management_key.as_str());
-                    let compensation = redact_text(&compensation.to_string(), &secrets);
-                    return Err(CpaRuntimeError::Failed(format!(
-                        "{error}; restoring CPA client keys also failed: {compensation}"
-                    )));
-                }
+            if let Some(upstream_before) = upstream_before
+                && let Err(compensation) = client.replace_api_keys(&upstream_before).await
+            {
+                let mut secrets = next_keys.iter().map(String::as_str).collect::<Vec<_>>();
+                secrets.extend(upstream_before.iter().map(String::as_str));
+                secrets.push(saved.management_key.as_str());
+                let compensation = redact_text(&compensation.to_string(), &secrets);
+                return Err(CpaRuntimeError::Failed(format!(
+                    "{error}; restoring CPA client keys also failed: {compensation}"
+                )));
             }
             return Err(error);
         }
@@ -1800,7 +1805,7 @@ impl CoreStateInner {
         port: u16,
         management_key: &str,
         inference_key: &str,
-        models: Vec<String>,
+        models: Vec<CpaCatalogModel>,
     ) -> Result<(), CpaRuntimeError> {
         let base_url = format!("http://127.0.0.1:{port}");
         let management_key_cipher = self
@@ -1846,10 +1851,8 @@ impl CoreStateInner {
             .lock()
             .upsert_cpa_integration(&account, &base_url, &management_key_cipher)
             .map_err(|error| CpaRuntimeError::Failed(error.to_string()))?;
-        if !models.is_empty() {
-            self.activate_cpa_model_catalog(models, &base_url, now)
-                .map_err(|error| CpaRuntimeError::Failed(error.to_string()))?;
-        }
+        self.activate_cpa_model_catalog(models, &base_url, now)
+            .map_err(|error| CpaRuntimeError::Failed(error.to_string()))?;
         self.routing.reset();
         Ok(())
     }
@@ -1942,15 +1945,17 @@ impl CoreStateInner {
                 CpaRuntimeError::Failed(format!("CPA GitHub release JSON is invalid: {error}"))
             })?;
         let version = normalize_release_version(&release.tag_name)?;
-        let asset_name = windows_amd64_asset_name(&version);
+        let selected = current_cpa_release_asset()
+            .ok_or_else(|| CpaRuntimeError::Unavailable(UNAVAILABLE_REASON.into()))?;
+        let asset_name = selected.file_name(&version);
         let asset = release
             .assets
             .iter()
             .find(|asset| asset.name == asset_name)
             .ok_or_else(|| {
-                CpaRuntimeError::Invalid(
-                    "latest CPA release does not contain the Windows x64 zip".into(),
-                )
+                CpaRuntimeError::Invalid(format!(
+                    "latest CPA release does not contain {asset_name}"
+                ))
             })?;
         let checksums = release
             .assets
@@ -1964,6 +1969,7 @@ impl CoreStateInner {
             asset_name,
             asset_url: asset.browser_download_url.clone(),
             checksums_url: checksums.browser_download_url.clone(),
+            archive_kind: selected.archive_kind(),
         })
     }
 
@@ -1981,7 +1987,7 @@ impl CoreStateInner {
         let actual = format!("{:x}", Sha256::digest(&archive));
         if actual != expected {
             return Err(CpaRuntimeError::Invalid(
-                "CPA Windows x64 zip SHA-256 does not match checksums.txt".into(),
+                "CPA release SHA-256 does not match checksums.txt".into(),
             ));
         }
         Ok((archive, actual))
@@ -2003,6 +2009,17 @@ struct ManagedSecrets {
 enum InstallMode {
     Fresh,
     Update,
+}
+
+#[derive(Clone, Copy)]
+struct RollbackRestore<'a> {
+    host: &'a CpaRuntimeHost,
+    managed: &'a ManagedCpa,
+    config_path: &'a Path,
+    current_config: &'a [u8],
+    was_running: bool,
+    management_key: &'a str,
+    inference_key: &'a str,
 }
 
 struct CpaPersistenceBackup {
@@ -2067,6 +2084,7 @@ struct ResolvedRelease {
     asset_name: String,
     asset_url: String,
     checksums_url: String,
+    archive_kind: extract::CpaArchiveKind,
 }
 
 #[derive(Debug, Deserialize)]
@@ -2319,8 +2337,13 @@ fn read_asset_sha(version_dir: &Path) -> Result<String, CpaRuntimeError> {
     Ok(value.to_ascii_lowercase())
 }
 
-fn find_windows_executable(dir: &Path) -> Result<PathBuf, CpaRuntimeError> {
-    for name in ["cli-proxy-api.exe", "CLIProxyAPI.exe"] {
+fn find_managed_executable(dir: &Path) -> Result<PathBuf, CpaRuntimeError> {
+    for name in [
+        "cli-proxy-api.exe",
+        "CLIProxyAPI.exe",
+        "cli-proxy-api",
+        "CLIProxyAPI",
+    ] {
         let path = dir.join(name);
         if path.is_file() {
             return Ok(path);
@@ -2329,18 +2352,42 @@ fn find_windows_executable(dir: &Path) -> Result<PathBuf, CpaRuntimeError> {
     let mut found = None;
     for entry in fs::read_dir(dir).map_err(fs_error)? {
         let path = entry.map_err(fs_error)?.path();
-        if path.extension().and_then(|value| value.to_str()) == Some("exe") && path.is_file() {
-            if found.is_some() {
-                return Err(CpaRuntimeError::Invalid(
-                    "CPA release contains more than one executable".into(),
-                ));
-            }
-            found = Some(path);
+        if !path.is_file() {
+            continue;
         }
+        let name = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("");
+        if name == ASSET_SHA_NAME || name.starts_with('.') {
+            continue;
+        }
+        let is_windows_exe = path.extension().and_then(|value| value.to_str()) == Some("exe");
+        let is_unix_binary = path.extension().is_none();
+        if !is_windows_exe && !is_unix_binary {
+            continue;
+        }
+        if found.is_some() {
+            return Err(CpaRuntimeError::Invalid(
+                "CPA release contains more than one executable".into(),
+            ));
+        }
+        found = Some(path);
     }
     found.ok_or_else(|| {
-        CpaRuntimeError::Invalid("CPA Windows x64 zip does not contain an executable".into())
+        CpaRuntimeError::Invalid("CPA release archive does not contain an executable".into())
     })
+}
+
+fn ensure_unix_executable(path: &Path) -> Result<(), CpaRuntimeError> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = fs::metadata(path).map_err(fs_error)?.permissions().mode();
+        fs::set_permissions(path, fs::Permissions::from_mode(mode | 0o111)).map_err(fs_error)?;
+    }
+    let _ = path;
+    Ok(())
 }
 
 fn select_port(preferred: Option<u16>) -> Result<u16, CpaRuntimeError> {

@@ -376,7 +376,7 @@ jobs:
           tags: |
             type=semver,pattern={{version}},value=${{ needs.resolve.outputs.tag }}
           labels: |
-            org.opencontainers.image.title=OCG Manager
+            org.opencontainers.image.title=Open Console Gateway
             org.opencontainers.image.description=OpenCode-Go multi-account local manager and gateway
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ needs.resolve.outputs.full_sha }}
@@ -390,8 +390,8 @@ jobs:
           tags: |
             type=semver,pattern={{version}},value=${{ needs.resolve.outputs.tag }}
           labels: |
-            org.opencontainers.image.title=OCG Manager Browser Worker
-            org.opencontainers.image.description=Isolated Chromium and noVNC sidecar for OCG Manager
+            org.opencontainers.image.title=Open Console Gateway Browser Worker
+            org.opencontainers.image.description=Isolated Chromium and noVNC sidecar for Open Console Gateway
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ needs.resolve.outputs.full_sha }}
 

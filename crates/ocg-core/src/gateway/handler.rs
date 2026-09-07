@@ -227,7 +227,7 @@ pub async fn gemini_model_action(
     }
 }
 
-/// GET /v1/models — authenticated local Alias registry list.
+/// GET /v1/models —authenticated local Alias registry list.
 ///
 /// Returns OpenAI list JSON for routeable code-owned aliases, then eligible
 /// Custom capability IDs, de-duplicated and in deterministic order. Refreshed
@@ -257,7 +257,19 @@ fn published_alias_models_response(state: &CoreState) -> axum::response::Respons
     let minimax_ids = provider_catalog_model_ids(&contracts, crate::provider::MINIMAX_PROVIDER_ID);
     let kimi_ids = provider_catalog_model_ids(&contracts, crate::provider::KIMI_PROVIDER_ID);
     let cpa_ids = active_cpa_model_ids(state);
-    let custom_ids = eligible_custom_public_models(state, &contracts);
+    let ollama_ids = provider_catalog_model_ids(&contracts, crate::provider::OLLAMA_PROVIDER_ID);
+    let ollama_pinned_ids = crate::provider_contracts::ollama_cloud_pinned_model_ids(&contracts);
+    let custom_ids = match eligible_custom_public_models(state, &contracts) {
+        Ok(ids) => ids,
+        Err(error) => {
+            return protocol_error_response(
+                ApiFormat::ChatCompletions,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                &format!("failed to load Custom accounts: {error}"),
+                None,
+            );
+        }
+    };
     let dynamics = state.dynamic_providers();
     let extra: Vec<_> = dynamics
         .iter()
@@ -271,6 +283,8 @@ fn published_alias_models_response(state: &CoreState) -> axum::response::Respons
         minimax: &minimax_ids,
         kimi: &kimi_ids,
         cpa: &cpa_ids,
+        ollama: &ollama_ids,
+        ollama_pinned: &ollama_pinned_ids,
         extra: &extra,
     };
     let published = crate::alias::published_routeable_aliases_with_runtime_catalogs(catalogs);
@@ -328,11 +342,35 @@ fn published_alias_models_response(state: &CoreState) -> axum::response::Respons
             }));
         }
     }
+    for catalog in &extra {
+        for (public_model, _upstream_model) in &catalog.mappings {
+            if published_model_ids_contain(&data, public_model) {
+                continue;
+            }
+            if !model_has_enabled_protocol(public_model, catalogs, &contracts, &dynamics) {
+                continue;
+            }
+            data.push(serde_json::json!({
+                "id": public_model,
+                "object": "model",
+                "created": 0,
+                "owned_by": catalog.provider_id
+            }));
+        }
+    }
     axum::Json(serde_json::json!({
         "object": "list",
         "data": data
     }))
     .into_response()
+}
+
+fn published_model_ids_contain(data: &[serde_json::Value], id: &str) -> bool {
+    data.iter().any(|item| {
+        item.get("id")
+            .and_then(|value| value.as_str())
+            .is_some_and(|existing| crate::custom::custom_model_id_matches(existing, id))
+    })
 }
 
 fn published_alias_has_enabled_protocol(
@@ -392,11 +430,9 @@ fn provider_catalog_model_ids(
 fn eligible_custom_public_models(
     state: &CoreState,
     contracts: &crate::provider_contracts::EffectiveContractSet,
-) -> Vec<String> {
-    let Ok(runtimes) = state.db.lock().list_custom_account_runtimes() else {
-        return Vec::new();
-    };
-    crate::custom::eligible_custom_public_models(&runtimes)
+) -> anyhow::Result<Vec<String>> {
+    let runtimes = state.db.lock().list_custom_account_runtimes()?;
+    Ok(crate::custom::eligible_custom_public_models(&runtimes)
         .into_iter()
         .filter(|id| {
             runtimes.iter().any(|runtime| {
@@ -409,7 +445,7 @@ fn eligible_custom_public_models(
                         .is_some_and(|contract| contract.model_has_enabled_protocol(id))
             })
         })
-        .collect()
+        .collect())
 }
 
 /// A disabled, cooling, auth-failed, or disconnected CPA must not inject raw
@@ -508,13 +544,26 @@ async fn proxy_handler_inner(
     let contracts = state.provider_contracts();
     let go_model_ids =
         provider_catalog_model_ids(&contracts, crate::provider::OPENCODE_PROVIDER_ID);
-    let custom_model_ids = eligible_custom_public_models(&state, &contracts);
+    let custom_model_ids = match eligible_custom_public_models(&state, &contracts) {
+        Ok(ids) => ids,
+        Err(error) => {
+            return protocol_error_response(
+                client_format,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                &format!("failed to load Custom accounts: {error}"),
+                None,
+            );
+        }
+    };
     let goat_model_ids =
         provider_catalog_model_ids(&contracts, crate::provider::COMMAND_CODE_PROVIDER_ID);
     let minimax_model_ids =
         provider_catalog_model_ids(&contracts, crate::provider::MINIMAX_PROVIDER_ID);
     let kimi_model_ids = provider_catalog_model_ids(&contracts, crate::provider::KIMI_PROVIDER_ID);
     let cpa_model_ids = active_cpa_model_ids(&state);
+    let ollama_model_ids =
+        provider_catalog_model_ids(&contracts, crate::provider::OLLAMA_PROVIDER_ID);
+    let ollama_pinned_ids = crate::provider_contracts::ollama_cloud_pinned_model_ids(&contracts);
     let zen_catalog = state.zen_free_model_catalog();
     let dynamics = state.dynamic_providers();
     let extra: Vec<_> = dynamics
@@ -529,6 +578,8 @@ async fn proxy_handler_inner(
         minimax: &minimax_model_ids,
         kimi: &kimi_model_ids,
         cpa: &cpa_model_ids,
+        ollama: &ollama_model_ids,
+        ollama_pinned: &ollama_pinned_ids,
         extra: &extra,
     };
     let resolved = match crate::alias::resolve_with_runtime_catalogs(&routing_model, catalogs) {
@@ -626,13 +677,26 @@ async fn gemini_proxy_handler(
     let contracts = state.provider_contracts();
     let go_model_ids =
         provider_catalog_model_ids(&contracts, crate::provider::OPENCODE_PROVIDER_ID);
-    let custom_model_ids = eligible_custom_public_models(&state, &contracts);
+    let custom_model_ids = match eligible_custom_public_models(&state, &contracts) {
+        Ok(ids) => ids,
+        Err(error) => {
+            return protocol_error_response(
+                ApiFormat::Gemini,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                &format!("failed to load Custom accounts: {error}"),
+                None,
+            );
+        }
+    };
     let goat_model_ids =
         provider_catalog_model_ids(&contracts, crate::provider::COMMAND_CODE_PROVIDER_ID);
     let minimax_model_ids =
         provider_catalog_model_ids(&contracts, crate::provider::MINIMAX_PROVIDER_ID);
     let kimi_model_ids = provider_catalog_model_ids(&contracts, crate::provider::KIMI_PROVIDER_ID);
     let cpa_model_ids = active_cpa_model_ids(&state);
+    let ollama_model_ids =
+        provider_catalog_model_ids(&contracts, crate::provider::OLLAMA_PROVIDER_ID);
+    let ollama_pinned_ids = crate::provider_contracts::ollama_cloud_pinned_model_ids(&contracts);
     let zen_catalog = state.zen_free_model_catalog();
     let dynamics = state.dynamic_providers();
     let extra: Vec<_> = dynamics
@@ -647,6 +711,8 @@ async fn gemini_proxy_handler(
         minimax: &minimax_model_ids,
         kimi: &kimi_model_ids,
         cpa: &cpa_model_ids,
+        ollama: &ollama_model_ids,
+        ollama_pinned: &ollama_pinned_ids,
         extra: &extra,
     };
     let resolved = match crate::alias::resolve_with_runtime_catalogs(&routing_model, catalogs) {

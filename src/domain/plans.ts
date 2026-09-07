@@ -24,6 +24,7 @@ export type PlanId =
   | "command-code-goat"
   | "minimax-cn"
   | "kimi-cn"
+  | "ollama-cloud"
   | "custom-endpoint"
   | "dynamic-http";
 
@@ -94,6 +95,17 @@ export const PLAN_DEFINITIONS: readonly PlanDefinition[] = [
     id: "kimi-cn",
     provider_id: "kimi",
     label: "Kimi Code CN",
+    kind: "api-key",
+    credential_kind: "api_key",
+    quota_scope: "key",
+    singleton: false,
+    managed_registration: false,
+    legacy: false,
+  },
+  {
+    id: "ollama-cloud",
+    provider_id: "ollama",
+    label: "Ollama Cloud",
     kind: "api-key",
     credential_kind: "api_key",
     quota_scope: "key",
@@ -186,23 +198,6 @@ export function planFamilyLabel(
   return plan.label;
 }
 
-/**
- * A family may be chosen in Add Account when the catalog says creation is
- * available and the family is not a backend-owned singleton.
- *
- * Legacy families keep their pre-catalog behavior: OpenCode Go stays creatable
- * even when the catalog is unreachable; non-legacy families fail closed.
- */
-export function planCanCreateAccount(
-  plan: PlanDefinition,
-  catalog: readonly ProviderCatalogEntry[] | null | undefined,
-): boolean {
-  if (plan.singleton) return false;
-  if (!catalog?.length) return plan.legacy;
-  const entry = findCatalogEntry(catalog, plan.provider_id);
-  return entry?.creation_availability === "available";
-}
-
 /** Reason the family cannot be created, or null when it is creatable. */
 export function planCreateDisabledReason(
   plan: PlanDefinition,
@@ -216,13 +211,4 @@ export function planCreateDisabledReason(
     return "该方案暂不可用";
   }
   return null;
-}
-
-/** True when the provider is routable according to the catalog. */
-export function planRoutable(
-  providerId: string,
-  catalog?: readonly ProviderCatalogEntry[] | null,
-): boolean {
-  const entry = findCatalogEntry(catalog, providerId);
-  return entry?.routable ?? false;
 }

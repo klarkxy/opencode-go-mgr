@@ -154,7 +154,7 @@
                 size="small"
                 :aria-label="t('刷新额度')"
                 :loading="usageRefreshLoading"
-                :disabled="isUsageRefreshBlocked(account, now) || usageLoading || !!usageLoadError"
+                :disabled="(!isOfficialCn && isUsageRefreshBlocked(account, now)) || usageLoading || !!usageLoadError"
                 @click="emit('refresh-usage')"
               >
                 <template #icon><n-icon :component="ReloadOutlined" /></template>
@@ -263,6 +263,9 @@
     <div v-else-if="isDraft" class="provider-unconfigured" role="status">
       <p>{{ draftDescription }}</p>
     </div>
+    <div v-else-if="isOllamaCloud && ollamaNeedsBilling" class="provider-unconfigured" role="status">
+      <p>{{ t("请配置 Ollama 计费档位以显示本月额度") }}</p>
+    </div>
     <div v-else-if="manualUsageCalibration" class="manual-usage-block">
       <div v-if="usageLoadError" class="usage-load-error" role="alert">
         <span>{{ t("用量加载失败") }}</span>
@@ -331,6 +334,7 @@
       <ProviderQuotaSummary v-else :usage="providerUsage" :now="now" />
     </div>
 
+
   </n-card>
 </template>
 
@@ -355,7 +359,10 @@ import {
   ReloadOutlined,
 } from "@vicons/antd";
 import type { Account, UsageWindow } from "../api/dashboard";
-import type { ProviderCatalogEntry, ProviderUsageResponse } from "../api/providers.ts";
+import type {
+  ProviderCatalogEntry,
+  ProviderUsageResponse,
+} from "../api/providers.ts";
 import { isCooling, isUsageLimitReached } from "../domain/accounts-usage.ts";
 import type { UsageKey } from "../domain/accounts-usage.ts";
 import {
@@ -374,6 +381,7 @@ import {
 import type { AccountMenuOption } from "../domain/account-display.ts";
 import {
   isCpaIntegrationAccount,
+  isOllamaCloudAccount,
   isOfficialCnPlanAccount,
   isZenFreeAccount,
 } from "../domain/account-providers.ts";
@@ -426,6 +434,8 @@ const isCpa = computed(() => isCpaIntegrationAccount(props.account));
 const isGo = computed(() => props.account.provider_id === "opencode");
 const isCustom = computed(() => isCustomApiAccount(props.account));
 const isOfficialCn = computed(() => isOfficialCnPlanAccount(props.account));
+const isOllamaCloud = computed(() => isOllamaCloudAccount(props.account));
+const ollamaNeedsBilling = computed(() => !props.account.ollama_billing_tier);
 const hasValidityPeriod = computed(() => (
   accountIsReady(props.account)
   && !isCustom.value

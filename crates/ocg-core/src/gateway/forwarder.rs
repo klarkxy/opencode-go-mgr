@@ -22,6 +22,7 @@ use crate::gateway::protocol::{
 };
 use crate::gateway::protocol_stream::StreamConverter;
 use crate::gateway::provider_adapter;
+use crate::gateway::routing::resolve_conversation_key;
 use crate::http_client::RouteLabel;
 use crate::kernel::pricing::PricingSnapshot;
 use crate::kernel::protocol::ApiFormat;
@@ -271,7 +272,9 @@ impl RequestPricingSnapshot {
         if account.provider_id == crate::provider::OPENCODE_PROVIDER_ID {
             return Self::OpenCode(go);
         }
-        if !crate::provider::is_command_code_goat(&account.provider_id) {
+        if !crate::provider::is_command_code_goat(&account.provider_id)
+            && account.provider_id != crate::provider::OLLAMA_PROVIDER_ID
+        {
             return Self::Unpriced;
         }
         let loaded = latest_provider_pricing_snapshot(&state.db.lock(), &account.provider_id);
@@ -605,6 +608,15 @@ async fn forward_request_impl(
             }
         };
     attempt_context.set_provider_route(account, &attempt_spec);
+    // Attempt-level wire normalization: request-plan bytes are shared by every
+    // candidate of a mixed chain, so the rewrite happens here after the
+    // attempt is chosen and before the single send, and only for the family
+    // whose adapter declared a marker. `upstream_body_bytes` records the
+    // bytes actually sent.
+    let attempt_body = attempt_spec
+        .wire_normalization
+        .normalize_request_body(plan.body.clone());
+    attempt_context.upstream_body_bytes = attempt_body.len();
     if attempt_spec.is_local_external_integration() {
         crate::cpa::normalize_base_url(&attempt_spec.base_url, true)
             .map_err(|error| anyhow::anyhow!(error.to_string()))?;
@@ -672,10 +684,30 @@ async fn forward_request_impl(
                 | "accept-encoding"
                 | "x-ocg-conversation-id"
                 | "x-cmdc-zdr"
+                | "x-opencode-session"
+                | "x-opencode-client"
+                | "x-opencode-request"
+                | "x-opencode-project"
+                | "x-session-id"
+                | "x-session-affinity"
         ) || (plan.upstream != ApiFormat::Messages
             && matches!(header.as_str(), "anthropic-version" | "anthropic-beta")))
         {
             upstream_headers.insert(name.clone(), value.clone());
+        }
+    }
+    if carries_opencode_session_header(&account.provider_id) {
+        let session = resolve_opencode_session_header(
+            &headers,
+            plan.client,
+            plan.log_requested_model(),
+            client_body,
+            &trace.request_id,
+        );
+        upstream_headers.insert("x-opencode-session", session.clone());
+        copy_explicit_opencode_identity_headers(&mut upstream_headers, &headers);
+        if account.provider_id == crate::provider::OPENCODE_ZEN_FREE_PROVIDER_ID {
+            apply_zen_free_identity_headers(&mut upstream_headers, &session, &trace.request_id);
         }
     }
     // Match the attempt's authentication contract. The client wire protocol
@@ -757,21 +789,25 @@ async fn forward_request_impl(
 
     let model = plan.model.clone();
     let send_headers = if attempt_spec.isolates_client_headers() {
-        let api_key = key
-            .as_deref()
-            .ok_or_else(|| anyhow::anyhow!("isolated route requires a decrypted key"))?;
-        let scheme = match attempt_spec.auth {
-            UpstreamAuth::XApiKey => crate::provider::UpstreamAuthScheme::XApiKey,
-            _ => crate::provider::UpstreamAuthScheme::Bearer,
-        };
-        let mut headers = crate::custom_http::isolated_custom_headers(scheme, api_key)
-            .map_err(|error| anyhow::anyhow!(error))?;
         let extra = json_content_headers(plan.upstream == ApiFormat::Messages)
             .map_err(|error| anyhow::anyhow!(error))?;
-        for (name, value) in &extra {
-            headers.insert(name.clone(), value.clone());
+        if matches!(attempt_spec.wire_auth(), UpstreamAuth::None) {
+            extra
+        } else {
+            let api_key = key
+                .as_deref()
+                .ok_or_else(|| anyhow::anyhow!("isolated route requires a decrypted key"))?;
+            let scheme = match attempt_spec.auth {
+                UpstreamAuth::XApiKey => crate::provider::UpstreamAuthScheme::XApiKey,
+                _ => crate::provider::UpstreamAuthScheme::Bearer,
+            };
+            let mut headers = crate::custom_http::isolated_custom_headers(scheme, api_key)
+                .map_err(|error| anyhow::anyhow!(error))?;
+            for (name, value) in &extra {
+                headers.insert(name.clone(), value.clone());
+            }
+            headers
         }
-        headers
     } else {
         upstream_headers
     };
@@ -787,7 +823,7 @@ async fn forward_request_impl(
         ),
         &url,
         send_headers,
-        plan.body.clone(),
+        attempt_body,
         plan.stream,
     )
     .await?;
@@ -1337,10 +1373,13 @@ async fn forward_request_impl(
         let stream_idle_timeout = StdDuration::from_secs(config.stream_idle_timeout_secs);
         let mut upstream_stream = Box::pin(upstream_resp.bytes_stream());
         let st = Arc::new(Mutex::new(StreamState::default()));
-        let converter = Arc::new(Mutex::new(StreamConverter::new_with_known_secret(
-            plan,
-            attempt_context.known_secret.as_deref(),
-        )));
+        let converter = Arc::new(Mutex::new(
+            StreamConverter::new_with_known_secret_and_normalization(
+                plan,
+                attempt_context.known_secret.as_deref(),
+                attempt_spec.wire_normalization,
+            ),
+        ));
         let upstream_format = plan.upstream;
         let stream_idle_timeout_secs = config.stream_idle_timeout_secs;
 
@@ -1978,6 +2017,12 @@ async fn forward_request_impl(
                 "usage_missing",
             )
         };
+        // Normalize the upstream response before protocol conversion so the
+        // marker family's reasoning backfill is visible to every client
+        // format, not only Chat-to-Chat passthrough.
+        attempt_spec
+            .wire_normalization
+            .normalize_response_value(&mut upstream_json);
         // Redact before protocol conversion as well as after it. Some response
         // adapters serialize source values into opaque replay fields (for
         // example, Anthropic thinking blocks in Responses encrypted_content),
@@ -3562,6 +3607,83 @@ mod host_credential_resolver_tests {
     }
 }
 
+const OPENCODE_ZEN_FREE_CLIENT: &str = "cli";
+const OPENCODE_ZEN_FREE_USER_AGENT: &str = "opencode";
+
+fn carries_opencode_session_header(provider_id: &str) -> bool {
+    provider_id == crate::provider::OPENCODE_PROVIDER_ID
+        || provider_id == crate::provider::OPENCODE_ZEN_FREE_PROVIDER_ID
+}
+
+fn resolve_opencode_session_header(
+    headers: &HeaderMap,
+    client: ApiFormat,
+    model: &str,
+    client_body: &[u8],
+    request_id: &str,
+) -> reqwest::header::HeaderValue {
+    headers
+        .get("x-opencode-session")
+        .or_else(|| headers.get("x-session-id"))
+        .or_else(|| headers.get("x-session-affinity"))
+        .cloned()
+        .or_else(|| {
+            resolve_conversation_key(client, model, headers, client_body)
+                .and_then(|key| format!("ocg-{key}").parse().ok())
+        })
+        .unwrap_or_else(|| {
+            request_id
+                .parse()
+                .expect("generated request id must be a valid header value")
+        })
+}
+
+fn copy_explicit_opencode_identity_headers(
+    upstream: &mut reqwest::header::HeaderMap,
+    client: &HeaderMap,
+) {
+    for name in [
+        "x-opencode-client",
+        "x-opencode-request",
+        "x-opencode-project",
+    ] {
+        if let Some(value) = client.get(name) {
+            upstream.insert(name, value.clone());
+        }
+    }
+}
+
+fn apply_zen_free_identity_headers(
+    headers: &mut reqwest::header::HeaderMap,
+    session: &reqwest::header::HeaderValue,
+    request_id: &str,
+) {
+    if headers.get("x-opencode-client").is_none() {
+        headers.insert(
+            "x-opencode-client",
+            reqwest::header::HeaderValue::from_static(OPENCODE_ZEN_FREE_CLIENT),
+        );
+    }
+    if headers.get("x-opencode-request").is_none()
+        && let Ok(value) = request_id.parse()
+    {
+        headers.insert("x-opencode-request", value);
+    }
+    if headers.get("x-opencode-project").is_none() {
+        headers.insert("x-opencode-project", session.clone());
+    }
+    let ua_is_opencode = headers
+        .get(reqwest::header::USER_AGENT)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.to_ascii_lowercase().contains("opencode"));
+    if !ua_is_opencode {
+        headers.insert(
+            reqwest::header::USER_AGENT,
+            reqwest::header::HeaderValue::from_static(OPENCODE_ZEN_FREE_USER_AGENT),
+        );
+    }
+}
+
 #[cfg(test)]
 mod forward_once_tests {
     use super::*;
@@ -3614,4 +3736,56 @@ mod forward_once_tests {
             connect_timeout.message
         );
     }
+
+    #[test]
+    fn zen_free_identity_fills_missing_headers_and_keeps_official_user_agent() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            reqwest::header::USER_AGENT,
+            "opencode/1.17.7".parse().unwrap(),
+        );
+        let session = reqwest::header::HeaderValue::from_static("ses_1");
+        apply_zen_free_identity_headers(&mut headers, &session, "req_1");
+        assert_eq!(headers.get("x-opencode-client").unwrap(), "cli");
+        assert_eq!(headers.get("x-opencode-request").unwrap(), "req_1");
+        assert_eq!(headers.get("x-opencode-project").unwrap(), "ses_1");
+        assert_eq!(
+            headers.get(reqwest::header::USER_AGENT).unwrap(),
+            "opencode/1.17.7"
+        );
+    }
+
+    #[test]
+    fn zen_free_identity_replaces_foreign_user_agent_and_preserves_client_fields() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(reqwest::header::USER_AGENT, "reqwest/0.12".parse().unwrap());
+        headers.insert("x-opencode-client", "cli".parse().unwrap());
+        headers.insert("x-opencode-request", "keep-me".parse().unwrap());
+        headers.insert("x-opencode-project", "proj_keep".parse().unwrap());
+        let session = reqwest::header::HeaderValue::from_static("ses_1");
+        apply_zen_free_identity_headers(&mut headers, &session, "req_1");
+        assert_eq!(
+            headers.get(reqwest::header::USER_AGENT).unwrap(),
+            "opencode"
+        );
+        assert_eq!(headers.get("x-opencode-client").unwrap(), "cli");
+        assert_eq!(headers.get("x-opencode-request").unwrap(), "keep-me");
+        assert_eq!(headers.get("x-opencode-project").unwrap(), "proj_keep");
+    }
+
+    #[test]
+    fn opencode_session_header_is_go_and_zen_free_only() {
+        assert!(carries_opencode_session_header(
+            crate::provider::OPENCODE_PROVIDER_ID
+        ));
+        assert!(carries_opencode_session_header(
+            crate::provider::OPENCODE_ZEN_FREE_PROVIDER_ID
+        ));
+        assert!(!carries_opencode_session_header(
+            crate::provider::COMMAND_CODE_PROVIDER_ID
+        ));
+    }
 }
+
+#[cfg(test)]
+mod tests;

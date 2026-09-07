@@ -1,6 +1,6 @@
-# OCG Manager for DSH
+# Open Console Gateway for DSH
 
-This is the embedded source template for OCG Manager's `ocg-manager-dsh` bundle.
+This is the embedded source template for Open Console Gateway's `ocg-manager-dsh` bundle.
 It is installed only into DSH's `web` profile and adds an OCG-owned
 companion plugin with the `ocg-manager` provider. The companion reuses the
 public `PiAiAdapter` transport and registers only its fixed provider route, so
@@ -13,12 +13,12 @@ to `OCG_MANAGER_API_KEY`; the Key remains outside this package.
 
 ## Lifecycle boundary
 
-- OCG Manager installs or removes this bundle from the fixed `web` profile.
+- Open Console Gateway installs or removes this bundle from the fixed `web` profile.
 - The DSH process resolves `OCG_MANAGER_API_KEY` at request time. The Desktop
   connector field-manages only that one assignment in DSH's `.env`; the bundle
   has no login screen and does not persist a credential.
 - Removing the bundle removes only the OCG-owned companion row on the next DSH
   start. Base-profile rows, other bundles, and other profiles stay untouched.
 
-This template is not a standalone public package. OCG Manager owns generation,
+This template is not a standalone public package. Open Console Gateway owns generation,
 installation status, and updates.

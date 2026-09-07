@@ -9,7 +9,10 @@
 use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
 
-use super::ids::{COMMAND_CODE_PROVIDER_ID, OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID};
+use super::ids::{
+    COMMAND_CODE_PROVIDER_ID, OLLAMA_CLOUD_PRICING_URL, OLLAMA_PROVIDER_ID, OPENCODE_PROVIDER_ID,
+    OPENCODE_ZEN_FREE_PROVIDER_ID,
+};
 
 pub const SOURCE_URL: &str = "https://opencode.ai/docs/go/";
 
@@ -49,6 +52,13 @@ pub fn provider_pricing_capability(provider_id: &str) -> Option<ProviderPricingC
             evidence: ProviderPricingEvidence::Verified,
             experimental: false,
             source_url: Some("https://commandcode.ai/docs/plans/goat"),
+            manual_refresh_available: true,
+        }),
+        OLLAMA_PROVIDER_ID => Some(ProviderPricingCapability {
+            provider_id: OLLAMA_PROVIDER_ID,
+            evidence: ProviderPricingEvidence::Verified,
+            experimental: false,
+            source_url: Some(OLLAMA_CLOUD_PRICING_URL),
             manual_refresh_available: true,
         }),
         OPENCODE_ZEN_FREE_PROVIDER_ID => Some(ProviderPricingCapability {
@@ -242,6 +252,12 @@ impl ProviderPricingValue {
             value.quota_multiplier = Some(multiplier);
         }
         Ok(value)
+    }
+
+    pub fn with_quota_multiplier(mut self, multiplier: f64) -> Result<Self> {
+        ensure_positive_finite("quota multiplier", multiplier)?;
+        self.quota_multiplier = Some(multiplier);
+        Ok(self)
     }
 }
 

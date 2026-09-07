@@ -33,7 +33,7 @@
 
     <template v-else>
       <n-alert type="info" :show-icon="false" class="transfer-note">
-        {{ t('选择由 OCG Manager 导出的加密 .ocgbackup 文件。文件和密码仅在此窗口内存中使用。') }}
+        {{ t('选择由 Open Console Gateway 导出的加密 .ocgbackup 文件。文件和密码仅在此窗口内存中使用。') }}
       </n-alert>
       <input
         ref="fileInput"

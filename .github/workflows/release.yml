@@ -173,6 +173,10 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      - name: Test Unix CPA process ownership
+        if: runner.os != 'Windows'
+        run: cargo test -p ocg-core --lib cpa_runtime::host --locked
+
       # The signing pair and public-key continuity were already proven by
       # preflight; release.mjs re-validates the plan inside the build itself.
       - name: Build platform artifacts
@@ -464,7 +468,7 @@ jobs:
             exit 1
           else
             gh release create "$GITHUB_REF_NAME" release/* --draft --verify-tag \
-              --title "OCG Manager $GITHUB_REF_NAME" --notes-file "$notes_file" "${release_type_flags[@]}"
+              --title "Open Console Gateway $GITHUB_REF_NAME" --notes-file "$notes_file" "${release_type_flags[@]}"
           fi
           release_metadata=$(gh release view "$GITHUB_REF_NAME" --json databaseId,isDraft,isPrerelease,tagName)
           if ! jq -e --arg tag "$GITHUB_REF_NAME" --argjson prerelease "$prerelease" \

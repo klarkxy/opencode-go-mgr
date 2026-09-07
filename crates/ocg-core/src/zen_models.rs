@@ -103,6 +103,6 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(catalog.models, ["new-coder-free"]);
-        assert_eq!(model_views(&catalog)[0].alias, "");
+        assert_eq!(model_views(&catalog)[0].alias, "new-coder");
     }
 }

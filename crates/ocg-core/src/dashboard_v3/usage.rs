@@ -19,7 +19,7 @@ use crate::models::{
 };
 use crate::provider::{
     COMMAND_CODE_GOAT_QUOTA_5H, COMMAND_CODE_GOAT_QUOTA_MONTH, COMMAND_CODE_GOAT_QUOTA_WEEK,
-    ProviderAdapterKind, ProviderRegistry, QUOTA_WINDOW_FREE,
+    OllamaBillingTier, ProviderAdapterKind, ProviderRegistry, QUOTA_WINDOW_FREE,
 };
 use crate::state::CoreState;
 
@@ -118,7 +118,6 @@ pub(super) async fn refresh_provider_usage(
         if current.updated_at != account_snapshot.updated_at
             || current.key_cipher != account_snapshot.key_cipher
             || current.provider_id != account_snapshot.provider_id
-            || current.provider_id != account_snapshot.provider_id
         {
             return Err(V3ApiError::conflict_at(
                 &state,
@@ -149,7 +148,36 @@ fn account_usage_locked(state: &CoreState, id: &str) -> Result<UsageWindow, V3Ap
     let pricing = captured_pricing(state);
     let db = state.db.lock();
     let account = load_account(&db, state, id)?;
-    let (limits, pricing_revision) = account_usage_limits(state, &account, &pricing)?;
+    if matches!(
+        ProviderAdapterKind::from_provider_id(&account.provider_id),
+        Some(ProviderAdapterKind::OllamaCloud)
+    ) {
+        let _limit = db
+            .ollama_cloud_billing_tier(&account.id)
+            .map_err(V3ApiError::internal)?
+            .map(OllamaBillingTier::monthly_credit_limit)
+            .ok_or_else(|| {
+                V3ApiError::invalid_request_at(
+                    state,
+                    "manual usage calibration is unavailable for this account",
+                )
+            })?;
+        let (used, reset) = db.ollama_month_usage(id).map_err(V3ApiError::internal)?;
+        return Ok(usage_window_from_model(
+            state,
+            ModelUsageWindow {
+                account_id: id.to_string(),
+                window_5h: 0.0,
+                window_week: 0.0,
+                window_month: used,
+                resets_in_5h: None,
+                resets_in_week: None,
+                resets_in_month: reset,
+            },
+            None,
+        ));
+    }
+    let (limits, pricing_revision) = account_usage_limits(state, &db, &account, &pricing)?;
     let usage = db
         .account_usage_with_limits(id, &limits)
         .map_err(V3ApiError::internal)?;
@@ -166,8 +194,18 @@ fn patch_account_usage_locked(
     let pricing = captured_pricing(state);
     let db = state.db.lock();
     let account = load_account(&db, state, id)?;
-    let (limits, pricing_revision) = account_usage_limits(state, &account, &pricing)?;
+    let (limits, pricing_revision) = account_usage_limits(state, &db, &account, &pricing)?;
     let window = parse_usage_window(state, &input.window)?;
+    if matches!(
+        ProviderAdapterKind::from_provider_id(&account.provider_id),
+        Some(ProviderAdapterKind::OllamaCloud)
+    ) && window != UsageWindowKind::Month
+    {
+        return Err(V3ApiError::invalid_request_at(
+            state,
+            "Ollama Cloud publishes only a monthly credit window",
+        ));
+    }
     if !input.percent.is_finite() || !(0.0..=100.0).contains(&input.percent) {
         return Err(V3ApiError::invalid_request_at(
             state,
@@ -202,11 +240,39 @@ fn patch_account_usage_locked(
             ));
         }
     };
-    if !db
-        .calibrate_account_usage(id, window, percent, input.resets_in_minutes, limit)
-        .map_err(V3ApiError::internal)?
-    {
+    let ollama = matches!(
+        ProviderAdapterKind::from_provider_id(&account.provider_id),
+        Some(ProviderAdapterKind::OllamaCloud)
+    );
+    let calibrated = if ollama {
+        db.calibrate_ollama_month_usage(id, percent, limit, Utc::now())
+            .map_err(V3ApiError::internal)?
+    } else {
+        db.calibrate_account_usage(id, window, percent, input.resets_in_minutes, limit)
+            .map_err(V3ApiError::internal)?
+    };
+    if !calibrated {
         return Err(V3ApiError::not_found(state));
+    }
+    if ollama {
+        let (used, reset) = db.ollama_month_usage(id).map_err(V3ApiError::internal)?;
+        return Ok(UsageMutation {
+            usage: usage_window_from_model(
+                state,
+                ModelUsageWindow {
+                    account_id: id.to_string(),
+                    window_5h: 0.0,
+                    window_week: 0.0,
+                    window_month: used,
+                    resets_in_5h: None,
+                    resets_in_week: None,
+                    resets_in_month: reset,
+                },
+                pricing_revision,
+            ),
+            revision: state.settings_revision(),
+            process_generation: state.process_generation(),
+        });
     }
     let usage = db
         .account_usage_with_limits(id, &limits)
@@ -303,6 +369,18 @@ pub(super) fn provider_usage_locked(
                 .map_err(V3ApiError::internal)?,
             None,
         )
+    } else if descriptor.kind == ProviderAdapterKind::OllamaCloud {
+        let windows = match db
+            .ollama_cloud_billing_tier(&account.id)
+            .map_err(V3ApiError::internal)?
+            .map(OllamaBillingTier::monthly_credit_limit)
+        {
+            Some(limit) => db
+                .live_ollama_month_quota_window(&account.id, limit)
+                .map_err(V3ApiError::internal)?,
+            None => Vec::new(),
+        };
+        (windows, None)
     } else {
         (
             db.list_quota_windows(&account.id)
@@ -342,6 +420,7 @@ fn load_account(db: &Database, state: &CoreState, id: &str) -> Result<ModelAccou
 
 fn account_usage_limits(
     state: &CoreState,
+    db: &Database,
     account: &ModelAccount,
     pricing: &CapturedPricing,
 ) -> Result<(PricingLimits, Option<String>), V3ApiError> {
@@ -355,6 +434,26 @@ fn account_usage_limits(
                     window_5h: COMMAND_CODE_GOAT_QUOTA_5H,
                     window_week: COMMAND_CODE_GOAT_QUOTA_WEEK,
                     window_month: COMMAND_CODE_GOAT_QUOTA_MONTH,
+                },
+                None,
+            ));
+        }
+        Some(ProviderAdapterKind::OllamaCloud) => {
+            let limit = db
+                .ollama_cloud_billing_tier(&account.id)
+                .map_err(V3ApiError::internal)?
+                .map(OllamaBillingTier::monthly_credit_limit)
+                .ok_or_else(|| {
+                    V3ApiError::invalid_request_at(
+                        state,
+                        "manual usage calibration is unavailable for this account",
+                    )
+                })?;
+            return Ok((
+                PricingLimits {
+                    window_5h: limit,
+                    window_week: limit,
+                    window_month: limit,
                 },
                 None,
             ));

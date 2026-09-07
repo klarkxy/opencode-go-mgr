@@ -476,7 +476,9 @@ async fn dashboard_v3_and_v2_observability_coexist_with_stable_v2_shapes() {
     assert_eq!(v3_status, StatusCode::OK);
     assert_eq!(
         v3_gateway["upstreamBaseUrl"],
-        harness.state.config().upstream_base_url
+        ocg_core::gateway::free_models::opencode_go_base_url(
+            &harness.state.config().upstream_base_url
+        )
     );
     assert!(v3_gateway.get("key").is_none());
     assert!(v3_gateway.get("upstream_base_url").is_none());

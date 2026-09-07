@@ -23,6 +23,59 @@ use tauri::Manager;
 const GATEWAY_PORT_ENV: &str = "OCG_GATEWAY_PORT";
 
 pub fn run() {
+    ocg_core::cpa_runtime::host::run_internal_supervisor_if_requested();
+    tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            if !args.iter().any(|arg| arg == "--startup")
+                && app.try_state::<state::AppState>().is_some()
+            {
+                tray::open_dashboard(app);
+            }
+        }))
+        .plugin(tauri_plugin_shell::init())
+        .setup(|app| {
+            // Plugin setup (including single-instance ownership) precedes this
+            // callback, so a secondary process never opens data or binds ports.
+            let app_state = initialize_host()?;
+            let core = &app_state.core;
+            if let Ok(resource_dir) = app.path().resource_dir() {
+                core.set_dashboard_dir(Some(resource_dir.join("dist")));
+            }
+            host::gateway::start_on_configured_port(core)?;
+            app.manage(app_state.clone());
+            host::register_dock_visibility(core, app);
+            updater::configure(app.handle(), core.clone())?;
+            tray::setup_tray(app)?;
+            if !autostart::is_startup_launch() {
+                tray::open_dashboard(app.handle());
+            }
+            Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                window.hide().ok();
+                api.prevent_close();
+            }
+        })
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            if let tauri::RunEvent::ExitRequested { .. } = event
+                && let Some(state) = app.try_state::<state::AppState>()
+            {
+                let core = &state.core;
+                host::close_native_browsers(&state.browser_processes, &core.data_dir());
+                host::cpa_runtime::stop_on_exit(core);
+                host::gateway::stop_listener(core);
+                let _ = core
+                    .db
+                    .lock()
+                    .log_gateway("info", "gateway", "application exiting");
+            }
+        });
+}
+
+fn initialize_host() -> Result<state::AppState> {
     let data_dir = data_dir();
     let cipher = match load_cipher(&data_dir) {
         Ok(cipher) => cipher,
@@ -67,55 +120,11 @@ pub fn run() {
 
     let browser_processes = Arc::new(Mutex::new(BrowserProcessState::default()));
     host::register_native_browser(&core_state, browser_processes.clone());
-    host::gateway::start_on_configured_port(&core_state);
 
-    let gui_state = Arc::new(GuiState {
+    Ok(Arc::new(GuiState {
         core: core_state.clone(),
         browser_processes,
-    });
-
-    let app_state = gui_state.clone();
-    let setup_core_state = core_state.clone();
-
-    tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
-            if !args.iter().any(|arg| arg == "--startup") {
-                tray::open_dashboard(app);
-            }
-        }))
-        .plugin(tauri_plugin_shell::init())
-        .manage(app_state.clone())
-        .setup(move |app| {
-            if let Ok(resource_dir) = app.path().resource_dir() {
-                setup_core_state.set_dashboard_dir(Some(resource_dir.join("dist")));
-            }
-            host::register_dock_visibility(&setup_core_state, app);
-            updater::configure(app.handle(), setup_core_state.clone())?;
-            tray::setup_tray(app)?;
-            if !autostart::is_startup_launch() {
-                tray::open_dashboard(app.handle());
-            }
-            Ok(())
-        })
-        .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                window.hide().ok();
-                api.prevent_close();
-            }
-        })
-        .build(tauri::generate_context!())
-        .expect("error while building tauri application")
-        .run(move |_app_handle, event| {
-            if let tauri::RunEvent::ExitRequested { .. } = event {
-                host::close_native_browsers(&app_state.browser_processes, &core_state.data_dir());
-                host::cpa_runtime::stop_on_exit(&core_state);
-                host::gateway::stop_listener(&core_state);
-                let _ = core_state
-                    .db
-                    .lock()
-                    .log_gateway("info", "gateway", "application exiting");
-            }
-        });
+    }))
 }
 
 fn gateway_port_override_from_env() -> Result<Option<u16>> {

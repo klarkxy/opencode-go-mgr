@@ -2,7 +2,7 @@
 
 # Protocol Conversion
 
-OCG Manager speaks five client protocols on one port, then translates each
+Open Console Gateway speaks five client protocols on one port, then translates each
 request into whatever the upstream Plan actually understands. The conversion
 layer is deterministic: it resolves the Alias, checks account
 eligibility, applies the adapter ceiling and saved provider contract, checks
@@ -11,8 +11,8 @@ converts. A force_off or globally closed protocol wins — even if the model
 claims it supports it.
 
 Each known OpenCode Go model starts from a hardcoded **preferred** protocol
-and a **supported** set, maintained after test-account probes; the request
-path does not discover protocols. A successful probe on **Providers** can
+and a **supported** set, maintained after test-account probes. Protocol
+selection uses the saved contract. A successful probe on **Providers** can
 confirm or add support only within that adapter ceiling; failures are recorded
 but never remove static capability. If the client protocol is supported and
 effectively enabled, request and response pass through. Otherwise the gateway
@@ -28,11 +28,11 @@ upstream protocol trial.
 
 | Preferred upstream | Models |
 | --- | --- |
-| OpenAI Chat Completions | `glm-5.3-flash`, `glm-5.3`, `glm-5.2`, `glm-5.1`, `glm-5`, `kimi-k3`, `kimi-k2.7-code`, `kimi-k2.6`, `kimi-k2.5`, `deepseek-v4-pro`, `deepseek-v4-flash`, `deepseek-v4-flash-vision-exp`, `mimo-v2.5`, `mimo-v2.5-pro`, `hy3`, `longcat-2.0`, `ox-alpha-free`, `big-pickle`, `hy3-free`, `deepseek-v4-flash-free`, `mimo-v2.5-free`, `ling-3.0-flash-free`, `laguna-s-2.1-free`, `longcat-2.0-free`, `north-mini-code-free`, `nemotron-3-ultra-free`, `nemotron-3.5-lightning-free`, `ling-3.0-flash-fin-free`, `hy4-preview` |
-| OpenAI Responses | `grok-4.6`, `grok-4.5`, `gpt-5.6-luna`, `muse-spark-1.2`, `muse-spark-1.2-contributor`, `muse-spark-1.2-contributor-free` |
+| OpenAI Chat Completions | `glm-5.3-flash`, `glm-5.3`, `glm-5.2`, `glm-5.1`, `glm-5`, `kimi-k3`, `kimi-k2.7-code`, `kimi-k2.6`, `kimi-k2.5`, `deepseek-v4-pro`, `deepseek-v4-flash`, `deepseek-v4-flash-vision-exp`, `mimo-v2.5`, `mimo-v2.5-pro`, `hy3`, `longcat-2.0`, `big-pickle`, `deepseek-v4-flash-free`, `mimo-v2.5-free`, `nemotron-3-ultra-free`, `nemotron-3.5-lightning-free`, `ling-3.0-flash-fin-free`, `hy4-preview` |
+| OpenAI Responses | `grok-4.6`, `grok-4.5`, `gpt-5.6-luna`, `muse-spark-1.2`, `muse-spark-1.2-contributor`, `muse-spark-1.2-contributor-free`, `muse-spark-1.3-contributor-free` |
 | Anthropic Messages | `minimax-m3`, `minimax-m2.7`, `minimax-m2.7-highspeed`, `minimax-m2.5`, `minimax-m2.5-highspeed`, `qwen3.8-max`, `qwen3.8-flash`, `qwen3.7-max`, `qwen3.7-plus`, `qwen3.6-plus`, `qwen3.5-plus` |
 
-Passthrough matrix (checked-in official baseline, 2026-09-01). ✓ = the client
+Passthrough matrix (checked-in official baseline, 2026-09-06). ✓ = the client
 protocol is forwarded as-is; empty = the baseline has no direct-passthrough
 evidence for that protocol. Provider catalogs and effective contracts still
 decide whether the model is routeable; a known but inadmissible model is
@@ -40,9 +40,10 @@ rejected locally rather than converted or sent upstream. Source of truth:
 `MODEL_PROTOCOLS` in `crates/ocg-domain/src/protocol.rs`.
 
 `reasoning.effort` aliases (applied before forwarding or conversion):
-`muse-spark-1.2`, `muse-spark-1.2-contributor`, and
-`muse-spark-1.2-contributor-free` map `max` → `xhigh` (upstream rejects
-`max`). Other models pass `reasoning.effort` through unchanged.
+`muse-spark-1.2`, `muse-spark-1.2-contributor`,
+`muse-spark-1.2-contributor-free`, and `muse-spark-1.3-contributor-free`
+map `max` → `xhigh` (upstream rejects `max`). Other models pass
+`reasoning.effort` through unchanged.
 
 | Model | Preferred | Chat | Responses | Messages |
 | --- | --- | :---: | :---: | :---: |
@@ -57,6 +58,7 @@ rejected locally rather than converted or sent upstream. Source of truth:
 | `muse-spark-1.2` | Responses | | ✓ | |
 | `muse-spark-1.2-contributor` | Responses | | ✓ | |
 | `muse-spark-1.2-contributor-free` | Responses | | ✓ | |
+| `muse-spark-1.3-contributor-free` | Responses | | ✓ | |
 | `kimi-k3` | Chat | ✓ | | |
 | `kimi-k2.7-code` | Chat | ✓ | | |
 | `kimi-k2.6` | Chat | ✓ | | |
@@ -68,15 +70,9 @@ rejected locally rather than converted or sent upstream. Source of truth:
 | `mimo-v2.5-pro` | Chat | ✓ | | |
 | `hy3` | Chat | ✓ | | |
 | `longcat-2.0` | Chat | ✓ | | |
-| `ox-alpha-free` | Chat | | | |
 | `big-pickle` | Chat | ✓ | | |
-| `hy3-free` | Chat | ✓ | | |
 | `deepseek-v4-flash-free` | Chat | | | |
 | `mimo-v2.5-free` | Chat | ✓ | | |
-| `ling-3.0-flash-free` | Chat | | | |
-| `laguna-s-2.1-free` | Chat | | | |
-| `longcat-2.0-free` | Chat | | | |
-| `north-mini-code-free` | Chat | | | |
 | `nemotron-3-ultra-free` | Chat | ✓ | | |
 | `nemotron-3.5-lightning-free` | Chat | ✓ | | |
 | `ling-3.0-flash-fin-free` | Chat | ✓ | | |
@@ -95,13 +91,12 @@ rejected locally rather than converted or sent upstream. Source of truth:
 
 Unknown model names return `400` on every supported client format — Chat
 Completions, Responses, Messages, and Gemini `generateContent` /
-`streamGenerateContent` — and unknown Claude Desktop aliases do too. The
-gateway refuses to guess a protocol by trial — that would bill the request
-twice. See [Aliases](gateway.md#aliases).
+`streamGenerateContent` — and unknown Claude Desktop aliases do too. See
+[Aliases](gateway.md#aliases).
 
 Gateway protocol endpoints accept JSON request bodies up to 16 MiB. That is
 a transport limit, not a context-window limit. If a reverse proxy sits in
-front of OCG Manager, allow at least 16 MiB request bodies or the proxy may
+front of Open Console Gateway, allow at least 16 MiB request bodies or the proxy may
 return `413 Payload Too Large` before the gateway sees the request.
 
 ## Responses is stateless
@@ -121,14 +116,14 @@ forcing one returns `400`.
 
 ## Gemini is a client-only format
 
-The gateway never sends Gemini wire data upstream. It converts `contents`,
+Gemini is a client format: the gateway converts `contents`,
 text-only `systemInstruction`, supported `inlineData` images,
 `functionDeclarations`, function calls/results, JSON-schema output,
 generation options, Google error envelopes, usage metadata, and SSE frames to
 and from the known model's native Chat Completions or Messages protocol. Both
 the `v1beta` and `v1` URL forms are accepted.
 
-The compatibility boundary — nothing is silently pretended equivalent:
+Unconvertible fields return `400`:
 
 - Non-empty `safetySettings` return `400 INVALID_ARGUMENT`, because a
   different upstream protocol cannot preserve their safety semantics.
@@ -155,11 +150,12 @@ The compatibility boundary — nothing is silently pretended equivalent:
 The dedicated entry accepts only the advertised aliases
 `claude-sonnet-4-6`, `claude-opus-4-6`, and `claude-haiku-4-5-20251001`.
 Before entering the existing Messages conversion path, the gateway rewrites
-the alias to the actual model saved from the Applications view; model
-capabilities, tool support, and context limits in the response still follow
-the actual model. The `sonnet`, `opus`, and `haiku` mappings are serialized
-inside `AppConfig`; omitted roles inherit the first configured role, while
-the dashboard returns the resolved three-role mapping.
+the alias to the actual model in the stored `sonnet` / `opus` / `haiku`
+mapping. Model capabilities, tool support, and context limits in the response
+still follow the actual model. The mapping is serialized inside `AppConfig`
+and updated through `PUT /dashboard/api/v3/claude-desktop/models`; omitted
+roles inherit the first configured role, and the dashboard returns the
+resolved three-role mapping.
 
 ---
 

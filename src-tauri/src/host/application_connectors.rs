@@ -547,7 +547,7 @@ fn inspect(
                 ApplicationConnectorStatus::Conflict,
                 true,
                 detected,
-                Some("connector-owned fields changed outside OCG Manager".into()),
+                Some("connector-owned fields changed outside Open Console Gateway".into()),
                 &targets,
             ),
             Err(error) => info(
@@ -903,7 +903,7 @@ fn desired_documents(
                 toml_field("model_provider", "ocg_manager".into(), false),
                 toml_field(
                     "model_providers.ocg_manager.name",
-                    "OCG Manager".into(),
+                    "Open Console Gateway".into(),
                     false,
                 ),
                 toml_field(
@@ -967,7 +967,7 @@ fn desired_documents(
                     fields: vec![
                         json_field(
                             "/provider/ocg",
-                            json!({"npm":"@ai-sdk/openai-compatible","name":"OCG Manager","options":{"baseURL":format!("{}/v1", request.gateway_url),"apiKey":"{env:OCG_API_KEY}"},"models":model_map}),
+                            json!({"npm":"@ai-sdk/openai-compatible","name":"Open Console Gateway","options":{"baseURL":format!("{}/v1", request.gateway_url),"apiKey":"{env:OCG_API_KEY}"},"models":model_map}),
                             false,
                         ),
                         json_field("/model", json!(format!("ocg/{primary}")), false),
@@ -1098,10 +1098,10 @@ fn build_connect_plan(
     old_state: Option<&StateV1>,
     desired_documents: Vec<DesiredDocument>,
 ) -> ApplicationConnectorResult<MutationPlan> {
-    if let Some(state) = old_state {
-        if !state_matches(roots, cipher, request.id, state)? {
-            return Err(conflict("connector-owned fields changed"));
-        }
+    if let Some(state) = old_state
+        && !state_matches(roots, cipher, request.id, state)?
+    {
+        return Err(conflict("connector-owned fields changed"));
     }
     validate_desired_documents(roots, request.id, &desired_documents)?;
 
@@ -1121,10 +1121,10 @@ fn build_connect_plan(
     for desired in desired_documents {
         let before = read_target(roots, request.id, &desired.target)?;
         let prior = old_documents.get(desired.target.id).copied();
-        if let Some(prior) = prior {
-            if prior.format != desired.target.format {
-                return Err(conflict("connector state format changed"));
-            }
+        if let Some(prior) = prior
+            && prior.format != desired.target.format
+        {
+            return Err(conflict("connector state format changed"));
         }
         let (after_bytes, document_state, mut document_changes) = match desired.target.format {
             DocumentFormat::Json => patch_json_connect(
@@ -2596,7 +2596,7 @@ fn state_target(data_dir: &Path, id: ApplicationConnectorId) -> Target {
     Target {
         id: "__state",
         path: state_path(data_dir, id),
-        label: "OCG Manager connector sidecar",
+        label: "Open Console Gateway connector sidecar",
         format: DocumentFormat::Json,
     }
 }
@@ -2975,10 +2975,10 @@ impl EnvDocument {
             existing.content = line.to_string();
             return Ok(());
         }
-        if let Some(last) = self.lines.last_mut() {
-            if last.ending.is_empty() {
-                last.ending = self.default_ending.clone();
-            }
+        if let Some(last) = self.lines.last_mut()
+            && last.ending.is_empty()
+        {
+            last.ending = self.default_ending.clone();
         }
         self.lines.push(EnvLine {
             content: line.to_string(),

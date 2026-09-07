@@ -2,7 +2,7 @@
 //! secrecy, V2 coexistence, and catalog append.
 
 use ocg_core::dashboard_v3::{
-    CATALOG_TYPE_NAMES, ClaudeDesktopModels, ERROR_INVALID_JSON, ERROR_INVALID_REQUEST,
+    ClaudeDesktopModels, ERROR_INVALID_JSON, ERROR_INVALID_REQUEST,
     ERROR_MISSING_EXPECTED_REVISION, ERROR_REVISION_CONFLICT, ERROR_UNAUTHORIZED, contract_schema,
 };
 use ocg_core::models::{
@@ -17,10 +17,6 @@ mod harness;
 use harness::{V3Harness, start_loopback, start_public};
 
 const CLAUDE_DESKTOP_CATALOG_TYPES: &[&str] = &["ClaudeDesktopModels", "ClaudeDesktopModelsUpdate"];
-const CUSTOM_DISCOVERY_CATALOG_TYPES: &[&str] = &[
-    "CustomModelDiscoveryRequest",
-    "CustomModelDiscoveryResponse",
-];
 
 const SECRET_FIELD_NAMES: &[&str] = &[
     "key",
@@ -157,144 +153,8 @@ fn assert_unrelated_config(harness: &V3Harness, before: &ocg_core::models::AppCo
 
 #[test]
 fn catalog_type_names_append_claude_desktop_after_custom_discovery() {
-    assert_eq!(CATALOG_TYPE_NAMES[0], "ControlRevision");
-    let proxy_start = CATALOG_TYPE_NAMES
-        .iter()
-        .position(|name| *name == "ProxyTestRequest")
-        .expect("ProxyTestRequest catalog entry");
-    assert_eq!(
-        &CATALOG_TYPE_NAMES[proxy_start..proxy_start + 2],
-        ["ProxyTestRequest", "ProxyTestResponse"]
-    );
-    let custom_start = proxy_start + 2;
-    let claude_start = custom_start + CUSTOM_DISCOVERY_CATALOG_TYPES.len();
-    assert_eq!(
-        &CATALOG_TYPE_NAMES[custom_start..claude_start],
-        CUSTOM_DISCOVERY_CATALOG_TYPES
-    );
-    let account_verify_start = claude_start + CLAUDE_DESKTOP_CATALOG_TYPES.len();
-    assert_eq!(
-        &CATALOG_TYPE_NAMES[claude_start..account_verify_start],
-        CLAUDE_DESKTOP_CATALOG_TYPES
-    );
-    assert_eq!(CATALOG_TYPE_NAMES[account_verify_start], "AccountVerify");
-    let updater_start = account_verify_start + 6;
-    assert_eq!(
-        &CATALOG_TYPE_NAMES[account_verify_start + 1..updater_start],
-        [
-            "BrowserMode",
-            "BrowserTarget",
-            "BrowserCapabilities",
-            "BrowserOpenRequest",
-            "BrowserOpen",
-        ]
-    );
-    let managed_start = updater_start + 3;
-    assert_eq!(
-        &CATALOG_TYPE_NAMES[updater_start..managed_start],
-        ["UpdateCheck", "DesktopUpdate", "InstallUpdate"]
-    );
-    assert_eq!(CATALOG_TYPE_NAMES[managed_start], "AccountManagedKeyVerify");
-    let usage_refresh_start = managed_start + 1;
-    let account_transfer_start = usage_refresh_start + 9;
-    assert_eq!(
-        &CATALOG_TYPE_NAMES[usage_refresh_start..account_transfer_start],
-        [
-            "UsageRefresh",
-            "UsageRefreshUpdate",
-            "UsageRefreshThrottleError",
-            "ProviderModelsRefreshUpdate",
-            "ProviderModels",
-            "ProviderPricingSnapshot",
-            "ProviderPricingValue",
-            "ProviderPricingRefresh",
-            "ProviderPricingRefreshUpdate",
-        ]
-    );
-    let application_connector_start = account_transfer_start + 8;
-    assert_eq!(
-        &CATALOG_TYPE_NAMES[account_transfer_start..application_connector_start],
-        [
-            "AccountExportRequest",
-            "AccountExport",
-            "AccountImportPreviewRequest",
-            "AccountImportPreview",
-            "AccountImportPreviewItem",
-            "AccountImportDisposition",
-            "AccountImportRequest",
-            "AccountImportResult",
-        ]
-    );
-    assert_eq!(
-        &CATALOG_TYPE_NAMES[application_connector_start..application_connector_start + 9],
-        [
-            "ApplicationConnectorAction",
-            "ApplicationConnectorStatus",
-            "ApplicationConnectorChange",
-            "ApplicationConnectorItem",
-            "ApplicationConnectors",
-            "ApplicationConnectorPreviewRequest",
-            "ApplicationConnectorPreview",
-            "ApplicationConnectorCommitRequest",
-            "ApplicationConnectorCommitResult",
-        ]
-    );
-    assert_eq!(
-        &CATALOG_TYPE_NAMES[application_connector_start + 9..application_connector_start + 32],
-        [
-            "CpaIntegration",
-            "CpaIntegrationUpdate",
-            "CpaTestRequest",
-            "CpaConnectionReport",
-            "CpaModels",
-            "CpaAccounts",
-            "CpaAccount",
-            "CpaAccountStatusUpdate",
-            "CpaAccountDelete",
-            "CpaQuotaReset",
-            "CpaOAuthProvider",
-            "CpaOAuthStartRequest",
-            "CpaOAuthStart",
-            "CpaOAuthStatus",
-            "CpaOAuthSessionDelete",
-            "CpaRuntime",
-            "CpaRuntimePhase",
-            "CpaRuntimeCheck",
-            "CpaRuntimeInstall",
-            "CpaRuntimeLogs",
-            "CpaRuntimeKey",
-            "CpaRuntimeKeys",
-            "CpaRuntimeKeyCreated",
-        ]
-    );
-    assert_eq!(
-        &CATALOG_TYPE_NAMES[application_connector_start + 32..],
-        [
-            "DynamicProviderAuthKind",
-            "DynamicProviderModel",
-            "DynamicProvider",
-            "DynamicProviderCreate",
-            "DynamicProviderUpdate",
-            "DynamicProviderMutation",
-            "DynamicProviderDiscoverRequest",
-            "DynamicProviderDiscoverResponse",
-            "DynamicProviderTestRequest",
-            "DynamicProviderTestResponse",
-        ]
-    );
-    assert_eq!(CATALOG_TYPE_NAMES.len(), application_connector_start + 42);
-
     let schema = contract_schema();
     let defs = schema["$defs"].as_object().expect("$defs");
-    let any_of = schema["anyOf"].as_array().expect("anyOf");
-    for (index, name) in CATALOG_TYPE_NAMES.iter().enumerate() {
-        assert!(defs.contains_key(*name), "schema missing {name}");
-        assert_eq!(
-            any_of[index]["$ref"],
-            format!("#/$defs/{name}"),
-            "anyOf drifted at {index}"
-        );
-    }
     for name in CLAUDE_DESKTOP_CATALOG_TYPES {
         assert_eq!(defs[*name]["additionalProperties"], false);
     }

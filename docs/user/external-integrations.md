@@ -3,13 +3,12 @@
 # External Integrations
 
 External integrations are optional, locally supported services that extend OCG
-Manager without becoming a Provider, a Plan, or a plugin. The dashboard keeps
-its eight core views; supported surfaces appear in the general **Extensions**
-group below the Settings divider.
+Manager. The dashboard keeps its seven core views; supported surfaces appear
+in the general **Extensions** group below the Settings divider.
 
 ## CPA
 
-CPA (CLI Proxy API) is a local subscription runtime. OCG Manager can manage
+CPA (CLI Proxy API) is a local subscription runtime. Open Console Gateway can manage
 its supported Codex, Claude, Antigravity, Kimi, and xAI account flows and route
 the resulting subscription pool, but CPA remains the owner of OAuth browser
 sessions, tokens, auth files, and internal scheduling. OCG stores only its
@@ -23,44 +22,53 @@ list views stay fingerprinted.
 
 Use one of these local deployments:
 
-- **Installed Windows x64 desktop:** OCG can download the official Windows x64
-  CPA release, keep it under the OCG data directory, and start it as an
-  OCG-owned child. Start is manual; the child stops when OCG exits. OCG never
-  stops a CPA process it did not start.
+- **Windows x64, macOS, or Linux x64 desktop app or CLI:** OCG can download
+  the official CLIProxyAPI asset for that OS and CPU, keep it under the OCG
+  data directory, and start it as an OCG-owned child. Start is manual; the
+  child stops when OCG exits. OCG never stops a CPA process it did not start.
+  Other OS/CPU combinations have no official asset and fail the install with
+  an explicit reason.
 - **Desktop or CLI:** run CPA on the same machine and configure a loopback URL
   such as `http://127.0.0.1:8317`.
 - **Docker:** enable the optional Compose sibling described in
   [Docker](docker.md). OCG uses the read-only `http://cpa:8317` service URL;
   the dashboard does not accept a LAN, Internet, or cross-node CPA address.
 
-CPA is intentionally not a remote integration. URLs with embedded credentials,
-queries, fragments, redirects, or non-loopback hosts are rejected. Do not
-reuse an OCG Manager Key as either CPA key.
+URLs with embedded credentials, queries, fragments, redirects, or non-loopback
+hosts are rejected. Do not reuse an Open Console Gateway Key as either CPA key.
 
 ### Connect and operate
 
-1. On installed Windows x64 desktop, install or start the managed CPA runtime
+1. On Windows x64, macOS, or Linux x64 (desktop app or CLI), install or start
+   the managed CPA runtime
    from **Extensions → CPA**, or install and start CPA yourself on loopback
    and save its **Management Key** and **Inference Key**. The managed runtime
-   generates those keys. Extra direct-client keys are shown fingerprinted, and
-   a newly created secret is returned once. The OCG-protected Inference Key
-   cannot be deleted. The Management Key is not written into CPA's
-   `config.yaml`; the Inference Key and direct-client keys are, because CPA
-   requires `api-keys` in that file.
+   generates those keys. Extra direct-client keys sit on **Overview**, are
+   shown fingerprinted, and a newly created secret is returned once. The
+   OCG-protected Inference Key cannot be deleted. The Management Key is not
+   written into CPA's `config.yaml`; the Inference Key and direct-client keys
+   are, because CPA requires `api-keys` in that file.
 2. Open **Extensions → CPA**, save the local address and both keys when you
    connect an external CPA, then run the connection test. It reports reachability, supported CPA version,
    Management authentication, and Inference authentication separately.
    OCG requires CPA 7.1.0 or newer; later major versions continue through the
    same typed response and exact-account validation instead of being rejected
    solely for their version number.
-3. Start an OAuth flow from CPA's account table. Browser-callback providers
+3. A fresh managed installation can start successfully with an empty model
+   catalog. This confirms CPA and its local authentication are working; it
+   does not make any model routeable. Start an OAuth flow from CPA's account
+   table. Browser-callback providers
    use CPA's loopback callback ports; Kimi and xAI use their device-code flow.
    OCG never runs an OAuth callback server and does not restore an old flow
    after a refresh or restart.
-4. Refresh the CPA model catalog and enable the CPA subscription pool when it
-   is ready. Its single **CPA subscription pool** card on Accounts can be
-   ordered and enabled/disabled like other route candidates, but cannot expose
-   a Key, be deleted, or stand in for individual CPA OAuth accounts.
+4. Open **Model catalog** and refresh it. The tab lists the saved snapshot:
+   each model ID and the source CPA reported (`owned_by`). A fresh install can
+   start with an empty catalog; refresh after OAuth accounts exist. Then enable
+   the CPA subscription pool. Its single **CPA subscription pool** card on
+   Accounts can be ordered and enabled/disabled like other route candidates,
+   but cannot expose a Key, be deleted, or stand in for individual CPA OAuth
+   accounts. For a managed runtime, extra direct-client keys live on Overview
+   rather than a separate tab; daily use goes through the OCG Access Key.
 
 Disabling the pool removes it from routing without forgetting CPA setup.
 **Disconnect and clear** removes OCG's CPA configuration, the pool card, and
@@ -75,10 +83,9 @@ externally operated CPA.
 
 ## Adding another integration
 
-Static external integrations are one kind of non-core surface that can appear
-in **Extensions**. They require product approval, a typed Dashboard V3 adapter,
-and a documented local boundary. Dynamic Provider plugins, user scripts,
-generic management proxies, and runtime adapter loading are not supported.
+Static external integrations appear in **Extensions**. They require product
+approval, a typed Dashboard V3 adapter, and a documented local boundary. The
+contribution path is in [Extending Open Console Gateway](../maintainer/extending.md).
 
 ---
 

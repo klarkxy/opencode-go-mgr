@@ -2,9 +2,8 @@
 
 # Data And Security
 
-OCG Manager stores your keys, passwords, and browser sessions on the local disk
-and does not ask any remote service to hold them. That is the privacy trade-off:
-no telemetry, no remote sync, and no recovery if the data directory is lost.
+Open Console Gateway stores your keys, passwords, and browser sessions on the local disk.
+Protect the data directory: there is no remote recovery if it is lost.
 
 - **GUI data location.** Windows: `%USERPROFILE%\.ocg-mgr`. macOS / Linux:
   `~/.ocg-mgr`. CLI data defaults to `~/.ocg-mgr-cli` on every platform and
@@ -22,16 +21,15 @@ no telemetry, no remote sync, and no recovery if the data directory is lost.
   401.
 - **Browser profiles.** `browser-profiles/`, or Docker's
   `ocg-browser-profiles`, contains long-lived cookies and official-site login
-  state and is not encrypted by OCG Manager at all. Protect, transfer, and
+  state and is not encrypted by Open Console Gateway at all. Protect, transfer, and
   destroy it with the same care as the database and account keys.
-- **No cross-node sync.** Each node manages its own accounts through its own
-  dashboard. OCG Manager does not synchronize account credentials between
-  nodes. Portable node state can instead be moved explicitly with a
-  password-encrypted `.ocgbackup` file from the loopback dashboard; no separate
-  administrator step-up is required. Account and Access Keys are encrypted with
-  Argon2id plus AES-256-GCM. The migration password is not stored and cannot be
-  recovered. Treat the file and password as separate secrets. Browser profiles,
-  login passwords, logs, usage, source cooldown state, and machine-local host
+- **Portable node backup.** Each node manages its own accounts through its own
+  dashboard. Move portable node state with a password-encrypted `.ocgbackup`
+  file from the loopback dashboard; no separate administrator step-up is
+  required. Account and Access Keys are encrypted with Argon2id plus
+  AES-256-GCM. The migration password is not stored and cannot be recovered.
+  Treat the file and password as separate secrets. Browser profiles, login
+  passwords, logs, usage, source cooldown state, and machine-local host
   settings are not included.
 - **Plain HTTP warning.** A non-loopback `http://` root URL exposes the Key
   and request contents to the network. Use HTTPS or a trusted LAN only.

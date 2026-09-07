@@ -1,12 +1,12 @@
 [package]
 name = "ocg-manager"
-version = "2.1.0"
-description = "OpenCode-Go multi-account key manager"
+version = "2.2.0"
+description = "Open Console Gateway"
 authors = ["ocg-manager"]
 license-file = "../LICENSE"
 repository = ""
 edition = "2024"
-rust-version = "1.85.0"
+rust-version = "1.88.0"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

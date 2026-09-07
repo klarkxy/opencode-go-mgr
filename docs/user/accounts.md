@@ -13,17 +13,22 @@ pool.
 
 **Accounts** owns identity, the account **Key**, verification, enabled state,
 card order, managed registration, and available usage / cooldown state.
-Cards intentionally omit provider contracts and protocol details. Catalogs,
-protocol probes, per-model protocol overrides, user-defined Provider
-Endpoint/protocol/mappings, and scoped pricing live on **Providers**, not here.
+Catalogs, protocol probes, per-model protocol overrides, user-defined Provider
+Endpoint/protocol/mappings, and scoped pricing live on **Providers**.
 A user-defined Provider account only stores Key (when auth requires it), notes,
 enablement, and runtime state. Custom API is the exception: that account still
 owns Endpoint, protocol, and model mappings. No-auth user-defined Providers
-expose one singleton account and reject a second. Command Code exposes no machine-readable account-usage
-endpoint, so GOAT cards show a clearly labelled local estimate: priced OCG
-request logs accumulate against the public `$14 / $35 / $70` windows. Traffic
-outside OCG and unpriced rows are not included; manual calibration can correct
-the displayed baseline.
+expose one singleton account and reject a second. GOAT cards show a clearly
+labelled local estimate: priced OCG request logs accumulate against the public
+`$14 / $35 / $70` windows. Command Code exposes no machine-readable usage API.
+Traffic outside OCG and unpriced rows are not included; manual calibration can
+correct the displayed baseline. Paid Ollama Cloud cards (Pro / Max / Team) show
+one monthly USD-Credits window from locally priced request logs against
+`$60 / $300 / $1000`. Ollama Cloud exposes no official usage API in this
+product. The meter is a soft estimate — used credit may exceed the limit, the
+bar clamps at 100%, and fullness never writes cooldown or changes routing. New
+accounts must choose Pro, Max, or Team plus a purchase date. Existing accounts
+with no billing row stay unconfigured until edited and remain routeable.
 
 The Adapter Registry is sealed. Built-in Provider families are:
 
@@ -34,17 +39,17 @@ The Adapter Registry is sealed. Built-in Provider families are:
 | Command Code GOAT | `command-code` | Yes | Public Provider catalog; GOAT preset models default on, additional models default off in the Providers matrix; no account-level GOAT/All or Max mode |
 | MiniMax CN Token Plan | `minimax` | Yes | Dedicated `sk-cp` Key; fixed official Chat and Messages routes, authenticated model directory, and manual official Token Plan usage refresh |
 | Kimi Code CN | `kimi` | Yes | Dedicated Kimi Code Key; fixed official Chat and Messages routes, authenticated model directory, and manual official weekly/rate-window usage refresh |
+| Ollama Cloud | `ollama` | Yes | Fixed-origin Chat Completions only (`https://ollama.com`, Bearer); public keyless catalog refresh; account billing tier (Pro $60 / Max $300 / Team $1000 USD Credits per billing month) plus purchase date; local monthly soft-credit estimate from official per-request usage and the manual `https://ollama.com/pricing` table; unconfigured existing accounts stay routeable with no meter |
 | Custom API | `custom` | Yes | Trusted-administrator destination; one API URL, one account-wide upstream protocol, and public-name → upstream-ID mappings per account; common base URLs are completed automatically; new accounts default on; eligible public names appear on `/v1/models`; unpriced/unknown cost, no quota debit |
 
 ## Move a node configuration
 
 Use **Export** on the Accounts toolbar to create a password-encrypted
 `.ocgbackup` file, then use **Import** on the destination node to preview and
-confirm the merge. No separate administrator step-up is required. Choose a
-migration password of at least 12
-characters and transfer it separately from the file; OCG Manager cannot recover
-it. The operation remains available only from the node's loopback dashboard;
-forwarded scheme headers do not grant access to a remote dashboard.
+confirm the merge. Choose a migration password of at least 12 characters and
+transfer it separately from the file; Open Console Gateway cannot recover it. The
+operation remains available only from the node's loopback dashboard; forwarded
+scheme headers do not grant access to a remote dashboard.
 
 The current V4 payload moves usable ordinary accounts and their stable IDs,
 ready account Keys, Custom Endpoint/public-model → upstream-ID mappings and verification state,
@@ -63,38 +68,36 @@ place; stale authentication and last-error flags are cleared when package
 account fields replace the stored credential.
 Machine-local listener/root URL, auto-start, and Dock settings also stay with
 the destination. Ready managed accounts keep their Key, but their browser login
-does not move; unfinished managed drafts are skipped. A legacy V1 package is
-still accepted and keeps its older Plan/name duplicate-skip behavior; V2 remains
-import-compatible. The outer encrypted envelope remains version 1 while the
-portable payload version evolves.
+does not move; unfinished managed drafts are skipped. Import accepts payload
+V4 only; payload V1–V3 backups are rejected with an explicit
+unsupported-version error. The outer encrypted envelope remains version 1 and
+is distinct from the portable payload version.
 
 Every persistent mutation path rejects `enabled=true` for a catalogued
 `routable=false` Provider before it mutates the row, revision, or timestamps.
-Command Code GOAT does not use directory fetch as Key verification; an enabled,
-ready account with a non-empty Key can route models enabled in the Provider
-matrix. A newly created, routable Custom API account defaults to enabled.
-Editing the Endpoint, capabilities, Key, or protocol preserves its enabled
-state. Disabled drafts remain saveable. The desktop UI uses Dashboard V3 HTTP and has no separate
-Tauri invoke mutation path.
+GOAT catalog refresh updates the model directory; Key auth is observed from
+inference 401/403. An enabled, ready account with a non-empty Key can route
+models enabled in the Provider matrix. A newly created, routable Custom API
+account defaults to enabled. Editing the Endpoint, capabilities, Key, or
+protocol preserves its enabled state. Disabled drafts remain saveable.
 
 Use only the official provider API **Key** for OpenCode Go, Command Code GOAT,
-MiniMax Token Plan, or Kimi Code. Browser cookies and reverse-proxy credentials are not account Keys. GOAT
-is a separate provider mapping and its Key is sent only to the fixed Command
-Code Provider API, never to OpenCode. Custom API is a separate trusted-administrator
-destination and must not send its key to an OpenCode endpoint.
+MiniMax Token Plan, or Kimi Code. Browser cookies and reverse-proxy credentials
+are not account Keys. GOAT is a separate provider mapping and its Key is sent
+only to the fixed Command Code Provider API, never to OpenCode. Custom API is a
+separate trusted-administrator destination and must not send its key to an
+OpenCode endpoint.
 
 MiniMax and Kimi keys are also origin-bound: MiniMax CN uses
 `https://api.minimaxi.com/v1`; Kimi Code CN uses
 `https://api.kimi.com/coding/v1`. Model and usage refreshes are explicit
-dashboard actions. OCG does not poll either subscription endpoint, and usage
-display never changes routing eligibility. Before the first successful usage
-refresh, the account card still shows a neutral **Not yet refreshed** quota bar;
-official windows replace it after refresh.
+dashboard actions. Usage display never changes routing eligibility. Before the
+first successful usage refresh, the account card still shows a neutral **Not
+yet refreshed** quota bar; official windows replace it after refresh.
 
-Command Code's official `GET /models` is public and refreshes one Provider-level
-catalog. It does not prove that a stored Key is valid. The Providers matrix is
-the only model-supply control: GOAT preset rows default on, newly discovered
-rows default off, and inference 401/403 is the real Key-auth signal.
+Command Code's official `GET /models` is public and refreshes one
+Provider-level catalog. The Providers matrix is the model-supply control: GOAT
+preset rows default on, newly discovered rows default off.
 
 Custom API is a live trusted-administrator destination. **Accounts** is the
 only editor for its mappings: each row pairs a public model name (what the
@@ -103,26 +106,25 @@ stores one API URL, one upstream protocol (Chat Completions, Responses, or
 Messages), and at least one mapping. That protocol is uniform across every
 mapping on the account and is the effective preferred
 protocol: matching client traffic passes through, while other supported client
-formats, including Gemini, convert to it. Entering an origin root is recommended:
+formats convert to it. See [Protocol conversion](protocol-conversion.md).
+Entering an origin root is recommended:
 OCG appends `/v1` and the selected protocol path. A base already ending in
 `/v1` is used without duplicating that segment. Existing complete standard
 Endpoints remain exact. **Fetch models** derives `/v1/models` from a root or
 versioned base, or the sibling `/models` from a complete standard Endpoint.
 Non-standard complete paths remain exact for inference and retain manual model
 entry instead of guessing a directory URL. Discovery returns upstream IDs only.
-Choosing one imports a row with the public name and upstream ID exactly equal;
-it never strips suffixes or invents an Alias. Fetching does not save, verify, or
-enable the account.
+Choosing one imports a row with the public name and upstream ID exactly equal.
+Fetching does not save, verify, or enable the account.
 
 A trusted administrator may configure any syntactically valid HTTP or HTTPS
 origin, including LAN, loopback, and other self-selected destinations.
 URL-embedded credentials, query strings, and fragments are rejected. The gateway
-never follows redirects and never forwards dashboard or client authentication.
-Chat Completions and Responses use only `Authorization: Bearer <key>`; Messages
-uses only `x-api-key: <key>`. There is no configurable auth scheme, dual-auth
-request, or 401 auth-header retry. Root and `/v1` bases resolve through the
-same rule for discovery, verification, and production inference; legacy complete
-Endpoints are requested verbatim.
+rejects redirects and does not forward dashboard or client authentication.
+Chat Completions and Responses use `Authorization: Bearer <key>`; Messages uses
+`x-api-key: <key>`. A 401 does not retry with a different auth header. Root and
+`/v1` bases resolve through the same rule for discovery, verification, and
+production inference; legacy complete Endpoints are requested verbatim.
 Custom HTTP uses the same process-wide Direct / Manual / Auto proxy policy;
 connect and request timeouts are bounded from the configured connect timeout
 (clamped 5–60 seconds).
@@ -130,18 +132,18 @@ connect and request timeouts are bounded from the configured connect timeout
 Every ready account card has the same **Test connection** action. It opens an
 account-scoped, searchable model table with single-model and sequential
 **Test all** controls. Each test sends one minimal real request through that
-exact account and its current effective protocol. It never switches to another
-account, runs gateway fallback, changes enablement or cooldown, or writes
-Provider protocol evidence. Results live only in the open dialog; closing it
-stops dispatching queued tests. A request already sent may finish, and testing
+exact account and its current effective protocol. Tests stay on that account:
+they do not switch accounts, run gateway fallback, change enablement or
+cooldown, or write Provider protocol evidence. Results live only in the open
+dialog; closing it stops dispatching queued tests. A request already sent may finish, and testing
 may consume provider quota. Provider-page tests remain the separate,
 low-frequency control for validating newly added Provider model/protocol
 capabilities and may use eligible-account fallback.
 
 Eligible accounts (enabled + ready + non-empty key) expose only their routeable
-public names on authenticated `GET /v1/models`; upstream-only IDs are not a
-second public catalog. A Custom public name resolves to its paired exact
-upstream ID. A public name never steals a published built-in Alias. Raw identity
+public names on authenticated `GET /v1/models`. A Custom public name resolves
+to its paired exact upstream ID. A public name never steals a published
+built-in Alias. Raw identity
 conflicts are excluded from publication and resolve as `ambiguous_model_id`
 without an upstream call. Undeclared names stay unknown (`400`). Changing the
 Endpoint, Key, mappings, or protocol leaves the account enabled. Endpoint and
@@ -154,8 +156,8 @@ no provider usage refresh. `MODEL_PROTOCOLS` remains Go-specific; Custom
 converts the client protocol to the account's single upstream protocol.
 
 **Add account** is a grouped plan list with a detail pane (**Ready to add** /
-**Draft plans** / **Unavailable**), not a card grid. Zen Free is a backend-owned
-singleton and is not listed there; enable or disable it on the account list.
+**Draft plans** / **Unavailable**). Zen Free is a backend-owned singleton and
+is not listed there; enable or disable it on the account list.
 Selecting OpenCode Go still offers **Import existing Key** and **Register new
 account (Beta)** in the detail pane:
 
@@ -171,13 +173,13 @@ Managed signup and isolated browser profiles are **Beta** features. They have
 not been thoroughly tested; do not rely on them in production.
 
 When you create a managed draft, the form shows the **invite URL** (prefilled
-from Settings; fresh installs may ship a demo default). Edit it in place: it must
-be an HTTPS URL no longer than 2,048 characters, contain no username or password,
-and use exactly `opencode.ai` or `console.opencode.ai` as its host. If it differs
-from Settings, it is written back to **Settings → OpenCode Go invite URL**.
-Changes affect later invite-page opens only; they do not rewrite completed
-accounts. Replace the demo default with your own invite link before a real
-signup, or referral credit goes to the link owner.
+from the OpenCode Go provider; fresh installs may ship a demo default). Edit it
+in place: it must be an HTTPS URL no longer than 2,048 characters, contain no
+username or password, and use exactly `opencode.ai` or `console.opencode.ai` as
+its host. If it differs from the saved value, it is written back to
+**Providers → OpenCode Go → Other**. Changes affect later invite-page opens
+only; they do not rewrite completed accounts. Replace the demo default with your
+own invite link before a real signup, or referral credit goes to the link owner.
 
 The managed wizard is intentionally manual (no password autofill, no payment
 clicks, no automatic key extraction):
@@ -222,13 +224,13 @@ from a backup or by signing in again.
 
 Each ready OpenCode Go or GOAT card shows the account name, cooldown state, and
 5-hour / weekly / monthly usage bars. OpenCode Go periodically calibrates the
-local accounting against its official endpoint. GOAT has no such endpoint, so
-its bars remain a local projection of priced OCG logs. Zen Free has its own
-anonymous, egress-IP-shared free cooldown rather than a key quota.
+local accounting against its official endpoint. GOAT bars remain a local
+projection of priced OCG logs. Zen Free has its own anonymous, egress-IP-shared
+free cooldown rather than a key quota.
 
 - **Usage baselines.** Type a percentage or drag a bar to set its current
   real-world usage baseline. After the value is saved, successful request cost
-  recorded by OCG Manager continues to accumulate above that baseline. Reaching
+  recorded by Open Console Gateway continues to accumulate above that baseline. Reaching
   100% is still only a warning; it does not stop the gateway from selecting the
   account. Manual calibration is shown only when the Plan declares it; GOAT
   uses it to correct for traffic that OCG cannot observe.

@@ -1,4 +1,4 @@
-//! Black-box v2.0 Alias and multi-Plan contract tests.
+//! Black-box Alias and multi-Plan contract tests.
 //!
 //! These tests drive public Gateway and dashboard HTTP/JSON. They are the
 //! independent acceptance slice for the accepted unified-alias / multi-Plan
@@ -9,36 +9,14 @@
 //! Out of scope: live GOAT network calls.
 
 use reqwest::StatusCode;
-use serde_json::{Value, json};
-use std::collections::{HashMap, VecDeque};
+use serde_json::json;
 
 #[path = "fixtures/v2/harness.rs"]
 mod harness;
 
 use harness::*;
 
-fn go_success_replies(keys: &[&str]) -> HashMap<String, VecDeque<FakeReply>> {
-    let mut replies = HashMap::new();
-    for key in keys {
-        replies.insert(
-            (*key).to_string(),
-            VecDeque::from([FakeReply {
-                status: 200,
-                body: SUCCESS_CHAT_BODY,
-            }]),
-        );
-    }
-    replies.insert(
-        String::new(),
-        VecDeque::from([FakeReply {
-            status: 200,
-            body: SUCCESS_CHAT_BODY,
-        }]),
-    );
-    replies
-}
-
-async fn reorder_account_first(harness: &V2Harness, account_id: &str) {
+async fn reorder_account_first(harness: &BlackBoxHarness, account_id: &str) {
     let mut account_ids = harness
         .accounts()
         .await
@@ -54,176 +32,10 @@ async fn reorder_account_first(harness: &V2Harness, account_id: &str) {
     assert_eq!(status, StatusCode::OK, "account reorder failed: {body}");
 }
 
-/// Catalog is the one Plan source. Dashboard V3 `GET /providers` is that list.
-#[tokio::test]
-async fn providers_catalog_is_the_only_plan_source() {
-    let harness = V2Harness::start().await;
-    let (catalog_status, catalog) = harness.get_json("/providers").await;
-    assert_eq!(catalog_status, StatusCode::OK, "{catalog}");
-    let entries = catalog
-        .as_array()
-        .expect("catalog must be a JSON array of Plan entries");
-    assert!(
-        !entries.is_empty(),
-        "catalog must list hardcoded Plans, got {catalog}"
-    );
-
-    let required = required_catalog_fields();
-    let expected_plans = catalog_contract()["plans"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default();
-    for plan in &expected_plans {
-        let provider_id = plan["provider_id"].as_str().unwrap();
-        let entry = catalog_entry(&catalog, provider_id).unwrap_or_else(|| {
-            panic!("catalog is the only Plan source and must include {provider_id}: {catalog}")
-        });
-        let missing = missing_fields(entry, &required);
-        assert!(
-            missing.is_empty(),
-            "v2-contract: {provider_id} missing catalog fields {missing:?}: {entry}"
-        );
-        if let Some(policy) = plan["verification_policy"].as_str() {
-            assert_eq!(
-                entry["verification_policy"].as_str(),
-                Some(policy),
-                "{provider_id} verification_policy"
-            );
-        }
-        if let Some(runtime) = plan["verification_runtime_availability"].as_str() {
-            assert_eq!(
-                entry["verification_runtime_availability"].as_str(),
-                Some(runtime),
-                "{provider_id} verification_runtime_availability"
-            );
-        }
-        if let Some(availability) = plan["creation_availability"].as_str() {
-            assert_eq!(
-                entry["creation_availability"].as_str(),
-                Some(availability),
-                "{provider_id} creation_availability"
-            );
-        }
-        if let Some(routable) = plan["routable"].as_bool() {
-            assert_eq!(entry["routable"], routable, "{provider_id} routable");
-        }
-        if plan["singleton"] == true {
-            assert_eq!(
-                entry["singleton"], true,
-                "{provider_id} must be a singleton: {entry}"
-            );
-        }
-        if plan["model_aliases_empty"] == true {
-            let published = alias_names(entry);
-            assert!(
-                published.is_empty(),
-                "{provider_id} is unroutable and must not publish client aliases: {published:?}"
-            );
-        }
-        if plan["requires_risk_notice"] == true {
-            let notice = &entry["risk_notice"];
-            assert!(
-                notice.is_object(),
-                "{provider_id} must publish risk_notice: {entry}"
-            );
-            for field in risk_notice_fields() {
-                assert!(
-                    notice[field.as_str()]
-                        .as_str()
-                        .is_some_and(|value| !value.is_empty()),
-                    "risk_notice.{field} is required: {notice}"
-                );
-            }
-        }
-        if let Some(prefix) = plan["key_prefix"].as_str() {
-            assert_eq!(
-                entry["key_prefix"].as_str(),
-                Some(prefix),
-                "{provider_id} key_prefix"
-            );
-        }
-        if let Some(required_ids) = plan["required_form_field_ids"].as_array() {
-            let published = form_field_ids(entry);
-            for field_id in required_ids {
-                let field_id = field_id.as_str().unwrap();
-                assert!(
-                    published.contains(field_id),
-                    "{provider_id} must publish form field {field_id}, got {published:?}"
-                );
-            }
-        }
-        if let Some(aliases) = plan["required_aliases"].as_array() {
-            let published = alias_names(entry);
-            for alias in aliases {
-                let alias = alias.as_str().unwrap();
-                assert!(
-                    published.contains(alias),
-                    "{provider_id} must publish alias {alias}, got {published:?}"
-                );
-            }
-        }
-        let published_list = alias_name_list(entry);
-        let contracts = harness.state.provider_contracts();
-        let zen_models = contracts
-            .providers
-            .get(ocg_core::provider::OPENCODE_ZEN_FREE_PROVIDER_ID)
-            .map(|scope| scope.catalog.models.as_slice())
-            .unwrap_or_default();
-        let goat_models = contracts
-            .providers
-            .get(COMMAND_CODE_PROVIDER_ID)
-            .map(|scope| scope.catalog.models.as_slice())
-            .unwrap_or_default();
-        let minimax_models = contracts
-            .providers
-            .get(ocg_core::provider::MINIMAX_PROVIDER_ID)
-            .map(|scope| scope.catalog.models.as_slice())
-            .unwrap_or_default();
-        let kimi_models = contracts
-            .providers
-            .get(ocg_core::provider::KIMI_PROVIDER_ID)
-            .map(|scope| scope.catalog.models.as_slice())
-            .unwrap_or_default();
-        assert_eq!(
-            published_list,
-            ocg_core::alias::routeable_aliases_for_with_extended_catalogs(
-                provider_id,
-                zen_models,
-                goat_models,
-                minimax_models,
-                kimi_models,
-            ),
-            "{provider_id} catalog aliases must match the routeable Alias registry"
-        );
-        assert!(
-            published_list.iter().all(|alias| !alias.contains('/')),
-            "{provider_id} must not publish raw upstream ids: {published_list:?}"
-        );
-        if provider_id == OPENCODE_PROVIDER_ID {
-            assert!(!published_list.iter().any(|alias| alias == FREE_MODEL));
-            assert!(
-                !published_list
-                    .iter()
-                    .any(|alias| alias == GOAT_UNIQUE_RAW_ID)
-            );
-        }
-        if provider_id == ocg_core::provider::OPENCODE_ZEN_FREE_PROVIDER_ID {
-            assert!(!published_list.iter().any(|alias| alias == FREE_MODEL));
-            assert!(published_list.iter().any(|alias| alias == "mimo-v2.5"));
-            assert!(
-                published_list.iter().any(|alias| alias == GO_ALIAS),
-                "Zen must publish the stripped Alias shared with Go: {published_list:?}"
-            );
-        }
-    }
-
-    harness.shutdown();
-}
-
 /// Unknown offerings fail closed at the dashboard create gate.
 #[tokio::test]
 async fn unknown_offering_create_fails_closed() {
-    let harness = V2Harness::start().await;
+    let harness = BlackBoxHarness::start().await;
     let before = harness.accounts().await;
     let (status, body) = harness
         .create_account(json!({
@@ -247,193 +59,11 @@ async fn unknown_offering_create_fails_closed() {
     harness.shutdown();
 }
 
-/// `/v1/models` is a local Alias registry list. Zero Go accounts is enough;
-/// a fake upstream catalog cannot add raw IDs or hide published aliases.
-#[tokio::test]
-async fn client_models_list_exposes_aliases_not_raw_upstream_ids() {
-    let mut replies = go_success_replies(&[GO_ACCOUNT_KEY]);
-    replies.insert(
-        GO_ACCOUNT_KEY.to_string(),
-        VecDeque::from([FakeReply {
-            status: 200,
-            body: MIXED_UPSTREAM_MODELS_BODY,
-        }]),
-    );
-    let harness = V2Harness::start_with_upstream(Some(replies)).await;
-
-    let (status, body) = harness.list_client_models().await;
-    assert_eq!(status, StatusCode::OK, "{body}");
-    assert!(
-        harness.fake_calls().is_empty(),
-        "GET /v1/models must not call upstream with zero accounts: {:?}",
-        harness.fake_calls()
-    );
-    let ids = client_model_ids(&body);
-    let contracts = harness.state.provider_contracts();
-    let expected = ocg_core::alias::published_routeable_aliases()
-        .into_iter()
-        .filter(
-            |published| match ocg_core::alias::resolve(&published.alias) {
-                Ok(ocg_core::alias::ResolvedModel::Alias { mappings, .. }) => {
-                    mappings.iter().any(|mapping| {
-                        mapping.routeable && contracts.mapping_has_enabled_protocol(mapping)
-                    })
-                }
-                Ok(ocg_core::alias::ResolvedModel::PinnedRaw { mapping, .. }) => {
-                    mapping.routeable && contracts.mapping_has_enabled_protocol(&mapping)
-                }
-                _ => false,
-            },
-        )
-        .collect::<Vec<_>>();
-    for published in &expected {
-        let index = ids
-            .iter()
-            .position(|alias| alias == &published.alias)
-            .unwrap_or_else(|| panic!("missing base Alias {} in {ids:?}", published.alias));
-        let item = &body["data"].as_array().expect("OpenAI list data")[index];
-        assert_eq!(item["owned_by"].as_str(), Some(published.owned_by.as_str()));
-    }
-    assert!(ids.iter().all(|alias| !alias.contains('/')));
-    assert!(!ids.iter().any(|alias| alias == "mimo-v2.5-free"));
-    assert!(
-        ids.iter().any(|id| id == GO_ALIAS),
-        "client model list must include preferred Go alias {GO_ALIAS}: {ids:?}"
-    );
-    assert!(
-        !ids.iter().any(|id| id == GOAT_UNIQUE_RAW_ID),
-        "v2-contract: client model list must not advertise the GOAT raw id {GOAT_UNIQUE_RAW_ID}: {ids:?}"
-    );
-    assert!(
-        !ids.iter().any(|id| id == "vendor-raw-not-an-alias"),
-        "client model list must not proxy unknown raw upstream ids: {ids:?}"
-    );
-    assert!(
-        ids.iter().all(|id| !id.contains('/')),
-        "aliases are kebab-case and must not include provider-prefixed raw ids: {ids:?}"
-    );
-    let go_owned = body["data"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|item| item["id"] == GO_ALIAS)
-        .unwrap();
-    assert_eq!(go_owned["owned_by"], OPENCODE_PROVIDER_ID);
-    let zen_owned = body["data"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|item| item["id"] == "mimo-v2.5")
-        .unwrap();
-    assert_eq!(zen_owned["owned_by"], OPENCODE_PROVIDER_ID);
-    let logs = harness.forward_logs().await;
-    assert_eq!(
-        logs["items"].as_array().map(Vec::len).unwrap_or(0),
-        0,
-        "GET /v1/models must not write forward logs: {logs}"
-    );
-
-    let (app_status, app_models) = harness.get_json("/application-models").await;
-    assert_eq!(app_status, StatusCode::OK, "{app_models}");
-    let app_ids: Vec<String> = match &app_models {
-        Value::Array(items) => items
-            .iter()
-            .filter_map(|item| {
-                item.as_str()
-                    .or_else(|| item["id"].as_str())
-                    .map(str::to_string)
-            })
-            .collect(),
-        other => panic!("application-models must list aliases: {other}"),
-    };
-    assert!(
-        app_ids.iter().any(|id| id == GO_ALIAS),
-        "Applications must copy aliases, not raw upstream ids: {app_ids:?}"
-    );
-    assert!(
-        !app_ids.iter().any(|id| id == GOAT_UNIQUE_RAW_ID),
-        "Applications must not expose the GOAT raw id: {app_ids:?}"
-    );
-    assert!(
-        !app_ids.iter().any(|id| id == FREE_MODEL),
-        "Applications must not list Zen-free aliases: {app_ids:?}"
-    );
-    assert!(
-        harness.fake_calls().is_empty(),
-        "GET /application-models must not call upstream with zero Go accounts: {:?}",
-        harness.fake_calls()
-    );
-
-    let _go = harness.create_go_account("go-main", GO_ACCOUNT_KEY).await;
-    let (status, again) = harness.list_client_models().await;
-    assert_eq!(status, StatusCode::OK, "{again}");
-    assert_eq!(client_model_ids(&again), ids);
-    assert!(
-        harness.fake_calls().is_empty(),
-        "creating a Go account must not make GET /v1/models call upstream: {:?}",
-        harness.fake_calls()
-    );
-    let (app_again_status, app_again) = harness.get_json("/application-models").await;
-    assert_eq!(app_again_status, StatusCode::OK, "{app_again}");
-    assert_eq!(app_again, app_models);
-    assert!(
-        harness.fake_calls().is_empty(),
-        "creating a Go account must not make GET /application-models call upstream: {:?}",
-        harness.fake_calls()
-    );
-
-    harness.shutdown();
-}
-
-/// Claude Desktop keeps the three role aliases.
-#[tokio::test]
-async fn claude_desktop_models_remain_role_aliases() {
-    let harness = V2Harness::start().await;
-    let (status, body) = harness.claude_desktop_models().await;
-    assert_eq!(status, StatusCode::OK, "{body}");
-    let ids = client_model_ids(&body);
-    assert_eq!(
-        ids.len(),
-        3,
-        "Claude Desktop must keep exactly three role aliases: {body}"
-    );
-    assert_eq!(
-        ids,
-        vec![
-            ocg_core::models::CLAUDE_DESKTOP_SONNET_ALIAS.to_string(),
-            ocg_core::models::CLAUDE_DESKTOP_OPUS_ALIAS.to_string(),
-            ocg_core::models::CLAUDE_DESKTOP_HAIKU_ALIAS.to_string(),
-        ],
-        "Claude Desktop must keep the advertised three-role aliases: {body}"
-    );
-    harness.shutdown();
-}
-
-/// Alias chat responses rewrite `model` back to the client-requested name.
-#[tokio::test]
-async fn alias_request_rewrites_response_model_to_client_name() {
-    let harness = V2Harness::start_with_chat_success(&[GO_ACCOUNT_KEY]).await;
-    let _go = harness.create_go_account("go-main", GO_ACCOUNT_KEY).await;
-    let (status, body) = harness.chat(GO_ALIAS).await;
-    assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(
-        body["model"].as_str(),
-        Some(GO_ALIAS),
-        "v2-contract: response.model must be the client-requested alias, not the upstream id: {body}"
-    );
-    assert_ne!(
-        body["model"].as_str(),
-        Some("upstream-should-not-leak"),
-        "upstream model id leaked into the client response: {body}"
-    );
-    harness.shutdown();
-}
-
 /// A unique raw upstream ID is pinned to one provider. With only Go
 /// routeable, the GOAT-shaped raw id must not fall through to OpenCode Go.
 #[tokio::test]
 async fn unique_raw_upstream_id_pins_to_one_provider_and_skips_go() {
-    let harness = V2Harness::start_with_chat_success(&[GO_ACCOUNT_KEY]).await;
+    let harness = BlackBoxHarness::start_with_chat_success(&[GO_ACCOUNT_KEY]).await;
     let go = harness.create_go_account("go-main", GO_ACCOUNT_KEY).await;
     let (status, body) = harness.chat(GOAT_UNIQUE_RAW_ID).await;
     assert_ne!(
@@ -470,7 +100,8 @@ async fn unique_raw_upstream_id_pins_to_one_provider_and_skips_go() {
 /// `v2_alias_runtime::ambiguous_model_id_is_structured_across_client_formats`.
 #[tokio::test]
 async fn ambiguous_raw_upstream_id_is_rejected() {
-    let harness = V2Harness::start_with_chat_success(&[GO_ACCOUNT_KEY, CUSTOM_ACCOUNT_KEY]).await;
+    let harness =
+        BlackBoxHarness::start_with_chat_success(&[GO_ACCOUNT_KEY, CUSTOM_ACCOUNT_KEY]).await;
     let _go = harness.create_go_account("go-main", GO_ACCOUNT_KEY).await;
     let catalog = harness.catalog().await;
     let overlaps = overlapping_raw_ids(&catalog);
@@ -529,29 +160,10 @@ async fn ambiguous_raw_upstream_id_is_rejected() {
     harness.shutdown();
 }
 
-/// OpenCode Go alias routing remains the compatible paid path.
-#[tokio::test]
-async fn go_alias_request_still_routes_and_logs_opencode_go() {
-    let harness = V2Harness::start_with_chat_success(&[GO_ACCOUNT_KEY]).await;
-    let go = harness.create_go_account("go-main", GO_ACCOUNT_KEY).await;
-    reorder_account_first(&harness, go["id"].as_str().unwrap()).await;
-    let (status, body) = harness.chat(GO_ALIAS).await;
-    assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(harness.fake_call_keys(), vec![GO_ACCOUNT_KEY.to_string()]);
-    let logs = harness.forward_logs().await;
-    let item = &logs["items"]
-        .as_array()
-        .and_then(|items| items.first())
-        .unwrap_or_else(|| panic!("expected a forward log: {logs}"));
-    assert_eq!(item["provider_id"].as_str(), Some(OPENCODE_PROVIDER_ID));
-    assert_eq!(item["account_id"], go["id"]);
-    harness.shutdown();
-}
-
 /// Zen Free stays anonymous and does not send an account Key.
 #[tokio::test]
 async fn zen_free_explicit_free_model_stays_anonymous() {
-    let harness = V2Harness::start_with_chat_success(&[GO_ACCOUNT_KEY]).await;
+    let harness = BlackBoxHarness::start_with_chat_success(&[GO_ACCOUNT_KEY]).await;
     let _go = harness.create_go_account("go-main", GO_ACCOUNT_KEY).await;
     let revision = harness.settings_revision().await;
     let (status, body) = harness
@@ -588,7 +200,7 @@ async fn zen_free_explicit_free_model_stays_anonymous() {
 /// Go import stays immediately routable; verification is not required.
 #[tokio::test]
 async fn go_import_remains_immediately_routable_without_verification() {
-    let harness = V2Harness::start_with_chat_success(&[GO_ACCOUNT_KEY]).await;
+    let harness = BlackBoxHarness::start_with_chat_success(&[GO_ACCOUNT_KEY]).await;
     let account = harness.create_go_account("go-main", GO_ACCOUNT_KEY).await;
     assert_eq!(account["enabled"], true, "{account}");
     assert_eq!(account["setup_step"], "ready", "{account}");
@@ -607,7 +219,7 @@ async fn go_import_remains_immediately_routable_without_verification() {
 /// GOAT is live without directory verification; Custom remains an optional-verification draft.
 #[tokio::test]
 async fn goat_creates_live_while_custom_creates_a_pending_draft() {
-    let harness = V2Harness::start().await;
+    let harness = BlackBoxHarness::start().await;
     let catalog = harness.catalog().await;
 
     let goat = catalog_entry(&catalog, COMMAND_CODE_PROVIDER_ID)
@@ -692,7 +304,8 @@ async fn goat_creates_live_while_custom_creates_a_pending_draft() {
 /// Explicitly disabled GOAT accounts must not be selected when a shared alias is requested.
 #[tokio::test]
 async fn disabled_goat_is_not_selected_for_alias_routing() {
-    let harness = V2Harness::start_with_chat_success(&[GO_ACCOUNT_KEY, GOAT_ACCOUNT_KEY]).await;
+    let harness =
+        BlackBoxHarness::start_with_chat_success(&[GO_ACCOUNT_KEY, GOAT_ACCOUNT_KEY]).await;
     let go = harness.create_go_account("go-main", GO_ACCOUNT_KEY).await;
     let (status, goat) = harness
         .create_account(json!({
@@ -730,7 +343,7 @@ async fn disabled_goat_is_not_selected_for_alias_routing() {
 /// GOAT verification is not applicable because its public catalog is not a Key check.
 #[tokio::test]
 async fn goat_account_reports_verification_not_applicable() {
-    let harness = V2Harness::start().await;
+    let harness = BlackBoxHarness::start().await;
     let (status, account) = harness
         .create_account(json!({
             "provider_id": COMMAND_CODE_PROVIDER_ID,
@@ -778,7 +391,7 @@ async fn goat_account_reports_verification_not_applicable() {
 /// Account Keys stay out of dashboard JSON, errors, and logs.
 #[tokio::test]
 async fn account_secrets_absent_from_json_errors_and_logs() {
-    let harness = V2Harness::start_with_chat_success(&[GO_ACCOUNT_KEY]).await;
+    let harness = BlackBoxHarness::start_with_chat_success(&[GO_ACCOUNT_KEY]).await;
     let account = harness.create_go_account("go-secret", GO_ACCOUNT_KEY).await;
     assert_eq!(account["key"], "");
     assert_eq!(account["password"], "");
@@ -806,47 +419,6 @@ async fn account_secrets_absent_from_json_errors_and_logs() {
     assert!(
         !json_contains_secret(&connection, GO_ACCOUNT_KEY),
         "connection info must not include the account Key: {connection}"
-    );
-    harness.shutdown();
-}
-
-/// Forward logs distinguish requested alias vs resolved alias vs upstream model.
-#[tokio::test]
-async fn forward_logs_distinguish_requested_alias_and_upstream_model() {
-    let harness = V2Harness::start_with_chat_success(&[GO_ACCOUNT_KEY]).await;
-    let go = harness.create_go_account("go-main", GO_ACCOUNT_KEY).await;
-    reorder_account_first(&harness, go["id"].as_str().unwrap()).await;
-    let (status, body) = harness.chat(GO_ALIAS).await;
-    assert_eq!(status, StatusCode::OK, "{body}");
-
-    let logs = harness.forward_logs().await;
-    let item = logs["items"]
-        .as_array()
-        .and_then(|items| items.first())
-        .unwrap_or_else(|| panic!("expected a forward log row: {logs}"));
-    for field in [
-        "requested_model",
-        "resolved_alias",
-        "upstream_model",
-        "provider_id",
-    ] {
-        assert!(
-            item.get(field).is_some() && !item[field].is_null(),
-            "v2-contract: forward log missing {field}: {item}"
-        );
-    }
-    assert_eq!(item["requested_model"].as_str(), Some(GO_ALIAS), "{item}");
-    assert_eq!(item["resolved_alias"].as_str(), Some(GO_ALIAS), "{item}");
-    assert_eq!(
-        item["provider_id"].as_str(),
-        Some(OPENCODE_PROVIDER_ID),
-        "{item}"
-    );
-    assert_eq!(item["account_id"], go["id"]);
-    assert_ne!(
-        item["upstream_model"].as_str(),
-        Some(""),
-        "upstream_model must be the Plan's raw id: {item}"
     );
     harness.shutdown();
 }

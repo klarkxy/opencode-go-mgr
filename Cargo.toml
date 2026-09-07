@@ -11,15 +11,14 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "2.1.0"
+version = "2.2.0"
 edition = "2024"
 authors = ["ocg-manager"]
 license-file = "LICENSE"
 repository = ""
-rust-version = "1.85.0"
+rust-version = "1.88.0"
 
 [profile.release]
-opt-level = 3
 lto = "thin"
 strip = true
 panic = "abort"

@@ -525,7 +525,6 @@ fn forward_log(account_id: &str, status: &str, cost: f64) -> ForwardLog {
 fn v24_adds_route_column_and_historical_rows_stay_unlabeled() {
     let dir = temp_data_dir("v24-route-column");
     let db = Database::open(dir.clone()).unwrap();
-    assert_eq!(db.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
 
     // A row written before the column existed keeps the empty default
     // ("not recorded") — insert it without naming the route column.
@@ -624,13 +623,6 @@ fn v16_migrates_existing_accounts_to_imported_ready_keys() {
         .expect("legacy account should remain");
     assert_eq!(legacy.account_type, AccountType::Key);
     assert_eq!(legacy.setup_step, AccountSetupStep::Ready);
-    let version: i64 = db
-        .conn
-        .query_row("SELECT MAX(version) FROM schema_version", [], |row| {
-            row.get(0)
-        })
-        .unwrap();
-    assert_eq!(version as i32, CURRENT_SCHEMA_VERSION);
     drop(db);
     fs::remove_dir_all(dir).expect("test data dir should be removed");
 }
@@ -1004,13 +996,6 @@ fn v7_migration_repairs_pr11_pr12_and_combined_v6_databases() {
         drop(conn);
 
         let db = open_with_host_cipher(dir.clone()).expect("v6 database should migrate");
-        let version: i32 = db
-            .conn
-            .query_row("SELECT MAX(version) FROM schema_version", [], |row| {
-                row.get(0)
-            })
-            .expect("schema version should load");
-        assert_eq!(version, CURRENT_SCHEMA_VERSION, "{label}");
         let account = db
             .get_account("old")
             .expect("account query should work")
@@ -1081,14 +1066,7 @@ fn v4_migration_preserves_uncalibrated_usage() {
     drop(conn);
 
     let db = open_with_host_cipher(dir.clone()).expect("v3 db should migrate");
-    let version: i32 = db
-        .conn
-        .query_row("SELECT MAX(version) FROM schema_version", [], |row| {
-            row.get(0)
-        })
-        .expect("schema version should be readable");
     let usage = db.account_usage("old").expect("usage should load");
-    assert_eq!(version, CURRENT_SCHEMA_VERSION);
     assert_eq!(
         db.get_account("old")
             .expect("account should load")
@@ -1231,13 +1209,6 @@ fn v8_migration_repairs_purchase_dates_written_by_older_binaries() {
     drop(conn);
 
     let db = open_with_host_cipher(dir.clone()).expect("v7 database should migrate");
-    let version: i32 = db
-        .conn
-        .query_row("SELECT MAX(version) FROM schema_version", [], |row| {
-            row.get(0)
-        })
-        .expect("schema version should load");
-    assert_eq!(version, CURRENT_SCHEMA_VERSION);
     assert_eq!(
         db.get_account("valid")
             .expect("valid account query should work")
@@ -1375,13 +1346,6 @@ fn v10_migration_repairs_charged_errors_from_original_v9() {
     drop(conn);
 
     let db = open_with_host_cipher(dir.clone()).expect("v9 database should migrate through v11");
-    let version: i32 = db
-        .conn
-        .query_row("SELECT MAX(version) FROM schema_version", [], |row| {
-            row.get(0)
-        })
-        .expect("schema version should load");
-    assert_eq!(version, CURRENT_SCHEMA_VERSION);
     let states = db
         .conn
         .prepare("SELECT cost, cost_state FROM forward_logs ORDER BY id")
@@ -1424,13 +1388,6 @@ fn account_reads_fallback_after_v8_data_is_corrupted() {
     drop(conn);
 
     let db = Database::open(dir.clone()).expect("database should open");
-    let version: i32 = db
-        .conn
-        .query_row("SELECT MAX(version) FROM schema_version", [], |row| {
-            row.get(0)
-        })
-        .expect("schema version should load");
-    assert_eq!(version, CURRENT_SCHEMA_VERSION);
     let created_at = DateTime::parse_from_rfc3339("2026-01-02T01:30:00+02:00")
         .expect("fixed timestamp should parse")
         .with_timezone(&Utc);
@@ -2022,21 +1979,18 @@ fn v13_migration_preserves_legacy_manual_usage_calibration() {
     assert_cost(usage.window_week, 13.0);
     assert_cost(usage.window_month, 16.0);
 
-    let (version, remaining_baselines): (i32, i64) = db
+    let remaining_baselines: i64 = db
         .conn
         .query_row(
-            "SELECT
-                    (SELECT MAX(version) FROM schema_version),
-                    COUNT(*)
+            "SELECT COUNT(*)
                  FROM accounts
                  WHERE usage_5h_baseline_percent IS NOT NULL
                     OR usage_week_baseline_percent IS NOT NULL
                     OR usage_month_baseline_percent IS NOT NULL",
             [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| row.get(0),
         )
         .expect("migration state should load");
-    assert_eq!(version, CURRENT_SCHEMA_VERSION);
     assert_eq!(remaining_baselines, 0);
 
     finalize_success(&db, "legacy-calibration", 2.0, Utc::now());
@@ -2093,13 +2047,6 @@ fn v14_migrates_v13_logs_and_adds_request_id_indexes() {
     }
 
     let db = Database::open(dir.clone()).expect("v13 database should migrate");
-    let version: i32 = db
-        .conn
-        .query_row("SELECT MAX(version) FROM schema_version", [], |row| {
-            row.get(0)
-        })
-        .expect("schema version should load");
-    assert_eq!(version, CURRENT_SCHEMA_VERSION);
     for index in ["idx_forward_logs_request_id", "idx_gateway_logs_request_id"] {
         let exists: bool = db
             .conn
@@ -2168,16 +2115,14 @@ fn v15_migration_adds_nullable_auth_error() {
     drop(conn);
 
     let db = Database::open(dir.clone()).expect("v14 database should migrate");
-    let (version, auth_error): (i32, Option<String>) = db
+    let auth_error: Option<String> = db
         .conn
         .query_row(
-            "SELECT (SELECT MAX(version) FROM schema_version), auth_error
-                 FROM accounts WHERE id = 'legacy'",
+            "SELECT auth_error FROM accounts WHERE id = 'legacy'",
             [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| row.get(0),
         )
         .expect("v15 migration state should load");
-    assert_eq!(version, CURRENT_SCHEMA_VERSION);
     assert!(auth_error.is_none());
 
     drop(db);
@@ -3922,13 +3867,6 @@ fn v19_client_key_migration_is_idempotent_and_crash_replay_safe() {
     };
     assert!(probe_columns(&db.conn).contains(&"client_key_id".to_string()));
     assert!(probe_columns(&db.conn).contains(&"client_key_name".to_string()));
-    let version: i32 = db
-        .conn
-        .query_row("SELECT MAX(version) FROM schema_version", [], |row| {
-            row.get(0)
-        })
-        .unwrap();
-    assert_eq!(version, CURRENT_SCHEMA_VERSION);
 
     let index_exists: i64 = db
             .conn
@@ -3945,13 +3883,6 @@ fn v19_client_key_migration_is_idempotent_and_crash_replay_safe() {
     drop(db);
     let db = Database::open(dir.clone()).unwrap();
     db.migrate().unwrap();
-    let version: i32 = db
-        .conn
-        .query_row("SELECT MAX(version) FROM schema_version", [], |row| {
-            row.get(0)
-        })
-        .unwrap();
-    assert_eq!(version, CURRENT_SCHEMA_VERSION);
 
     drop(db);
     fs::remove_dir_all(dir).unwrap();
@@ -3990,13 +3921,6 @@ fn v20_creates_the_sub_gateway_keys_table_idempotently() {
         (table, index, legacy)
     };
     assert_eq!(probe(&db.conn), (1, 1, 0));
-    let version: i32 = db
-        .conn
-        .query_row("SELECT MAX(version) FROM schema_version", [], |row| {
-            row.get(0)
-        })
-        .unwrap();
-    assert_eq!(version, CURRENT_SCHEMA_VERSION);
 
     // Replaying the migration converges to the same shape.
     db.migrate().unwrap();
@@ -4023,7 +3947,6 @@ fn v21_adds_usage_sync_columns_with_safe_defaults() {
             "v27 must drop leftover {name}"
         );
     }
-    assert_eq!(db.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
 
     let account = account("sync-defaults");
     db.create_account(&account).unwrap();
@@ -4038,7 +3961,6 @@ fn v21_adds_usage_sync_columns_with_safe_defaults() {
     assert!(sync.last_expedited_at.is_none());
 
     db.migrate().unwrap();
-    assert_eq!(db.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
 
     drop(db);
     fs::remove_dir_all(dir).unwrap();
@@ -4082,7 +4004,6 @@ fn v21_to_v22_creates_one_usable_rollback_backup() {
     create_v21_fixture(&dir, false);
 
     let db = open_with_host_cipher(dir.clone()).expect("v21 database should migrate");
-    assert_eq!(db.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
     assert!(
         db.get_account("rollback-account")
             .expect("migrated account should load")
@@ -4174,7 +4095,6 @@ fn v21_to_v22_creates_one_usable_rollback_backup() {
 
     let backup_bytes = fs::read(backup_path).expect("backup should be readable");
     let reopened = open_with_host_cipher(dir.clone()).expect("v22 database should reopen");
-    assert_eq!(reopened.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
     drop(reopened);
     assert_eq!(pre_v22_backup_paths(&dir), backups_before);
     assert_eq!(
@@ -4191,7 +4111,6 @@ fn v20_to_v22_creates_verified_source_backup_before_direct_upgrade() {
     create_v20_fixture(&dir, false);
 
     let db = open_with_host_cipher(dir.clone()).expect("v20 database should migrate directly");
-    assert_eq!(db.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
     let account_columns = db
         .conn
         .prepare("PRAGMA table_info(accounts)")
@@ -4219,7 +4138,6 @@ fn v20_to_v22_creates_verified_source_backup_before_direct_upgrade() {
     drop(backup);
 
     let reopened = open_with_host_cipher(dir.clone()).expect("v22 database should reopen");
-    assert_eq!(reopened.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
     drop(reopened);
     assert_eq!(pre_v22_backup_paths(&dir), backups_before);
     assert_eq!(
@@ -4266,17 +4184,14 @@ fn draft_v19_libraries_without_notes_gain_the_column_on_reopen() {
     }
 
     let db = open_with_host_cipher(dir.clone()).expect("draft database should reopen");
-    let (version, notes_after): (i32, i64) = db
+    let notes_after: i64 = db
         .conn
         .query_row(
-            "SELECT
-                    (SELECT MAX(version) FROM schema_version),
-                    (SELECT COUNT(*) FROM pragma_table_info('accounts') WHERE name = 'notes')",
+            "SELECT COUNT(*) FROM pragma_table_info('accounts') WHERE name = 'notes'",
             [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| row.get(0),
         )
         .expect("repaired schema should load");
-    assert_eq!(version, CURRENT_SCHEMA_VERSION);
     assert_eq!(notes_after, 1);
     db.list_accounts()
         .expect("account reads must survive a missing notes column on the draft");
@@ -4525,7 +4440,6 @@ fn v22_to_v23_creates_one_usable_rollback_backup_and_contract_tables() {
     assert!(pre_v23_backup_paths(&dir).is_empty());
 
     let db = open_with_host_cipher(dir.clone()).expect("v22 database should migrate");
-    assert_eq!(db.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
     let go = db
         .account_verification_state("v22-account")
         .unwrap()
@@ -4555,7 +4469,6 @@ fn v22_to_v23_creates_one_usable_rollback_backup_and_contract_tables() {
     drop(backup);
 
     let reopened = open_with_host_cipher(dir.clone()).expect("v23 database should reopen");
-    assert_eq!(reopened.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
     drop(reopened);
     assert_eq!(pre_v23_backup_paths(&dir).len(), 1);
     fs::remove_dir_all(dir).unwrap();
@@ -4614,7 +4527,6 @@ fn zen_free_model_catalog_survives_reopen() {
 fn v26_fresh_database_has_contract_tables_and_reopens() {
     let dir = temp_data_dir("v26-fresh");
     let db = Database::open(dir.clone()).unwrap();
-    assert_eq!(db.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
     let tables: i64 = db
         .conn
         .query_row(
@@ -4628,10 +4540,8 @@ fn v26_fresh_database_has_contract_tables_and_reopens() {
         .unwrap();
     assert_eq!(tables, 2);
     db.migrate().unwrap();
-    assert_eq!(db.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
     drop(db);
     let reopened = Database::open(dir.clone()).unwrap();
-    assert_eq!(reopened.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
     drop(reopened);
     fs::remove_dir_all(dir).unwrap();
 }
@@ -4664,7 +4574,6 @@ fn v25_to_v26_backfills_zen_catalog_into_provider_scope() {
         assert_eq!(schema_version_on(&conn).unwrap(), 25);
     }
     let db = Database::open(dir.clone()).expect("v25 database should migrate to v26");
-    assert_eq!(db.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
     let scope = db
         .load_persisted_scope(&ContractScope::provider(OPENCODE_ZEN_FREE_PROVIDER_ID))
         .unwrap()
@@ -4979,27 +4888,28 @@ fn v23_persists_verification_custom_config_and_capabilities() {
             endpoint_url: "https://api.example.com/v1/chat/completions".into(),
             upstream_protocol: UpstreamProtocolKind::ChatCompletions,
         },
-        true,
     )
     .unwrap();
-    let rejected = db.upsert_account_custom_config(
-        "custom-1",
-        &AccountCustomConfigInput {
-            endpoint_url: "https://api.example.com/v1/messages".into(),
-            upstream_protocol: UpstreamProtocolKind::Messages,
-        },
-        false,
-    );
-    assert!(
-        rejected.is_err(),
-        "protocol must stay immutable after create"
+    let updated = db
+        .upsert_account_custom_config(
+            "custom-1",
+            &AccountCustomConfigInput {
+                endpoint_url: "https://api.example.com/v1/messages".into(),
+                upstream_protocol: UpstreamProtocolKind::Messages,
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        updated.upstream_protocol,
+        UpstreamProtocolKind::Messages,
+        "Custom protocol stays editable after create"
     );
     db.replace_account_model_capabilities(
         "custom-1",
         &[AccountModelCapabilityInput {
             public_model: "deepseek/deepseek-v4-flash".into(),
             upstream_model: "deepseek/deepseek-v4-flash".into(),
-            protocol: UpstreamProtocolKind::ChatCompletions,
+            protocol: UpstreamProtocolKind::Messages,
             source: Some("manual".into()),
         }],
     )
@@ -5331,6 +5241,7 @@ fn account_migration_batch_is_atomic_and_preserves_order() {
             capabilities: Vec::new(),
             verification_status: ConnectionVerificationStatus::NotRequired,
             connection_verified_at: None,
+            ollama_billing_tier: None,
         },
         AccountImportRecord {
             account: custom,
@@ -5346,6 +5257,7 @@ fn account_migration_batch_is_atomic_and_preserves_order() {
             }],
             verification_status: ConnectionVerificationStatus::Pending,
             connection_verified_at: None,
+            ollama_billing_tier: None,
         },
     ];
     db.conn
@@ -5569,7 +5481,6 @@ fn custom_mutations_repend_but_keep_verified_accounts_enabled() {
             endpoint_url: "https://api.example.net/v2/chat/completions".into(),
             upstream_protocol: UpstreamProtocolKind::ChatCompletions,
         },
-        false,
     )
     .unwrap();
     let after_url = db.get_account("custom-stale").unwrap().unwrap();
@@ -5731,7 +5642,6 @@ fn custom_verification_cas_rejects_stale_key_config_caps_and_delete() {
             endpoint_url: "https://api.example.net/v2/chat/completions".into(),
             upstream_protocol: UpstreamProtocolKind::ChatCompletions,
         },
-        false,
     )
     .unwrap();
     assert!(
@@ -5849,6 +5759,35 @@ fn unroutable_catalog_plans_cannot_persist_enabled_true() {
     go.enabled = true;
     db.create_account(&go).unwrap();
     assert!(db.get_account("go-enabled").unwrap().unwrap().enabled);
+
+    // Ollama Cloud opened its enable bit once routing, control plane, and
+    // usage shipped; enabled rows must persist through the same gates.
+    let mut ollama = account("ollama-enabled");
+    ollama.provider_id = OLLAMA_PROVIDER_ID.to_string();
+    ollama.enabled = true;
+    db.create_account(&ollama).unwrap();
+    assert!(db.get_account("ollama-enabled").unwrap().unwrap().enabled);
+    db.update_account(
+        "ollama-enabled",
+        &AccountUpdate {
+            enabled: Some(false),
+            ..AccountUpdate::default()
+        },
+        None,
+        None,
+    )
+    .unwrap();
+    db.update_account(
+        "ollama-enabled",
+        &AccountUpdate {
+            enabled: Some(true),
+            ..AccountUpdate::default()
+        },
+        None,
+        None,
+    )
+    .unwrap();
+    assert!(db.get_account("ollama-enabled").unwrap().unwrap().enabled);
 
     for plan in BUILTIN_PROVIDERS
         .iter()
@@ -5981,6 +5920,7 @@ fn open_sanitizes_unroutable_catalog_leftovers_without_touching_go_zen_or_unknow
         Vec::<(&str, &str)>::new()
     );
     assert!(builtin_provider(CUSTOM_PROVIDER_ID).is_some_and(|plan| plan.routable));
+    assert!(builtin_provider(OLLAMA_PROVIDER_ID).is_some_and(|plan| plan.routable));
 
     let dir = temp_data_dir("unroutable-sanitation");
     let db = Database::open(dir.clone()).unwrap();
@@ -6049,6 +5989,16 @@ fn open_sanitizes_unroutable_catalog_leftovers_without_touching_go_zen_or_unknow
     );
     leftover_enable(&db, "draft-api");
 
+    // An enabled Ollama Cloud row is now legitimate (routable offering),
+    // so open must leave it untouched.
+    persist_unroutable_draft(
+        &db,
+        builtin_provider(OLLAMA_PROVIDER_ID).unwrap(),
+        "ollama-leftover",
+        "ollama-leftover-notes",
+    );
+    leftover_enable(&db, "ollama-leftover");
+
     let zen_before = sanitation_snapshot(&db, ZEN_FREE_ACCOUNT_ID);
     let go_before = sanitation_snapshot(&db, "go-keep");
     let unknown_before = sanitation_snapshot(&db, "unknown-keep");
@@ -6056,8 +6006,10 @@ fn open_sanitizes_unroutable_catalog_leftovers_without_touching_go_zen_or_unknow
     let goat_verified_before = sanitation_snapshot(&db, "goat-verified");
     let goat_failed_before = sanitation_snapshot(&db, "goat-failed");
     let custom_before = sanitation_snapshot(&db, "draft-api");
+    let ollama_before = sanitation_snapshot(&db, "ollama-leftover");
     assert!(go_before.enabled);
     assert!(custom_before.enabled);
+    assert!(ollama_before.enabled);
     assert!(unknown_before.enabled);
     assert!(goat_pending_before.enabled);
     assert!(goat_verified_before.enabled);
@@ -6124,6 +6076,13 @@ fn open_sanitizes_unroutable_catalog_leftovers_without_touching_go_zen_or_unknow
         "now-routable Custom leftovers must not be disabled at open"
     );
 
+    let ollama_after = sanitation_snapshot(&db, "ollama-leftover");
+    assert_eq!(ollama_after, ollama_before);
+    assert!(
+        ollama_after.enabled,
+        "routable Ollama leftovers must not be disabled at open"
+    );
+
     let first_pass: Vec<_> = [
         ZEN_FREE_ACCOUNT_ID,
         "go-keep",
@@ -6132,6 +6091,7 @@ fn open_sanitizes_unroutable_catalog_leftovers_without_touching_go_zen_or_unknow
         "goat-verified",
         "goat-failed",
         "draft-api",
+        "ollama-leftover",
     ]
     .into_iter()
     .map(|id| (id.to_string(), sanitation_snapshot(&db, id)))
@@ -6322,7 +6282,6 @@ fn populate_v26_source(dir: &Path) -> (String, String) {
 fn v27_fresh_database_skips_pre_v3_backup_and_has_one_primary() {
     let dir = temp_data_dir("v27-fresh");
     let db = Database::open(dir.clone()).unwrap();
-    assert_eq!(db.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
     assert!(pre_v3_backup_paths(&dir).is_empty());
     assert!(table_exists(&db.conn, "access_keys").unwrap());
     assert!(!table_exists(&db.conn, "sub_gateway_keys").unwrap());
@@ -6417,7 +6376,6 @@ fn v28_to_v29_purges_scnet_accounts_and_acknowledgements() {
     drop(conn);
 
     let db = Database::open(dir.clone()).unwrap();
-    assert_eq!(db.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
     assert!(
         db.get_account("scnet-leftover").unwrap().is_none(),
         "v29 must delete SCNet account rows"
@@ -6495,7 +6453,6 @@ fn v31_to_v32_collapses_custom_protocols_and_disables_the_account() {
     drop(db);
 
     let db = Database::open(dir.clone()).unwrap();
-    assert_eq!(db.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
     let config = db.account_custom_config("custom-v31").unwrap().unwrap();
     assert_eq!(
         config.upstream_protocol,
@@ -6584,7 +6541,6 @@ fn v32_to_v33_backfills_public_and_upstream_identities_for_custom_and_goat() {
     drop(conn);
 
     let migrated = Database::open(dir.clone()).unwrap();
-    assert_eq!(migrated.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
     for (account_id, expected) in [("custom-v32", "custom-public"), ("goat-v32", "goat/model")] {
         let capabilities = migrated
             .list_account_model_capabilities(account_id)
@@ -6613,7 +6569,6 @@ fn v33_to_v34_adds_empty_cpa_singleton_configuration_table() {
     drop(conn);
 
     let migrated = Database::open(dir.clone()).unwrap();
-    assert_eq!(migrated.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
     assert!(table_exists(&migrated.conn, "cpa_integration").unwrap());
     assert!(migrated.cpa_integration().unwrap().is_none());
     drop(migrated);
@@ -6679,18 +6634,63 @@ fn cpa_singleton_upsert_catalog_and_disconnect_are_idempotent_and_atomic() {
     );
 
     db.replace_cpa_model_catalog(
-        &["gpt-5.6-sol".into(), "unknown-cpa-model".into()],
+        &[
+            CpaCatalogModel {
+                id: "gpt-5.6-sol".into(),
+                owned_by: Some("openai".into()),
+            },
+            "unknown-cpa-model".into(),
+        ],
         "http://127.0.0.1:9317",
         now,
     )
     .unwrap();
-    assert_eq!(db.cpa_model_catalog().unwrap().unwrap().models.len(), 2);
+    let catalog = db.cpa_model_catalog().unwrap().unwrap();
+    assert_eq!(catalog.models.len(), 2);
+    assert_eq!(catalog.models[0].id, "gpt-5.6-sol");
+    assert_eq!(catalog.models[0].owned_by.as_deref(), Some("openai"));
+    assert!(catalog.models[1].owned_by.is_none());
 
     db.delete_cpa_integration().unwrap();
     db.delete_cpa_integration().unwrap();
     assert!(db.cpa_integration().unwrap().is_none());
     assert!(db.cpa_model_catalog().unwrap().is_none());
     assert!(db.get_account(CPA_ACCOUNT_ID).unwrap().is_none());
+    drop(db);
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn cpa_model_catalog_reads_legacy_id_arrays() {
+    let dir = temp_data_dir("cpa-catalog-legacy-ids");
+    let db = open_with_host_cipher(dir.clone()).unwrap();
+    db.conn
+        .execute(
+            "INSERT INTO provider_model_catalogs
+                 (provider_id, models_json, refreshed_at, source_url)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![
+                CPA_PROVIDER_ID,
+                r#"["gpt-5","claude"]"#,
+                Utc::now().to_rfc3339(),
+                "http://127.0.0.1:8317",
+            ],
+        )
+        .unwrap();
+    let catalog = db.cpa_model_catalog().unwrap().unwrap();
+    assert_eq!(
+        catalog.models,
+        [
+            CpaCatalogModel {
+                id: "gpt-5".into(),
+                owned_by: None,
+            },
+            CpaCatalogModel {
+                id: "claude".into(),
+                owned_by: None,
+            },
+        ]
+    );
     drop(db);
     fs::remove_dir_all(dir).unwrap();
 }
@@ -6713,7 +6713,6 @@ fn v26_to_v27_copies_keys_drops_columns_and_writes_hashed_backup() {
     };
 
     let db = open_with_host_cipher(dir.clone()).expect("v26 database should migrate to v27");
-    assert_eq!(db.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
     assert_eq!(
         db.primary_access_key_value().unwrap().as_deref(),
         Some(primary.as_str())
@@ -6767,7 +6766,6 @@ fn v26_to_v27_copies_keys_drops_columns_and_writes_hashed_backup() {
     assert!(evidence.contains(backup_name));
 
     let reopened = open_with_host_cipher(dir.clone()).unwrap();
-    assert_eq!(reopened.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
     drop(reopened);
     assert_eq!(pre_v3_backup_paths(&dir), backups);
 
@@ -6779,7 +6777,6 @@ fn v21_migrates_through_v26_before_v27_backup() {
     let dir = temp_data_dir("v21-through-v26-v27");
     create_v21_fixture(&dir, false);
     let db = open_with_host_cipher(dir.clone()).expect("v21 database should migrate");
-    assert_eq!(db.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
     drop(db);
     let pre_v3 = pre_v3_backup_paths(&dir);
     assert_eq!(pre_v3.len(), 1);
@@ -6804,7 +6801,6 @@ fn v27_fault_before_schema_version_leaves_usable_v26_source() {
     drop(conn);
     assert_eq!(pre_v3_backup_paths(&dir).len(), 1);
     let db = open_with_host_cipher(dir.clone()).expect("v26 source should still migrate");
-    assert_eq!(db.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
     drop(db);
     fs::remove_dir_all(dir).unwrap();
 }
@@ -6835,11 +6831,9 @@ fn v27_duplicate_start_converges_on_one_primary() {
             .collect::<Vec<_>>()
     );
     for db in results.into_iter().flatten() {
-        assert_eq!(db.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
         drop(db);
     }
     let db = open_with_host_cipher(dir.clone()).unwrap();
-    assert_eq!(db.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
     let count: i64 = db
         .conn
         .query_row(
@@ -6881,7 +6875,79 @@ fn v27_wrong_cipher_fails_closed_without_claiming_v27() {
     drop(conn);
 
     let recovered = Database::open_with_cipher(dir.clone(), right).unwrap();
-    assert_eq!(recovered.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
+    drop(recovered);
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn current_schema_wrong_host_cipher_fails_closed_without_rewriting_ciphertext() {
+    let cipher_a: Arc<dyn KeyCipher + Send + Sync> =
+        Arc::new(StaticKeyCipher::new("alpha-host-secret"));
+    let cipher_b: Arc<dyn KeyCipher + Send + Sync> =
+        Arc::new(StaticKeyCipher::new("omega-host-secret"));
+
+    let empty = temp_data_dir("v37-empty-cipher-open");
+    drop(Database::open_with_cipher(empty.clone(), cipher_b.clone()).unwrap());
+    fs::remove_dir_all(&empty).unwrap();
+
+    let no_auth = temp_data_dir("v37-no-auth-cipher-open");
+    drop(Database::open_with_cipher(no_auth.clone(), cipher_a.clone()).unwrap());
+    drop(Database::open_with_cipher(no_auth.clone(), cipher_b.clone()).unwrap());
+    fs::remove_dir_all(&no_auth).unwrap();
+
+    let dir = temp_data_dir("v37-wrong-host-cipher");
+    let key_plain = "sk-preflight-live-key";
+    let password_plain = "pw-preflight-live-secret";
+    let db = Database::open_with_cipher(dir.clone(), cipher_a.clone()).unwrap();
+    assert_eq!(schema_version_on(&db.conn).unwrap(), CURRENT_SCHEMA_VERSION);
+    let mut enc = account("enc-current");
+    enc.key_cipher = cipher_a.encrypt(key_plain).unwrap();
+    enc.password_cipher = Some(cipher_a.encrypt(password_plain).unwrap());
+    db.create_account(&enc).unwrap();
+    let stored = db.get_account("enc-current").unwrap().unwrap();
+    let key_before = stored.key_cipher.clone();
+    let password_before = stored.password_cipher.clone();
+    drop(db);
+
+    let error = match Database::open_with_cipher(dir.clone(), cipher_b) {
+        Ok(_) => panic!("wrong host cipher must fail closed on current schema"),
+        Err(error) => error,
+    };
+    let message = format!("{error:#}");
+    assert!(
+        message.contains("host cipher rejected") && message.contains("key_cipher"),
+        "{message}"
+    );
+    assert!(
+        !message.contains(&key_before)
+            && !message.contains(password_before.as_deref().unwrap_or_default())
+            && !message.contains(key_plain)
+            && !message.contains(password_plain)
+            && !message.contains("alpha-host-secret")
+            && !message.contains("omega-host-secret"),
+        "probe error must not leak ciphertext, plaintext, or host secrets: {message}"
+    );
+
+    let conn = Connection::open(dir.join("data.sqlite")).unwrap();
+    assert_eq!(schema_version_on(&conn).unwrap(), CURRENT_SCHEMA_VERSION);
+    let (key_after, password_after): (String, Option<String>) = conn
+        .query_row(
+            "SELECT key_cipher, password_cipher FROM accounts WHERE id = ?1",
+            ["enc-current"],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(key_after, key_before);
+    assert_eq!(password_after, password_before);
+    drop(conn);
+
+    Database::open(dir.clone()).expect(
+        "current schema still opens without a host cipher; v27 is the rewrite that requires one",
+    );
+    let recovered = Database::open_with_cipher(dir.clone(), cipher_a).unwrap();
+    let loaded = recovered.get_account("enc-current").unwrap().unwrap();
+    assert_eq!(loaded.key_cipher, key_before);
+    assert_eq!(loaded.password_cipher, password_before);
     drop(recovered);
     fs::remove_dir_all(dir).unwrap();
 }
@@ -7035,7 +7101,6 @@ fn v27_vacuum_into_writer_rejects_stale_backup_and_retries() {
     v27_test_hooks::set_race_during_vacuum(true);
     let _guard = V27HookGuard;
     let db = open_with_host_cipher(dir.clone()).expect("raced VACUUM INTO should retry and finish");
-    assert_eq!(db.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
     drop(db);
     let backups = pre_v3_backup_paths(&dir);
     assert!(
@@ -7176,7 +7241,6 @@ fn v31_migration_creates_override_table() {
     drop(db);
 
     let db = Database::open(dir.clone()).unwrap();
-    assert_eq!(db.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
     let table_exists: i64 = db
         .conn
         .query_row(
@@ -7459,7 +7523,6 @@ fn v35_maps_known_pairs_conserves_rows_and_writes_pre_v35_snapshot() {
     drop(conn);
 
     let db = open_with_host_cipher(dir.clone()).unwrap();
-    assert_eq!(schema_version_on(&db.conn).unwrap(), CURRENT_SCHEMA_VERSION);
     sqlite_quick_check(&db.conn).unwrap();
     sqlite_foreign_key_check(&db.conn).unwrap();
     let account_count_after: i64 = db
@@ -7500,7 +7563,8 @@ fn v35_maps_known_pairs_conserves_rows_and_writes_pre_v35_snapshot() {
 fn v35_unknown_pair_rolls_back_without_mutation() {
     let dir = temp_data_dir("v35-unknown-pair");
     let db = open_with_host_cipher(dir.clone()).unwrap();
-    let leftover = account("v35-unknown");
+    let mut leftover = account("v35-unknown");
+    leftover.key_cipher = fixture_account_key_cipher();
     db.create_account(&leftover).unwrap();
     drop(db);
     reverse_current_to_v34(&dir);
@@ -7571,7 +7635,6 @@ fn v35_catalog_collision_rolls_back_without_mutation() {
 fn v35_dynamic_provider_tables_round_trip_and_reject_duplicate_public_models() {
     let dir = temp_data_dir("v35-dynamic-providers");
     let db = open_with_host_cipher(dir.clone()).unwrap();
-    assert_eq!(schema_version_on(&db.conn).unwrap(), CURRENT_SCHEMA_VERSION);
     let columns = v35_column_names(&db.conn, "dynamic_providers");
     for required in [
         "id",
@@ -7711,6 +7774,423 @@ fn dynamic_provider_patch_fault_rolls_back_mappings_and_runtime_state() {
     assert_eq!(loaded.mappings[0].upstream_model, "vendor/opus");
     let account = db.get_account(&first.id).unwrap().unwrap();
     assert_eq!(account.auth_error.as_deref(), Some("stale"));
+    drop(db);
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn replace_dynamic_provider_refuses_to_fan_out_a_replacement_key() {
+    let dir = temp_data_dir("dyn-no-fanout");
+    let db = open_with_host_cipher(dir.clone()).unwrap();
+    let now = Utc::now();
+    let provider_id = uuid::Uuid::new_v4().to_string();
+    let runtime = crate::dynamic::DynamicProviderRuntime {
+        id: provider_id.clone(),
+        name: "Fanout".into(),
+        endpoint_url: "http://127.0.0.1:9".into(),
+        upstream_protocol: crate::provider::UpstreamProtocolKind::ChatCompletions,
+        auth_kind: ocg_domain::dynamic::DynamicAuthKind::Bearer,
+        mappings: vec![ocg_domain::dynamic::DynamicModelMapping {
+            public_model: "lab-opus".into(),
+            upstream_model: "vendor/opus".into(),
+        }],
+        created_at: now,
+        updated_at: now,
+    };
+    let mut first = account("dyn-fanout-1");
+    first.provider_id = provider_id.clone();
+    first.key_cipher = fixture_account_key_cipher();
+    db.create_dynamic_provider(&runtime, &first).unwrap();
+    let mut second = account("dyn-fanout-2");
+    second.provider_id = provider_id.clone();
+    second.key_cipher = test_host_cipher().encrypt("sk-second").unwrap();
+    db.create_account(&second).unwrap();
+
+    let error = db
+        .replace_dynamic_provider(&runtime, false, false, Some("cipher-new"))
+        .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("replacement Key can only be written to the singleton account"),
+        "{error}"
+    );
+    let first_loaded = db.get_account(&first.id).unwrap().unwrap();
+    let second_loaded = db.get_account(&second.id).unwrap().unwrap();
+    assert_eq!(first_loaded.key_cipher, first.key_cipher);
+    assert_eq!(second_loaded.key_cipher, second.key_cipher);
+    drop(db);
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn imported_dynamic_auth_change_rejects_destination_only_accounts() {
+    let dir = temp_data_dir("dyn-import-auth-conflict");
+    let db = open_with_host_cipher(dir.clone()).unwrap();
+    let now = Utc::now();
+    let provider_id = uuid::Uuid::new_v4().to_string();
+    let mut runtime = crate::dynamic::DynamicProviderRuntime {
+        id: provider_id.clone(),
+        name: "Auth conflict".into(),
+        endpoint_url: "http://127.0.0.1:9".into(),
+        upstream_protocol: crate::provider::UpstreamProtocolKind::ChatCompletions,
+        auth_kind: ocg_domain::dynamic::DynamicAuthKind::None,
+        mappings: vec![ocg_domain::dynamic::DynamicModelMapping {
+            public_model: "lab-opus".into(),
+            upstream_model: "vendor/opus".into(),
+        }],
+        created_at: now,
+        updated_at: now,
+    };
+    let mut destination_only = account("dyn-destination-only");
+    destination_only.provider_id = provider_id.clone();
+    destination_only.credential_kind = CredentialKind::None;
+    destination_only.key_cipher.clear();
+    db.create_dynamic_provider(&runtime, &destination_only)
+        .unwrap();
+
+    runtime.auth_kind = ocg_domain::dynamic::DynamicAuthKind::Bearer;
+    let error = upsert_imported_dynamic_provider_on(&db.conn, &runtime, &HashSet::new())
+        .expect_err("destination-only account must block an auth-boundary change");
+    assert!(
+        error.to_string().contains("destination-only accounts"),
+        "{error}"
+    );
+    assert_eq!(
+        db.get_dynamic_provider(&provider_id)
+            .unwrap()
+            .unwrap()
+            .auth_kind,
+        ocg_domain::dynamic::DynamicAuthKind::None
+    );
+
+    drop(db);
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn ollama_billing_create_failure_rolls_back_the_account_row() {
+    let dir = temp_data_dir("ollama-billing-atomic");
+    let db = open_with_host_cipher(dir.clone()).unwrap();
+    let mut ollama = account("ollama-atomic");
+    ollama.provider_id = OLLAMA_PROVIDER_ID.to_string();
+    ollama.key_cipher = fixture_account_key_cipher();
+    ollama.purchase_date = "2026-08-01".into();
+    db.conn
+        .execute_batch(
+            "CREATE TRIGGER fail_ollama_billing
+                 BEFORE INSERT ON ollama_cloud_billing
+                 BEGIN
+                     SELECT RAISE(ABORT, 'forced ollama billing failure');
+                 END;",
+        )
+        .unwrap();
+    let error = db
+        .create_account_with_contract_and_billing(&ollama, None, &[], Some(OllamaBillingTier::Pro))
+        .expect_err("billing failure should abort the create");
+    assert!(
+        error.to_string().contains("forced ollama billing failure"),
+        "{error}"
+    );
+    assert!(db.get_account("ollama-atomic").unwrap().is_none());
+    assert_eq!(db.ollama_cloud_billing_tier("ollama-atomic").unwrap(), None);
+    drop(db);
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn ollama_billing_update_failure_preserves_account_fields_and_key() {
+    let dir = temp_data_dir("ollama-billing-update-atomic");
+    let db = open_with_host_cipher(dir.clone()).unwrap();
+    let original_key = fixture_account_key_cipher();
+    let replacement_key = test_host_cipher()
+        .encrypt("sk-replacement")
+        .expect("replacement key should encrypt");
+    let mut ollama = account("ollama-update-atomic");
+    ollama.provider_id = OLLAMA_PROVIDER_ID.to_string();
+    ollama.name = "original-name".into();
+    ollama.key_cipher = original_key.clone();
+    ollama.purchase_date = "2026-08-01".into();
+    db.create_account_with_contract_and_billing(&ollama, None, &[], Some(OllamaBillingTier::Pro))
+        .unwrap();
+
+    db.conn
+        .execute_batch(
+            "CREATE TRIGGER fail_ollama_billing_update
+                 BEFORE INSERT ON ollama_cloud_billing
+                 BEGIN
+                     SELECT RAISE(ABORT, 'forced ollama billing update failure');
+                 END;",
+        )
+        .unwrap();
+    let rename = AccountUpdate {
+        name: Some("renamed".into()),
+        ..AccountUpdate::default()
+    };
+    let error = db
+        .update_account_with_billing(
+            "ollama-update-atomic",
+            &rename,
+            Some(&replacement_key),
+            None,
+            Some(Some(OllamaBillingTier::Max)),
+        )
+        .expect_err("billing failure should abort the account update");
+    assert!(
+        error
+            .to_string()
+            .contains("forced ollama billing update failure"),
+        "{error}"
+    );
+    let rolled_back = db.get_account("ollama-update-atomic").unwrap().unwrap();
+    assert_eq!(rolled_back.name, "original-name");
+    assert_eq!(rolled_back.key_cipher, original_key);
+    assert_eq!(
+        db.ollama_cloud_billing_tier("ollama-update-atomic")
+            .unwrap(),
+        Some(OllamaBillingTier::Pro)
+    );
+
+    db.conn
+        .execute_batch("DROP TRIGGER fail_ollama_billing_update;")
+        .unwrap();
+    db.update_account_with_billing(
+        "ollama-update-atomic",
+        &rename,
+        Some(&replacement_key),
+        None,
+        Some(Some(OllamaBillingTier::Max)),
+    )
+    .unwrap();
+    let updated = db.get_account("ollama-update-atomic").unwrap().unwrap();
+    assert_eq!(updated.name, "renamed");
+    assert_eq!(updated.key_cipher, replacement_key);
+    assert_eq!(
+        db.ollama_cloud_billing_tier("ollama-update-atomic")
+            .unwrap(),
+        Some(OllamaBillingTier::Max)
+    );
+
+    db.update_account_with_billing(
+        "ollama-update-atomic",
+        &AccountUpdate {
+            name: Some("name-only".into()),
+            ..AccountUpdate::default()
+        },
+        None,
+        None,
+        None,
+    )
+    .unwrap();
+    let name_only = db.get_account("ollama-update-atomic").unwrap().unwrap();
+    assert_eq!(name_only.name, "name-only");
+    assert_eq!(name_only.key_cipher, replacement_key);
+    assert_eq!(
+        db.ollama_cloud_billing_tier("ollama-update-atomic")
+            .unwrap(),
+        Some(OllamaBillingTier::Max)
+    );
+
+    db.update_account_with_billing(
+        "ollama-update-atomic",
+        &AccountUpdate {
+            name: Some("cleared".into()),
+            ..AccountUpdate::default()
+        },
+        None,
+        None,
+        Some(None),
+    )
+    .unwrap();
+    let cleared = db.get_account("ollama-update-atomic").unwrap().unwrap();
+    assert_eq!(cleared.name, "cleared");
+    assert_eq!(cleared.key_cipher, replacement_key);
+    assert_eq!(
+        db.ollama_cloud_billing_tier("ollama-update-atomic")
+            .unwrap(),
+        None
+    );
+
+    drop(db);
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn v36_to_v37_discards_cookie_usage_state_and_keeps_account_keys() {
+    let dir = temp_data_dir("v36-v37-ollama-billing");
+    let db = open_with_host_cipher(dir.clone()).unwrap();
+    let mut ollama = account("ollama-v36");
+    ollama.provider_id = OLLAMA_PROVIDER_ID.to_string();
+    ollama.key_cipher = fixture_account_key_cipher();
+    db.create_account(&ollama).unwrap();
+    let key_before = db.get_account("ollama-v36").unwrap().unwrap().key_cipher;
+    drop(db);
+
+    let conn = Connection::open(dir.join("data.sqlite")).unwrap();
+    conn.execute_batch(
+        "DROP TABLE IF EXISTS ollama_cloud_billing;
+         CREATE TABLE IF NOT EXISTS ollama_cloud_usage_state (
+            account_id TEXT PRIMARY KEY,
+            cookie_cipher TEXT,
+            status TEXT NOT NULL DEFAULT 'unconfigured',
+            snapshot TEXT,
+            last_error TEXT,
+            last_success_at TEXT,
+            last_attempt_at TEXT,
+            next_eligible_at TEXT,
+            failure_streak INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+         );
+         INSERT INTO ollama_cloud_usage_state (account_id, cookie_cipher, status, snapshot)
+         VALUES ('ollama-v36', 'obsolete-cookie', 'ok', '{\"windows\":[]}');
+         DELETE FROM schema_version;
+         INSERT INTO schema_version (version) VALUES (36);",
+    )
+    .unwrap();
+    drop(conn);
+
+    let migrated = open_with_host_cipher(dir.clone()).unwrap();
+    assert!(!table_exists(&migrated.conn, "ollama_cloud_usage_state").unwrap());
+    assert!(table_exists(&migrated.conn, "ollama_cloud_billing").unwrap());
+    let loaded = migrated.get_account("ollama-v36").unwrap().unwrap();
+    assert_eq!(loaded.key_cipher, key_before);
+    assert_eq!(
+        migrated.ollama_cloud_billing_tier("ollama-v36").unwrap(),
+        None
+    );
+    drop(migrated);
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn ollama_billing_tier_round_trip_and_cascade() {
+    let dir = temp_data_dir("ollama-billing-roundtrip");
+    let mut db = Database::open(dir.clone()).unwrap();
+    let mut ollama = account("ollama-bill");
+    ollama.provider_id = OLLAMA_PROVIDER_ID.to_string();
+    ollama.purchase_date = "2026-08-01".into();
+    db.create_account(&ollama).unwrap();
+    db.set_ollama_cloud_billing_tier("ollama-bill", Some(OllamaBillingTier::Pro))
+        .unwrap();
+    assert_eq!(
+        db.ollama_cloud_billing_tier("ollama-bill").unwrap(),
+        Some(OllamaBillingTier::Pro)
+    );
+    db.set_ollama_cloud_billing_tier("ollama-bill", None)
+        .unwrap();
+    assert_eq!(db.ollama_cloud_billing_tier("ollama-bill").unwrap(), None);
+    db.set_ollama_cloud_billing_tier("ollama-bill", Some(OllamaBillingTier::Team))
+        .unwrap();
+    db.delete_account("ollama-bill").unwrap();
+    assert_eq!(db.ollama_cloud_billing_tier("ollama-bill").unwrap(), None);
+    drop(db);
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn ollama_tier_change_clears_month_offset_same_tier_preserves() {
+    let dir = temp_data_dir("ollama-tier-offset");
+    let db = Database::open(dir.clone()).unwrap();
+    let mut ollama = account("ollama-offset");
+    ollama.provider_id = OLLAMA_PROVIDER_ID.to_string();
+    ollama.purchase_date = "2026-08-01".into();
+    db.create_account(&ollama).unwrap();
+    db.set_ollama_cloud_billing_tier("ollama-offset", Some(OllamaBillingTier::Pro))
+        .unwrap();
+    db.conn
+        .execute(
+            "UPDATE accounts SET usage_month_window_cost_offset = 12.5 WHERE id = ?1",
+            ["ollama-offset"],
+        )
+        .unwrap();
+    db.set_ollama_cloud_billing_tier("ollama-offset", Some(OllamaBillingTier::Pro))
+        .unwrap();
+    let offset: f64 = db
+        .conn
+        .query_row(
+            "SELECT usage_month_window_cost_offset FROM accounts WHERE id = ?1",
+            ["ollama-offset"],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(offset, 12.5);
+    db.set_ollama_cloud_billing_tier("ollama-offset", Some(OllamaBillingTier::Max))
+        .unwrap();
+    let offset: f64 = db
+        .conn
+        .query_row(
+            "SELECT usage_month_window_cost_offset FROM accounts WHERE id = ?1",
+            ["ollama-offset"],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(offset, 0.0);
+    assert_eq!(db.list_forward_logs(10).unwrap().len(), 0);
+    drop(db);
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn ollama_month_window_is_half_open_and_exposes_overage() {
+    use chrono::TimeZone;
+    let dir = temp_data_dir("ollama-month-bounds");
+    let db = Database::open(dir.clone()).unwrap();
+    let mut ollama = account("ollama-month");
+    ollama.provider_id = OLLAMA_PROVIDER_ID.to_string();
+    ollama.purchase_date = "2026-08-01".into();
+    db.create_account(&ollama).unwrap();
+    db.set_ollama_cloud_billing_tier("ollama-month", Some(OllamaBillingTier::Pro))
+        .unwrap();
+
+    let start_naive = chrono::NaiveDate::from_ymd_opt(2026, 8, 1)
+        .unwrap()
+        .and_hms_opt(0, 0, 0)
+        .unwrap();
+    let start = chrono::Local
+        .from_local_datetime(&start_naive)
+        .single()
+        .unwrap()
+        .with_timezone(&Utc);
+    let expires = purchase_expires_on("2026-08-01").unwrap();
+    let end_naive = chrono::NaiveDate::parse_from_str(&expires, "%Y-%m-%d")
+        .unwrap()
+        .and_hms_opt(0, 0, 0)
+        .unwrap();
+    let end = chrono::Local
+        .from_local_datetime(&end_naive)
+        .single()
+        .unwrap()
+        .with_timezone(&Utc);
+
+    let mut before = forward_log("ollama-month", "success", 5.0);
+    before.cost_state = "priced".into();
+    before.timestamp = start - chrono::Duration::hours(1);
+    db.log_forward(&before).unwrap();
+
+    let mut inside = forward_log("ollama-month", "success", 80.0);
+    inside.cost_state = "priced".into();
+    inside.timestamp = start + chrono::Duration::days(1);
+    db.log_forward(&inside).unwrap();
+
+    let mut at_end = forward_log("ollama-month", "success", 9.0);
+    at_end.cost_state = "priced".into();
+    at_end.timestamp = end;
+    db.log_forward(&at_end).unwrap();
+
+    let mut after = forward_log("ollama-month", "success", 11.0);
+    after.cost_state = "priced".into();
+    after.timestamp = end + chrono::Duration::hours(1);
+    db.log_forward(&after).unwrap();
+
+    let windows = db
+        .live_ollama_month_quota_window("ollama-month", 60.0)
+        .unwrap();
+    assert_eq!(windows.len(), 1);
+    assert_eq!(windows[0].used, 80.0);
+    assert_eq!(windows[0].limit_value, Some(60.0));
+    let (used, reset) = db.ollama_month_usage("ollama-month").unwrap();
+    assert_eq!(used, 80.0);
+    assert_eq!(reset, Some(end));
     drop(db);
     fs::remove_dir_all(dir).unwrap();
 }

@@ -89,8 +89,6 @@ async fn update_settings(
             .map_err(|message| V3ApiError::invalid_request_at(state, message))?;
         validate_proxy_list(state, &mut config)
             .map_err(|message| V3ApiError::invalid_request_at(state, message))?;
-        validate_upstream_url(&config.upstream_base_url)
-            .map_err(|message| V3ApiError::invalid_request_at(state, message))?;
         config.client_root_url = normalize_client_root_url(&config.client_root_url)
             .map_err(|message| V3ApiError::invalid_request_at(state, message))?;
 
@@ -146,7 +144,6 @@ fn changed_setting_fields(update: &SettingsUpdate) -> Vec<&'static str> {
     let mut fields = Vec::new();
     for (present, name) in [
         (update.gateway_port.is_some(), "gateway_port"),
-        (update.upstream_base_url.is_some(), "upstream_base_url"),
         (update.proxy_mode.is_some(), "proxy_mode"),
         (update.proxy_url.is_some(), "proxy_url"),
         (
@@ -211,9 +208,6 @@ fn apply_settings_patch(config: &mut AppConfig, update: &SettingsUpdate) {
     if let Some(gateway_port) = update.gateway_port {
         config.gateway_port = gateway_port;
     }
-    if let Some(upstream_base_url) = &update.upstream_base_url {
-        config.upstream_base_url = upstream_base_url.clone();
-    }
     if let Some(proxy_mode) = update.proxy_mode {
         config.proxy_mode = app_proxy_mode(proxy_mode);
     }
@@ -264,7 +258,6 @@ fn settings_from_state(state: &CoreState) -> Settings {
         process_generation: state.process_generation(),
         gateway_port: config.gateway_port,
         gateway_port_from_env: state.gateway_port_from_env(),
-        upstream_base_url: config.upstream_base_url,
         proxy_mode: v3_proxy_mode(config.proxy_mode),
         proxy_url: config.proxy_url,
         proxy_list_direction: v3_proxy_list_direction(config.proxy_list_direction),
@@ -363,16 +356,6 @@ fn validate_proxy_list(state: &CoreState, config: &mut AppConfig) -> Result<(), 
     Ok(())
 }
 
-fn validate_upstream_url(url: &str) -> Result<(), String> {
-    let parsed =
-        reqwest::Url::parse(url).map_err(|error| format!("invalid upstream URL: {error}"))?;
-    match parsed.scheme() {
-        "https" => Ok(()),
-        "http" if is_loopback(&parsed) => Ok(()),
-        _ => Err("upstream must use https, except loopback http".to_string()),
-    }
-}
-
 fn preferred_protocol_name(format: ApiFormat) -> &'static str {
     match format {
         ApiFormat::ChatCompletions => "chat_completions",
@@ -380,13 +363,6 @@ fn preferred_protocol_name(format: ApiFormat) -> &'static str {
         ApiFormat::Messages => "messages",
         ApiFormat::Gemini => "gemini",
     }
-}
-
-fn is_loopback(url: &reqwest::Url) -> bool {
-    matches!(
-        url.host_str(),
-        Some("localhost") | Some("127.0.0.1") | Some("::1") | Some("[::1]")
-    )
 }
 
 fn v3_proxy_mode(mode: AppProxyMode) -> ProxyMode {

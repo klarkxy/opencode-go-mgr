@@ -12,7 +12,6 @@ export type AppNavigationIcon =
   | "accounts"
   | "providers"
   | "aliases"
-  | "apps"
   | "logs"
   | "settings"
   | "cpa";
@@ -32,7 +31,6 @@ export const APP_NAVIGATION = [
   { key: "accounts", label: "账号", icon: "accounts", group: "core" },
   { key: "providers", label: "供应商", icon: "providers", group: "core" },
   { key: "aliases", label: "别名", icon: "aliases", group: "core" },
-  { key: "apps", label: "应用", icon: "apps", group: "core" },
   { key: "logs", label: "日志", icon: "logs", group: "core" },
   { key: "settings", label: "设置", icon: "settings", group: "core" },
   { key: "cpa", label: "CPA", icon: "cpa", group: "extensions" },
@@ -51,12 +49,14 @@ export const EXTENSION_APP_NAVIGATION = APP_NAVIGATION.filter(({ group }) => gro
 
 export const LEGACY_PRICING_VIEW = "pricing";
 export const PROVIDERS_VIEW: AppViewKey = "providers";
+export const PROVIDER_OTHER_TAB = "other";
 
 const viewKeySet = new Set<string>(APP_VIEW_KEYS);
 
 export interface ProviderScopeQuery {
   scope_kind?: string;
   scope_id?: string;
+  tab?: string;
 }
 
 export function isLegacyPricingView(raw: string | null | undefined): boolean {
@@ -72,11 +72,13 @@ export function resolveAppViewKey(raw: string | null | undefined): AppViewKey {
 export function readProviderScopeQuery(search: string): {
   scope_kind: string | null;
   scope_id: string | null;
+  tab: string | null;
 } {
   const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
   return {
     scope_kind: params.get("scope_kind"),
     scope_id: params.get("scope_id"),
+    tab: params.get("tab"),
   };
 }
 
@@ -95,23 +97,21 @@ export function applyAppViewSearchParams(
   if (view !== "providers") {
     url.searchParams.delete("scope_kind");
     url.searchParams.delete("scope_id");
+    url.searchParams.delete("tab");
     return url;
   }
   if (scope === undefined) return url;
   if (scope === null) {
     url.searchParams.delete("scope_kind");
     url.searchParams.delete("scope_id");
+    url.searchParams.delete("tab");
     return url;
   }
   if (scope.scope_kind) url.searchParams.set("scope_kind", scope.scope_kind);
   else url.searchParams.delete("scope_kind");
   if (scope.scope_id) url.searchParams.set("scope_id", scope.scope_id);
   else url.searchParams.delete("scope_id");
-  return url;
-}
-
-export function applyAccountViewSearchParams(url: URL, accountId: string): URL {
-  applyAppViewSearchParams(url, "accounts");
-  url.searchParams.set("account_id", accountId);
+  if (scope.tab) url.searchParams.set("tab", scope.tab);
+  else url.searchParams.delete("tab");
   return url;
 }

@@ -3,13 +3,13 @@ import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 if (process.argv[1] === undefined) {
-  throw new Error("OCG Manager could not identify the active DSH runtime.");
+  throw new Error("Open Console Gateway could not identify the active DSH runtime.");
 }
 const runtimeBase = pathToFileURL(process.argv[1]).href;
 async function importFromDsh(packageName, entry) {
   const manifest = findPackageJSON(packageName, runtimeBase);
   if (manifest === undefined) {
-    throw new Error(`OCG Manager requires ${packageName} from the active DSH runtime.`);
+    throw new Error(`Open Console Gateway requires ${packageName} from the active DSH runtime.`);
   }
   return import(pathToFileURL(join(dirname(manifest), entry)).href);
 }
@@ -32,12 +32,12 @@ export const name = "ocg-manager-dsh";
 export const inject = ["llm"];
 
 const providerId = "ocg-manager";
-const displayName = "OCG Manager";
+const displayName = "Open Console Gateway";
 const baseUrl = "http://127.0.0.1:9042/v1";
 const generatedModels = "__OCG_MANAGER_GENERATED_MODELS__";
 
 if (!Array.isArray(generatedModels)) {
-  throw new Error("OCG Manager model catalog has not been generated.");
+  throw new Error("Open Console Gateway model catalog has not been generated.");
 }
 
 const piProvider = createProvider({

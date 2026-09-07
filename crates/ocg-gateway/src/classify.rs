@@ -155,7 +155,7 @@ pub fn provider_error_policy(provider_id: &str) -> ProviderErrorPolicy {
             } else {
                 Auth401Policy::RotatePersistAuthError
             },
-            rate_limit_429: RateLimit429Policy::GoWindow,
+            rate_limit_429: RateLimit429Policy::GenericFiveMinute,
         },
     }
 }
@@ -176,6 +176,7 @@ fn policy_for_kind(kind: ProviderAdapterKind) -> ProviderErrorPolicy {
         ProviderAdapterKind::CommandCodeGoat
         | ProviderAdapterKind::MiniMaxCn
         | ProviderAdapterKind::KimiCn
+        | ProviderAdapterKind::OllamaCloud
         | ProviderAdapterKind::ConfigurableHttp
         | ProviderAdapterKind::Cpa => ProviderErrorPolicy {
             inference_401: Auth401Policy::RotatePersistAuthError,

@@ -2,7 +2,7 @@
   <div class="aliases-page">
     <header class="aliases-header">
       <h1>{{ t("别名") }}</h1>
-      <p>{{ t("只读汇总当前供应商合同与 Custom 账号映射；点击编辑 Custom 可直接打开对应账号。") }}</p>
+      <p>{{ t("只读汇总当前供应商合同与 Custom 账号映射。") }}</p>
     </header>
 
     <div
@@ -45,6 +45,15 @@
           {{ t("重试") }}
         </n-button>
       </n-alert>
+      <n-alert
+        v-if="dynamicLoadError"
+        type="warning"
+        :title="t('加载供应商失败: {error}', { error: dynamicLoadError })"
+      >
+        <n-button size="small" secondary :loading="loading" @click="loadAliases({ retain: true })">
+          {{ t("重试") }}
+        </n-button>
+      </n-alert>
 
       <n-empty v-if="aliasGroups.length === 0" :description="t('暂无 Alias')" />
       <div v-else class="aliases-table-wrap">
@@ -53,10 +62,8 @@
             <tr>
               <th>{{ t("对外模型名") }}</th>
               <th>{{ t("供应商 / 方案") }}</th>
-              <th>{{ t("Custom 账号") }}</th>
               <th>{{ t("上游模型 ID") }}</th>
               <th>{{ t("可路由") }}</th>
-              <th>{{ t("操作") }}</th>
             </tr>
           </thead>
           <tbody v-for="group in aliasGroups" :key="group.public_model">
@@ -65,18 +72,8 @@
                 <code>{{ group.public_model }}</code>
               </td>
               <td>{{ row.provider_plan }}</td>
-              <td>{{ row.custom_account ?? '—' }}</td>
               <td><code>{{ row.upstream_model }}</code></td>
               <td>{{ row.routable ? t("可用") : t("不可用") }}</td>
-              <td>
-                <n-button
-                  v-if="row.custom_account_id"
-                  size="small"
-                  tertiary
-                  @click="openCustomAccount(row.custom_account_id)"
-                >{{ t("编辑 Custom") }}</n-button>
-                <span v-else>—</span>
-              </td>
             </tr>
           </tbody>
         </table>
@@ -89,29 +86,40 @@
 import { computed, onActivated, onMounted, ref } from "vue";
 import { NAlert, NButton, NEmpty, NSpin } from "naive-ui";
 import type { Account } from "../api/dashboard.ts";
-import type { ProviderCatalogEntry, ProviderContractsResponse } from "../api/providers.ts";
+import type {
+  DynamicProviderView,
+  ProviderCatalogEntry,
+  ProviderContractsResponse,
+} from "../api/providers.ts";
+import { providerApi } from "../api/providers.ts";
+import { isDynamicCatalogEntry } from "../domain/dynamic-provider.ts";
 import { flattenProviderScopes, normalizeProviderContractsResponse } from "../domain/provider-contracts.ts";
-import { providerAliasRows } from "../domain/provider-aliases.ts";
+import { mergeProviderAliasRows } from "../domain/provider-aliases.ts";
 import { t } from "../i18n/index.ts";
 import { useAccountsStore } from "../stores/accounts.ts";
 import { useProvidersStore } from "../stores/providers.ts";
 import { dashboardErrorDetail } from "../utils/errors.ts";
-import { applyAccountViewSearchParams } from "./app-navigation.ts";
 
 const accountsStore = useAccountsStore();
 const providersStore = useProvidersStore();
 const contracts = ref<ProviderContractsResponse | null>(null);
 const catalog = ref<ProviderCatalogEntry[] | null>(null);
 const accounts = ref<Account[]>([]);
+const dynamicProviders = ref<DynamicProviderView[]>([]);
 const loading = ref(false);
 const loadError = ref("");
 const accountsLoadError = ref("");
+const dynamicLoadError = ref("");
 let activatedOnce = false;
 
 const initialLoading = computed(() => loading.value && !contracts.value);
 const aliasRows = computed(() => (
   contracts.value
-    ? providerAliasRows(flattenProviderScopes(contracts.value, catalog.value), accounts.value)
+    ? mergeProviderAliasRows(
+      flattenProviderScopes(contracts.value, catalog.value),
+      accounts.value,
+      dynamicProviders.value,
+    )
     : []
 ));
 const aliasGroups = computed(() => {
@@ -130,14 +138,44 @@ const aliasGroups = computed(() => {
 async function loadAliases(options: { retain?: boolean } = {}): Promise<void> {
   if (loading.value) return;
   loading.value = true;
-  if (!options.retain) loadError.value = "";
+  if (!options.retain) {
+    loadError.value = "";
+    dynamicLoadError.value = "";
+  }
   try {
     const [contractsResult, catalogResult, accountsResult] = await Promise.allSettled([
       providersStore.loadContracts(),
       providersStore.loadCatalog(),
       accountsStore.loadPresented(),
     ]);
-    if (catalogResult.status === "fulfilled") catalog.value = catalogResult.value;
+    if (catalogResult.status === "fulfilled") {
+      catalog.value = catalogResult.value;
+      const entries = catalogResult.value.filter(isDynamicCatalogEntry);
+      if (entries.length === 0) {
+        dynamicProviders.value = [];
+        dynamicLoadError.value = "";
+      } else {
+        const details = await Promise.allSettled(
+          entries.map((entry) => providerApi.getDynamicProvider(entry.provider_id)),
+        );
+        const previous = new Map(dynamicProviders.value.map((provider) => [provider.id, provider]));
+        const next: DynamicProviderView[] = [];
+        const failures: string[] = [];
+        details.forEach((result, index) => {
+          if (result.status === "fulfilled") {
+            next.push(result.value);
+            return;
+          }
+          failures.push(dashboardErrorDetail(result.reason));
+          if (options.retain) {
+            const kept = previous.get(entries[index]?.provider_id ?? "");
+            if (kept) next.push(kept);
+          }
+        });
+        dynamicProviders.value = next;
+        dynamicLoadError.value = failures[0] ?? "";
+      }
+    }
     if (accountsResult.status === "fulfilled") {
       accounts.value = accountsResult.value;
       accountsLoadError.value = "";
@@ -153,12 +191,6 @@ async function loadAliases(options: { retain?: boolean } = {}): Promise<void> {
   } finally {
     loading.value = false;
   }
-}
-
-function openCustomAccount(accountId: string): void {
-  const url = applyAccountViewSearchParams(new URL(window.location.href), accountId);
-  window.history.pushState(null, "", url);
-  window.dispatchEvent(new PopStateEvent("popstate"));
 }
 
 onMounted(() => void loadAliases());

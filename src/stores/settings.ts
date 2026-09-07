@@ -19,18 +19,27 @@ export const useSettingsStore = defineStore("settings", () => {
   const loading = ref(false);
   const error = ref("");
 
+  // Overlapping loads resolve out of order; only the latest request commits
+  // state. Stale calls still return/throw to their own caller unchanged.
+  let loadGeneration = 0;
+  let claudeDesktopGeneration = 0;
+
   async function load(): Promise<AppConfig> {
+    const generation = ++loadGeneration;
     loading.value = true;
     try {
       const result = await dashboardApi.getSettings();
+      if (generation !== loadGeneration) return result;
       settings.value = result;
       error.value = "";
       return result;
     } catch (e) {
-      error.value = e instanceof Error ? e.message : String(e);
+      if (generation === loadGeneration) {
+        error.value = e instanceof Error ? e.message : String(e);
+      }
       throw e;
     } finally {
-      loading.value = false;
+      if (generation === loadGeneration) loading.value = false;
     }
   }
 
@@ -38,7 +47,7 @@ export const useSettingsStore = defineStore("settings", () => {
     return load();
   }
 
-  async function put(update: AppConfig): Promise<void> {
+  async function putPresented(update: AppConfig): Promise<AppConfig> {
     try {
       await dashboardApi.updateSettings(update);
       await load();
@@ -46,16 +55,14 @@ export const useSettingsStore = defineStore("settings", () => {
       if (isRevisionConflict(cause)) await load();
       throw cause;
     }
-  }
-
-  async function putPresented(update: AppConfig): Promise<AppConfig> {
-    await put(update);
     if (!settings.value) throw new Error("settings reload returned no resource");
     return settings.value;
   }
 
   async function loadClaudeDesktop(): Promise<ClaudeDesktopModels> {
+    const generation = ++claudeDesktopGeneration;
     const result = await dashboardApi.getClaudeDesktopModels();
+    if (generation !== claudeDesktopGeneration) return result;
     claudeDesktop.value = result;
     return result;
   }
@@ -63,6 +70,7 @@ export const useSettingsStore = defineStore("settings", () => {
   async function putClaudeDesktop(models: ClaudeDesktopModels): Promise<ClaudeDesktopModels> {
     try {
       const result = await dashboardApi.updateClaudeDesktopModels(models);
+      claudeDesktopGeneration += 1;
       claudeDesktop.value = result;
       return result;
     } catch (cause) {
@@ -71,24 +79,14 @@ export const useSettingsStore = defineStore("settings", () => {
     }
   }
 
-  function reset(): void {
-    settings.value = null;
-    claudeDesktop.value = null;
-    loading.value = false;
-    error.value = "";
-  }
-
   return {
     settings: computed(() => settings.value),
     claudeDesktop: computed(() => claudeDesktop.value),
     loading: computed(() => loading.value),
     error: computed(() => error.value),
-    load,
     loadPresented,
-    put,
     putPresented,
     loadClaudeDesktop,
     putClaudeDesktop,
-    reset,
   };
 });

@@ -214,16 +214,13 @@ fn create_locked(
         updated_at: now,
     };
     let runtime = runtime_from_definition(definition, now, now);
-    {
+    let snapshot = {
         let db = state.db.lock();
         db.create_dynamic_provider(&runtime, &account)
-            .map_err(|error| V3ApiError::invalid_request_at(state, error.to_string()))?;
-        state
-            .reload_dynamic_providers_locked(&db)
-            .map_err(V3ApiError::internal)?;
-    }
-    let revision = state.bump_settings_revision();
-    Ok(provider_mutation(state, runtime, revision))
+            .map_err(|error| V3ApiError::invalid_request_at(state, error.to_string()))?
+    };
+    state.install_dynamic_providers_snapshot(snapshot);
+    Ok(provider_mutation(state, runtime, state.settings_revision()))
 }
 
 fn update_locked(
@@ -263,32 +260,29 @@ fn update_locked(
     }
     let changing_to_none = !existing.auth_kind.is_singleton() && auth_kind.is_singleton();
     let changing_from_none = existing.auth_kind.is_singleton() && !auth_kind.is_singleton();
-    let replacement_key = if changing_from_none {
-        Some(first_account_key(state, auth_kind, input.key.as_deref())?)
-    } else if changing_to_none {
-        None
-    } else {
-        input
-            .key
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(|key| state.encrypt_key(key).map_err(V3ApiError::internal))
-            .transpose()?
-    };
-    if changing_from_none && replacement_key.is_none() {
+    let supplied_key = input
+        .key
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    if !changing_from_none && supplied_key.is_some() {
         return Err(V3ApiError::invalid_request_at(
             state,
-            "changing from none-auth to keyed auth requires a replacement Key",
+            "account Keys are owned by Accounts; rotate them there",
         ));
     }
+    let replacement_key = if changing_from_none {
+        Some(first_account_key(state, auth_kind, input.key.as_deref())?)
+    } else {
+        None
+    };
     let now = Utc::now();
     let runtime = runtime_from_definition(definition, existing.created_at, now);
     let substantive = existing.endpoint_url != runtime.endpoint_url
         || existing.upstream_protocol != runtime.upstream_protocol
         || existing.auth_kind != runtime.auth_kind
         || existing.mappings != runtime.mappings;
-    {
+    let snapshot = {
         let db = state.db.lock();
         db.replace_dynamic_provider(
             &runtime,
@@ -296,13 +290,10 @@ fn update_locked(
             changing_to_none,
             replacement_key.as_deref(),
         )
-        .map_err(|error| V3ApiError::invalid_request_at(state, error.to_string()))?;
-        state
-            .reload_dynamic_providers_locked(&db)
-            .map_err(V3ApiError::internal)?;
-    }
-    let revision = state.bump_settings_revision();
-    Ok(provider_mutation(state, runtime, revision))
+        .map_err(|error| V3ApiError::invalid_request_at(state, error.to_string()))?
+    };
+    state.install_dynamic_providers_snapshot(snapshot);
+    Ok(provider_mutation(state, runtime, state.settings_revision()))
 }
 
 fn delete_locked(
@@ -313,17 +304,14 @@ fn delete_locked(
     let _settings_update = state.settings_update.lock();
     check_expectation(state, expectation)?;
     reject_builtin_id(state, provider_id)?;
-    {
+    let snapshot = {
         let db = state.db.lock();
         db.delete_dynamic_provider(provider_id)
-            .map_err(|error| map_delete_error(state, error))?;
-        state
-            .reload_dynamic_providers_locked(&db)
-            .map_err(V3ApiError::internal)?;
-    }
-    let revision = state.bump_settings_revision();
+            .map_err(|error| map_delete_error(state, error))?
+    };
+    state.install_dynamic_providers_snapshot(snapshot);
     Ok(MutationAck {
-        revision,
+        revision: state.settings_revision(),
         process_generation: state.process_generation(),
     })
 }

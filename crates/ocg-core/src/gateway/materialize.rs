@@ -19,7 +19,7 @@
 //!    **Never** trial a billable inference path.
 //!    Adapter identity is [`crate::provider::ProviderAdapterKind`]; Custom is
 //!    Configurable HTTP, not a base class.
-//! 4. Ask [`super::provider_adapter::resolve_route`] for endpoint + auth.
+//! 4. Ask [`super::provider_adapter::resolve_route_with_dynamics`] for endpoint + auth.
 //!    Production GOAT uses the official Provider API after a saved verified
 //!    catalog snapshot. The official slash raw ID pins to command-code/goat
 //!    without stealing Go kebab aliases.
@@ -65,10 +65,12 @@ pub(crate) struct MaterializedRouteSet {
 }
 
 /// Diagnostics are not a candidate protocol decision. If a resolution can use
-/// Custom or Command Code GOAT, preserve the client wire format until each
-/// actual mapping/account is materialized. Unique GOAT catalog IDs are not in
-/// OpenCode `MODEL_PROTOCOLS`. Pure builtin resolutions keep their normal
-/// early validation.
+/// Custom, Command Code GOAT, or Ollama Cloud, preserve the client wire format
+/// until each actual mapping/account is materialized. Unique GOAT and Ollama
+/// catalog IDs are not in OpenCode `MODEL_PROTOCOLS`. Zen-only resolutions
+/// default to Chat so unknown catalog `-free` rows (and their stripped Alias)
+/// are not rejected against the Go protocol table. Pure builtin resolutions
+/// keep their normal early validation.
 pub(crate) fn diagnostic_forced_upstream(
     resolved: &ResolvedModel,
     client: ApiFormat,
@@ -82,16 +84,32 @@ pub(crate) fn diagnostic_forced_upstream(
                 .unwrap_or(ApiFormat::ChatCompletions),
         );
     }
-    let preserve_client = match resolved {
-        ResolvedModel::PinnedRaw { mapping, .. } => {
-            mapping_is_configurable_http(mapping) || mapping_is_command_code_goat(mapping)
+    let zen_only = match resolved {
+        ResolvedModel::PinnedRaw { mapping, .. } => mapping_is_zen_free(mapping),
+        ResolvedModel::Alias { mappings, .. } => {
+            let routeable: Vec<_> = mappings
+                .iter()
+                .filter(|mapping| mapping.routeable)
+                .collect();
+            !routeable.is_empty() && routeable.iter().all(|mapping| mapping_is_zen_free(mapping))
         }
-        ResolvedModel::Alias { mappings, .. } => mappings.iter().any(|mapping| {
-            mapping.routeable
-                && (mapping_is_configurable_http(mapping) || mapping_is_command_code_goat(mapping))
-        }),
+    };
+    if zen_only {
+        return Some(ApiFormat::ChatCompletions);
+    }
+    let preserve_client = match resolved {
+        ResolvedModel::PinnedRaw { mapping, .. } => mapping_preserves_client_wire(mapping),
+        ResolvedModel::Alias { mappings, .. } => mappings
+            .iter()
+            .any(|mapping| mapping.routeable && mapping_preserves_client_wire(mapping)),
     };
     preserve_client.then_some(client)
+}
+
+fn mapping_preserves_client_wire(mapping: &ProviderMapping) -> bool {
+    mapping_is_configurable_http(mapping)
+        || mapping_is_command_code_goat(mapping)
+        || mapping_is_ollama_cloud(mapping)
 }
 
 fn mapping_adapter_kind(mapping: &ProviderMapping) -> Option<ProviderAdapterKind> {
@@ -108,6 +126,10 @@ fn mapping_is_configurable_http(mapping: &ProviderMapping) -> bool {
 
 fn mapping_is_zen_free(mapping: &ProviderMapping) -> bool {
     mapping_adapter_kind(mapping) == Some(ProviderAdapterKind::ZenFree)
+}
+
+fn mapping_is_ollama_cloud(mapping: &ProviderMapping) -> bool {
+    mapping_adapter_kind(mapping) == Some(ProviderAdapterKind::OllamaCloud)
 }
 
 pub(crate) fn protocol_error_from_resolve(error: ResolveError) -> ProtocolError {
@@ -489,15 +511,19 @@ fn materialize_custom_account_plan(
     )
 }
 
+struct DynamicPlanNames<'a> {
+    client_model: &'a str,
+    routing_model: &'a str,
+    resolved_alias: Option<String>,
+    mapping_upstream: &'a str,
+}
+
 fn materialize_dynamic_account_plan(
     account: &Account,
     runtime: Option<&crate::dynamic::DynamicProviderRuntime>,
     config: &AppConfig,
     parsed: &ParsedClientRequest,
-    client_model: &str,
-    routing_model: &str,
-    resolved_alias: Option<String>,
-    mapping: &ProviderMapping,
+    names: DynamicPlanNames<'_>,
 ) -> Result<RequestPlan, ProtocolError> {
     let runtime = runtime.ok_or_else(|| {
         ProtocolError::new(format!(
@@ -512,21 +538,23 @@ fn materialize_dynamic_account_plan(
         )));
     }
     let selected = runtime
-        .mapping_for_public(routing_model)
-        .or_else(|| runtime.mapping_for_upstream(&mapping.upstream_model))
-        .or_else(|| runtime.mapping_for_upstream(routing_model))
+        .mapping_for_public(names.routing_model)
+        .or_else(|| runtime.mapping_for_upstream(names.mapping_upstream))
+        .or_else(|| runtime.mapping_for_upstream(names.routing_model))
         .ok_or_else(|| {
             ProtocolError::new(format!(
-                "dynamic provider `{}` has no mapping for `{routing_model}`",
-                runtime.name
+                "dynamic provider `{}` has no mapping for `{}`",
+                runtime.name, names.routing_model
             ))
         })?;
     materialize_channel_plan(
         config,
         parsed,
-        client_model,
+        names.client_model,
         &selected.upstream_model,
-        resolved_alias.or_else(|| Some(selected.public_model.clone())),
+        names
+            .resolved_alias
+            .or_else(|| Some(selected.public_model.clone())),
         UpstreamChannel::Go,
         None,
         false,
@@ -564,9 +592,7 @@ fn collect_mapping_plans(
     let mut routes = Vec::new();
     for account in accounts {
         for candidate in &plans {
-            if account.provider_id != candidate.mapping.provider_id
-                || account.provider_id != candidate.mapping.provider_id
-            {
+            if account.provider_id != candidate.mapping.provider_id {
                 continue;
             }
             if routes.iter().any(|route: &MaterializedCandidate| {
@@ -625,10 +651,12 @@ fn collect_mapping_plans(
                     crate::dynamic::find_runtime(dynamics, &account.provider_id),
                     config,
                     parsed,
-                    client_model,
-                    routing_model,
-                    resolved_alias.clone(),
-                    &candidate.mapping,
+                    DynamicPlanNames {
+                        client_model,
+                        routing_model,
+                        resolved_alias: resolved_alias.clone(),
+                        mapping_upstream: &candidate.mapping.upstream_model,
+                    },
                 ) {
                     Ok(plan) => plan,
                     Err(error) => {

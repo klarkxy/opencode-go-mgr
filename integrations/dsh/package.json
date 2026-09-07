@@ -2,7 +2,7 @@
   "name": "ocg-manager-dsh",
   "version": "0.0.0",
   "private": true,
-  "description": "OCG Manager provider bundle for the DSH web profile",
+  "description": "Open Console Gateway provider bundle for the DSH web profile",
   "type": "module",
   "main": "./index.js",
   "files": [
