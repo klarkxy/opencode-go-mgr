@@ -8,10 +8,19 @@ conflicting writes, accounts that are cooling down, and Plans that look ready
 but are still `pending` drafts — the gateway stays pessimistic so you do not
 get billed for a bad guess.
 
-- **The dashboard never opens from the tray.** Another process is bound to
-  `127.0.0.1:9042`, or a previous tray app still holds the single-instance
-  lock. Quit that process or the previous release tray app and retry. For
-  source development only, `scripts/free-dev-port.mjs` clears stale Vite
+- **On Windows, launching appears to do nothing and no tray icon is visible.**
+  Launching again attempts to restore the existing desktop instance's tray
+  and open its dashboard. A new instance creates its tray before starting
+  the Gateway and displays startup failures in a dialog. If
+  `ocg-manager-cli.exe` owns the port, the dialog shows its PID and executable
+  path and lets you stop it and retry. Current requests are interrupted;
+  accounts, configuration, and data are not deleted. Declining preserves
+  the old service. Other port owners are diagnosed but never stopped; close
+  that application first. Standalone CLI operation remains trayless.
+  Windows may put the icon in its overflow menu; the application cannot
+  force it to stay pinned on the taskbar. If an existing desktop instance
+  is hung, end it in Task Manager and launch again. For source development
+  only, `scripts/free-dev-port.mjs` clears stale Vite
   processes on port `30001`; it does not release `9042` or the desktop
   single-instance lock.
 - **`401 Unauthorized` from the upstream.** Zen Free returns it unchanged.

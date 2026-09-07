@@ -1,6 +1,8 @@
 pub mod autostart;
 pub mod host;
 pub mod native_browser;
+mod startup_recovery;
+mod startup_ui;
 pub mod state;
 pub mod tray;
 pub mod updater;
@@ -24,11 +26,15 @@ const GATEWAY_PORT_ENV: &str = "OCG_GATEWAY_PORT";
 
 pub fn run() {
     ocg_core::cpa_runtime::host::run_internal_supervisor_if_requested();
-    tauri::Builder::default()
+    let application = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             if !args.iter().any(|arg| arg == "--startup")
                 && app.try_state::<state::AppState>().is_some()
             {
+                if let Err(error) = tray::setup_tray(app) {
+                    startup_ui::show_startup_error(&error.to_string());
+                    return;
+                }
                 tray::open_dashboard(app);
             }
         }))
@@ -36,16 +42,23 @@ pub fn run() {
         .setup(|app| {
             // Plugin setup (including single-instance ownership) precedes this
             // callback, so a secondary process never opens data or binds ports.
-            let app_state = initialize_host()?;
+            let mut app_state = initialize_host()?;
+            if startup_recovery::prepare(&app_state.core)? {
+                // The old CLI could have written while its recovery prompt was
+                // open. Reopen persisted state after it exits, never serve a
+                // snapshot captured before user consent.
+                drop(app_state);
+                app_state = initialize_host()?;
+            }
             let core = &app_state.core;
             if let Ok(resource_dir) = app.path().resource_dir() {
                 core.set_dashboard_dir(Some(resource_dir.join("dist")));
             }
-            host::gateway::start_on_configured_port(core)?;
             app.manage(app_state.clone());
+            tray::setup_tray(app.handle())?;
             host::register_dock_visibility(core, app);
             updater::configure(app.handle(), core.clone())?;
-            tray::setup_tray(app)?;
+            host::gateway::start_on_configured_port(core)?;
             if !autostart::is_startup_launch() {
                 tray::open_dashboard(app.handle());
             }
@@ -57,61 +70,37 @@ pub fn run() {
                 api.prevent_close();
             }
         })
-        .build(tauri::generate_context!())
-        .expect("error while building tauri application")
-        .run(|app, event| {
-            if let tauri::RunEvent::ExitRequested { .. } = event
-                && let Some(state) = app.try_state::<state::AppState>()
-            {
-                let core = &state.core;
-                host::close_native_browsers(&state.browser_processes, &core.data_dir());
-                host::cpa_runtime::stop_on_exit(core);
-                host::gateway::stop_listener(core);
-                let _ = core
-                    .db
-                    .lock()
-                    .log_gateway("info", "gateway", "application exiting");
-            }
-        });
+        .build(tauri::generate_context!());
+    let application = match application {
+        Ok(application) => application,
+        Err(error) => {
+            startup_ui::show_startup_error(&error.to_string());
+            return;
+        }
+    };
+    application.run(|app, event| {
+        if let tauri::RunEvent::ExitRequested { .. } = event
+            && let Some(state) = app.try_state::<state::AppState>()
+        {
+            let core = &state.core;
+            host::close_native_browsers(&state.browser_processes, &core.data_dir());
+            host::cpa_runtime::stop_on_exit(core);
+            host::gateway::stop_listener(core);
+            let _ = core
+                .db
+                .lock()
+                .log_gateway("info", "gateway", "application exiting");
+        }
+    });
 }
 
 fn initialize_host() -> Result<state::AppState> {
     let data_dir = data_dir();
-    let cipher = match load_cipher(&data_dir) {
-        Ok(cipher) => cipher,
-        Err(e) => {
-            eprintln!("failed to initialize encryption: {}", e);
-            std::process::exit(1);
-        }
-    };
-    let db = match Database::open_with_cipher(data_dir.clone(), cipher.clone()) {
-        Ok(db) => db,
-        Err(e) => {
-            eprintln!("failed to open database: {}", e);
-            std::process::exit(1);
-        }
-    };
-
-    let core_state = match CoreStateInner::new(db, data_dir.clone(), cipher.clone()) {
-        Ok(s) => Arc::new(s),
-        Err(e) => {
-            eprintln!("failed to initialize state: {}", e);
-            std::process::exit(1);
-        }
-    };
-
-    match gateway_port_override_from_env() {
-        Ok(Some(port)) => {
-            if let Err(error) = core_state.register_gateway_port_override(port) {
-                eprintln!("failed to configure Gateway port: {error}");
-                std::process::exit(1);
-            }
-        }
-        Ok(None) => {}
-        Err(error) => {
-            eprintln!("failed to configure Gateway port: {error}");
-            std::process::exit(1);
-        }
+    let cipher = load_cipher(&data_dir)?;
+    let db = Database::open_with_cipher(data_dir.clone(), cipher.clone())?;
+    let core_state = Arc::new(CoreStateInner::new(db, data_dir.clone(), cipher.clone())?);
+    if let Some(port) = gateway_port_override_from_env()? {
+        core_state.register_gateway_port_override(port)?;
     }
 
     host::register_desktop_settings(&core_state);

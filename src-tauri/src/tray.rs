@@ -31,13 +31,26 @@ pub fn open_dashboard(app: &AppHandle) {
     }
 }
 
-pub fn setup_tray(app: &tauri::App) -> crate::Result<()> {
+const TRAY_ID: &str = "main";
+
+pub fn setup_tray(app: &tauri::AppHandle) -> crate::Result<()> {
+    if let Some(tray) = app.tray_by_id(TRAY_ID) {
+        tray.set_visible(true)?;
+        return Ok(());
+    }
+
     let open_i = MenuItem::with_id(app, "open", "打开管理界面", true, None::<&str>)?;
     let quit_i = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&open_i, &quit_i])?;
 
-    let _tray = TrayIconBuilder::new()
-        .icon(app.default_window_icon().unwrap().clone())
+    let icon = app
+        .default_window_icon()
+        .ok_or_else(|| anyhow::anyhow!("default window icon is missing"))?
+        .clone();
+
+    let _tray = TrayIconBuilder::with_id(TRAY_ID)
+        .icon(icon)
+        .tooltip("Open Console Gateway")
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
