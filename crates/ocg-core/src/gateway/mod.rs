@@ -31,10 +31,28 @@ pub use listener::GatewayLifecycle;
 pub use listener::ListenerStopOutcome;
 
 // 1M-token conversations exceed Axum's 2 MiB Bytes default; keep a bounded cap before auth.
-const MAX_GATEWAY_REQUEST_BODY_BYTES: usize = 16 * 1024 * 1024;
-const _: () = assert!(MAX_GATEWAY_REQUEST_BODY_BYTES > 2 * 1024 * 1024);
+const DEFAULT_GATEWAY_REQUEST_BODY_BYTES: usize = 64 * 1024 * 1024;
+
+fn request_body_limit(value: Option<&str>) -> usize {
+    let Some(value) = value else {
+        return DEFAULT_GATEWAY_REQUEST_BODY_BYTES;
+    };
+    match value.trim().parse::<usize>() {
+        Ok(bytes) if bytes > 0 => bytes,
+        _ => {
+            eprintln!("Invalid OCG_MAX_REQUEST_BODY_BYTES; using the default 64 MiB limit");
+            DEFAULT_GATEWAY_REQUEST_BODY_BYTES
+        }
+    }
+}
 
 pub(crate) fn inference_router(state: CoreState) -> Router<CoreState> {
+    let value = std::env::var_os("OCG_MAX_REQUEST_BODY_BYTES");
+    let value = value.as_ref().map(|value| value.to_string_lossy());
+    inference_router_with_body_limit(state, request_body_limit(value.as_deref()))
+}
+
+fn inference_router_with_body_limit(state: CoreState, body_limit: usize) -> Router<CoreState> {
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods(Any)
@@ -63,7 +81,7 @@ pub(crate) fn inference_router(state: CoreState) -> Router<CoreState> {
             post(handler::gemini_model_action),
         )
         .layer(cors)
-        .layer(DefaultBodyLimit::max(MAX_GATEWAY_REQUEST_BODY_BYTES))
+        .layer(DefaultBodyLimit::max(body_limit))
         .layer(middleware::from_fn_with_state(
             state,
             handler::request_trace_middleware,

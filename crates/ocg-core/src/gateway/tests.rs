@@ -1,4 +1,4 @@
-use super::{MAX_GATEWAY_REQUEST_BODY_BYTES, start_gateway_on};
+use super::{DEFAULT_GATEWAY_REQUEST_BODY_BYTES, request_body_limit, start_gateway_on};
 use crate::crypto::{KeyCipher, StaticKeyCipher};
 use crate::db::Database;
 use crate::gateway_keys::{PRIMARY_KEY_ID, PRIMARY_KEY_NAME};
@@ -9,8 +9,66 @@ use std::fs;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+#[test]
+fn gateway_request_body_limit_configuration() {
+    assert_eq!(request_body_limit(None), 64 * 1024 * 1024);
+    assert_eq!(request_body_limit(Some("134217728")), 128 * 1024 * 1024);
+    assert_eq!(request_body_limit(Some(" 1024 ")), 1024);
+    for invalid in ["", "0", "-1", "64MiB", "1.5", "999999999999999999999999"] {
+        assert_eq!(request_body_limit(Some(invalid)), 64 * 1024 * 1024);
+    }
+}
+
 #[tokio::test]
-async fn gateway_request_body_limit_accepts_16_mib_and_rejects_larger() {
+async fn gateway_request_body_limit_override_covers_all_inference_routes() {
+    let dir = std::env::temp_dir().join(format!("ocg-body-limit-{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&dir).unwrap();
+    let db = Database::open(dir.clone()).unwrap();
+    let cipher: Arc<dyn KeyCipher + Send + Sync> = Arc::new(StaticKeyCipher::new("test"));
+    let state = Arc::new(CoreStateInner::new(db, dir.clone(), cipher).unwrap());
+    let router =
+        super::inference_router_with_body_limit(state.clone(), request_body_limit(Some("1024")))
+            .with_state(state);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    let server = tokio::spawn(async move {
+        axum::serve(listener, router)
+            .with_graceful_shutdown(async {
+                let _ = stopped.await;
+            })
+            .await
+            .unwrap();
+    });
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    for path in [
+        "/v1/chat/completions",
+        "/v1/responses",
+        "/v1/messages",
+        "/claude-desktop/v1/messages",
+        "/v1beta/models/test:generateContent",
+        "/v1/models/test:streamGenerateContent",
+    ] {
+        for (size, expected) in [
+            (1024, StatusCode::UNAUTHORIZED),
+            (1025, StatusCode::PAYLOAD_TOO_LARGE),
+        ] {
+            let response = client
+                .post(format!("http://{addr}{path}"))
+                .body(vec![b' '; size])
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(response.status(), expected, "{path}, {size} bytes");
+        }
+    }
+    stop.send(()).unwrap();
+    server.await.unwrap();
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test]
+async fn gateway_request_body_limit_accepts_64_mib_and_rejects_larger() {
     let mut dir = std::env::temp_dir();
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -34,8 +92,8 @@ async fn gateway_request_body_limit_accepts_16_mib_and_rejects_larger() {
         .build()
         .expect("test client should build");
 
-    let mut accepted_body = vec![b' '; MAX_GATEWAY_REQUEST_BODY_BYTES];
-    accepted_body[MAX_GATEWAY_REQUEST_BODY_BYTES - 1] = b'x';
+    let mut accepted_body = vec![b' '; DEFAULT_GATEWAY_REQUEST_BODY_BYTES];
+    accepted_body[DEFAULT_GATEWAY_REQUEST_BODY_BYTES - 1] = b'x';
     let accepted = client
         .post(format!("{root}/v1/chat/completions"))
         .bearer_auth("gateway-test-key")
@@ -73,7 +131,7 @@ async fn gateway_request_body_limit_accepts_16_mib_and_rejects_larger() {
         .post(format!("{root}/v1/chat/completions"))
         .bearer_auth("gateway-test-key")
         .header("origin", "https://example.test")
-        .body(vec![b'x'; MAX_GATEWAY_REQUEST_BODY_BYTES + 1])
+        .body(vec![b'x'; DEFAULT_GATEWAY_REQUEST_BODY_BYTES + 1])
         .send()
         .await
         .expect("request above the body limit should complete");
@@ -221,7 +279,7 @@ async fn unauthorized_and_expected_fallback_requests_are_not_persisted() {
         .post(format!("{root}/v1/chat/completions"))
         .bearer_auth("wrong-key")
         .header("content-type", "application/json")
-        .body(vec![b'x'; MAX_GATEWAY_REQUEST_BODY_BYTES + 1])
+        .body(vec![b'x'; DEFAULT_GATEWAY_REQUEST_BODY_BYTES + 1])
         .send()
         .await
         .expect("oversized unauthorized request should complete");

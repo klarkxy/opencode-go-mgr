@@ -62,7 +62,9 @@ Open Console Gateway 在一个端口上提供五种客户端协议，再把每�
 
 未知模型名在所有支持的客户端格式上直接返回 `400`——Chat Completions、Responses、Messages，以及 Gemini `generateContent` / `streamGenerateContent`——未知 Claude Desktop 别名也一样。见 [别名](gateway.zh-CN.md#别名)。
 
-Gateway 协议端点最多接受 16 MiB 的 JSON 请求体；这是传输上限，不是上下文窗口。若 Open Console Gateway 前面还有反向代理，需把请求体上限设为至少 16 MiB，否则请求可能还没到达 Gateway 就被代理以 `413 Payload Too Large` 拒绝。
+Gateway 协议端点默认最多接受 64 MiB 的 JSON 请求体。可在启动桌面应用、CLI 或容器前设置环境变量 `OCG_MAX_REQUEST_BODY_BYTES`，用正整数指定字节数，例如 `134217728` 表示 128 MiB；修改后需重启进程。无效、零值或超出整数范围的值会产生警告并回退到默认的 64 MiB。此项仅通过环境变量配置，不改变 Dashboard 的请求体上限。
+
+这是传输上限，不是上下文窗口；超限请求返回 `413 Payload Too Large`。提高上限会增加每个并发请求可缓冲的内存，包括认证前的缓冲。若 Open Console Gateway 前面还有反向代理，其请求体上限需至少与 Gateway 配置一致，否则请求可能还没到达 Gateway 就被代理拒绝。
 
 ## Responses 是无状态端点
 

@@ -1419,6 +1419,26 @@ async fn unterminated_stream_tail_never_echoes_the_selected_account_key() {
 }
 
 #[tokio::test]
+async fn request_larger_than_16_mib_reaches_upstream() {
+    let h = FallbackHarness::go(&[("key-1", &[ok()])], &["key-1"]).await;
+    let body = serde_json::json!({
+        "model": "deepseek-v4-flash",
+        "messages": [{"role": "user", "content": "x".repeat(17 * 1024 * 1024)}],
+        "max_tokens": 3,
+        "stream": false
+    });
+    let response = loopback_client()
+        .post(format!("http://127.0.0.1:{}/v1/chat/completions", h.port))
+        .bearer_auth("gw-test")
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(h.call_count(), 1);
+}
+
+#[tokio::test]
 async fn upstream_payload_too_large_is_not_mislabeled_as_client_body_limit() {
     let h = FallbackHarness::go(
         &[

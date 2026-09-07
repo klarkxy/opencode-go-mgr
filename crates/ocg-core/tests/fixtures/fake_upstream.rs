@@ -87,6 +87,7 @@ pub(crate) async fn start_fake_upstream_with_delay(
     let calls = Arc::new(Mutex::new(Vec::new()));
     let app = Router::new()
         .fallback(any(fake_reply))
+        .layer(axum::extract::DefaultBodyLimit::max(64 * 1024 * 1024))
         .with_state(FakeState {
             replies: Arc::new(Mutex::new(replies)),
             calls: calls.clone(),

@@ -94,10 +94,18 @@ Completions, Responses, Messages, and Gemini `generateContent` /
 `streamGenerateContent` — and unknown Claude Desktop aliases do too. See
 [Aliases](gateway.md#aliases).
 
-Gateway protocol endpoints accept JSON request bodies up to 16 MiB. That is
-a transport limit, not a context-window limit. If a reverse proxy sits in
-front of Open Console Gateway, allow at least 16 MiB request bodies or the proxy may
-return `413 Payload Too Large` before the gateway sees the request.
+Gateway protocol endpoints accept JSON request bodies up to 64 MiB by default.
+Set `OCG_MAX_REQUEST_BODY_BYTES` to a positive integer in bytes (for example,
+`134217728` for 128 MiB) before starting the desktop app, CLI, or container to
+override this limit. Restart the process after changing it. Invalid, zero, or
+out-of-range values produce a warning and fall back to 64 MiB. The setting is
+environment-only and does not change Dashboard request limits.
+
+This is a transport limit, not a context-window limit. Requests above it return
+`413 Payload Too Large`. Larger limits allow more memory to be buffered per
+concurrent request, including before authentication. If a reverse proxy sits in
+front of Open Console Gateway, configure its limit to be at least as large or it
+may reject the request before the gateway sees it.
 
 ## Responses is stateless
 
