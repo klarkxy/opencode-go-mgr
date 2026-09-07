@@ -96,9 +96,8 @@ The **Settings** view holds the gateway's persistent configuration:
 - **Per-model list** (fourth proxy mode) — routes chat forwarding per model
   instead of process-wide. Pick a direction and check models from the known
   registry; the list accepts exact known model ids only (no patterns or
-  free-text). With the **whitelist** direction, listed models — for example
-  region-restricted ones such as `gpt-5.6-luna`, `grok-4.5`, or
-  `muse-spark-1.2` — connect through the proxy URL while every unlisted model
+  free-text). With the **whitelist** direction, listed models
+  connect through the proxy URL while every unlisted model
   connects directly (ignoring system/environment proxies, exactly like force
   direct). The **blacklist** direction inverts this: listed models connect
   directly and everything else uses the proxy URL. Both directions require the

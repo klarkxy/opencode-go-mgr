@@ -81,9 +81,10 @@ Pages 源设为 **GitHub Actions**。
 质量门覆盖前端、排除桌面 crate 的 Linux Rust，以及 Windows 桌面单元测试。
 原生安装包冒烟只在候选或 tag 流程运行。容器冒烟仅 amd64。
 
-仍需真机：真实桌面 UI、Claude Desktop、Gemini CLI、备份恢复、数据库降级、
-真实上游账号、第三方客户端配置、Google/OpenCode 登录、noVNC 输入、真实支付，
-以及 Cookie 跨重启保留。
+这些工作流未覆盖真实桌面交互、第三方客户端配置与推理、备份恢复、真实上游账号、
+Google/OpenCode 登录、noVNC 输入与 Cookie 跨重启保留。按照[发布流程](releasing.zh-CN.md)
+选择适用的人工检查并记录未执行项。真实支付不是例行发布要求。数据库不支持降级；
+回滚使用升级前备份，见[存储与迁移](storage-migration.zh-CN.md)。
 
 ---
 

@@ -45,8 +45,8 @@ fail before selection.
 | **Accounts** | Account Key, enablement, order, notes, cooldown, usage state | Catalogs and protocol contracts live on **Providers** |
 | **Providers** | Built-in catalogs, model/protocol contracts, pricing scopes, typed user-defined Provider Endpoint/auth/mappings | Custom API mappings stay on the account card |
 | **Custom API account** | One API URL, one account-wide upstream protocol, public-model → upstream-ID mappings | Shared Provider definitions live on **Providers** |
-| **Extensions / CPA** | One approved local external-integration boundary | Built-in routing families stay under **Accounts** / **Providers** |
-| **Application guides** | Client tutorials in this user guide and `application-guides.ts`; Desktop connector code in `Applications.vue` | Gateway endpoints stay on this node |
+| **Extensions / CPA** | A static local external-integration boundary | Built-in routing families stay under **Accounts** / **Providers** |
+| **Legacy Applications** | Retired; remaining guide and connector code awaits cleanup | Clients use the ordinary Gateway API |
 
 The Adapter Registry is static and sealed. User-defined Providers persist as
 typed data and always bind Configurable HTTP.

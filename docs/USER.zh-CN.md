@@ -7,7 +7,7 @@
 ## 新增集成
 
 - [新增供应商](user/add-provider.zh-CN.md) — 创建用户定义供应商、通过 Custom API 接入单个兼容上游，或贡献一个具备完整 HTTP 与路由契约的密封内置供应商。
-- [新增应用](user/add-application.zh-CN.md) — 把未收录客户端接到 Gateway、贡献应用教程，或新增可选的本机 Desktop 连接器。
+- [手动客户端配置](user/add-application.zh-CN.md) — 通过 Gateway API 直接连接客户端。
 
 ## 章节
 
@@ -17,7 +17,7 @@
 - [接入第一个客户端](user/first-client.zh-CN.md) — 复制 Key 与 API Base URL，用一个请求验证连通。
 - [升级、备份、恢复与卸载](user/upgrade-backup.zh-CN.md) — 升级通道、手动升级、备份、恢复与卸载。
 - [管理面板](user/dashboard.zh-CN.md) — 七个核心页面、扩展分组、国际化与接入中心。
-- [应用教程与模型能力](user/applications.zh-CN.md) — 客户端教程与模型能力表。
+- [旧应用功能——已退役](user/applications.zh-CN.md) — 退役范围与残留实现说明。
 - [账号](user/accounts.zh-CN.md) — Plan、凭据、排序、额度行为与托管注册。
 - [供应商](user/providers.zh-CN.md) — 目录、供应商合约、按模型协议覆盖、探测与用户定义供应商。
 - [日志与设置](user/logs-settings.zh-CN.md) — 请求日志、设置、代理模式与主题。
@@ -33,7 +33,7 @@
 
 ## 阅读路径
 
-- **新用户** — `overview` → `architecture` → `install` → `first-client` → `accounts` → `providers` → `gateway` → `applications` → `troubleshooting`。
+- **新用户** — `overview` → `architecture` → `install` → `first-client` → `accounts` → `providers` → `gateway` → `troubleshooting`。
 - **Docker / CLI 运维** — `overview` → `architecture` → `docker` → `external-integrations` → `cli` → `accounts` → `providers` → `routing` → `logs-settings` → `troubleshooting`。
 - **集成作者** — 上游供应商读 `add-provider`；下游客户端读 `add-application`。
 

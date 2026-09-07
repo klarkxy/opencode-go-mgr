@@ -2,9 +2,11 @@
 
 [简体中文](README.zh-CN.md)
 
-This review started from `39e85125`. Fixes are committed on the candidate branch;
-draft PR #57 is open, and three-platform candidate CI passed as described below. No tag,
-production release, or deployment was performed.
+This is a dated verification record for the 2.2.0 candidate, starting from
+`39e85125`. At the end of this review, fixes were committed on the candidate
+branch, draft PR #57 was open, and three-platform candidate CI had passed as
+described below. No merge, tag, production release, or deployment was performed
+as part of this review. Later repository or release status is outside this record.
 
 ## Repairs
 
@@ -37,9 +39,9 @@ production release, or deployment was performed.
   legacy installation records are removed only after an in-place replacement.
   Candidate CI exposed this defect; its final overwrite/uninstall smoke passed.
 
-Grok and Kimi supplied bounded reviews and repairs. A separate design review and
-implementation handled Unix process ownership, followed by an independent source
-review. Returned changes and test evidence were inspected by the primary.
+Unix process ownership received a separate design review and an independent
+source review after implementation. The integrated changes and test evidence
+were reviewed together.
 
 ## Verification
 
@@ -89,16 +91,19 @@ so this report does not claim a locally verified Linux copy.
 
 ## Limits and review dispositions
 
-- Application integration is planned for retirement. The user explicitly excluded
-  its testing, including Claude Desktop and Gemini CLI, from this review's
-  acceptance scope. It is not a release blocker for this candidate.
+- Application-integration testing, including Claude Desktop and Gemini CLI,
+  was outside this review's scope. This report provides no end-to-end client
+  compatibility evidence. The legacy Applications subsystem was subsequently
+  retired as a project decision; see the [retirement notice](../../../user/applications.md).
+  Its tests are no longer release gates. Ordinary Gateway protocol verification
+  remains part of release acceptance.
 - Native macOS/Linux CI and Windows installer acceptance passed. Signed updater
   delivery and live supplier/OAuth sessions were not exercised. Candidate checks
   do not constitute production signing or distribution verification.
 - The existing XOR Key obfuscation is not authenticated encryption. The new
   decrypt probe cannot distinguish every wrong key that happens to produce valid
   UTF-8; no cryptographic-format migration was introduced.
-- Applications navigation was intentionally removed earlier and was not restored.
+- The reviewed dashboard had no Applications navigation entry.
   No-auth Provider deletion retains the documented account-first, non-cascading
   workflow; deleting its only account ends routing, and the empty Provider remains
   removable. Recreating the Provider recreates its no-auth singleton.
@@ -120,8 +125,9 @@ and the two application startup registry entries were checked/restored.
 - [macOS Universal](https://github.com/klarkxy/opencode-go-mgr/actions/runs/34079065269/job/101610886207) and [Linux x64](https://github.com/klarkxy/opencode-go-mgr/actions/runs/34079065269/job/101610886205): passed on `917984b9`. Subsequent source changes affect only the Windows installer and its smoke; paired guides were also updated.
 
 Code review, gateway checks, and three-platform candidate acceptance passed.
-The candidate is ready to enter [the release procedure](../../../maintainer/releasing.md)
-within the agreed scope; application-integration testing is excluded by the user.
+These results cover the boundaries listed above. For a release decision, use
+[the release procedure](../../../maintainer/releasing.md) and assess the omitted
+checks against the changes being shipped.
 Manual candidate workflows do not create a Release or receive updater signing
 keys, so signing and distribution remain release-stage checks. No merge, tag,
 production publication, or deployment was performed.

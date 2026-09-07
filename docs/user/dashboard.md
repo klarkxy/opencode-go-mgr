@@ -24,7 +24,7 @@ The first panel above the fold — and the only one that stays pinned to the top
 - The **API Base URL** (e.g. `http://127.0.0.1:9042/v1`) with one-click copy, plus the full Chat Completions, Responses, and Messages endpoints.
 - An **HTTP warning** that appears whenever the resolved root URL is a non-loopback `http://` URL, warning that the Key and request contents would be transmitted in clear text.
 
-The **Downstream Access Root** setting in **Settings** controls only the URLs the dashboard shows and the application tutorials emit. Its effective value is selected in this order:
+The **Downstream Access Root** setting in **Settings** controls only the URLs the dashboard shows. Its effective value is selected in this order:
 
 1. A non-empty `OCG_CLIENT_ROOT_URL` environment variable.
 2. The manually saved dashboard value.
@@ -38,10 +38,10 @@ Set an externally reachable root such as `https://ocg.example.com` when clients 
 
 The **Access Keys** view is the home for client-facing credentials. Primary and sub Keys live together in `access_keys` (schema v27). Create, rename, enable, disable, regenerate, and delete go through Dashboard V3; a successful change bumps the settings revision. Mutation acknowledgements do not include plaintext, so the page reloads Connection Center to show the new value.
 
-- The **primary key** is always active and cannot be disabled or deleted; rotate it with the reset control. Its id is `00000000-0000-0000-0000-000000000001`. It is the credential the application guides show by default. There is no custom-value field.
+- The **primary key** is always active and cannot be disabled or deleted; rotate it with the reset control. Its id is `00000000-0000-0000-0000-000000000001`. There is no custom-value field.
 - **Sub keys** are additional credentials you create, name, rename, enable/disable, regenerate, or delete — useful for handing one key to each device. Deleting a sub key is a soft delete: it stops authenticating immediately and its plaintext is cleared, but forward logs keep resolving to its name. A sub key value may never equal the primary key value or another sub key value, and at most 64 non-deleted sub keys are supported.
 
-Connection Center only copies enabled keys. Usage by key is filtered on the Logs view. Per-client setup lives in [Application guides](applications.md).
+Connection Center only copies enabled keys. Usage by key is filtered on the Logs view. See [Manual client setup](add-application.md) to connect a client.
 
 ---
 

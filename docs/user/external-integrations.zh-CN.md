@@ -29,7 +29,7 @@ CPA（CLI Proxy API）是本机订阅运行时。Open Console Gateway 可管理�
 
 ## 新增其他接入
 
-静态外部接入出现在 **扩展** 分组。它们必须经过产品批准，使用 typed Dashboard V3 adapter 和有文档的本机边界。贡献路径见[扩展 Open Console Gateway](../maintainer/extending.zh-CN.md)。
+静态外部接入出现在 **扩展** 分组。贡献时应提供 typed Dashboard V3 adapter 和有文档的本机边界，供代码评审核对。贡献路径见[扩展 Open Console Gateway](../maintainer/extending.zh-CN.md)。
 
 ---
 

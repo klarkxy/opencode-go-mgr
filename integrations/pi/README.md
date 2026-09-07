@@ -1,20 +1,12 @@
-# Open Console Gateway for Pi
+# Legacy Pi integration — retired
 
-This is the embedded source template for Open Console Gateway's global Pi package. Its
-only provider is `ocg-manager`, which sends OpenAI Chat Completions requests to
-the local Open Console Gateway at `http://127.0.0.1:9042/v1`.
+This template belongs to the retired Applications subsystem. It is retained
+only until implementation cleanup and is no longer an installation or
+contribution path. The replacement application subsystem will be designed
+separately. See [retirement notice](../../docs/user/applications.md).
 
-The desktop app materializes `models.generated.json` before installation. That
-file is the package's complete model catalog; the package does not fetch a
-catalog or start a background service.
+旧应用子系统已整套退役。本模板仅等待代码清理，不再作为安装或贡献路径。
+后续新方案另行设计，见[退役说明](../../docs/user/applications.zh-CN.md)。
 
-## Lifecycle boundary
-
-- Install the generated package globally with Pi (`pi install <package-path>`).
-- Use Pi's native `/login ocg-manager` flow to enter an Open Console Gateway Key. Pi owns
-  that stored credential; it is never written into this package.
-- Remove it with `pi remove <package-source>`. Removal unregisters the provider
-  on the next Pi startup and leaves Pi's other providers unchanged.
-
-This template is not a standalone public package. Open Console Gateway owns generation,
-installation status, and updates.
+Retirement does not uninstall an existing client package or change its saved
+configuration. Client-side cleanup remains separate from repository cleanup.

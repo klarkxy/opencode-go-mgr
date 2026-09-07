@@ -18,8 +18,9 @@ pnpm install
 pnpm run dev
 ```
 
-`pnpm run dev` runs `tauri dev` with `OCG_GATEWAY_PORT=19042` so Windows
-HNS/WSL/Docker excluded ranges around `9042` do not block the stack.
+`pnpm run dev` runs `tauri dev` with `OCG_GATEWAY_PORT=19042`, a separate
+development default. On some Windows hosts, HNS/WSL/Docker reserves port
+ranges that include `9042`; the development default can avoid that conflict.
 Installed builds still default to `9042`. Vite serves
 `http://127.0.0.1:30001/dashboard/` and proxies `/dashboard/api` (including
 WebSockets) to that gateway port. Override both Tauri and Vite with
@@ -53,7 +54,8 @@ Rust unit tests live in sibling `tests.rs` modules (`src/db.rs` declares
 `mod tests;` and the tests are in `src/db/tests.rs`). Do not add tests that
 assert on source text, workflow YAML, or documentation prose.
 
-Application guides are driven by `src/views/application-guides.ts`.
+The legacy Applications code, including `src/views/application-guides.ts`, is
+retired and pending cleanup; see the [retirement notice](../user/applications.md).
 
 CLI sandbox (OpenCode Go cards only; no Custom, sub keys, or settings):
 

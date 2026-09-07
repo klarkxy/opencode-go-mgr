@@ -8,7 +8,7 @@
 - **安全边界不能为了简化而削弱**。Gateway 鉴权、Key 混淆、URL 校验、冷却写入、SSE 透传以及 ConnectionInfo 密钥边界均保留。
 - **不引入远端同步**。每个节点由自己的面板管理。
 - **`auto_start` 与 `show_dock_icon` 受能力门控**。Windows x64、macOS 和 Linux x64 的 release / 已安装 Tauri 进程注入登录自启同步钩子；Dock 仅 macOS Tauri。
-- **本地 Alias 列表保持本地**。带鉴权的 `GET /v1/models` 与面板 `application-models` 不在请求时增加上游发现。供应商页上的显式 Zen Free 刷新是唯一目录抓取例外，且只访问固定官方 endpoint。两份列表保持独立；不发明 `requested_alias` 日志字段。
+- **本地 Alias 列表保持本地**。带鉴权的 `GET /v1/models` 与面板 `application-models` 读取已保存状态，不在请求时增加上游发现。目录刷新是独立、显式的控制面操作，使用各 Provider 支持的数据源。两份列表的收录规则不同；请求日志使用 `requested_model`、`resolved_alias` 与 `upstream_model`。
 - **尊重 `parking_lot::Mutex` 不可重入**。调用另一个持锁函数前先 `drop` guard。
 
 ## 文档
@@ -18,6 +18,10 @@
 - `DESIGN.md` 与 `src/theme.ts` 负责视觉 token 和面向用户的 **Key** 名称。包清单与 `compose.example.yaml` 负责版本钉。
 - 只描述当前行为。已知缺口放入 `docs/user/limits.md` 或 `docs/maintainer/known-debt.md`。用肯定句写；只有当该页的首次读者合理会假设相反情况时才补充否定。
 - 仓库文档与 `AGENTS.md` 只记录共享的项目事实。个人模型选择、智能体角色和本机工具路径放在用户级配置中。
+  贡献者可以使用自己的编辑器、助手和评审工作流；仓库要求针对最终改动及其验证。
+- 区分当前行为、项目设计决策和带日期的验证证据。设计约束应说明其兼容性、归属或易用性目的。
+  单次验证的环境、版本、覆盖范围与未执行检查写入对应证据报告；一次排除不代表后续发布豁免，也不代表功能退役。
+  示例使用占位符或有文档的产品默认值，不使用维护者的私有路径、账号或网络配置。
 
 ---
 

@@ -1,24 +1,12 @@
-# Open Console Gateway for DSH
+# Legacy DSH integration — retired
 
-This is the embedded source template for Open Console Gateway's `ocg-manager-dsh` bundle.
-It is installed only into DSH's `web` profile and adds an OCG-owned
-companion plugin with the `ocg-manager` provider. The companion reuses the
-public `PiAiAdapter` transport and registers only its fixed provider route, so
-it does not replace the base `llm-pi-ai` row or mask providers supplied by
-another bundle. It does not modify another DSH profile.
+This template belongs to the retired Applications subsystem. It is retained
+only until implementation cleanup and is no longer an installation or
+contribution path. The replacement application subsystem will be designed
+separately. See [retirement notice](../../docs/user/applications.md).
 
-The desktop app replaces the generated-model placeholder before installation.
-The route uses OpenAI Chat Completions at `http://127.0.0.1:9042/v1` and refers
-to `OCG_MANAGER_API_KEY`; the Key remains outside this package.
+旧应用子系统已整套退役。本模板仅等待代码清理，不再作为安装或贡献路径。
+后续新方案另行设计，见[退役说明](../../docs/user/applications.zh-CN.md)。
 
-## Lifecycle boundary
-
-- Open Console Gateway installs or removes this bundle from the fixed `web` profile.
-- The DSH process resolves `OCG_MANAGER_API_KEY` at request time. The Desktop
-  connector field-manages only that one assignment in DSH's `.env`; the bundle
-  has no login screen and does not persist a credential.
-- Removing the bundle removes only the OCG-owned companion row on the next DSH
-  start. Base-profile rows, other bundles, and other profiles stay untouched.
-
-This template is not a standalone public package. Open Console Gateway owns generation,
-installation status, and updates.
+Retirement does not uninstall an existing client package or change its saved
+configuration. Client-side cleanup remains separate from repository cleanup.

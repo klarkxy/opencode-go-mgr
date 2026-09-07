@@ -6,7 +6,7 @@ Gateway 启动后，接入客户端主要是复制配置。请使用接入中心
 
 1. 在 **账号** 视图用官方分发的 API Key 添加一个 OpenCode Go 账号。登录账号可选；新增时如果先填写账号，它会自动作为必填名称，直到你手动修改名称。面板不收集或维护 OpenCode 登录密码。
 2. 在面板的 **接入中心** 复制 **Key** 和 **API Base URL** （`http://127.0.0.1:9042/v1`）。
-3. 把客户端指向该 Base URL 并填入 Key。[应用教程](applications.zh-CN.md) 覆盖 17 个常见客户端。
+3. 把客户端指向该 Base URL 并填入 Key。地址与协议选择见[手动客户端配置](add-application.zh-CN.md)。
 4. 发一个真实请求验证。
 
 **Key** 是你唯一要交给客户端的秘密。它接受三种请求头形态——`Authorization: Bearer <key>`、Anthropic 风格的 `x-api-key: <key>`、Gemini 风格的 `x-goog-api-key: <key>`。Gateway 从 SQLite 取出 OpenCode-Go 账号 Key，并自行注入上游。

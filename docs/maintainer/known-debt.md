@@ -2,7 +2,16 @@
 
 # Known Debt And Non-Goals
 
+This page describes the current implementation and project scope. Non-goals are
+design boundaries, not requirements for a contributor's personal workflow.
+Scope changes should explain their compatibility and maintenance impact in the
+proposal or pull request, with corresponding code and documentation changes.
+
 ## Known Debt
+
+- The legacy Applications subsystem is retired. Its guide generation, Desktop
+  connectors, Pi/DSH templates, related APIs, and tests still need code cleanup.
+  A replacement will be designed separately; see the [retirement notice](../user/applications.md).
 
 - Auto-start is capability-gated: Windows x64, macOS, and Linux x64
   release/installed Tauri processes inject the login-start sync hook.
@@ -51,8 +60,9 @@
 - Automatic pricing or Zen catalog polling.
 - Cross-engine reuse of legacy WebView profiles.
 - Database downgrade support, or opening a newer schema with an older binary.
-- Windows/Linux ARM64, 32-bit x86, RPM, Snap, app-store packages, Windows
-  Authenticode, or Apple notarization.
+- Windows/Linux ARM64 desktop packages, 32-bit x86, RPM, Snap, app-store
+  packages, Windows Authenticode, or Apple notarization. This does not exclude
+  the supported Linux ARM64 container image.
 - A second Cosign image signature on top of GitHub provenance.
 ---
 

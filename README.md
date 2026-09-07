@@ -62,7 +62,7 @@ Auth:    Authorization: Bearer <key>
    **Key** from **Access Keys**; it is the only Open Console Gateway credential your
    client needs.
 3. Point your client at `http://127.0.0.1:9042/v1`. Per-client setup is in
-   [Application guides](docs/user/applications.md).
+   [Manual client setup](docs/user/add-application.md).
 
 ```bash
 curl http://127.0.0.1:9042/v1/chat/completions \
@@ -91,7 +91,7 @@ routing uses the saved preferred/supported contract.
 | Anthropic Messages | MiniMax and Qwen models |
 
 Zen Free uses a saved official catalog snapshot. Gemini is a client format, not
-an upstream destination. Complete model, capability, and conversion tables are in [model capabilities](docs/user/applications.md) and
+an upstream destination. Current model catalogs and protocol support are documented in [Providers](docs/user/providers.md) and
 [protocol conversion](docs/user/protocol-conversion.md).
 
 ## Next

@@ -39,8 +39,8 @@ Free 没有凭据。Vue SPA 通过 HTTP Dashboard V3 通信。
 | **账号** | 账号 Key、启停、顺序、备注、冷却与用量状态 | 目录与协议合约在 **供应商** |
 | **供应商** | 内置目录、模型/协议合约、价格范围，以及用户定义 Provider 的 Endpoint/鉴权/映射 | Custom API 映射留在账号卡 |
 | **Custom API 账号** | 一个 API URL、一个账号级上游协议、公开模型 → 上游 ID 映射 | 共享 Provider 定义在 **供应商** |
-| **扩展 / CPA** | 一个经过批准的本机外部集成边界 | 内置路由家族仍在 **账号** / **供应商** |
-| **应用教程** | 本用户指南与 `application-guides.ts` 中的客户端教程；Desktop 连接器代码在 `Applications.vue` | Gateway 端点仍在本节点 |
+| **扩展 / CPA** | 一个静态本机外部集成边界 | 内置路由家族仍在 **账号** / **供应商** |
+| **旧应用功能** | 已退役；残留教程与连接器代码待清理 | 客户端使用普通 Gateway API |
 
 Adapter Registry 静态密封。用户定义 Provider 仅作为类型化数据持久化，并始终绑定
 Configurable HTTP。

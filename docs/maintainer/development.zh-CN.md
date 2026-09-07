@@ -17,8 +17,8 @@ pnpm install
 pnpm run dev
 ```
 
-`pnpm run dev` 以 `OCG_GATEWAY_PORT=19042` 运行 `tauri dev`，避开 Windows
-HNS/WSL/Docker 在 `9042` 附近的排除端口范围。安装版仍默认 `9042`。Vite
+`pnpm run dev` 以独立的开发默认端口 `OCG_GATEWAY_PORT=19042` 运行 `tauri dev`。
+部分 Windows 主机的 HNS/WSL/Docker 保留端口范围包含 `9042`，开发默认端口可避开该冲突。安装版仍默认 `9042`。Vite
 提供 `http://127.0.0.1:30001/dashboard/`，并把 `/dashboard/api`（含
 WebSocket）代理到该 Gateway 端口。启动前设置 `OCG_GATEWAY_PORT` 可同时覆盖
 Tauri 与 Vite；变量生效时，设置页以只读方式显示实际端口。
@@ -47,7 +47,7 @@ Tauri 与 Vite；变量生效时，设置页以只读方式显示实际端口。
 Rust 单元测试放在同名子模块：`src/db.rs` 声明 `mod tests;`，测试正文在
 `src/db/tests.rs`。不要写断言源码文本、工作流 YAML 或文档正文的测试。
 
-应用教程由 `src/views/application-guides.ts` 驱动。
+旧 Applications 代码（包括 `src/views/application-guides.ts`）已退役，等待清理，见[退役说明](../user/applications.zh-CN.md)。
 
 CLI 沙箱（只创建 OpenCode Go 卡；不能创建 Custom、子 Key 或设置）：
 

@@ -15,10 +15,10 @@
   and Linux x64 release/installed Tauri processes inject the login-start sync
   hook; Dock is macOS Tauri only.
 - **Local Alias lists stay local.** Authenticated `GET /v1/models` and dashboard
-  `application-models` must not grow request-time upstream discovery. The
-  explicit Zen Free refresh on Providers is the only directory-fetch exception
-  and is restricted to the fixed official endpoint. Do not equate the two
-  lists; do not invent a `requested_alias` log field.
+  `application-models` read saved state without request-time upstream discovery.
+  Catalog refresh is a separate, explicit control-plane action using each
+  Provider's supported source. The two lists have different inclusion rules;
+  request logs use `requested_model`, `resolved_alias`, and `upstream_model`.
 - **Respect `parking_lot::Mutex` non-reentrancy.** Drop the guard before
   calling another lock holder.
 
@@ -35,6 +35,14 @@
   a first-time reader of that page would reasonably assume the opposite.
 - Repository docs and `AGENTS.md` carry shared project facts. Keep personal
   model choices, agent roles, and local tool paths in user-level configuration.
+  Contributors can use their own editors, assistants, and review workflow;
+  repository requirements concern the resulting change and its verification.
+- Separate current behavior, project design decisions, and dated evidence.
+  Explain design constraints by their compatibility, ownership, or usability
+  purpose. Record a run's environment, revision, coverage, and omitted checks
+  in its evidence report; a one-run exclusion is not a future release exemption
+  or a feature-retirement decision. Examples use placeholders or documented
+  product defaults, not a maintainer's private paths, accounts, or network setup.
 
 ---
 

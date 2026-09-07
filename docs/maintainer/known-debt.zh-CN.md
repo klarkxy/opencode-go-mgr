@@ -2,7 +2,13 @@
 
 # 已知缺口与明确非目标
 
+本页描述当前实现与项目范围。非目标是设计边界，不是对贡献者个人工作流的要求。
+调整范围时，应在提案或 PR 中说明兼容性与维护影响，并同步修改代码和文档。
+
 ## 已知缺口
+
+- 旧应用子系统已整套退役；教程生成、Desktop 连接器、Pi/DSH 模板、相关 API 与测试仍待代码清理。
+  后续新方案另行设计，见[退役说明](../user/applications.zh-CN.md)。
 
 - `auto_start` 受能力门控：Windows x64、macOS 和 Linux x64 的 release / 已安装 Tauri 进程注入登录自启同步钩子。开发构建、CLI、Docker 面板不暴露该开关。Dock 可见性仅 macOS Tauri。
 - 生成的 Tauri schema 文件会让 diff 变吵；只在 Tauri 配置确实改动时才需要修改它们。
@@ -28,7 +34,7 @@
 - 自动轮询价格或 Zen 目录。
 - 旧 WebView Profile 跨引擎复用。
 - 数据库降级，或让旧二进制打开更新后的 schema。
-- Windows/Linux ARM64、32 位 x86、RPM、Snap、应用商店包、Windows Authenticode 或 Apple 公证。
+- Windows/Linux ARM64 桌面包、32 位 x86、RPM、Snap、应用商店包、Windows Authenticode 或 Apple 公证；此项不排除已支持的 Linux ARM64 容器镜像。
 - 在 GitHub provenance 之外再加一份 Cosign 镜像签名。
 
 ---

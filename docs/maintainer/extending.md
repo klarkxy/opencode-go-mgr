@@ -2,7 +2,8 @@
 
 # Extending Open Console Gateway
 
-Use one of three explicit extension paths. They are intentionally different.
+Provider adapters and external integrations are the current extension paths.
+The legacy application-connector path below is retired.
 
 ## 1. Provider or Plan: sealed and static
 
@@ -24,15 +25,16 @@ The Provider registry remains static and sealed.
 Each static Provider owns its catalog, evidence, and override state under its
 single `provider_id` identity.
 
-## 2. Application connector: local Desktop capability
+## 2. Legacy application connectors: retired
 
-Use this for a client-side configuration or package integration. Follow the
-application-guide/connector boundary: it is process-owned by the Desktop host,
-uses documented field ownership, and stays out of the Provider registry.
+The old Applications subsystem, guide generation, automatic connectors, and
+Pi/DSH templates are retired. Do not extend this implementation. Remaining code
+is pending cleanup; a replacement will be designed separately. See the
+[retirement notice](../user/applications.md).
 
 ## 3. External integration: static local-service adapter
 
-Use this for a product-approved service the user deploys locally. It appears in
+Use this for a local service integrated through a code-reviewed adapter. It appears in
 the general **Extensions** navigation group below Settings, not in
 Providers, Plans, or the Add Account selector.
 
@@ -40,16 +42,20 @@ Providers, Plans, or the Add Account selector.
   not add a raw management proxy or arbitrary upstream path/body forwarding.
 - Make the ownership boundary explicit. OCG may retain only what it needs to
   connect and route; the external service retains its own OAuth tokens, auth
-  files, browser callbacks, internal scheduler, and lifecycle.
+  files, browser callbacks, and internal scheduler. For an externally operated
+  service, lifecycle also remains external. The managed CPA mode separately
+  owns its installed files and child process; see [Runtime Invariants](runtime-invariants.md#external-integrations).
 - Keep the service local: loopback for Desktop/CLI, or an explicit private
-  Compose sibling. Do not create LAN, Internet, cross-node, process-control,
-  auto-upgrade, registry, or generic SDK surfaces.
+  Compose sibling. Remote service addresses and arbitrary process control are
+  outside this boundary. Managed CPA lifecycle operations are limited to the
+  OCG-owned runtime; installation and updates are user-triggered.
 - Reuse OCG's ordering/selection/logging conventions only where the product
   contract calls for it. Do not invent internal accounts, costs, or quotas the
   external service does not expose.
 
-CPA is the first instance of this path. Extract a shared framework only after
-a second approved integration proves a shared requirement.
+CPA is the current instance of this path. Reuse its existing helpers where they
+fit; justify a shared framework with concrete requirements from the integrations
+that will use it.
 
 ## Dashboard V3 endpoint changes
 

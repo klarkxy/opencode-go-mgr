@@ -83,8 +83,8 @@ externally operated CPA.
 
 ## Adding another integration
 
-Static external integrations appear in **Extensions**. They require product
-approval, a typed Dashboard V3 adapter, and a documented local boundary. The
+Static external integrations appear in **Extensions**. Contributions include
+a typed Dashboard V3 adapter and a documented local boundary for code review. The
 contribution path is in [Extending Open Console Gateway](../maintainer/extending.md).
 
 ---

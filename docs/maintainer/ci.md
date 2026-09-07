@@ -91,10 +91,13 @@ Quality covers frontend + Linux Rust excluding the desktop crate + Windows
 desktop unit tests. Native installer smokes run on candidates and tags.
 Container smoke is amd64 only.
 
-Still machine checks: real desktop UI, Claude Desktop, Gemini CLI,
-backup/restore, database downgrade, live upstream accounts, third-party
-client config, Google/OpenCode login, noVNC input, real payment, and
-cookie persistence across restart.
+Coverage outside these workflows includes real desktop interaction, third-party
+client configuration and inference, backup/restore, live upstream accounts,
+Google/OpenCode login, noVNC input, and cookie persistence across restart.
+Choose applicable manual checks using [Release Procedure](releasing.md) and
+record omissions. Real payment is not a routine release requirement. Database
+downgrade is unsupported; rollback uses a pre-upgrade backup as described in
+[Storage And Migrations](storage-migration.md).
 ---
 
 [Maintainer guide index](../MAINTAINER.md) · [简体中文](ci.zh-CN.md) · [Docs index](../README.md)

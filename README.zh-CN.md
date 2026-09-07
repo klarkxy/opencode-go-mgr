@@ -40,7 +40,7 @@ Gateway: http://127.0.0.1:9042/v1
 
 1. 安装并启动。Gateway 就绪后管理面板会在系统浏览器中打开；托盘图标随时唤回。
 2. 在 **账号** 视图添加 Plan，并在需要时添加凭据。随后到 **访问密钥** 复制客户端 **Key**；客户端只需要这份 Open Console Gateway 凭据。
-3. 把客户端指向 `http://127.0.0.1:9042/v1`。各客户端配置见[应用教程](docs/user/applications.zh-CN.md)。
+3. 把客户端指向 `http://127.0.0.1:9042/v1`。各客户端配置见[手动客户端配置](docs/user/add-application.zh-CN.md)。
 
 ```bash
 curl http://127.0.0.1:9042/v1/chat/completions \
@@ -65,7 +65,7 @@ OpenCode Go 模型各有推荐上游协议。匹配且已支持的客户端协�
 | OpenAI Responses | 推理和贡献者模型 |
 | Anthropic Messages | MiniMax 和 Qwen 模型 |
 
-Zen Free 使用已保存的官方目录快照。Gemini 是客户端格式，不是上游目的地。完整模型、能力与转换表见[模型能力](docs/user/applications.zh-CN.md)和[协议转换](docs/user/protocol-conversion.zh-CN.md)。
+Zen Free 使用已保存的官方目录快照。Gemini 是客户端格式，不是上游目的地。当前模型目录与协议支持见[供应商](docs/user/providers.zh-CN.md)和[协议转换](docs/user/protocol-conversion.zh-CN.md)。
 
 ## 下一步
 

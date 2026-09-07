@@ -27,14 +27,18 @@ patch version.
 ## Human checks CI does not run
 
 Protocol, schema, CAS, and local-list behavior belong in `cargo test` /
-`pnpm run test`, not this list.
+`pnpm run test`, not this list. Select real-client checks by the affected
+Gateway protocols. Record the tested client versions, platforms, results,
+and omissions in the release evidence; previous runs do not grant exemptions.
 
 - [ ] Quality gate, signed `release:check`, and selected platform smokes
       are green; the four version manifests, `compose.example.yaml`, and
       workspace `Cargo.lock` entries agree.
-- [ ] Launch Claude Desktop and Gemini CLI once each for a text and a
-      tool call. Spot-check that application-guide display snippets mask
-      the Key and copied results contain the real key.
+- [ ] Exercise affected client paths with text and tool calls. Include Claude
+      Desktop when its retained Gateway role mapping changes and Gemini CLI when
+      Gemini compatibility changes. The retired Applications subsystem, guide
+      generation, and automatic connectors are outside release acceptance.
+      Verify that Connection Center masks displayed Keys and copies the selected Key.
 - [ ] Optional managed onboarding (sign-in identity → invite URL →
       OpenCode login → payment review → key paste). Real payment only when
       explicitly intended. Refresh quota against official
