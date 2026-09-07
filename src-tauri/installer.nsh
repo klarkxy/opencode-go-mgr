@@ -8,6 +8,7 @@
       ${AndIf} ${FileExists} "$0\${MAINBINARYNAME}.exe"
       ${AndIf} ${FileExists} "$0\uninstall.exe"
         StrCpy $INSTDIR $0
+        SetOutPath $INSTDIR
       ${EndIf}
     ${EndIf}
   ${EndIf}
@@ -22,12 +23,28 @@
     !insertmacro IsShortcutTarget "$SMPROGRAMS\OCG Manager.lnk" "$INSTDIR\${MAINBINARYNAME}.exe"
     Pop $0
     ${If} $0 = 1
-      Delete "$SMPROGRAMS\OCG Manager.lnk"
+      ${IfNot} ${FileExists} "$SMPROGRAMS\${PRODUCTNAME}.lnk"
+        Rename "$SMPROGRAMS\OCG Manager.lnk" "$SMPROGRAMS\${PRODUCTNAME}.lnk"
+      ${Else}
+        !insertmacro IsShortcutTarget "$SMPROGRAMS\${PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARYNAME}.exe"
+        Pop $0
+        ${If} $0 = 1
+          Delete "$SMPROGRAMS\OCG Manager.lnk"
+        ${EndIf}
+      ${EndIf}
     ${EndIf}
     !insertmacro IsShortcutTarget "$DESKTOP\OCG Manager.lnk" "$INSTDIR\${MAINBINARYNAME}.exe"
     Pop $0
     ${If} $0 = 1
-      Delete "$DESKTOP\OCG Manager.lnk"
+      ${IfNot} ${FileExists} "$DESKTOP\${PRODUCTNAME}.lnk"
+        Rename "$DESKTOP\OCG Manager.lnk" "$DESKTOP\${PRODUCTNAME}.lnk"
+      ${Else}
+        !insertmacro IsShortcutTarget "$DESKTOP\${PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARYNAME}.exe"
+        Pop $0
+        ${If} $0 = 1
+          Delete "$DESKTOP\OCG Manager.lnk"
+        ${EndIf}
+      ${EndIf}
     ${EndIf}
   ${EndIf}
 !macroend

@@ -12,8 +12,9 @@ the kind of operations that are boring right up until they aren't.
 On Windows, the in-app updater preserves the existing installation directory
 when upgrading from OCG Manager to Open Console Gateway. A manual installer
 should use the existing directory to replace the old installation. The upgrade
-keeps the data directory and auto-start setting, and replaces the old installed-app
-registration with the new product name.
+keeps the data directory and auto-start setting, migrates existing desktop and
+Start-menu shortcuts, and replaces the old installed-app registration with the
+new product name.
 
 ## Database Migration And Access Keys (Schema v37)
 

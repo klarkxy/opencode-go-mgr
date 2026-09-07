@@ -4,7 +4,7 @@
 
 从 [GitHub 最新 Release](https://github.com/klarkxy/opencode-go-mgr/releases/latest) 下载升级包，并用同一 Release 的 `SHA256SUMS` 校验：PowerShell 用 `Get-FileHash <文件> -Algorithm SHA256`，macOS 用 `shasum -a 256 <文件>`，Linux 用 `sha256sum <文件>`。下面把备份、恢复和卸载一起讲完——都是平时很枯燥、关键时刻恨自己没看的操作。
 
-Windows 应用内更新会在 OCG Manager 升级为 Open Console Gateway 时保留原安装目录。手动运行安装器时，请选择原目录以替换旧安装。升级保留数据目录与开机启动设置，并将已安装应用记录更新为新名称。
+Windows 应用内更新会在 OCG Manager 升级为 Open Console Gateway 时保留原安装目录。手动运行安装器时，请选择原目录以替换旧安装。升级保留数据目录与开机启动设置，迁移已有桌面和开始菜单快捷方式，并将已安装应用记录更新为新名称。
 
 ## 数据库迁移与接入 Key（schema v37）
 

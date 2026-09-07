@@ -188,6 +188,15 @@ try {
     $startupValue = Get-StartupEntryValue -RunKey $runKey -Name $previousRunName
     if ($startupValue -ne $expectedStartupValue) { throw "Published install wrote unexpected startup value: $startupValue" }
 
+    $legacyShortcutDirectories = @()
+    if ($previousRunName -eq $LegacyRunValue) {
+      $legacyShortcutDirectories = @(
+        [Environment]::GetFolderPath('Programs'),
+        [Environment]::GetFolderPath('DesktopDirectory')
+      ) | Where-Object { Test-Path -LiteralPath (Join-Path $_ 'OCG Manager.lnk') }
+      if (!$legacyShortcutDirectories.Count) { throw 'Published install has no legacy shortcut to verify' }
+    }
+
     $previousPid = $process.Id
     Invoke-Installer -Path $CandidateInstaller -Arguments @('/UPDATE', '/P', '/R', '/ARGS', '--startup') -Label 'candidate overwrite update'
     foreach ($attempt in 1..30) {
@@ -217,6 +226,26 @@ try {
       }
       if (Test-Path 'HKCU:\Software\klarkxy\OCG Manager') {
         throw 'Overwrite update left the legacy installation location behind'
+      }
+      $shortcutShell = New-Object -ComObject WScript.Shell
+      try {
+        foreach ($shortcutDirectory in $legacyShortcutDirectories) {
+          $currentShortcut = Join-Path $shortcutDirectory 'Open Console Gateway.lnk'
+          if (!(Test-Path -LiteralPath $currentShortcut)) {
+            throw "Overwrite update did not preserve shortcut: $currentShortcut"
+          }
+          $shortcut = $shortcutShell.CreateShortcut($currentShortcut)
+          try {
+            if ($shortcut.TargetPath -ne $guiPath) { throw "Updated shortcut has the wrong target: $currentShortcut" }
+          } finally {
+            [Runtime.InteropServices.Marshal]::FinalReleaseComObject($shortcut) | Out-Null
+          }
+          if (Test-Path -LiteralPath (Join-Path $shortcutDirectory 'OCG Manager.lnk')) {
+            throw 'Overwrite update left a duplicate legacy shortcut'
+          }
+        }
+      } finally {
+        [Runtime.InteropServices.Marshal]::FinalReleaseComObject($shortcutShell) | Out-Null
       }
     }
   } else {
