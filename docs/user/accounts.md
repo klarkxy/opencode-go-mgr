@@ -259,6 +259,10 @@ than a key quota.
   This path has the same 15-second per-account throttle and global proxy, but
   no automatic schedule; its result never writes inference cooldown or changes
   routing. Manual calibration remains available for correction.
+- **GOAT inference cooldown.** A real Command Code `429` that identifies the
+  5-hour or weekly plan window uses the response's exact `Your limit resets at`
+  timestamp for the matching account cooldown. Ordinary transient or malformed
+  rate limits keep the generic five-minute fallback.
 - **Identity and credentials.** The name is the account's required primary
   display label. The login account field is optional; on Key-account creation,
   entering it first copies it into the name until you edit the name yourself.

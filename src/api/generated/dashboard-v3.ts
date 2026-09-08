@@ -1561,8 +1561,8 @@ export interface AccountManagedKeyVerify {
 }
 /**
  * POST `/accounts/{id}/usage/refresh` result. Nested `usage` is the V3
- * window projection; `revision` is captured after the shared coordinator
- * returns and is not advanced by official calibration.
+ * window projection; `revision` is captured after the provider-specific
+ * refresh returns and is not advanced by official calibration.
  */
 export interface UsageRefresh {
   lastSuccessAt: string;

@@ -6576,7 +6576,7 @@
     },
     "UsageRefresh": {
       "additionalProperties": false,
-      "description": "POST `/accounts/{id}/usage/refresh` result. Nested `usage` is the V3\nwindow projection; `revision` is captured after the shared coordinator\nreturns and is not advanced by official calibration.",
+      "description": "POST `/accounts/{id}/usage/refresh` result. Nested `usage` is the V3\nwindow projection; `revision` is captured after the provider-specific\nrefresh returns and is not advanced by official calibration.",
       "properties": {
         "lastSuccessAt": {
           "type": "string"
