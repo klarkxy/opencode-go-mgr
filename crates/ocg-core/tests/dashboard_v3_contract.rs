@@ -1,4 +1,4 @@
-//! Dashboard V3 contract kernel: schema drift, coexistence, auth, and process generation.
+//! Dashboard V3 contract kernel: schema drift, public auth, and process generation.
 
 use ocg_core::dashboard_v3::{ControlRevision, contract_schema_pretty};
 use reqwest::StatusCode;
@@ -57,8 +57,8 @@ fn process_generation_is_stable_per_core_state_and_differs_across_fresh_states()
 }
 
 #[tokio::test]
-async fn v2_coexists_with_v3_contract_routes() {
-    let harness = start_loopback("coexist").await;
+async fn public_auth_status_and_v3_contract_are_reachable() {
+    let harness = start_loopback("public-auth-contract").await;
     let auth = harness
         .client
         .get(format!("{}/auth/status", harness.v2_base))

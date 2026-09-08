@@ -1174,8 +1174,8 @@ pub(crate) fn stamp_pricing_activation(mut snapshot: PricingSnapshot) -> Pricing
 
 pub(crate) const MAX_PRICING_MULTIPLIER: f64 = 1000.0;
 
-/// Dashboard confirmation policy for an official pricing refresh. Shared by
-/// V2 and V3 so multiplier merge / confirmation matching stays identical.
+/// Dashboard confirmation policy for an official pricing refresh. Kept in
+/// one place so multiplier merge / confirmation matching stays identical.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PricingRefreshConfirmPolicy {
     KeepCurrent,

@@ -19,7 +19,6 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Duration;
 
 #[path = "../fake_upstream.rs"]
 mod fake_upstream;
@@ -32,11 +31,6 @@ pub(crate) const SUCCESS_BODY_WITHOUT_USAGE: &str = r#"{"id":"ok","object":"chat
 pub(crate) const CHAT_STREAM_WITHOUT_USAGE: &str = concat!(
     "data: {\"id\":\"chat-stream\",\"model\":\"deepseek-v4-flash\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"ok\"},\"finish_reason\":null}]}\n\n",
     "data: {\"id\":\"chat-stream\",\"model\":\"deepseek-v4-flash\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
-    "data: [DONE]\n\n"
-);
-pub(crate) const CHAT_STREAM_HEAD: &str = "data: {\"id\":\"chat-stream\",\"model\":\"deepseek-v4-flash\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"ok\"},\"finish_reason\":null}]}\n\n";
-pub(crate) const CHAT_STREAM_TAIL: &str = concat!(
-    "data: {\"id\":\"chat-stream\",\"model\":\"deepseek-v4-flash\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":2,\"prompt_tokens_details\":{\"cached_tokens\":0}}}\n\n",
     "data: [DONE]\n\n"
 );
 pub(crate) const LIMITED_BODY: &str = r#"{"type":"error","error":{"type":"GoUsageLimitError","message":"Weekly usage limit reached. Resets in 3 days."}}"#;
@@ -240,22 +234,4 @@ async fn scripted_reply(
         [("content-type", content_type)],
         reply.body,
     )
-}
-
-pub(crate) async fn wait_log_status(
-    state: &Arc<CoreStateInner>,
-    timeout: Duration,
-    predicate: impl Fn(&[ocg_core::models::ForwardLog]) -> bool,
-) -> Vec<ocg_core::models::ForwardLog> {
-    let deadline = tokio::time::Instant::now() + timeout;
-    loop {
-        let logs = state.db.lock().list_forward_logs(20).unwrap();
-        if predicate(&logs) {
-            return logs;
-        }
-        if tokio::time::Instant::now() >= deadline {
-            panic!("timed out waiting for forward log condition; last logs: {logs:?}");
-        }
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
 }

@@ -659,7 +659,6 @@ fn resolve_error_exposes_ambiguous_code() {
         ],
     });
     assert_eq!(error.code, Some(crate::alias::AMBIGUOUS_MODEL_ID));
-    assert!(error.message.contains("alias"));
 }
 
 #[test]

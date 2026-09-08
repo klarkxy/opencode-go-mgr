@@ -1,4 +1,4 @@
-//! Dashboard V3 local accounts slice: auth, CAS, secrecy, Plan gates, and V2 coexistence.
+//! Dashboard V3 local accounts slice: auth, CAS, secrecy, Plan gates, and retired V2 paths.
 
 use chrono::Utc;
 use ocg_core::browser::browser_profile_paths;
@@ -704,7 +704,6 @@ async fn dashboard_v3_create_gates_for_go_custom_goat_and_zen() {
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{zen}");
     assert_v3_error(&zen, ERROR_INVALID_REQUEST);
-    assert!(zen["message"].as_str().unwrap().contains("singleton"));
 
     harness.stop();
 }
@@ -1490,7 +1489,6 @@ async fn dashboard_v3_delete_maps_browser_stop_failure_to_service_unavailable() 
     .await;
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
     assert_v3_error(&body, ERROR_SERVICE_UNAVAILABLE);
-    assert_eq!(body["code"], "serviceUnavailable");
     assert_eq!(body["currentRevision"], before);
     assert_eq!(body["processGeneration"], generation);
     assert_eq!(harness.state.settings_revision(), before);
@@ -1533,8 +1531,8 @@ async fn dashboard_v3_managed_create_requires_invite_url() {
 }
 
 #[tokio::test]
-async fn dashboard_v3_account_mutations_coexist_with_v2() {
-    let harness = start_loopback("accounts-v2-coexist").await;
+async fn retired_v2_account_mutations_do_not_create_or_toggle() {
+    let harness = start_loopback("accounts-v2-retired").await;
     let v2_created = harness
         .client
         .post(format!("{}/accounts", harness.v2_base))

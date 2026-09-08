@@ -3,6 +3,7 @@
 
 use chrono::Utc;
 use ocg_core::crypto::{KeyCipher, StaticKeyCipher};
+use ocg_core::dashboard_v3::ERROR_INVALID_REQUEST;
 use ocg_core::models::{Account, AccountType, ForwardLog};
 use ocg_core::provider::{OLLAMA_PROVIDER_ID, OllamaBillingTier};
 use reqwest::Method;
@@ -140,8 +141,8 @@ async fn ollama_paid_tier_requires_purchase_date_and_publishes_month_credits() {
         ),
     )
     .await;
-    assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
-    assert!(body.to_string().contains("billing tier"), "{body}");
+    assert_eq!(status, axum::http::StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["code"], ERROR_INVALID_REQUEST);
 
     let (status, body) = send_json(
         &harness,
@@ -158,8 +159,8 @@ async fn ollama_paid_tier_requires_purchase_date_and_publishes_month_credits() {
         ),
     )
     .await;
-    assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
-    assert!(body.to_string().contains("purchase_date"), "{body}");
+    assert_eq!(status, axum::http::StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["code"], ERROR_INVALID_REQUEST);
 
     let (status, body) = send_json(
         &harness,

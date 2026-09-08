@@ -1,4 +1,4 @@
-//! Dashboard V3 read-only observability: auth, secrecy, local-only reads, V2 parity.
+//! Dashboard V3 read-only observability: auth, secrecy, local-only reads, and retired V2 paths.
 
 use chrono::{Duration, Utc};
 use ocg_core::dashboard_v3::{
@@ -442,8 +442,8 @@ async fn dashboard_v3_stopped_gateway_status_redacts_account_secret_from_last_er
 }
 
 #[tokio::test]
-async fn dashboard_v3_and_v2_observability_coexist_with_stable_v2_shapes() {
-    let harness = start_loopback("obs-coexist").await;
+async fn v3_observability_stays_camel_case_after_v2_retirement() {
+    let harness = start_loopback("obs-v2-retired").await;
     harness
         .state
         .db

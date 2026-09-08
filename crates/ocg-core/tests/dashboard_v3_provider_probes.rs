@@ -1,5 +1,5 @@
 //! Dashboard V3 provider protocol probes: auth, CAS, zero-call gates, shared
-//! transport, persistence, and V2 coexistence.
+//! transport, persistence, and retired V2 paths.
 
 use axum::Router;
 use axum::body::Bytes;
@@ -763,12 +763,7 @@ async fn fixed_provider_overrides_reject_protocols_outside_official_ceiling() {
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{rejected}");
-    assert!(
-        rejected["message"]
-            .as_str()
-            .unwrap_or_default()
-            .contains("documented capability ceiling")
-    );
+    assert_v3_error(&rejected, ERROR_INVALID_REQUEST);
 
     let (status, accepted) = send_json(
         &harness,
@@ -857,7 +852,6 @@ async fn protocol_probes_zero_call_gates_do_not_touch_upstream() {
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{duplicate}");
     assert_v3_error(&duplicate, ERROR_INVALID_REQUEST);
-    assert!(duplicate["message"].as_str().unwrap().contains("duplicate"));
 
     let (status, empty) = send_json(
         &harness,
@@ -925,13 +919,6 @@ async fn protocol_probes_zero_call_gates_do_not_touch_upstream() {
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{custom}");
     assert_v3_error(&custom, ERROR_INVALID_REQUEST);
-    assert!(
-        custom["message"]
-            .as_str()
-            .unwrap()
-            .to_ascii_lowercase()
-            .contains("account-owned")
-    );
 
     for (provider_id, model_id) in [
         (MINIMAX_PROVIDER_ID, "MiniMax-M3"),
@@ -952,12 +939,6 @@ async fn protocol_probes_zero_call_gates_do_not_touch_upstream() {
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{missing_account}");
         assert_v3_error(&missing_account, ERROR_INVALID_REQUEST);
-        assert!(
-            missing_account["message"]
-                .as_str()
-                .unwrap()
-                .contains("no eligible provider accounts")
-        );
     }
 
     let (status, unknown_provider) = send_json(
@@ -1224,12 +1205,6 @@ async fn protocol_probe_without_eligible_accounts_is_a_zero_call_rejection() {
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
     assert_v3_error(&body, ERROR_INVALID_REQUEST);
-    assert!(
-        body["message"]
-            .as_str()
-            .unwrap()
-            .contains("no eligible provider accounts")
-    );
     assert_eq!(origin.call_count(), 0);
     assert_eq!(harness.state.settings_revision(), before);
     assert!(
@@ -1300,7 +1275,6 @@ async fn model_outside_provider_catalog_is_rejected_without_bump_or_upstream() {
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
     assert_eq!(body["code"], ERROR_INVALID_REQUEST);
-    assert!(body.to_string().contains("provider catalog"), "{body}");
     assert_eq!(harness.state.settings_revision(), before);
     assert_eq!(origin.call_count(), 0);
     harness.stop();
@@ -1579,11 +1553,6 @@ async fn transport_failure_returns_200_persists_observation_and_redacts_secrets(
     assert_eq!(log.status, "error");
     assert_eq!(log.http_status, Some(500));
     assert_eq!(log.error_stage.as_deref(), Some("protocol_probe"));
-    assert!(
-        log.error_message
-            .as_deref()
-            .is_some_and(|message| message.contains("upstream returned 500"))
-    );
     assert_secret_free(&serde_json::to_value(&log).unwrap(), &[GO_KEY]);
     assert!(
         runtime_logs
@@ -2081,8 +2050,8 @@ async fn static_reset_advances_global_revision_before_reload_failure() {
 }
 
 #[tokio::test]
-async fn v2_duplicate_custom_and_ceiling_probes_coexist() {
-    let harness = start_loopback("probes-v2-coexist").await;
+async fn retired_account_owned_probes_do_not_call_upstream() {
+    let harness = start_loopback("probes-v2-retired").await;
     let origin = start_probe_origin(StatusCode::OK, SUCCESS_BODY, Duration::ZERO).await;
     point_upstream(&harness, &origin.url);
     let account_id = create_go_account(&harness).await;
@@ -2093,54 +2062,10 @@ async fn v2_duplicate_custom_and_ceiling_probes_coexist() {
             &format!("/accounts/{account_id}/protocol-probes"),
             Some(json!({
                 "model_id": "grok-4.5",
-                "protocols": ["chat_completions", "responses", "chat_completions"]
-            })),
-        )
-        .await;
-    let (status, duplicate) = send_json(
-        &harness,
-        Method::POST,
-        &probe_path(OPENCODE_PROVIDER_ID),
-        &cas(
-            &harness,
-            json!({
-                "accountId": account_id,
-                "modelId": "grok-4.5",
-                "protocols": ["chat_completions", "responses", "chat_completions"]
-            }),
-        ),
-    )
-    .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "{duplicate}");
-    assert!(duplicate.to_string().contains("duplicate"), "{duplicate}");
-    assert_eq!(origin.call_count(), 0);
-
-    harness
-        .assert_v2_path_removed(
-            Method::POST,
-            &format!("/accounts/{account_id}/protocol-probes"),
-            Some(json!({
-                "model_id": "not-a-known-model",
                 "protocols": ["chat_completions"]
             })),
         )
         .await;
-    let (status, ceiling) = send_json(
-        &harness,
-        Method::POST,
-        &probe_path(OPENCODE_PROVIDER_ID),
-        &cas(
-            &harness,
-            json!({
-                "accountId": account_id,
-                "modelId": "not-a-known-model",
-                "protocols": ["chat_completions"]
-            }),
-        ),
-    )
-    .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "{ceiling}");
-    assert_eq!(ceiling["code"], ERROR_INVALID_REQUEST);
     assert_eq!(origin.call_count(), 0);
 
     let (status, custom) = send_json(

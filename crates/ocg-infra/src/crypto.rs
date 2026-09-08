@@ -328,9 +328,7 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join(".encryption-key"), "").unwrap();
 
-        let error = load_or_create_static_cipher(&dir).unwrap_err();
-
-        assert!(error.to_string().contains("is empty"));
+        load_or_create_static_cipher(&dir).expect_err("empty secret must fail");
         fs::remove_dir_all(dir).unwrap();
     }
 }

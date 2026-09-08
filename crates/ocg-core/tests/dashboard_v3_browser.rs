@@ -1,5 +1,5 @@
 //! Dashboard V3 browser runtime: session protection, CAS, secrecy, Origin,
-//! native/remote wire shape, reset lifecycle, and V2 coexistence.
+//! native/remote wire shape, reset lifecycle, and retired V2 paths.
 
 use axum::Router;
 use axum::extract::ws::{Message as AxumWsMessage, WebSocketUpgrade};
@@ -1526,12 +1526,12 @@ async fn dashboard_v3_open_invite_requires_configured_url() {
 }
 
 #[tokio::test]
-async fn dashboard_v3_browser_coexists_with_v2() {
-    let harness = start_loopback("browser-v2-coexist").await;
+async fn retired_v2_browser_does_not_launch_or_reset() {
+    let harness = start_loopback("browser-v2-retired").await;
     let launches = Arc::new(AtomicUsize::new(0));
     let stops = Arc::new(AtomicUsize::new(0));
     register_native(&harness, launches.clone(), stops.clone(), None);
-    let account_id = create_go_account(&harness, "coexist", "sk-v2-coexist").await;
+    let account_id = create_go_account(&harness, "retired-v2", "sk-retired-v2").await;
 
     let v2_caps = harness
         .client

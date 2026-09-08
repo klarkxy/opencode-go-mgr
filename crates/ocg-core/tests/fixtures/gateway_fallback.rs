@@ -915,8 +915,34 @@ pub(crate) async fn get_application_models(
         .unwrap();
     let status = response.status();
     let body = response.json::<serde_json::Value>().await.unwrap();
-    let models = body.get("models").cloned().unwrap_or(body);
-    (status, models)
+    if status == axum::http::StatusCode::OK {
+        assert!(
+            body.get("models")
+                .and_then(serde_json::Value::as_array)
+                .is_some(),
+            "GET /application-models must emit a models array: {body}"
+        );
+        assert!(
+            body.get("revision").is_some()
+                && body.get("processGeneration").is_some()
+                && body.get("pricingRevision").is_some(),
+            "GET /application-models must emit V3 snapshot tokens: {body}"
+        );
+    }
+    (status, body)
+}
+
+pub(crate) fn application_model_ids(body: &serde_json::Value) -> Vec<String> {
+    body.get("models")
+        .and_then(serde_json::Value::as_array)
+        .unwrap_or_else(|| panic!("GET /application-models must emit models: {body}"))
+        .iter()
+        .map(|item| {
+            item.as_str()
+                .unwrap_or_else(|| panic!("application-models entries must be strings: {body}"))
+                .to_string()
+        })
+        .collect()
 }
 
 pub(crate) fn assert_no_application_model_side_effects(

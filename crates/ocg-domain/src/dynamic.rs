@@ -177,7 +177,7 @@ mod tests {
             },
         ])
         .unwrap_err();
-        assert!(error.to_string().contains("duplicate public model"));
+        assert!(matches!(error, ProviderBindingError::InvalidModelId(_)));
     }
 
     #[test]

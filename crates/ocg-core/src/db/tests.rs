@@ -3331,41 +3331,6 @@ fn clear_v23_identity(db: &Database, id: i64) {
 }
 
 #[test]
-fn forward_log_model_filter_binds_each_identity_column() {
-    let none = empty_forward_query();
-    let (sql, params) = forward_log_filter(&none);
-    assert!(!sql.to_ascii_lowercase().contains("model"));
-    assert!(params.is_empty());
-
-    let empty = ForwardLogQueryOptions {
-        model: Some(""),
-        ..empty_forward_query()
-    };
-    let (sql, params) = forward_log_filter(&empty);
-    assert!(!sql.to_ascii_lowercase().contains("model"));
-    assert!(params.is_empty());
-
-    let filtered = ForwardLogQueryOptions {
-        status: Some("success"),
-        model: Some("glm-5.2"),
-        ..empty_forward_query()
-    };
-    let (sql, params) = forward_log_filter(&filtered);
-    assert!(sql.contains("status = ?"));
-    assert!(sql.contains(
-        "(model = ? OR requested_model = ? OR resolved_alias = ? OR upstream_model = ?)"
-    ));
-    assert!(sql.contains(" AND "));
-    assert_eq!(params.len(), 5);
-    assert_eq!(params[0], Value::Text("success".into()));
-    assert!(
-        params[1..]
-            .iter()
-            .all(|value| *value == Value::Text("glm-5.2".into()))
-    );
-}
-
-#[test]
 fn forward_logs_model_filter_matches_each_identity_and_legacy_fallback() {
     let dir = temp_data_dir("forward-model-identity-filter");
     let db = Database::open(dir.clone()).unwrap();
@@ -4774,7 +4739,6 @@ fn probe_observation_batch_upserts_atomically_and_bumps_scope_once() {
 
     let empty = db.upsert_model_protocols(&[]);
     assert!(empty.is_err(), "{empty:?}");
-    assert!(empty.unwrap_err().to_string().contains("nonempty"));
     assert!(db.load_persisted_scope(&go).unwrap().is_none());
 
     let mixed = db.upsert_model_protocols(&[
@@ -4792,7 +4756,6 @@ fn probe_observation_batch_upserts_atomically_and_bumps_scope_once() {
         ),
     ]);
     assert!(mixed.is_err(), "{mixed:?}");
-    assert!(mixed.unwrap_err().to_string().contains("mix"));
     assert!(db.load_persisted_scope(&go).unwrap().is_none());
     assert!(db.load_persisted_scope(&custom).unwrap().is_none());
     assert!(

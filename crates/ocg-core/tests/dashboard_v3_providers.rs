@@ -1,5 +1,5 @@
 //! Dashboard V3 local/Zen providers control plane: auth, catalog, contracts,
-//! CAS, Zen refresh, and V2 coexistence. Protocol probes live in
+//! CAS, Zen refresh, and retired V2 paths. Protocol probes live in
 //! `dashboard_v3_provider_probes.rs`.
 
 #[cfg(debug_assertions)]
@@ -16,8 +16,9 @@ use ocg_core::dashboard_v3::ERROR_CONFLICT;
 use ocg_core::dashboard_v3::set_zen_models_source_url_override_for_tests;
 use ocg_core::dashboard_v3::{
     AccountUpstreamProtocol, ERROR_INVALID_JSON, ERROR_INVALID_REQUEST,
-    ERROR_MISSING_EXPECTED_REVISION, ERROR_NOT_FOUND, ERROR_REVISION_CONFLICT, ERROR_UNAUTHORIZED,
-    ProviderCatalog, ProviderContracts, ProviderModelCapability, ZenFreeModels, ZenFreeSettings,
+    ERROR_MISSING_EXPECTED_REVISION, ERROR_NOT_FOUND, ERROR_OUTBOUND_FAILED,
+    ERROR_REVISION_CONFLICT, ERROR_UNAUTHORIZED, ProviderCatalog, ProviderContracts,
+    ProviderModelCapability, ZenFreeModels, ZenFreeSettings,
 };
 use ocg_core::kernel::ids::is_free_model;
 use ocg_core::kernel::zen::ZEN_MODELS_SOURCE_URL;
@@ -1115,8 +1116,7 @@ async fn dashboard_v3_zen_refresh_persists_on_success_and_preserves_state_on_fai
     )
     .await;
     assert_eq!(status, StatusCode::BAD_GATEWAY, "{empty_body}");
-    assert_eq!(empty_body["code"], "outboundFailed");
-    assert_v3_error(&empty_body, "outboundFailed");
+    assert_v3_error(&empty_body, ERROR_OUTBOUND_FAILED);
     assert_eq!(empty_body["currentRevision"], after_success);
     assert_eq!(
         empty_body["processGeneration"],
@@ -1140,7 +1140,7 @@ async fn dashboard_v3_zen_refresh_persists_on_success_and_preserves_state_on_fai
     )
     .await;
     assert_eq!(status, StatusCode::BAD_GATEWAY, "{failed_body}");
-    assert_eq!(failed_body["code"], "outboundFailed");
+    assert_v3_error(&failed_body, ERROR_OUTBOUND_FAILED);
     assert_eq!(harness.state.settings_revision(), after_success);
     assert_eq!(
         harness.state.zen_free_model_catalog().models,
@@ -1539,8 +1539,8 @@ async fn dashboard_v3_custom_endpoint_model_protocol_overrides_enforce_cas_and_p
 }
 
 #[tokio::test]
-async fn dashboard_v3_provider_routes_coexist_with_v2_and_omit_v2_aliases() {
-    let harness = start_loopback("providers-coexist").await;
+async fn retired_v2_provider_routes_stay_gone_and_v3_omits_legacy_aliases() {
+    let harness = start_loopback("providers-v2-retired").await;
 
     harness
         .assert_v2_path_removed(Method::GET, "/providers", None)

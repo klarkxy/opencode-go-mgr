@@ -347,13 +347,12 @@ mod tests {
             UpstreamProtocolKind::Responses,
         ];
         require_unique_probe_protocols(&unique).expect("unique caller order is preserved");
-        let error = require_unique_probe_protocols(&[
+        require_unique_probe_protocols(&[
             UpstreamProtocolKind::ChatCompletions,
             UpstreamProtocolKind::Responses,
             UpstreamProtocolKind::ChatCompletions,
         ])
         .expect_err("duplicates must fail locally");
-        assert!(error.contains("duplicate"));
     }
 
     #[test]

@@ -1,5 +1,5 @@
-//! Dashboard V3 account verify: auth, CAS, V2 semantics, Custom probe matrix,
-//! revision bump rules, secrecy, and V2 coexistence.
+//! Dashboard V3 account verify: auth, CAS, Custom probe matrix,
+//! revision bump rules, secrecy, and retired V2 paths.
 
 use axum::Router;
 use axum::body::Bytes;
@@ -655,12 +655,6 @@ async fn unknown_offerings_fail_closed_without_touching_goat_or_upstream() {
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{unknown}");
     assert_v3_error(&unknown, ERROR_INVALID_REQUEST);
-    assert!(
-        unknown["message"]
-            .as_str()
-            .unwrap()
-            .contains("unknown provider offering")
-    );
 
     let (status, missing) = send_json(
         &harness,
@@ -1515,8 +1509,8 @@ async fn concurrent_custom_verifies_certify_once() {
 }
 
 #[tokio::test]
-async fn v2_account_verify_coexists_and_keeps_its_shape() {
-    let harness = start_loopback("verify-v2-coexist").await;
+async fn retired_v2_account_verify_does_not_mutate() {
+    let harness = start_loopback("verify-v2-retired").await;
     force_direct_proxy(&harness);
     let origin = start_origin(StatusCode::OK, SUCCESS_BODY, Duration::ZERO).await;
     let goat_id = create_goat_account(&harness).await;

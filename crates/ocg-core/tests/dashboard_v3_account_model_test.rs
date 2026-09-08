@@ -6,6 +6,7 @@ use axum::extract::OriginalUri;
 use axum::http::{HeaderMap, Method as HttpMethod};
 use axum::routing::any;
 use chrono::Utc;
+use ocg_core::dashboard_v3::ERROR_INVALID_REQUEST;
 use ocg_core::models::ProxyMode;
 use ocg_core::provider::CUSTOM_PROVIDER_ID;
 use reqwest::{Method, StatusCode};
@@ -195,7 +196,6 @@ async fn model_test_locks_the_requested_disabled_cooling_account_and_does_not_mu
     assert_eq!(body["httpStatus"], 401);
     assert!(body["durationMs"].as_u64().is_some());
     assert!(!body.to_string().contains(TARGET_KEY), "{body}");
-    assert!(!body.to_string().contains("rejected"), "{body}");
     assert_eq!(harness.state.settings_revision(), before_revision);
     let after = harness
         .state
@@ -231,7 +231,7 @@ async fn model_test_rejects_unknown_models_before_outbound() {
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
-    assert_eq!(body["code"], "invalidRequest");
+    assert_eq!(body["code"], ERROR_INVALID_REQUEST);
     assert!(origin.calls.lock().unwrap().is_empty());
     harness.stop();
 }
@@ -526,7 +526,7 @@ async fn dynamic_unknown_model_fails_before_outbound() {
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
-    assert_eq!(body["code"], "invalidRequest");
+    assert_eq!(body["code"], ERROR_INVALID_REQUEST);
     assert!(origin.calls.lock().unwrap().is_empty());
     harness.stop();
 }

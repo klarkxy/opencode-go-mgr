@@ -149,7 +149,6 @@ fn provider_snapshot_round_trips_legacy_go_shape() {
     let record = typed.to_storage_record().unwrap();
     let loaded = ProviderScopedPricingSnapshot::from_storage_record(&record).unwrap();
     assert_eq!(loaded.provider_id(), "opencode");
-    assert_eq!(loaded.provider_id(), "opencode");
     assert_eq!(loaded.revision(), legacy.revision);
     assert_eq!(loaded.evidence(), ProviderPricingEvidence::Verified);
     assert_eq!(loaded.values().len(), legacy.models.len());

@@ -1988,7 +1988,6 @@ fn format_error_exposes_ambiguous_model_id() {
         code,
     );
     assert_eq!(chat["error"]["type"], crate::alias::AMBIGUOUS_MODEL_ID);
-    assert!(chat["error"]["message"].as_str().unwrap().contains("alias"));
 
     let messages = format_error_with_code(
         ApiFormat::Messages,

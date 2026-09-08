@@ -1,6 +1,7 @@
 //! Dynamic Provider persistence, V3 control plane, and routing snapshot tests.
 
 use chrono::Utc;
+use ocg_core::dashboard_v3::ERROR_INVALID_REQUEST;
 use ocg_core::models::ProxyMode;
 use ocg_core::provider::{CUSTOM_PROVIDER_ID, OPENCODE_PROVIDER_ID};
 use reqwest::{Method, StatusCode};
@@ -938,13 +939,7 @@ async fn keyed_provider_update_rejects_key_and_does_not_fan_out() {
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{rejected}");
-    assert!(
-        rejected["message"]
-            .as_str()
-            .unwrap_or_default()
-            .contains("Accounts"),
-        "{rejected}"
-    );
+    assert_eq!(rejected["code"], ERROR_INVALID_REQUEST, "{rejected}");
     assert_eq!(harness.state.settings_revision(), revision);
     let after = harness
         .state
