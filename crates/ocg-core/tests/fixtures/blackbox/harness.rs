@@ -1,7 +1,10 @@
 //! HTTP-only helpers for the alias / multi-Plan black-box suite.
 //!
-//! Tests talk to Gateway and dashboard JSON. They do not construct private
-//! gateway types. `CoreStateInner` is used only to boot an isolated data dir.
+//! Tests talk to Gateway and dashboard V3 JSON (`/dashboard/api/v3`) using
+//! camelCase field names. Named helpers may unwrap a V3 envelope
+//! (`entries`, `accounts`, `account`); raw `*_json` methods return the HTTP
+//! body unchanged. They do not construct private gateway types.
+//! `CoreStateInner` is used only to boot an isolated data dir.
 
 #![allow(dead_code)]
 
@@ -12,7 +15,7 @@ use ocg_core::models::ProxyMode;
 use ocg_core::state::{CoreStateInner, GatewayHandle};
 use reqwest::StatusCode;
 use serde_json::{Value, json};
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -50,7 +53,7 @@ pub(crate) fn loopback_client() -> reqwest::Client {
     reqwest::Client::builder()
         .no_proxy()
         .build()
-        .expect("v2 test client should build")
+        .expect("black-box test client should build")
 }
 
 pub(crate) struct BlackBoxHarness {
@@ -96,7 +99,8 @@ impl BlackBoxHarness {
     ) -> Self {
         let dir = temp_data_dir();
         let db = Database::open(dir.clone()).unwrap();
-        let cipher: Arc<dyn KeyCipher + Send + Sync> = Arc::new(StaticKeyCipher::new("v2-tests"));
+        let cipher: Arc<dyn KeyCipher + Send + Sync> =
+            Arc::new(StaticKeyCipher::new("blackbox-tests"));
         let state = Arc::new(CoreStateInner::new(db, dir.clone(), cipher).unwrap());
 
         let (upstream, fake_calls, stop_fake) = if let Some(replies) = replies {
@@ -144,11 +148,11 @@ impl BlackBoxHarness {
     }
 
     pub(crate) fn mutation_body(&self, body: Value) -> Value {
-        keys_to_camel(with_cas_tokens(
+        with_cas_tokens(
             body,
             self.state.settings_revision(),
             self.state.process_generation(),
-        ))
+        )
     }
 
     pub(crate) fn gateway(&self, path: &str) -> String {
@@ -159,7 +163,7 @@ impl BlackBoxHarness {
         let response = self.client.get(self.dashboard(path)).send().await.unwrap();
         let status = response.status();
         let body = decode_json(response).await;
-        (status, adapt_v3_response(path, status, body))
+        (status, body)
     }
 
     pub(crate) async fn post_json(&self, path: &str, body: &Value) -> (StatusCode, Value) {
@@ -172,7 +176,7 @@ impl BlackBoxHarness {
             .unwrap();
         let status = response.status();
         let body = decode_json(response).await;
-        (status, adapt_v3_response(path, status, body))
+        (status, body)
     }
 
     pub(crate) async fn patch_json(&self, path: &str, body: &Value) -> (StatusCode, Value) {
@@ -185,7 +189,7 @@ impl BlackBoxHarness {
             .unwrap();
         let status = response.status();
         let body = decode_json(response).await;
-        (status, adapt_v3_response(path, status, body))
+        (status, body)
     }
 
     pub(crate) async fn put_json(&self, path: &str, body: &Value) -> (StatusCode, Value) {
@@ -198,7 +202,7 @@ impl BlackBoxHarness {
             .unwrap();
         let status = response.status();
         let body = decode_json(response).await;
-        (status, adapt_v3_response(path, status, body))
+        (status, body)
     }
 
     pub(crate) async fn delete_json(&self, path: &str, body: &Value) -> (StatusCode, Value) {
@@ -211,7 +215,7 @@ impl BlackBoxHarness {
             .unwrap();
         let status = response.status();
         let body = decode_json(response).await;
-        (status, adapt_v3_response(path, status, body))
+        (status, body)
     }
 
     pub(crate) async fn catalog(&self) -> Value {
@@ -221,27 +225,36 @@ impl BlackBoxHarness {
             StatusCode::OK,
             "catalog must be readable on loopback: {body}"
         );
-        body
+        body.get("entries")
+            .cloned()
+            .unwrap_or_else(|| panic!("GET /providers must return entries: {body}"))
     }
 
     pub(crate) async fn accounts(&self) -> Value {
         let (status, body) = self.get_json("/accounts").await;
         assert_eq!(status, StatusCode::OK, "account list: {body}");
-        body
+        body.get("accounts")
+            .cloned()
+            .unwrap_or_else(|| panic!("GET /accounts must return accounts: {body}"))
     }
 
     pub(crate) async fn create_account(&self, payload: Value) -> (StatusCode, Value) {
-        self.post_json("/accounts", &payload).await
+        let (status, body) = self.post_json("/accounts", &payload).await;
+        if status.is_success() {
+            (status, mutation_account(body))
+        } else {
+            (status, body)
+        }
     }
 
     pub(crate) async fn create_go_account(&self, name: &str, key: &str) -> Value {
         let revision = self.settings_revision().await;
         let (status, body) = self
             .create_account(json!({
-                "provider_id": OPENCODE_PROVIDER_ID,
+                "providerId": OPENCODE_PROVIDER_ID,
                 "name": name,
                 "key": key,
-                "expected_revision": revision
+                "expectedRevision": revision
             }))
             .await;
         assert_eq!(status, StatusCode::OK, "create Go account: {body}");
@@ -302,22 +315,6 @@ impl BlackBoxHarness {
         (status, body)
     }
 
-    pub(crate) async fn claude_desktop_models(&self) -> (StatusCode, Value) {
-        let response = self
-            .client
-            .get(self.gateway("/claude-desktop/v1/models"))
-            .header(
-                reqwest::header::AUTHORIZATION,
-                format!("Bearer {GATEWAY_KEY}"),
-            )
-            .send()
-            .await
-            .unwrap();
-        let status = response.status();
-        let body = decode_json(response).await;
-        (status, body)
-    }
-
     pub(crate) async fn forward_logs(&self) -> Value {
         let (status, body) = self.get_json("/logs/forward?limit=50").await;
         assert_eq!(status, StatusCode::OK, "forward logs: {body}");
@@ -357,7 +354,7 @@ impl BlackBoxHarness {
     }
 }
 
-pub(crate) async fn start_output_then_disconnect_upstream() -> (
+async fn start_output_then_disconnect_upstream() -> (
     String,
     Arc<std::sync::atomic::AtomicUsize>,
     tokio::sync::oneshot::Sender<()>,
@@ -372,10 +369,10 @@ pub(crate) async fn start_output_then_disconnect_upstream() -> (
     start_raw_disconnect_upstream(raw).await
 }
 
-pub(crate) async fn start_v2_with_disconnect_upstream() -> BlackBoxHarness {
+pub(crate) async fn start_with_disconnect_upstream() -> BlackBoxHarness {
     let dir = temp_data_dir();
     let db = Database::open(dir.clone()).unwrap();
-    let cipher: Arc<dyn KeyCipher + Send + Sync> = Arc::new(StaticKeyCipher::new("v2-tests"));
+    let cipher: Arc<dyn KeyCipher + Send + Sync> = Arc::new(StaticKeyCipher::new("blackbox-tests"));
     let state = Arc::new(CoreStateInner::new(db, dir.clone(), cipher).unwrap());
     let (base, calls, stop) = start_output_then_disconnect_upstream().await;
     let mut config = state.config();
@@ -405,38 +402,7 @@ pub(crate) fn catalog_entry<'a>(catalog: &'a Value, provider_id: &str) -> Option
     catalog
         .as_array()?
         .iter()
-        .find(|entry| entry["provider_id"] == provider_id || entry["providerId"] == provider_id)
-}
-
-pub(crate) fn catalog_aliases(entry: &Value) -> Vec<Value> {
-    match &entry["model_aliases"] {
-        Value::Array(items) => items.clone(),
-        _ => Vec::new(),
-    }
-}
-
-pub(crate) fn alias_name_list(entry: &Value) -> Vec<String> {
-    catalog_aliases(entry)
-        .into_iter()
-        .filter_map(|item| {
-            item.as_str()
-                .or_else(|| item["alias"].as_str())
-                .map(str::to_string)
-        })
-        .collect()
-}
-
-pub(crate) fn alias_names(entry: &Value) -> HashSet<String> {
-    alias_name_list(entry).into_iter().collect()
-}
-
-pub(crate) fn form_field_ids(entry: &Value) -> HashSet<String> {
-    entry["form_fields"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|field| field["id"].as_str().map(str::to_string))
-        .collect()
+        .find(|entry| entry["providerId"] == provider_id)
 }
 
 pub(crate) fn custom_create_payload(
@@ -448,69 +414,25 @@ pub(crate) fn custom_create_payload(
 ) -> Value {
     let endpoint_url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
     json!({
-        "provider_id": CUSTOM_PROVIDER_ID,
+        "providerId": CUSTOM_PROVIDER_ID,
         "name": name,
         "key": key,
-        "expected_revision": revision,
-        "custom_config": {
-            "endpoint_url": endpoint_url,
-            "upstream_protocol": "chat_completions"
+        "expectedRevision": revision,
+        "customConfig": {
+            "endpointUrl": endpoint_url,
+            "upstreamProtocol": "chat_completions"
         },
-        "model_capabilities": [{
-            "model_id": model_id,
+        "modelCapabilities": [{
+            "modelId": model_id,
             "protocol": "chat_completions"
         }]
     })
-}
-
-pub(crate) fn overlapping_raw_ids(catalog: &Value) -> Vec<(String, Vec<String>)> {
-    let mut by_raw: HashMap<String, Vec<String>> = HashMap::new();
-    let Some(entries) = catalog.as_array() else {
-        return Vec::new();
-    };
-    for entry in entries {
-        let provider = entry["provider_id"].as_str().unwrap_or_default();
-        for alias in catalog_aliases(entry) {
-            let raw = alias["upstream_model"]
-                .as_str()
-                .or_else(|| alias["upstream_model_id"].as_str());
-            if let Some(raw) = raw {
-                by_raw
-                    .entry(raw.to_string())
-                    .or_default()
-                    .push(provider.to_string());
-            }
-        }
-    }
-    by_raw
-        .into_iter()
-        .filter_map(|(raw, plans)| {
-            let mut unique = plans.clone();
-            unique.sort();
-            unique.dedup();
-            if unique.len() > 1 {
-                Some((raw, unique))
-            } else {
-                None
-            }
-        })
-        .collect()
 }
 
 pub(crate) fn error_type(body: &Value) -> Option<&str> {
     body.pointer("/error/type")
         .and_then(Value::as_str)
         .or_else(|| body.get("type").and_then(Value::as_str))
-}
-
-pub(crate) fn error_message(body: &Value) -> String {
-    if let Some(message) = body.pointer("/error/message").and_then(Value::as_str) {
-        return message.to_string();
-    }
-    match &body["error"] {
-        Value::String(message) => message.clone(),
-        other => other.to_string(),
-    }
 }
 
 pub(crate) fn json_contains_secret(value: &Value, secret: &str) -> bool {
@@ -525,17 +447,8 @@ pub(crate) fn json_contains_secret(value: &Value, secret: &str) -> bool {
     }
 }
 
-pub(crate) fn client_model_ids(body: &Value) -> Vec<String> {
-    body["data"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|item| item["id"].as_str().map(str::to_string))
-        .collect()
-}
-
 fn temp_data_dir() -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("ocg-v2-contract-{}", uuid::Uuid::new_v4()));
+    let dir = std::env::temp_dir().join(format!("ocg-blackbox-{}", uuid::Uuid::new_v4()));
     fs::create_dir_all(&dir).unwrap();
     dir
 }
@@ -560,115 +473,18 @@ fn with_cas_tokens(mut body: Value, revision: u64, process_generation: u64) -> V
     let Some(object) = body.as_object_mut() else {
         return body;
     };
-    if !object.contains_key("expectedRevision") && !object.contains_key("expected_revision") {
-        object.insert("expected_revision".into(), json!(revision));
-    }
-    if !object.contains_key("processGeneration") && !object.contains_key("process_generation") {
-        object.insert("process_generation".into(), json!(process_generation));
-    }
+    object
+        .entry("expectedRevision")
+        .or_insert_with(|| json!(revision));
+    object
+        .entry("processGeneration")
+        .or_insert_with(|| json!(process_generation));
     body
 }
 
-fn keys_to_camel(value: Value) -> Value {
-    match value {
-        Value::Object(map) => Value::Object(
-            map.into_iter()
-                .map(|(key, child)| (snake_to_camel(&key), keys_to_camel(child)))
-                .collect(),
-        ),
-        Value::Array(items) => Value::Array(items.into_iter().map(keys_to_camel).collect()),
-        other => other,
-    }
-}
-
-fn keys_to_snake(value: Value) -> Value {
-    match value {
-        Value::Object(map) => Value::Object(
-            map.into_iter()
-                .map(|(key, child)| (camel_to_snake(&key), keys_to_snake(child)))
-                .collect(),
-        ),
-        Value::Array(items) => Value::Array(items.into_iter().map(keys_to_snake).collect()),
-        other => other,
-    }
-}
-
-fn snake_to_camel(key: &str) -> String {
-    let mut out = String::with_capacity(key.len());
-    let mut upper = false;
-    for ch in key.chars() {
-        if ch == '_' {
-            upper = true;
-        } else if upper {
-            out.extend(ch.to_uppercase());
-            upper = false;
-        } else {
-            out.push(ch);
-        }
-    }
-    out
-}
-
-fn camel_to_snake(key: &str) -> String {
-    let mut out = String::with_capacity(key.len() + 4);
-    for (index, ch) in key.chars().enumerate() {
-        if ch.is_uppercase() {
-            if index > 0 {
-                out.push('_');
-            }
-            out.extend(ch.to_lowercase());
-        } else {
-            out.push(ch);
-        }
-    }
-    out
-}
-
-fn adapt_v3_response(path: &str, status: StatusCode, body: Value) -> Value {
-    let path = path.split('?').next().unwrap_or(path);
-    let body = keys_to_snake(body);
-    if !status.is_success() {
-        return body;
-    }
-    if (path == "/providers" || path == "/providers/catalog")
-        && let Some(entries) = body.get("entries")
-    {
-        return entries.clone();
-    }
-    if path == "/accounts"
-        && let Some(accounts) = body.get("accounts").and_then(Value::as_array)
-    {
-        return Value::Array(
-            accounts
-                .iter()
-                .cloned()
-                .map(|account| normalize_account(account, None))
-                .collect(),
-        );
-    }
-    if path == "/application-models"
-        && let Some(models) = body.get("models")
-    {
-        return models.clone();
-    }
-    if let Some(account) = body.get("account")
-        && !account.is_null()
-    {
-        return normalize_account(account.clone(), body.get("revision").cloned());
-    }
-    if body.get("id").is_some() && body.get("provider_id").is_some() {
-        return normalize_account(body, None);
-    }
-    body
-}
-
-fn normalize_account(mut account: Value, revision: Option<Value>) -> Value {
-    if let Some(object) = account.as_object_mut() {
-        object.entry("key").or_insert_with(|| json!(""));
-        object.entry("password").or_insert_with(|| json!(""));
-        if let Some(revision) = revision {
-            object.entry("revision").or_insert(revision);
-        }
-    }
-    account
+pub(crate) fn mutation_account(body: Value) -> Value {
+    body.get("account")
+        .filter(|account| !account.is_null())
+        .cloned()
+        .unwrap_or_else(|| panic!("V3 account mutation must wrap an account: {body}"))
 }
