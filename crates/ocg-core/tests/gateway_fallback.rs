@@ -3544,9 +3544,12 @@ async fn duplicate_protocol_probes_fail_locally_without_upstream() {
 }
 
 #[tokio::test]
-async fn explicit_probe_can_add_ceiling_protocol_and_failure_does_not() {
+async fn explicit_probe_records_results_without_changing_production_protocol() {
     let h = FallbackHarness::go(
-        &[("key-1", &[reply(500, r#"{"error":"nope"}"#), ok(), ok()])],
+        &[(
+            "key-1",
+            &[reply(500, r#"{"error":"nope"}"#), ok(), ok_responses()],
+        )],
         &["key-1"],
     )
     .await;
@@ -3623,28 +3626,42 @@ async fn explicit_probe_can_add_ceiling_protocol_and_failure_does_not() {
         .unwrap()
         .clone();
     assert!(
-        after_success
+        !after_success
             .protocols
             .get("chat_completions")
             .unwrap()
             .available
     );
     assert!(
-        after_success
+        !after_success
             .protocols
             .get("chat_completions")
             .unwrap()
             .enabled
     );
+    assert_eq!(
+        after_success
+            .protocols
+            .get("chat_completions")
+            .unwrap()
+            .last_probe_result,
+        Some(ocg_core::provider_contracts::ProbeResultKind::Success)
+    );
 
     let (status, body) = h.protocol("/v1/chat/completions", "grok-4.5").await;
     assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["choices"][0]["message"]["content"], "ok");
     let recorded = h.calls.lock().unwrap();
-    assert!(
+    assert_eq!(
         recorded
             .iter()
-            .any(|call| call.path == "/v1/chat/completions" && call.body.contains("grok-4.5")),
-        "probed Chat must become the selected production path: {recorded:?}"
+            .map(|call| call.path.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "/v1/chat/completions",
+            "/v1/chat/completions",
+            "/v1/responses"
+        ]
     );
 }
 

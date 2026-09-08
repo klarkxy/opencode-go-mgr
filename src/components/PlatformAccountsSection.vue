@@ -435,23 +435,56 @@ function observedText(snapshot: PlatformSnapshot): string {
   return timeText(snapshot.observedAt);
 }
 
+// Overlapping loads resolve out of order; only the latest operation commits
+// loading/error presentation. Mirrors the load guard in stores/accounts.ts.
+let loadGeneration = 0;
+
+/**
+ * Acceptance boundary for every incoming snapshot: within the same backend
+ * process generation a delayed older response must not roll the view back;
+ * a different generation is an opaque identity with no comparable ordering,
+ * so it is adopted as-is. Mirrors the revision sink in stores/controlPlane.ts.
+ *
+ * An accepted snapshot is a complete fresh list, so it also supersedes any
+ * pending load: drop the obsolete loading/error presentation and invalidate
+ * older load completions. A rejected stale snapshot carries no fresh state
+ * and leaves an in-flight newer load untouched.
+ */
+function acceptView(next: PlatformAccountsView): void {
+  const current = view.value;
+  if (
+    current !== null
+    && next.processGeneration === current.processGeneration
+    && next.revision < current.revision
+  ) {
+    return;
+  }
+  view.value = next;
+  loadGeneration += 1;
+  loading.value = false;
+  loadError.value = "";
+}
+
 async function load(): Promise<void> {
+  const generation = ++loadGeneration;
   loading.value = true;
   loadError.value = "";
   try {
-    view.value = await platformAccountsApi.list();
+    acceptView(await platformAccountsApi.list());
   } catch (error) {
-    loadError.value = dashboardErrorDetail(error);
-    message.error(t("加载平台账号失败: {error}", { error: loadError.value }));
+    if (generation === loadGeneration) {
+      loadError.value = dashboardErrorDetail(error);
+      message.error(t("加载平台账号失败: {error}", { error: loadError.value }));
+    }
   } finally {
-    loading.value = false;
+    if (generation === loadGeneration) loading.value = false;
   }
 }
 
 /** Revision-conflict recovery: tokens already refreshed by the CAS layer; reload and ask to retry. */
 async function recoverConflict(): Promise<void> {
   try {
-    view.value = await platformAccountsApi.list();
+    acceptView(await platformAccountsApi.list());
   } catch {
     // The next explicit action retries; keep the conflict warning meaningful.
   }
@@ -479,7 +512,7 @@ async function onFormSave(payload: PlatformAccountFormPayload): Promise<void> {
   mutating.value = true;
   try {
     const editing = editingPlatform.value;
-    view.value = editing
+    acceptView(editing
       ? await platformAccountsApi.update(editing.id, {
         name: payload.name,
         ...(payload.userCredential !== undefined ? { userCredential: payload.userCredential } : {}),
@@ -489,7 +522,7 @@ async function onFormSave(payload: PlatformAccountFormPayload): Promise<void> {
         name: payload.name,
         baseUrl: payload.baseUrl,
         ...(payload.userCredential !== undefined ? { userCredential: payload.userCredential } : {}),
-      });
+      }));
     showForm.value = false;
     message.success(editing ? t("平台账号已更新") : t("平台账号已创建"));
   } catch (error) {
@@ -533,7 +566,7 @@ async function refreshParent(parent: PlatformAccount): Promise<void> {
   if (refreshing.value[parent.id]) return;
   refreshing.value[parent.id] = true;
   try {
-    view.value = await platformAccountsApi.refresh(parent.id);
+    acceptView(await platformAccountsApi.refresh(parent.id));
     message.success(t("已刷新"));
   } catch (error) {
     if (isRevisionConflict(error)) await recoverConflict();
@@ -548,7 +581,7 @@ async function refreshChild(parent: PlatformAccount, link: PlatformLink): Promis
   if (refreshing.value[key]) return;
   refreshing.value[key] = true;
   try {
-    view.value = await platformAccountsApi.refresh(parent.id, link.accountId);
+    acceptView(await platformAccountsApi.refresh(parent.id, link.accountId));
     message.success(t("已刷新"));
   } catch (error) {
     if (isRevisionConflict(error)) await recoverConflict();
@@ -570,11 +603,11 @@ async function onLinkSubmit(
   if (!parent || mutating.value) return;
   mutating.value = true;
   try {
-    view.value = await platformAccountsApi.link(
+    acceptView(await platformAccountsApi.link(
       selection.accountId,
       parent.id,
       platformGroupWrite(selection.group),
-    );
+    ));
     showLink.value = false;
     message.success(t("已关联"));
     // Linking rewrites the Key's endpoint to the parent-owned inference URL.
@@ -605,7 +638,7 @@ async function unlink(accountId: string): Promise<void> {
   if (mutating.value) return;
   mutating.value = true;
   try {
-    view.value = await platformAccountsApi.unlink(accountId);
+    acceptView(await platformAccountsApi.unlink(accountId));
     message.success(t("已取消关联"));
     emit("changed");
   } catch (error) {
