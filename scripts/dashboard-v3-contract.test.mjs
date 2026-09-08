@@ -3,11 +3,6 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
-  ARTIFACT_PATHS,
-  CARGO_ARGS,
-  CARGO_EXAMPLE,
-  SCHEMA_RELATIVE_PATH,
-  TYPES_RELATIVE_PATH,
   assertArtifactsMatch,
   assertTypesAreContractOnly,
   parseArgs,
@@ -39,20 +34,6 @@ test("parseArgs accepts exactly one of write or check", () => {
   assert.throws(() => parseArgs([]), /exactly one/);
   assert.throws(() => parseArgs(["--write", "--check"]), /exactly one/);
   assert.throws(() => parseArgs(["--client"]), /Unknown argument/);
-});
-
-test("artifact paths are schema plus types and never an endpoint client", () => {
-  assert.deepEqual([...ARTIFACT_PATHS], [SCHEMA_RELATIVE_PATH, TYPES_RELATIVE_PATH]);
-  assert.equal(CARGO_EXAMPLE, "export_dashboard_v3_schema");
-  assert.deepEqual([...CARGO_ARGS], [
-    "run",
-    "-p",
-    "ocg-core",
-    "--example",
-    "export_dashboard_v3_schema",
-    "--locked",
-    "--quiet",
-  ]);
 });
 
 test("generated TypeScript must stay types-only", () => {

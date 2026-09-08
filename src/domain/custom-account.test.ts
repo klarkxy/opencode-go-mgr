@@ -1,9 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  CUSTOM_ENDPOINT_URL_ISSUE_KEYS,
   customEndpointUrlIssue,
-  customApiUrlPlaceholder,
   customApiUrlSupportsModelDiscovery,
   customApiUrlNeedsManualModels,
   expandCustomModelCapabilities,
@@ -20,11 +18,11 @@ test("trusted Endpoint validation permits LAN, localhost, and HTTP", () => {
   ]) assert.equal(customEndpointUrlIssue(endpoint), null, endpoint);
   assert.equal(customEndpointUrlIssue("ftp://api.example.com"), "not_http");
   assert.equal(customEndpointUrlIssue("https://user:pass@api.example.com"), "with_credentials");
-  assert.equal(CUSTOM_ENDPOINT_URL_ISSUE_KEYS.empty, "请填写 API 地址");
+  assert.equal(customEndpointUrlIssue(""), "empty");
+  assert.equal(customEndpointUrlIssue("   "), "empty");
 });
 
 test("common API bases and legacy standard paths enable model discovery", () => {
-  assert.equal(customApiUrlPlaceholder(), "https://api.example.com");
   assert.ok(customApiUrlSupportsModelDiscovery("https://api.example.com", "chat_completions"));
   assert.ok(customApiUrlSupportsModelDiscovery("https://api.example.com/v1", "chat_completions"));
   assert.ok(customApiUrlSupportsModelDiscovery("https://api.example.com/openai/v1/", "responses"));

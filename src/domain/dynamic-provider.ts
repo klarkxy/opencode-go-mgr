@@ -1,7 +1,7 @@
 import type { ProviderCatalogEntry } from "../api/providers.ts";
 import { customEndpointUrlIssue } from "./custom-account.ts";
 
-export const DYNAMIC_PROVIDER_MODEL_SOURCE = "dynamic_provider";
+const DYNAMIC_PROVIDER_MODEL_SOURCE = "dynamic_provider";
 
 export type DynamicAuthKind = "bearer" | "x-api-key" | "none";
 export type DynamicUpstreamProtocol = "chat_completions" | "responses" | "messages";

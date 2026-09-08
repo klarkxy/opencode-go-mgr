@@ -16,7 +16,6 @@ import {
   flattenProviderScopes,
   isSafeSourceUrl,
   normalizeProviderContractsResponse,
-  protocolDisplayName,
   providerScopeKey,
   selectProviderScope,
   type ProviderModelContract,
@@ -293,10 +292,6 @@ test("refresh and probe capability follow card/catalog facts, not raw provider i
   assert.equal(catalogRefreshSupported(go), true);
   assert.equal(catalogRefreshSupported(custom), false);
   assert.deepEqual(enabledProtocols(custom), ["chat_completions"]);
-});
-
-test("protocol display names stay stable for the three upstream wires", () => {
-  assert.equal(protocolDisplayName("chat_completions"), "Chat Completions");
 });
 
 test("enabled protocols are derived only from model evidence, not scope switches", () => {

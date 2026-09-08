@@ -39,7 +39,7 @@ export const APP_NAVIGATION = [
 export type AppNavigationViewKey = (typeof APP_NAVIGATION)[number]["key"];
 export type AppViewKey = AppNavigationViewKey | "browser";
 
-export const APP_VIEW_KEYS: readonly AppViewKey[] = [
+const APP_VIEW_KEYS: readonly AppViewKey[] = [
   ...APP_NAVIGATION.map(({ key }) => key),
   "browser",
 ];
@@ -47,8 +47,8 @@ export const APP_VIEW_KEYS: readonly AppViewKey[] = [
 export const CORE_APP_NAVIGATION = APP_NAVIGATION.filter(({ group }) => group === "core");
 export const EXTENSION_APP_NAVIGATION = APP_NAVIGATION.filter(({ group }) => group === "extensions");
 
-export const LEGACY_PRICING_VIEW = "pricing";
-export const PROVIDERS_VIEW: AppViewKey = "providers";
+const LEGACY_PRICING_VIEW = "pricing";
+const PROVIDERS_VIEW: AppViewKey = "providers";
 export const PROVIDER_OTHER_TAB = "other";
 
 const viewKeySet = new Set<string>(APP_VIEW_KEYS);

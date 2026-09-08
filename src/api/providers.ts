@@ -15,8 +15,6 @@ import type {
   ProviderUsage as V3ProviderUsage,
   ProtocolOverrideState as V3ProtocolOverrideState,
   ProtocolProbeResponse as V3ProtocolProbeResponse,
-  ZenFreeModels as V3ZenFreeModels,
-  ZenFreeSettings,
 } from "./generated/dashboard-v3.ts";
 import { presentAccount, presentPricing, type Account, type AccountProtocol, type PricingSnapshot } from "./dashboard-presenters.ts";
 
@@ -83,13 +81,6 @@ export interface DynamicProviderView {
 }
 
 export type ProviderProtocol = AccountProtocol;
-
-export interface ProviderModelCapability {
-  model_id: string;
-  provider_id: string;
-  preferred_protocol: ProviderProtocol;
-  supported_protocols: ProviderProtocol[];
-}
 
 export interface StoredProviderPricingValue {
   model_id: string;
@@ -183,18 +174,6 @@ export interface ProviderSettingsUpdate {
 export interface ProviderSettingsResponse {
   account: Account;
   revision: number;
-}
-
-export interface ZenFreeModelEntry {
-  model_id: string;
-  alias: string;
-}
-
-export interface ZenFreeModelsResponse {
-  account_id: string;
-  models: ZenFreeModelEntry[];
-  refreshed_at: string | null;
-  source_url: string;
 }
 
 export type ContractScopeKind = "provider" | "custom_endpoint";
@@ -345,7 +324,7 @@ function formFieldKind(value: string): ProviderCatalogFormField["kind"] {
   throw new Error(`unknown form field kind: ${value}`);
 }
 
-export function presentDynamicProvider(value: V3DynamicProvider): DynamicProviderView {
+function presentDynamicProvider(value: V3DynamicProvider): DynamicProviderView {
   return {
     id: value.id,
     name: value.name,
@@ -370,7 +349,7 @@ function assertNoSecret(value: object): void {
   }
 }
 
-export function presentCatalogEntry(value: V3ProviderCatalogEntry): ProviderCatalogEntry {
+function presentCatalogEntry(value: V3ProviderCatalogEntry): ProviderCatalogEntry {
   return {
     provider_id: value.providerId,
     display_name: value.displayName,
@@ -464,7 +443,7 @@ function presentAccountChoice(value: V3ProviderContracts["providers"][number]["a
   };
 }
 
-export function presentContracts(value: V3ProviderContracts): ProviderContractsResponse {
+function presentContracts(value: V3ProviderContracts): ProviderContractsResponse {
   return {
     revision: value.revision,
     providers: value.providers.map((scope) => ({
@@ -580,15 +559,6 @@ function presentProviderUsage(value: V3ProviderUsage): ProviderUsageResponse {
   };
 }
 
-function presentZenModels(value: V3ZenFreeModels): ZenFreeModelsResponse {
-  return {
-    account_id: value.accountId,
-    models: value.models.map((model) => ({ model_id: model.modelId, alias: model.alias })),
-    refreshed_at: value.refreshedAt,
-    source_url: value.sourceUrl,
-  };
-}
-
 function presentProbe(value: V3ProtocolProbeResponse): ProtocolProbeResponse {
   return {
     model_id: value.modelId,
@@ -604,13 +574,6 @@ function presentProbe(value: V3ProtocolProbeResponse): ProtocolProbeResponse {
 
 export const providerApi = {
   getProviderCatalog: async () => (await dashboardV3.getProviders()).entries.map(presentCatalogEntry),
-  getProviderModelCapabilities: async (): Promise<ProviderModelCapability[]> =>
-    (await dashboardV3.getProviderModelCapabilities()).map((model) => ({
-      model_id: model.modelId,
-      provider_id: model.providerId,
-      preferred_protocol: model.preferredProtocol,
-      supported_protocols: [...model.supportedProtocols],
-    })),
   getProviderPricing: async (providerId: string) =>
     presentProviderPricing(await dashboardV3.getProviderPricing(providerId)),
   updateProviderPricingMultipliers: async (
@@ -629,18 +592,6 @@ export const providerApi = {
         })),
       }, expectation)
     )));
-  },
-  getZenFreeSettings: async (): Promise<ZenFreeSettings> => dashboardV3.getZenFreeSettings(),
-  getZenFreeModels: async (): Promise<ZenFreeModelsResponse> => presentZenModels(await dashboardV3.getZenFreeModels()),
-  refreshZenFreeModels: async (): Promise<ZenFreeModelsResponse> => {
-    const control = useControlPlaneStore();
-    if (!control.hasTokens()) await control.refresh();
-    try {
-      return presentZenModels(await control.runMutation((expectation) => dashboardV3.refreshZenFreeModels(expectation)));
-    } catch (cause) {
-      if (isRevisionConflict(cause)) await dashboardV3.getZenFreeModels();
-      throw cause;
-    }
   },
   getProviderUsage: async (accountId: string) =>
     presentProviderUsage(await dashboardV3.getProviderUsage(accountId)),
@@ -753,7 +704,7 @@ export const providerApi = {
     } catch (cause) {
       if (isRevisionConflict(cause)) {
         await dashboardV3.getProviders();
-        await dashboardV3.getDynamicProvider(providerId).catch(() => undefined);
+        await dashboardV3.getDynamicProvider(providerId);
       }
       throw cause;
     }

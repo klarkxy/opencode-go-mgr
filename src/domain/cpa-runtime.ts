@@ -55,7 +55,7 @@ export function cpaRuntimeMode(
 }
 
 /** A fresh supported host may install; an installed runtime must be OCG-owned. */
-export function cpaRuntimeLifecycleEditable(
+function cpaRuntimeLifecycleEditable(
   runtime: Pick<CpaRuntime, "supported" | "owned" | "installed"> | null,
 ): boolean {
   return !!runtime && runtime.supported && (!runtime.installed || runtime.owned);
@@ -69,7 +69,7 @@ export function cpaClientKeysAvailable(
 }
 
 /** Non-terminal phases reported while a lifecycle operation is in flight. */
-export const CPA_BUSY_PHASES: readonly CpaRuntimePhase[] = [
+const CPA_BUSY_PHASES: readonly CpaRuntimePhase[] = [
   "checking",
   "downloading",
   "installing",

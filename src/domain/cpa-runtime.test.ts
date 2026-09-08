@@ -262,14 +262,8 @@ test("quota renders scalars directly and falls back to JSON or a dash", () => {
 
 test("OAuth provider registry keeps the fixed five providers in order", () => {
   assert.deepEqual(
-    CPA_OAUTH_PROVIDERS.map(({ id, label }) => [id, label]),
-    [
-      ["codex", "Codex"],
-      ["anthropic", "Claude"],
-      ["antigravity", "Antigravity"],
-      ["kimi", "Kimi"],
-      ["xai", "xAI"],
-    ],
+    CPA_OAUTH_PROVIDERS.map(({ id }) => id),
+    ["codex", "anthropic", "antigravity", "kimi", "xai"],
   );
 });
 

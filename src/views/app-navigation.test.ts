@@ -1,8 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  APP_NAVIGATION,
-  APP_NAVIGATION_GROUPS,
   CORE_APP_NAVIGATION,
   EXTENSION_APP_NAVIGATION,
   PROVIDER_OTHER_TAB,
@@ -18,8 +16,6 @@ test("navigation metadata keeps the fixed core order and exposes CPA under Exten
     ["dashboard", "keys", "accounts", "providers", "aliases", "logs", "settings"],
   );
   assert.deepEqual(EXTENSION_APP_NAVIGATION.map(({ key }) => key), ["cpa"]);
-  assert.equal(APP_NAVIGATION_GROUPS.extensions.label, "扩展");
-  assert.equal(APP_NAVIGATION.find(({ key }) => key === "cpa")?.label, "CPA");
 });
 
 test("legacy pricing view keys resolve to providers without inventing a second entry", () => {

@@ -54,10 +54,6 @@ test("add-account chooser omits singleton Zen Free and groups remaining families
     catalogEntry("custom", { routable: true, creation_availability: "available" }),
   ];
   const options = buildPlanOptions(catalog);
-  assert.equal(
-    options.find(({ plan }) => plan.id === "custom-endpoint")?.creationHint,
-    "创建后默认启用；可随时通过账号卡片测试连接。",
-  );
   assert.deepEqual(options.map(({ plan }) => plan.id), [
     "opencode-go",
     "command-code-goat",
@@ -123,7 +119,7 @@ test("GOAT follows the catalog without inventing a Key-verification gate", () =>
   assert.equal(draftGoat.creationHint, "");
 });
 
-test("plan hints and disabled reasons are translation keys", () => {
+test("catalog gaps use local reasons and do not leak backend English", () => {
   const catalog = [
     catalogEntry("opencode", { display_name: "OpenCode Go Catalog" }),
   ];

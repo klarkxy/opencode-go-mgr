@@ -110,7 +110,7 @@ export function accountStatusTagType(account: Account, now = Date.now()): Accoun
   return "success";
 }
 
-export function accountExpiryDays(account: Pick<Account, "expires_on">, now = Date.now()): number {
+function accountExpiryDays(account: Pick<Account, "expires_on">, now = Date.now()): number {
   return daysUntilDate(account.expires_on, now);
 }
 
@@ -165,7 +165,7 @@ export function isUsageRefreshBlocked(account: Account, now = Date.now()): boole
   return Number.isFinite(ts) && ts > now;
 }
 
-export function formatUsageSyncTime(value: string | null | undefined): string {
+function formatUsageSyncTime(value: string | null | undefined): string {
   if (!value) return t("尚未官方同步");
   const ts = Date.parse(value);
   if (!Number.isFinite(ts)) return value;

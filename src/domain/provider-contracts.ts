@@ -202,7 +202,7 @@ export function enabledProtocols(scope: Pick<ProviderScopeView, "models">): Prov
   ));
 }
 
-export function mergeModelContract(
+function mergeModelContract(
   models: readonly ProviderModelContract[],
   next: ProviderModelContract,
 ): ProviderModelContract[] {

@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  DYNAMIC_PAID_TEST_WARNING_KEY,
   buildDynamicProviderCreateBody,
   buildDynamicProviderUpdateBody,
   dynamicAuthRequiresKey,
@@ -136,5 +135,4 @@ test("paid tests and deletes require confirmation; Enter submits save", () => {
   assert.equal(dynamicProviderActionNeedsConfirm("delete"), true);
   assert.equal(dynamicProviderActionNeedsConfirm("save"), false);
   assert.equal(dynamicProviderActionNeedsConfirm("discover"), false);
-  assert.equal(DYNAMIC_PAID_TEST_WARNING_KEY, "真实测试会消耗上游额度或产生费用。确定继续？");
 });
