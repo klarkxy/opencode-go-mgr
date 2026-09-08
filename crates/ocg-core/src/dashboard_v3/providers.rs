@@ -890,24 +890,9 @@ pub(super) async fn run_provider_protocol_probes(
         .iter()
         .filter_map(|outcome| outcome.observation.clone())
         .collect();
-    // A provider-level probe answers whether any currently routable account can
-    // serve the protocol. Positive evidence may enable it; account/transport
-    // failures must never create a provider-global force_off.
-    let overrides: Vec<(
-        String,
-        crate::provider::UpstreamProtocolKind,
-        DomainProtocolOverrideState,
-    )> = outcomes
-        .iter()
-        .filter(|outcome| !outcome.skipped && outcome.success)
-        .map(|outcome| {
-            (
-                prepared.model_id.clone(),
-                outcome.protocol,
-                DomainProtocolOverrideState::ForceOn,
-            )
-        })
-        .collect();
+    // Connection tests record observations only. Protocol enablement and
+    // preference are configuration, never a side effect of testing.
+    let overrides = Vec::new();
     let _settings_update = state.settings_update.lock();
     check_expectation(&state, &prepared.expectation)?;
     ensure_probe_model_is_current(
@@ -1347,7 +1332,18 @@ fn dynamic_catalog_entry(runtime: &crate::dynamic::DynamicProviderRuntime) -> Pr
         model_source: "dynamic_provider".into(),
         key_prefix: None,
         auth_schemes,
-        upstream_protocols: vec![AccountUpstreamProtocol::from(runtime.upstream_protocol)],
+        upstream_protocols: {
+            let mut protocols = vec![AccountUpstreamProtocol::from(runtime.upstream_protocol)];
+            for mapping in &runtime.mappings {
+                if let Some(value) = &mapping.upstream_override {
+                    let protocol = AccountUpstreamProtocol::from(value.protocol);
+                    if !protocols.contains(&protocol) {
+                        protocols.push(protocol);
+                    }
+                }
+            }
+            protocols
+        },
         form_fields: {
             let mut fields = vec![ProviderCatalogFormField {
                 id: "name".into(),

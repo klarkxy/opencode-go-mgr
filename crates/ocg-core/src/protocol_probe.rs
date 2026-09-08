@@ -235,8 +235,17 @@ async fn execute_protocol_request(
         .map_err(|error| (None, error.to_string()))?;
     let url = HttpInferenceTransport::join_endpoint(&route.base_url, &route.path)
         .map_err(|error| (None, error.to_string()))?;
-    let extra = json_content_headers(protocol == UpstreamProtocolKind::Messages)
+    let mut extra = json_content_headers(protocol == UpstreamProtocolKind::Messages)
         .map_err(|error| (None, error.to_string()))?;
+    crate::gateway::forwarder::apply_provider_identity_headers(
+        &mut extra,
+        &reqwest::header::HeaderMap::new(),
+        &account.provider_id,
+        format,
+        ctx.model_id,
+        &body,
+        &uuid::Uuid::new_v4().to_string(),
+    );
     let timeout = std::time::Duration::from_secs(ctx.config.non_stream_timeout_secs.clamp(5, 30));
     let auth = match (route.auth, secret.as_deref()) {
         (UpstreamAuth::None, _) => None,
@@ -329,6 +338,8 @@ async fn execute_protocol_request(
             ),
         ));
     }
+    crate::custom::prove_verified_protocol_response(status, &bytes, protocol)
+        .map_err(|failure| (Some(status_code), failure.message))?;
     Ok(status_code)
 }
 

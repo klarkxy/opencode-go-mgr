@@ -208,6 +208,14 @@ pub const CATALOG_TYPE_NAMES: &[&str] = &[
     "DynamicProviderTestRequest",
     "DynamicProviderTestResponse",
     "OllamaBillingTier",
+    "PlatformAccounts",
+    "PlatformAccount",
+    "PlatformLink",
+    "PlatformSnapshot",
+    "PlatformCreate",
+    "PlatformUpdate",
+    "PlatformLinkWrite",
+    "PlatformRefresh",
 ];
 
 pub const ERROR_UNAUTHORIZED: &str = "unauthorized";
@@ -2968,9 +2976,19 @@ impl From<DynamicProviderAuthKind> for ocg_domain::dynamic::DynamicAuthKind {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DynamicModelUpstreamOverride {
+    pub protocol: AccountUpstreamProtocol,
+    pub endpoint_url: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[schemars(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DynamicProviderModel {
     pub public_model: String,
     pub upstream_model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upstream_override: Option<DynamicModelUpstreamOverride>,
 }
 
 /// Secret-free dynamic Provider definition.
@@ -2978,6 +2996,8 @@ pub struct DynamicProviderModel {
 #[serde(rename_all = "camelCase")]
 #[schemars(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DynamicProvider {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preset_id: Option<String>,
     pub id: String,
     pub name: String,
     pub endpoint_url: String,
@@ -2995,6 +3015,8 @@ pub struct DynamicProvider {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DynamicProviderCreate {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preset_id: Option<String>,
     #[serde(flatten)]
     pub expectation: MutationExpectation,
     pub name: String,
@@ -3015,6 +3037,9 @@ pub struct DynamicProviderCreate {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DynamicProviderUpdate {
+    /// Omitted/null preserves provenance; an empty string clears it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preset_id: Option<String>,
     #[serde(flatten)]
     pub expectation: MutationExpectation,
     pub name: String,
@@ -3203,9 +3228,14 @@ pub fn contract_schema() -> Value {
     include_type::<DynamicProviderMutation>(&mut serialize);
     include_type::<DynamicProviderDiscoverResponse>(&mut serialize);
     include_type::<DynamicProviderTestResponse>(&mut serialize);
+    include_type::<super::platforms::PlatformAccounts>(&mut serialize);
     let mut defs = serialize.take_definitions(true);
 
     let mut deserialize = SchemaSettings::draft2020_12().into_generator();
+    include_type::<super::platforms::PlatformCreate>(&mut deserialize);
+    include_type::<super::platforms::PlatformUpdate>(&mut deserialize);
+    include_type::<super::platforms::PlatformLinkWrite>(&mut deserialize);
+    include_type::<super::platforms::PlatformRefresh>(&mut deserialize);
     include_type::<MutationExpectation>(&mut deserialize);
     include_type::<SettingsUpdate>(&mut deserialize);
     include_type::<KeyCreate>(&mut deserialize);

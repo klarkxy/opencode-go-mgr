@@ -69,7 +69,7 @@ async fn verification_resolves_root_base_to_the_selected_protocol_path() {
         let mut buf = vec![0_u8; 8192];
         let read = stream.read(&mut buf).await.unwrap_or(0);
         let _ = request_tx.send(String::from_utf8_lossy(&buf[..read]).to_string());
-        let body = r#"{"id":"ok"}"#;
+        let body = r#"{"choices":[{"message":{"role":"assistant","content":"ok"}}]}"#;
         let response = format!(
             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
             body.len()
@@ -261,7 +261,7 @@ fn verification_bodies_are_non_stream_and_token_bounded() {
     )
     .unwrap();
     assert_eq!(responses["stream"], false);
-    assert_eq!(responses["max_output_tokens"], 1);
+    assert_eq!(responses["max_output_tokens"], 16);
 
     let messages = serde_json::from_slice::<Value>(
         &minimal_verification_body(UpstreamProtocolKind::Messages, "local-model").unwrap(),
@@ -351,14 +351,48 @@ fn model_discovery_timeout_is_shorter_than_the_general_request_timeout() {
 }
 
 #[test]
-fn only_2xx_json_object_proves_verified() {
-    assert!(prove_verified_json_object(StatusCode::OK, br#"{"id":"ok"}"#).is_ok());
-    assert!(prove_verified_json_object(StatusCode::CREATED, br#"{"ok":true}"#).is_ok());
-    assert!(prove_verified_json_object(StatusCode::OK, b"[1]").is_err());
-    assert!(prove_verified_json_object(StatusCode::OK, b"\"ok\"").is_err());
-    assert!(prove_verified_json_object(StatusCode::OK, b"not-json").is_err());
-    assert!(prove_verified_json_object(StatusCode::BAD_REQUEST, br#"{"error":"no"}"#).is_err());
-    assert!(prove_verified_json_object(StatusCode::FOUND, br#"{"id":"ok"}"#).is_err());
+fn verification_requires_the_requested_protocol_and_rejects_false_success() {
+    let cases: [(UpstreamProtocolKind, &[u8]); 3] = [
+        (
+            UpstreamProtocolKind::ChatCompletions,
+            br#"{"choices":[{"message":{"content":"ok"}}]}"#,
+        ),
+        (
+            UpstreamProtocolKind::Responses,
+            br#"{"object":"response","output":[],"status":"completed","error":null}"#,
+        ),
+        (
+            UpstreamProtocolKind::Messages,
+            br#"{"type":"message","role":"assistant","content":[]}"#,
+        ),
+    ];
+    for (protocol, body) in cases {
+        assert!(prove_verified_protocol_response(StatusCode::OK, body, protocol).is_ok());
+        for (other, _) in cases {
+            if protocol != other {
+                assert!(prove_verified_protocol_response(StatusCode::OK, body, other).is_err());
+            }
+        }
+        for invalid in [
+            br#"{"id":"ok"}"#.as_slice(),
+            br#"{"error":{"message":"denied"}}"#,
+            b"[1]",
+            b"not-json",
+        ] {
+            assert!(prove_verified_protocol_response(StatusCode::OK, invalid, protocol).is_err());
+        }
+        for status in [StatusCode::BAD_REQUEST, StatusCode::FOUND] {
+            assert!(prove_verified_protocol_response(status, body, protocol).is_err());
+        }
+    }
+    assert!(
+        prove_verified_protocol_response(
+            StatusCode::OK,
+            br#"{"output":[],"status":"failed"}"#,
+            UpstreamProtocolKind::Responses
+        )
+        .is_err()
+    );
 }
 
 #[test]

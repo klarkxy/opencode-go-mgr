@@ -1845,7 +1845,19 @@ fn catalog_type_names_append_pricing_dtos_after_the_provider_prefix() {
         &CATALOG_TYPE_NAMES[dynamic_end..ollama_end],
         OLLAMA_USAGE_CATALOG_TYPES
     );
-    assert_eq!(CATALOG_TYPE_NAMES.len(), ollama_end);
+    assert_eq!(
+        &CATALOG_TYPE_NAMES[ollama_end..],
+        &[
+            "PlatformAccounts",
+            "PlatformAccount",
+            "PlatformLink",
+            "PlatformSnapshot",
+            "PlatformCreate",
+            "PlatformUpdate",
+            "PlatformLinkWrite",
+            "PlatformRefresh",
+        ]
+    );
 }
 
 #[test]

@@ -26,7 +26,10 @@ use crate::gateway::routing::resolve_conversation_key;
 use crate::http_client::RouteLabel;
 use crate::kernel::pricing::PricingSnapshot;
 use crate::kernel::protocol::ApiFormat;
-use crate::models::{Account, AppConfig, ForwardLog, ForwardMetrics, UsageWindowKind};
+use crate::models::{
+    Account, AppConfig, ForwardLog, ForwardLogNativeAttribution, ForwardMetrics, UsageWindowKind,
+};
+use crate::platform::{PlatformAccount, PlatformLink};
 use crate::pricing::{
     ProviderPricingEvidence, ProviderScopedPricingSnapshot, latest_provider_pricing_snapshot,
 };
@@ -258,7 +261,27 @@ pub struct ForwardResult {
 enum RequestPricingSnapshot {
     OpenCode(Arc<PricingSnapshot>),
     Provider(Arc<ProviderScopedPricingSnapshot>),
+    /// Linked Custom Key: exact frozen platform price, or fail-closed unknown.
+    /// Never inherits Go / GOAT / Ollama / USD provider rows.
+    Platform(PlatformAttemptPrice),
     Unpriced,
+}
+
+/// Per-attempt platform price captured from the link snapshot only.
+#[derive(Clone)]
+enum PlatformAttemptPrice {
+    Frozen(FrozenPlatformPrice),
+    Unknown { provenance: Option<String> },
+}
+
+#[derive(Clone)]
+struct FrozenPlatformPrice {
+    provenance: String,
+    currency: String,
+    input: f64,
+    output: f64,
+    cache_read: Option<f64>,
+    cache_write: Option<f64>,
 }
 
 impl From<Arc<PricingSnapshot>> for RequestPricingSnapshot {
@@ -320,6 +343,7 @@ impl RequestPricingSnapshot {
                 cache_creation_tokens,
                 Utc::now(),
             ),
+            Self::Platform(price) => price.estimate(),
             Self::Unpriced => crate::kernel::pricing::PricingEstimate {
                 raw_cost_usd: None,
                 quota_debit: None,
@@ -337,6 +361,7 @@ impl RequestPricingSnapshot {
         match self {
             Self::OpenCode(snapshot) => Some(&snapshot.revision),
             Self::Provider(snapshot) => Some(snapshot.revision()),
+            Self::Platform(price) => price.provenance(),
             Self::Unpriced => None,
         }
     }
@@ -345,9 +370,279 @@ impl RequestPricingSnapshot {
         match self {
             Self::OpenCode(_) => Some(crate::provider::OPENCODE_PROVIDER_ID),
             Self::Provider(snapshot) => Some(snapshot.provider_id()),
+            Self::Platform(_) => Some(crate::provider::CUSTOM_PROVIDER_ID),
             Self::Unpriced => None,
         }
     }
+}
+
+impl PlatformAttemptPrice {
+    fn provenance(&self) -> Option<&str> {
+        match self {
+            Self::Frozen(price) => Some(&price.provenance),
+            Self::Unknown { provenance } => provenance.as_deref(),
+        }
+    }
+
+    fn estimate(&self) -> crate::kernel::pricing::PricingEstimate {
+        crate::kernel::pricing::PricingEstimate {
+            raw_cost_usd: None,
+            quota_debit: None,
+            effective_paid_cost_usd: None,
+            cost: None,
+            pricing_revision_id: self.provenance().map(str::to_string),
+            quota_multiplier: None,
+            local_adjustment_multiplier: None,
+            cost_state: "unknown",
+        }
+    }
+}
+
+fn estimate_platform_native(
+    price: &FrozenPlatformPrice,
+    prompt_tokens: i64,
+    completion_tokens: i64,
+    cached_tokens: i64,
+    cache_creation_tokens: i64,
+) -> Option<f64> {
+    let prompt = prompt_tokens.max(0) as f64;
+    let completion = completion_tokens.max(0) as f64;
+    let cached = (cached_tokens.max(0) as f64).min(prompt);
+    let cache_creation = (cache_creation_tokens.max(0) as f64).min((prompt - cached).max(0.0));
+    let uncached = prompt - cached - cache_creation;
+    if cached > 0.0 && price.cache_read.is_none() {
+        return None;
+    }
+    if cache_creation > 0.0 && price.cache_write.is_none() {
+        return None;
+    }
+    let mut native = uncached * price.input + completion * price.output;
+    if let Some(cache_read) = price.cache_read {
+        native += cached * cache_read;
+    }
+    if let Some(cache_write) = price.cache_write {
+        native += cache_creation * cache_write;
+    }
+    native.is_finite().then_some(native)
+}
+
+fn platform_price_for_attempt(
+    state: &CoreState,
+    account: &Account,
+    upstream_model: &str,
+    endpoint: Option<&str>,
+) -> Option<PlatformAttemptPrice> {
+    let db = state.db.lock();
+    let links = db.list_platform_links().ok()?;
+    let link = links
+        .into_iter()
+        .find(|link| link.account_id == account.id)?;
+    if !db
+        .get_account(&account.id)
+        .ok()
+        .flatten()
+        .is_some_and(|current| current.key_cipher == account.key_cipher)
+        || endpoint.is_some_and(|url| {
+            !db.account_custom_config(&account.id)
+                .ok()
+                .flatten()
+                .is_some_and(|config| config.endpoint_url == url)
+        })
+    {
+        return Some(PlatformAttemptPrice::Unknown {
+            provenance: Some("platform:attempt_identity_changed".into()),
+        });
+    }
+    let parent = match db.platform_account(&link.platform_account_id) {
+        Ok(Some(parent)) => parent,
+        _ => {
+            return Some(PlatformAttemptPrice::Unknown {
+                provenance: Some(format!("{}:missing", link.platform_account_id)),
+            });
+        }
+    };
+    Some(select_link_platform_price(
+        &link,
+        &parent,
+        upstream_model,
+        Utc::now().timestamp(),
+    ))
+}
+
+fn select_link_platform_price(
+    link: &PlatformLink,
+    parent: &PlatformAccount,
+    upstream_model: &str,
+    now: i64,
+) -> PlatformAttemptPrice {
+    let unknown = |reason: &str| PlatformAttemptPrice::Unknown {
+        provenance: Some(format!(
+            "{}:{}:{}:{}:{reason}",
+            parent.id,
+            parent.version,
+            link.group.id.as_deref().unwrap_or(""),
+            upstream_model
+        )),
+    };
+    let Some(group_id) = link
+        .group
+        .id
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+    else {
+        return unknown("auto");
+    };
+    if group_id == "auto" || !link.group.auto_groups.is_empty() {
+        return unknown("auto");
+    }
+    let Some(snapshot) = link.snapshot.as_ref() else {
+        return unknown("nosnap");
+    };
+    if snapshot.stale {
+        return unknown("stale");
+    }
+    let matches = snapshot
+        .prices
+        .iter()
+        .filter(|price| {
+            price.model == upstream_model
+                && price.group_id.as_deref() == Some(group_id)
+                && !price.official_reference
+        })
+        .collect::<Vec<_>>();
+    if matches.len() != 1 {
+        return unknown("nomatch");
+    }
+    let price = matches[0];
+    if price.official_reference {
+        return unknown("official");
+    }
+    if price.unavailable_reason.is_some() {
+        return unknown("unavailable");
+    }
+    if now >= price.valid_until {
+        return unknown("expired");
+    }
+    let Some(input) = finite_nonneg_rate(price.input) else {
+        return unknown("incomplete");
+    };
+    let Some(output) = finite_nonneg_rate(price.output) else {
+        return unknown("incomplete");
+    };
+    let currency = price.currency.trim();
+    if currency.is_empty() {
+        return unknown("incomplete");
+    }
+    let cache_read = match optional_finite_nonneg_rate(price.cache_read) {
+        Ok(rate) => rate,
+        Err(()) => return unknown("incomplete"),
+    };
+    let cache_write = match optional_finite_nonneg_rate(price.cache_write) {
+        Ok(rate) => rate,
+        Err(()) => return unknown("incomplete"),
+    };
+    PlatformAttemptPrice::Frozen(FrozenPlatformPrice {
+        provenance: format!(
+            "{}:{}:{group_id}:{upstream_model}:{}:{}:{}",
+            parent.id, parent.version, price.valid_until, price.source, snapshot.observed_at
+        ),
+        currency: currency.to_string(),
+        input,
+        output,
+        cache_read,
+        cache_write,
+    })
+}
+
+fn finite_nonneg_rate(value: Option<f64>) -> Option<f64> {
+    value.filter(|rate| rate.is_finite() && *rate >= 0.0)
+}
+
+fn optional_finite_nonneg_rate(value: Option<f64>) -> Result<Option<f64>, ()> {
+    match value {
+        None => Ok(None),
+        Some(rate) if rate.is_finite() && rate >= 0.0 => Ok(Some(rate)),
+        Some(_) => Err(()),
+    }
+}
+
+fn bind_platform_attempt_price(
+    state: &CoreState,
+    account: &Account,
+    context: &mut ForwardAttemptContext,
+    pricing: RequestPricingSnapshot,
+    endpoint: Option<&str>,
+) -> RequestPricingSnapshot {
+    let Some(platform) =
+        platform_price_for_attempt(state, account, &context.upstream_model, endpoint)
+    else {
+        return pricing;
+    };
+    context.platform_price = Some(platform.clone());
+    RequestPricingSnapshot::Platform(platform)
+}
+
+fn apply_platform_native_attribution(
+    attribution: &mut ForwardLogNativeAttribution,
+    context: &ForwardAttemptContext,
+    metrics: &ForwardMetrics,
+) {
+    let Some(PlatformAttemptPrice::Frozen(price)) = context.platform_price.as_ref() else {
+        return;
+    };
+    if metrics.cost_state != "unknown" {
+        return;
+    }
+    let Some(value) = estimate_platform_native(
+        price,
+        metrics.prompt_tokens,
+        metrics.completion_tokens,
+        metrics.cached_tokens,
+        metrics.cache_creation_tokens,
+    ) else {
+        return;
+    };
+    attribution.native_cost_value = Some(value);
+    attribution.native_cost_unit = Some(price.currency.clone());
+    attribution.native_cost_currency = Some(price.currency.clone());
+}
+
+fn platform_request_has_variable_cost(body: &[u8], service_tier: Option<&str>) -> bool {
+    fn media(value: &Value) -> bool {
+        match value {
+            Value::Object(object) => {
+                object
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .is_some_and(|kind| {
+                        matches!(
+                            kind,
+                            "image"
+                                | "image_url"
+                                | "input_image"
+                                | "input_audio"
+                                | "audio"
+                                | "video"
+                                | "input_video"
+                                | "file"
+                                | "input_file"
+                        )
+                    })
+                    || object
+                        .get("modalities")
+                        .and_then(Value::as_array)
+                        .is_some_and(|values| values.iter().any(|v| v.as_str() != Some("text")))
+                    || object.contains_key("inline_data")
+                    || object.contains_key("inlineData")
+                    || object.values().any(media)
+            }
+            Value::Array(values) => values.iter().any(media),
+            _ => false,
+        }
+    }
+    service_tier.is_some_and(|tier| tier != "default")
+        || serde_json::from_slice::<Value>(body).map_or(true, |value| media(&value))
 }
 
 #[derive(Clone)]
@@ -373,6 +668,7 @@ struct ForwardAttemptContext {
     credential_account_id: Option<String>,
     client_key_id: Option<String>,
     client_key_name: Option<String>,
+    platform_price: Option<PlatformAttemptPrice>,
 }
 
 impl ForwardAttemptContext {
@@ -404,6 +700,7 @@ impl ForwardAttemptContext {
             credential_account_id: None,
             client_key_id: None,
             client_key_name: None,
+            platform_price: None,
         }
     }
 
@@ -567,7 +864,26 @@ async fn forward_request_impl(
 ) -> Result<ForwardResult> {
     let mut attempt_context =
         ForwardAttemptContext::new(trace, client_body.len(), attempt, plan, route);
-    let pricing_snapshot = RequestPricingSnapshot::for_account(state, account, pricing_snapshot);
+    let pricing_snapshot = bind_platform_attempt_price(
+        state,
+        account,
+        &mut attempt_context,
+        RequestPricingSnapshot::for_account(state, account, pricing_snapshot),
+        plan.custom_route
+            .as_ref()
+            .map(|route| route.endpoint_url.as_str()),
+    );
+    let pricing_snapshot = if matches!(&pricing_snapshot, RequestPricingSnapshot::Platform(_))
+        && platform_request_has_variable_cost(&plan.body, plan.service_tier.as_deref())
+    {
+        let unknown = PlatformAttemptPrice::Unknown {
+            provenance: Some("platform:unsupported_request_pricing".into()),
+        };
+        attempt_context.platform_price = Some(unknown.clone());
+        RequestPricingSnapshot::Platform(unknown)
+    } else {
+        pricing_snapshot
+    };
     attempt_context.set_client_key(client_key_id, state);
     let attempt_spec =
         match provider_adapter::resolve_route_with_dynamics(account, config, plan, dynamics) {
@@ -696,20 +1012,15 @@ async fn forward_request_impl(
             upstream_headers.insert(name.clone(), value.clone());
         }
     }
-    if carries_opencode_session_header(&account.provider_id) {
-        let session = resolve_opencode_session_header(
-            &headers,
-            plan.client,
-            plan.log_requested_model(),
-            client_body,
-            &trace.request_id,
-        );
-        upstream_headers.insert("x-opencode-session", session.clone());
-        copy_explicit_opencode_identity_headers(&mut upstream_headers, &headers);
-        if account.provider_id == crate::provider::OPENCODE_ZEN_FREE_PROVIDER_ID {
-            apply_zen_free_identity_headers(&mut upstream_headers, &session, &trace.request_id);
-        }
-    }
+    apply_provider_identity_headers(
+        &mut upstream_headers,
+        &headers,
+        &account.provider_id,
+        plan.client,
+        plan.log_requested_model(),
+        client_body,
+        &trace.request_id,
+    );
     // Match the attempt's authentication contract. The client wire protocol
     // alone is not an authentication decision. The executor constructs the
     // header from the Host-resolved secret; adapters never supplied plaintext.
@@ -2607,6 +2918,7 @@ fn log_forward(
     let failure_value = failure
         .as_ref()
         .and_then(|failure| serde_json::from_str(&failure.diagnostic_json).ok());
+    let persist_metrics = metrics.clone();
     let id = db.log_forward(&ForwardLog {
         id: 0,
         timestamp: Utc::now(),
@@ -2637,7 +2949,7 @@ fn log_forward(
         pricing_revision_id: metrics.pricing_revision_id,
         quota_multiplier: metrics.quota_multiplier,
         local_adjustment_multiplier: metrics.local_adjustment_multiplier,
-        service_tier: metrics.service_tier,
+        service_tier: metrics.service_tier.clone(),
         cost_state: cost_state.to_string(),
         error_message: error_message.map(|message| context.redact_known_secret(message)),
         request_id: Some(context.trace.request_id.clone()),
@@ -2647,17 +2959,23 @@ fn log_forward(
         duration_ms: failure.as_ref().map(|failure| failure.duration_ms),
         diagnostic: failure_value,
     })?;
-    persist_log_identity(db, id, context)?;
+    persist_log_identity(db, id, context, &persist_metrics)?;
     Ok(id)
 }
 
-fn persist_log_identity(db: &Database, id: i64, context: &ForwardAttemptContext) -> Result<()> {
+fn persist_log_identity(
+    db: &Database,
+    id: i64,
+    context: &ForwardAttemptContext,
+    metrics: &ForwardMetrics,
+) -> Result<()> {
     let Some(mut attribution) = db.forward_log_native_attribution(id)? else {
         return Ok(());
     };
     attribution.requested_model = Some(context.requested_model.clone());
     attribution.resolved_alias = context.resolved_alias.clone();
     attribution.upstream_model = Some(context.upstream_model.clone());
+    apply_platform_native_attribution(&mut attribution, context, metrics);
     db.set_forward_log_native_attribution(id, &attribution)?;
     Ok(())
 }
@@ -2673,8 +2991,15 @@ fn finalize_logged_forward(
     diagnostic: Option<&ForwardLogDiagnosticUpdate<'_>>,
     context: &ForwardAttemptContext,
 ) -> Result<()> {
-    db.update_forward_log(id, status, http_status, metrics, error_message, diagnostic)?;
-    persist_log_identity(db, id, context)
+    db.update_forward_log(
+        id,
+        status,
+        http_status,
+        metrics.clone(),
+        error_message,
+        diagnostic,
+    )?;
+    persist_log_identity(db, id, context, &metrics)
 }
 
 fn success_status_for_cost(cost_state: &str) -> &'static str {
@@ -2924,6 +3249,7 @@ mod stream_usage_tests {
             credential_account_id: None,
             client_key_id: None,
             client_key_name: None,
+            platform_price: None,
         };
         let mut headers = HeaderMap::new();
         headers.insert("x-request-id", format!("request-{secret}").parse().unwrap());
@@ -3263,6 +3589,7 @@ mod stream_outcome_guard_tests {
             credential_account_id: Some("acct-1".into()),
             client_key_id: None,
             client_key_name: None,
+            platform_price: None,
         }
     }
 
@@ -3613,6 +3940,28 @@ const OPENCODE_ZEN_FREE_USER_AGENT: &str = "opencode";
 fn carries_opencode_session_header(provider_id: &str) -> bool {
     provider_id == crate::provider::OPENCODE_PROVIDER_ID
         || provider_id == crate::provider::OPENCODE_ZEN_FREE_PROVIDER_ID
+}
+
+/// Shared by inference and operational probes so a working account is not
+/// rejected merely because its test omitted provider-required identity.
+pub(crate) fn apply_provider_identity_headers(
+    upstream: &mut reqwest::header::HeaderMap,
+    client_headers: &HeaderMap,
+    provider_id: &str,
+    client: ApiFormat,
+    model: &str,
+    body: &[u8],
+    request_id: &str,
+) {
+    if carries_opencode_session_header(provider_id) {
+        let session =
+            resolve_opencode_session_header(client_headers, client, model, body, request_id);
+        upstream.insert("x-opencode-session", session.clone());
+        copy_explicit_opencode_identity_headers(upstream, client_headers);
+        if provider_id == crate::provider::OPENCODE_ZEN_FREE_PROVIDER_ID {
+            apply_zen_free_identity_headers(upstream, &session, request_id);
+        }
+    }
 }
 
 fn resolve_opencode_session_header(

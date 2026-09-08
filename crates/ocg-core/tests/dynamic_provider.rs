@@ -9,6 +9,8 @@ use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::Duration;
 
+#[path = "fixtures/dynamic_protocols.rs"]
+mod dynamic_protocols;
 #[allow(dead_code)]
 #[path = "fixtures/fake_upstream.rs"]
 mod fake_upstream;
@@ -19,6 +21,221 @@ use fake_upstream::{FakeReply, start_fake_upstream, start_fake_upstream_with_del
 use harness::{V3Harness, start_loopback};
 
 const CHAT_OK: &str = r#"{"id":"ok","object":"chat.completion","model":"vendor/opus","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}"#;
+
+#[tokio::test]
+async fn discovered_model_probes_and_routes_all_three_client_formats_with_streaming() {
+    for (upstream_protocol, suffix, auth, reply, stream_reply) in [
+        (
+            "chat_completions",
+            "chat/completions",
+            "bearer",
+            CHAT_OK,
+            dynamic_protocols::CHAT_STREAM,
+        ),
+        (
+            "responses",
+            "responses",
+            "bearer",
+            dynamic_protocols::RESPONSES,
+            dynamic_protocols::RESPONSES_STREAM,
+        ),
+        (
+            "messages",
+            "messages",
+            "x-api-key",
+            dynamic_protocols::MESSAGES,
+            dynamic_protocols::MESSAGES_STREAM,
+        ),
+    ] {
+        let mut queue = VecDeque::from([
+            FakeReply {
+                status: 200,
+                body: r#"{"data":[{"id":"vendor/opus"}],"has_more":true,"last_id":"vendor/opus"}"#,
+            },
+            FakeReply {
+                status: 200,
+                body: r#"{"data":[{"id":"vendor/second"}],"has_more":false}"#,
+            },
+            FakeReply {
+                status: 200,
+                body: reply,
+            },
+        ]);
+        for _ in 0..3 {
+            queue.push_back(FakeReply {
+                status: 200,
+                body: reply,
+            });
+            queue.push_back(FakeReply {
+                status: 200,
+                body: stream_reply,
+            });
+        }
+        let (upstream, calls, _stop) =
+            start_fake_upstream(HashMap::from([("sk-matrix".into(), queue)])).await;
+        let harness = start_loopback(&format!("dyn-matrix-{upstream_protocol}")).await;
+        let mut config = harness.state.config();
+        config.proxy_mode = ProxyMode::Direct;
+        harness.state.set_config(config).unwrap();
+        let endpoint = format!("{upstream}/tenant/api/v1/{suffix}");
+        let before = harness.state.settings_revision();
+        let (status, discovered) = send_json(&harness, Method::POST, "/providers/models/discover", &json!({
+            "endpointUrl": endpoint, "upstreamProtocol": upstream_protocol, "authKind": auth, "key": "sk-matrix"
+        })).await;
+        assert_eq!(status, StatusCode::OK, "{discovered}");
+        assert_eq!(
+            discovered["models"],
+            json!(["vendor/opus", "vendor/second"])
+        );
+        assert_eq!(discovered["truncated"], false);
+        let (status, probed) = send_json(&harness, Method::POST, "/providers/test", &json!({
+            "endpointUrl": endpoint, "upstreamProtocol": upstream_protocol, "authKind": auth, "key": "sk-matrix",
+            "publicModel": "lab-opus", "upstreamModel": discovered["models"][0]
+        })).await;
+        assert_eq!(status, StatusCode::OK, "{probed}");
+        assert_eq!(probed["ok"], true, "{probed}");
+        assert_eq!(
+            harness.state.settings_revision(),
+            before,
+            "discovery/probes must not save routing"
+        );
+        let (status, created) = send_json(
+            &harness,
+            Method::POST,
+            "/providers",
+            &cas(
+                &harness,
+                create_body(
+                    "matrix",
+                    &endpoint,
+                    upstream_protocol,
+                    auth,
+                    Some("sk-matrix"),
+                ),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{created}");
+        assert!(
+            listed_gateway_model_ids(&harness)
+                .await
+                .contains(&"lab-opus".to_string())
+        );
+        for client_protocol in ["chat/completions", "responses", "messages"] {
+            for stream in [false, true] {
+                let mut body = match client_protocol {
+                    "responses" => {
+                        json!({"model":"lab-opus","input":"ping","store":false,"max_output_tokens":32,
+                        "tools":[{"type":"function","name":"lookup","parameters":{"type":"object","properties":{}}}]})
+                    }
+                    "messages" => {
+                        json!({"model":"lab-opus","messages":[{"role":"user","content":"ping"}],"max_tokens":32,
+                        "tools":[{"name":"lookup","input_schema":{"type":"object","properties":{}}}]})
+                    }
+                    _ => {
+                        json!({"model":"lab-opus","messages":[{"role":"user","content":"ping"}],"max_tokens":32,
+                        "tools":[{"type":"function","function":{"name":"lookup","parameters":{"type":"object","properties":{}}}}]})
+                    }
+                };
+                body["stream"] = json!(stream);
+                let response = harness
+                    .client
+                    .post(format!(
+                        "http://127.0.0.1:{}/v1/{client_protocol}",
+                        harness.handle.port
+                    ))
+                    .bearer_auth(&harness.state.config().gateway_key)
+                    .header("cookie", "session=must-not-leak")
+                    .json(&body)
+                    .send()
+                    .await
+                    .unwrap();
+                let status = response.status();
+                let result = response.text().await.unwrap();
+                assert_eq!(
+                    status,
+                    StatusCode::OK,
+                    "{upstream_protocol} -> {client_protocol} stream={stream}: {result}"
+                );
+                assert!(!result.contains("sk-matrix"));
+                if stream {
+                    assert!(result.contains("hello"), "{result}");
+                    let terminal = match client_protocol {
+                        "responses" => "response.completed",
+                        "messages" => "message_stop",
+                        _ => "[DONE]",
+                    };
+                    assert!(result.contains(terminal), "{result}");
+                } else {
+                    let result: Value = serde_json::from_str(&result).unwrap();
+                    let field = match client_protocol {
+                        "responses" => "output",
+                        "messages" => "content",
+                        _ => "choices",
+                    };
+                    assert!(result[field].is_array(), "{result}");
+                }
+            }
+        }
+        let calls = calls.lock().unwrap();
+        assert_eq!(calls.len(), 9);
+        assert_eq!(calls[0].path, "/tenant/api/v1/models");
+        assert_eq!(calls[1].path, "/tenant/api/v1/models");
+        for call in calls.iter().skip(2) {
+            assert_eq!(call.path, format!("/tenant/api/v1/{suffix}"));
+            assert_eq!(
+                serde_json::from_str::<Value>(&call.body).unwrap()["model"],
+                "vendor/opus"
+            );
+            assert!(call.cookie.is_none());
+            if auth == "bearer" {
+                assert_eq!(call.authorization.as_deref(), Some("Bearer sk-matrix"));
+                assert!(call.x_api_key.is_none());
+            } else {
+                assert_eq!(call.x_api_key.as_deref(), Some("sk-matrix"));
+                assert!(call.authorization.is_none());
+                assert!(call.anthropic_version.is_some());
+            }
+        }
+        for (index, call) in calls.iter().skip(3).enumerate() {
+            let sent: Value = serde_json::from_str(&call.body).unwrap();
+            assert_eq!(sent["stream"], index % 2 == 1, "{sent}");
+            if upstream_protocol == "responses" {
+                assert!(
+                    sent["input"].is_array() || sent["input"].is_string(),
+                    "{sent}"
+                );
+                assert!(
+                    sent["max_output_tokens"]
+                        .as_u64()
+                        .is_some_and(|value| value > 0),
+                    "{sent}"
+                );
+            } else {
+                assert!(
+                    sent["messages"]
+                        .as_array()
+                        .is_some_and(|rows| !rows.is_empty()),
+                    "{sent}"
+                );
+                assert!(
+                    sent["max_tokens"].as_u64().is_some_and(|value| value > 0),
+                    "{sent}"
+                );
+            }
+            assert!(sent.to_string().contains("ping"), "{sent}");
+            assert!(
+                sent["tools"]
+                    .as_array()
+                    .is_some_and(|tools| !tools.is_empty()),
+                "{sent}"
+            );
+            assert!(sent["tools"].to_string().contains("lookup"), "{sent}");
+        }
+        drop(calls);
+        harness.stop();
+    }
+}
 
 fn cas(harness: &V3Harness, patch: Value) -> Value {
     let mut body = patch.as_object().cloned().unwrap_or_default();
@@ -31,6 +248,113 @@ fn cas(harness: &V3Harness, patch: Value) -> Value {
         json!(harness.state.process_generation()),
     );
     Value::Object(body)
+}
+
+#[tokio::test]
+async fn preset_provenance_survives_save_edit_and_can_be_cleared() {
+    let harness = start_loopback("dyn-preset-provenance").await;
+    let mut draft = create_body(
+        "Renamed Azure",
+        "https://resource.example/openai/v1/responses",
+        "responses",
+        "bearer",
+        Some("sk-placeholder"),
+    );
+    draft["presetId"] = json!("azure-openai");
+    let (status, created) = send_json(
+        &harness,
+        Method::POST,
+        "/providers",
+        &cas(&harness, draft.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    assert_eq!(created["provider"]["presetId"], "azure-openai");
+    let id = created["provider"]["id"].as_str().unwrap();
+    let path = format!("/providers/{id}");
+    let (status, loaded) = send_json(&harness, Method::GET, &path, &Value::Null).await;
+    assert_eq!(status, StatusCode::OK, "{loaded}");
+    assert_eq!(loaded["presetId"], "azure-openai");
+    assert_eq!(
+        harness
+            .state
+            .db
+            .lock()
+            .get_dynamic_provider(id)
+            .unwrap()
+            .unwrap()
+            .preset_id
+            .as_deref(),
+        Some("azure-openai")
+    );
+    draft.as_object_mut().unwrap().remove("key");
+    draft.as_object_mut().unwrap().remove("presetId");
+    draft["name"] = json!("Still Azure");
+    let (status, edited) = send_json(
+        &harness,
+        Method::PATCH,
+        &path,
+        &cas(&harness, draft.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{edited}");
+    assert_eq!(
+        edited["provider"]["presetId"], "azure-openai",
+        "legacy callers preserve provenance"
+    );
+    draft["presetId"] = json!("bad/id");
+    let before = harness.state.settings_revision();
+    let (status, _) = send_json(
+        &harness,
+        Method::PATCH,
+        &path,
+        &cas(&harness, draft.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(harness.state.settings_revision(), before);
+    draft["presetId"] = json!("");
+    let (status, cleared) = send_json(&harness, Method::PATCH, &path, &cas(&harness, draft)).await;
+    assert_eq!(status, StatusCode::OK, "{cleared}");
+    assert!(cleared["provider"].get("presetId").is_none());
+    harness.stop();
+}
+
+#[tokio::test]
+async fn draft_protocol_probe_rejects_wrong_shapes_and_error_objects_without_saving() {
+    let harness = start_loopback("dyn-probe-false-success").await;
+    let mut config = harness.state.config();
+    config.proxy_mode = ProxyMode::Direct;
+    harness.state.set_config(config).unwrap();
+    let before = harness.state.settings_revision();
+    for (protocol, body) in [
+        ("chat_completions", r#"{"ok":true}"#),
+        ("responses", CHAT_OK),
+        ("responses", r#"{"output":[]}"#),
+        ("messages", CHAT_OK),
+        (
+            "chat_completions",
+            r#"{"error":{"message":"sk-secret-do-not-echo"}}"#,
+        ),
+        ("responses", r#"{"status":"failed","output":[]}"#),
+    ] {
+        let (upstream, calls, _stop) = start_fake_upstream(HashMap::from([(
+            "sk-secret-do-not-echo".into(),
+            VecDeque::from([FakeReply { status: 200, body }]),
+        )]))
+        .await;
+        let (status, tested) = send_json(&harness, Method::POST, "/providers/test", &json!({
+            "endpointUrl": upstream, "upstreamProtocol": protocol, "authKind":"bearer", "key":"sk-secret-do-not-echo",
+            "publicModel":"lab-opus", "upstreamModel":"vendor/opus"
+        })).await;
+        assert_eq!(status, StatusCode::OK, "{tested}");
+        assert_eq!(tested["ok"], false, "{tested}");
+        assert!(tested["error"].is_string());
+        assert!(!tested.to_string().contains("sk-secret-do-not-echo"));
+        assert_eq!(calls.lock().unwrap().len(), 1);
+        assert_eq!(harness.state.settings_revision(), before);
+    }
+    harness.stop();
 }
 
 async fn send_json(
@@ -1268,5 +1592,213 @@ async fn dynamic_none_auth_singleton_can_disable_and_re_enable_without_a_key() {
     assert_eq!(after_enable.credential_kind, stored.credential_kind);
     assert_eq!(after_enable.key_cipher, stored.key_cipher);
     assert!(after_enable.key_cipher.is_empty());
+    harness.stop();
+}
+
+#[tokio::test]
+async fn inherited_chat_and_overridden_messages_use_effective_routes() {
+    let mut queue = VecDeque::new();
+    for body in [
+        CHAT_OK,
+        CHAT_OK,
+        CHAT_OK,
+        dynamic_protocols::MESSAGES,
+        dynamic_protocols::MESSAGES,
+        dynamic_protocols::MESSAGES,
+        CHAT_OK,
+        dynamic_protocols::MESSAGES,
+    ] {
+        queue.push_back(FakeReply { status: 200, body });
+    }
+    let (upstream, calls, _stop) =
+        start_fake_upstream(HashMap::from([("sk-override".into(), queue)])).await;
+    let harness = start_loopback("dyn-effective-route").await;
+    let mut config = harness.state.config();
+    config.proxy_mode = ProxyMode::Direct;
+    harness.state.set_config(config).unwrap();
+    let chat_endpoint = format!("{upstream}/v1");
+    let messages_endpoint = format!("{upstream}/anthropic/v1/messages");
+    let (status, created) = send_json(
+        &harness,
+        Method::POST,
+        "/providers",
+        &cas(
+            &harness,
+            json!({
+                "name": "Lab",
+                "endpointUrl": chat_endpoint,
+                "upstreamProtocol": "chat_completions",
+                "authKind": "bearer",
+                "key": "sk-override",
+                "models": [
+                    {
+                        "publicModel": "lab-chat",
+                        "upstreamModel": "vendor/chat"
+                    },
+                    {
+                        "publicModel": "lab-messages",
+                        "upstreamModel": "vendor/messages",
+                        "upstreamOverride": {
+                            "protocol": "messages",
+                            "endpointUrl": messages_endpoint
+                        }
+                    }
+                ]
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    let models = created["provider"]["models"].as_array().unwrap();
+    assert!(models[0].get("upstreamOverride").is_none(), "{created}");
+    assert_eq!(models[1]["upstreamOverride"]["protocol"], "messages");
+    assert_eq!(
+        models[1]["upstreamOverride"]["endpointUrl"],
+        messages_endpoint
+    );
+    let provider_id = created["provider"]["id"].as_str().unwrap().to_string();
+    let listed = listed_gateway_model_ids(&harness).await;
+    assert!(listed.contains(&"lab-chat".to_string()), "{listed:?}");
+    assert!(listed.contains(&"lab-messages".to_string()), "{listed:?}");
+
+    async fn request_all_formats(harness: &V3Harness, model: &str) -> Vec<(StatusCode, String)> {
+        let mut results = Vec::new();
+        for client_protocol in ["chat/completions", "responses", "messages"] {
+            let body = match client_protocol {
+                "responses" => json!({
+                    "model": model,
+                    "input": "ping",
+                    "store": false,
+                    "max_output_tokens": 32
+                }),
+                "messages" => json!({
+                    "model": model,
+                    "messages": [{"role": "user", "content": "ping"}],
+                    "max_tokens": 32
+                }),
+                _ => json!({
+                    "model": model,
+                    "messages": [{"role": "user", "content": "ping"}],
+                    "max_tokens": 32
+                }),
+            };
+            let response = harness
+                .client
+                .post(format!(
+                    "http://127.0.0.1:{}/v1/{client_protocol}",
+                    harness.handle.port
+                ))
+                .bearer_auth(&harness.state.config().gateway_key)
+                .json(&body)
+                .send()
+                .await
+                .unwrap();
+            results.push((response.status(), response.text().await.unwrap()));
+        }
+        results
+    }
+
+    for (status, body) in request_all_formats(&harness, "lab-chat").await {
+        assert_eq!(status, StatusCode::OK, "{body}");
+    }
+    for (status, body) in request_all_formats(&harness, "lab-messages").await {
+        assert_eq!(status, StatusCode::OK, "{body}");
+    }
+
+    let account_id = account_id_for_provider(&harness, &provider_id).await;
+    for (model, protocol) in [
+        ("lab-chat", "chat_completions"),
+        ("lab-messages", "messages"),
+    ] {
+        let (status, tested) = send_json(
+            &harness,
+            Method::POST,
+            &format!("/accounts/{account_id}/model-tests"),
+            &json!({ "modelId": model }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{tested}");
+        assert_eq!(tested["success"], true, "{tested}");
+        assert_eq!(tested["protocol"], protocol, "{tested}");
+        assert_eq!(tested["modelId"], model);
+    }
+
+    let recorded = calls.lock().unwrap();
+    assert_eq!(recorded.len(), 8, "{recorded:?}");
+    for call in recorded
+        .iter()
+        .take(3)
+        .chain(recorded.iter().skip(6).take(1))
+    {
+        assert_eq!(call.path, "/v1/chat/completions", "{call:?}");
+        assert_eq!(
+            serde_json::from_str::<Value>(&call.body).unwrap()["model"],
+            "vendor/chat"
+        );
+        assert_eq!(call.authorization.as_deref(), Some("Bearer sk-override"));
+        assert!(call.x_api_key.is_none(), "{call:?}");
+    }
+    for call in recorded
+        .iter()
+        .skip(3)
+        .take(3)
+        .chain(recorded.iter().skip(7).take(1))
+    {
+        assert_eq!(call.path, "/anthropic/v1/messages", "{call:?}");
+        assert_eq!(
+            serde_json::from_str::<Value>(&call.body).unwrap()["model"],
+            "vendor/messages"
+        );
+        assert_eq!(
+            call.authorization.as_deref(),
+            Some("Bearer sk-override"),
+            "auth stays supplier-owned on a Messages override"
+        );
+        assert!(call.x_api_key.is_none(), "{call:?}");
+        assert!(call.anthropic_version.is_some(), "{call:?}");
+    }
+    drop(recorded);
+
+    let (status, updated) = send_json(
+        &harness,
+        Method::PATCH,
+        &format!("/providers/{provider_id}"),
+        &cas(
+            &harness,
+            json!({
+                "name": "Lab",
+                "endpointUrl": chat_endpoint,
+                "upstreamProtocol": "chat_completions",
+                "authKind": "bearer",
+                "models": [
+                    {
+                        "publicModel": "lab-chat",
+                        "upstreamModel": "vendor/chat"
+                    },
+                    {
+                        "publicModel": "lab-messages",
+                        "upstreamModel": "vendor/messages"
+                    }
+                ]
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{updated}");
+    let cleared = &updated["provider"]["models"][1];
+    assert_eq!(cleared["publicModel"], "lab-messages");
+    assert!(cleared.get("upstreamOverride").is_none(), "{updated}");
+    let (status, loaded) = send_json(
+        &harness,
+        Method::GET,
+        &format!("/providers/{provider_id}"),
+        &Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{loaded}");
+    assert!(
+        loaded["models"][1].get("upstreamOverride").is_none(),
+        "{loaded}"
+    );
     harness.stop();
 }

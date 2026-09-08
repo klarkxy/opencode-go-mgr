@@ -27,6 +27,7 @@ pub(crate) mod http_client;
 pub mod kernel;
 pub mod models;
 pub(crate) mod plan_usage;
+pub mod platform;
 pub mod pricing;
 pub(crate) mod protocol_probe;
 pub mod provider;

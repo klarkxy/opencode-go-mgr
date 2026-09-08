@@ -43,7 +43,7 @@ use crate::kernel::ids::normalize_model_name;
 use crate::kernel::protocol::ApiFormat;
 use crate::models::{Account, AppConfig, UpstreamChannel};
 use crate::provider::ProviderAdapterKind;
-use crate::provider_contracts::{ContractScope, EffectiveContractSet};
+use crate::provider_contracts::{ContractScope, EffectiveContractSet, protocol_to_api};
 use axum::http::StatusCode;
 use bytes::Bytes;
 
@@ -371,11 +371,12 @@ fn materialize_mapping_plan(
     let forced_upstream = if adapter_kind == Some(ProviderAdapterKind::ConfigurableHttp) {
         Some(parsed.client)
     } else if adapter_kind == Some(ProviderAdapterKind::Cpa) {
-        Some(
-            crate::kernel::protocol::model_protocol(&model)
-                .map(|profile| profile.preferred)
-                .unwrap_or(ApiFormat::ChatCompletions),
-        )
+        // CPA owns the model's upstream choice. Only Gemini is client-only
+        // here and must be converted to a protocol exposed by CPA.
+        Some(match parsed.client {
+            ApiFormat::Gemini => ApiFormat::ChatCompletions,
+            protocol => protocol,
+        })
     } else if adapter_kind == Some(ProviderAdapterKind::CommandCodeGoat) {
         Some(
             contracts
@@ -547,6 +548,7 @@ fn materialize_dynamic_account_plan(
                 runtime.name, names.routing_model
             ))
         })?;
+    let route = runtime.effective_route(selected);
     materialize_channel_plan(
         config,
         parsed,
@@ -558,13 +560,9 @@ fn materialize_dynamic_account_plan(
         UpstreamChannel::Go,
         None,
         false,
-        Some(match runtime.upstream_protocol {
-            crate::provider::UpstreamProtocolKind::ChatCompletions => ApiFormat::ChatCompletions,
-            crate::provider::UpstreamProtocolKind::Responses => ApiFormat::Responses,
-            crate::provider::UpstreamProtocolKind::Messages => ApiFormat::Messages,
-        }),
+        Some(protocol_to_api(route.protocol)),
         Some(CustomRouteSpec {
-            endpoint_url: runtime.endpoint_url.clone(),
+            endpoint_url: route.endpoint_url,
         }),
     )
 }

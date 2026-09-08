@@ -39,6 +39,8 @@ pub struct Database {
     conn: Connection,
 }
 
+mod platform;
+
 /// Local configuration for the one code-owned CPA external integration.
 /// Both credential values stay encrypted outside the short-lived V3 write path.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -156,6 +158,9 @@ pub struct AccountImportRecord {
 /// transaction.
 #[derive(Debug, Clone)]
 pub struct NodeImportRecord {
+    pub platform_links_authoritative: bool,
+    pub platform_accounts: Vec<crate::platform::PortablePlatformAccount>,
+    pub platform_links: Vec<crate::platform::PortablePlatformLink>,
     pub accounts: Vec<AccountImportRecord>,
     pub account_order: Vec<String>,
     pub config_json: String,
@@ -194,7 +199,7 @@ pub const PRE_V3_BACKUP_FILE_PREFIX: &str = "data.sqlite.pre-v3.";
 /// database is rewritten to provider-only identity in v35.
 pub const PRE_V35_BACKUP_FILE_PREFIX: &str = "data.sqlite.pre-v35.";
 /// Highest schema this binary can open or migrate. Newer databases fail closed.
-pub const CURRENT_SCHEMA_VERSION: i32 = 37;
+pub const CURRENT_SCHEMA_VERSION: i32 = 40;
 /// Canonical source schema for the v35 provider-identity rewrite.
 pub const V34_SCHEMA_VERSION: i32 = 34;
 /// Historical v34 offering IDs. Used only by v1–v34 SQL and the v35 preflight
@@ -2068,7 +2073,7 @@ fn dynamic_tx_fault(point: &'static str) -> Result<()> {
 
 fn list_dynamic_providers_on(conn: &Connection) -> Result<Vec<DynamicProviderRuntime>> {
     let mut stmt = conn.prepare(
-        "SELECT id, name, endpoint_url, upstream_protocol, auth_kind, created_at, updated_at
+        "SELECT id, name, endpoint_url, upstream_protocol, auth_kind, created_at, updated_at, preset_id
          FROM dynamic_providers
          ORDER BY created_at ASC, id ASC",
     )?;
@@ -2081,14 +2086,16 @@ fn list_dynamic_providers_on(conn: &Connection) -> Result<Vec<DynamicProviderRun
             row.get::<_, String>(4)?,
             row.get::<_, String>(5)?,
             row.get::<_, String>(6)?,
+            row.get::<_, Option<String>>(7)?,
         ))
     })?;
     let mut providers = Vec::new();
     for row in rows {
-        let (id, name, endpoint_url, protocol, auth_kind, created_at, updated_at) = row?;
+        let (id, name, endpoint_url, protocol, auth_kind, created_at, updated_at, preset_id) = row?;
         providers.push(load_dynamic_provider_runtime(
             conn,
             DynamicProviderRow {
+                preset_id,
                 id,
                 name,
                 endpoint_url,
@@ -2108,7 +2115,7 @@ fn get_dynamic_provider_on(
 ) -> Result<Option<DynamicProviderRuntime>> {
     let row = conn
         .query_row(
-            "SELECT id, name, endpoint_url, upstream_protocol, auth_kind, created_at, updated_at
+            "SELECT id, name, endpoint_url, upstream_protocol, auth_kind, created_at, updated_at, preset_id
              FROM dynamic_providers
              WHERE lower(id) = lower(?1)",
             [provider_id],
@@ -2121,16 +2128,20 @@ fn get_dynamic_provider_on(
                     row.get::<_, String>(4)?,
                     row.get::<_, String>(5)?,
                     row.get::<_, String>(6)?,
+            row.get::<_, Option<String>>(7)?,
                 ))
             },
         )
         .optional()?;
-    let Some((id, name, endpoint_url, protocol, auth_kind, created_at, updated_at)) = row else {
+    let Some((id, name, endpoint_url, protocol, auth_kind, created_at, updated_at, preset_id)) =
+        row
+    else {
         return Ok(None);
     };
     Ok(Some(load_dynamic_provider_runtime(
         conn,
         DynamicProviderRow {
+            preset_id,
             id,
             name,
             endpoint_url,
@@ -2143,6 +2154,7 @@ fn get_dynamic_provider_on(
 }
 
 struct DynamicProviderRow {
+    preset_id: Option<String>,
     id: String,
     name: String,
     endpoint_url: String,
@@ -2162,7 +2174,7 @@ fn load_dynamic_provider_runtime(
     let auth_kind = DynamicAuthKind::try_from(provider.auth_kind.as_str())
         .map_err(|error| anyhow::anyhow!(error.to_string()))?;
     let mut stmt = conn.prepare(
-        "SELECT public_model, upstream_model
+        "SELECT public_model, upstream_model, upstream_override
          FROM dynamic_provider_models
          WHERE provider_id = ?1
          ORDER BY public_model_key ASC",
@@ -2171,6 +2183,18 @@ fn load_dynamic_provider_runtime(
         Ok(DynamicModelMapping {
             public_model: row.get(0)?,
             upstream_model: row.get(1)?,
+            upstream_override: row
+                .get::<_, Option<String>>(2)?
+                .map(|value| {
+                    serde_json::from_str(&value).map_err(|error| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            2,
+                            rusqlite::types::Type::Text,
+                            Box::new(error),
+                        )
+                    })
+                })
+                .transpose()?,
         })
     })?;
     let mut mappings = Vec::new();
@@ -2194,6 +2218,7 @@ fn load_dynamic_provider_runtime(
             )
         })?;
     Ok(DynamicProviderRuntime {
+        preset_id: provider.preset_id,
         id: provider.id,
         name: provider.name,
         endpoint_url: provider.endpoint_url,
@@ -2208,8 +2233,8 @@ fn load_dynamic_provider_runtime(
 fn insert_dynamic_provider_on(conn: &Connection, runtime: &DynamicProviderRuntime) -> Result<()> {
     conn.execute(
         "INSERT INTO dynamic_providers
-         (id, name, endpoint_url, upstream_protocol, auth_kind, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+         (id, name, endpoint_url, upstream_protocol, auth_kind, created_at, updated_at, preset_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         params![
             runtime.id,
             runtime.name,
@@ -2218,6 +2243,7 @@ fn insert_dynamic_provider_on(conn: &Connection, runtime: &DynamicProviderRuntim
             runtime.auth_kind.as_str(),
             runtime.created_at.to_rfc3339(),
             runtime.updated_at.to_rfc3339(),
+            runtime.preset_id,
         ],
     )?;
     insert_dynamic_provider_models_on(conn, &runtime.id, &runtime.mappings)
@@ -2257,7 +2283,7 @@ fn upsert_imported_dynamic_provider_on(
         }
         conn.execute(
             "UPDATE dynamic_providers
-             SET name = ?1, endpoint_url = ?2, upstream_protocol = ?3, auth_kind = ?4, updated_at = ?5
+             SET name = ?1, endpoint_url = ?2, upstream_protocol = ?3, auth_kind = ?4, updated_at = ?5, preset_id = ?7
              WHERE id = ?6",
             params![
                 runtime.name,
@@ -2266,6 +2292,7 @@ fn upsert_imported_dynamic_provider_on(
                 runtime.auth_kind.as_str(),
                 runtime.updated_at.to_rfc3339(),
                 existing.id,
+                runtime.preset_id,
             ],
         )?;
         conn.execute(
@@ -2300,8 +2327,8 @@ fn insert_dynamic_provider_models_on(
 ) -> Result<()> {
     let mut stmt = conn.prepare(
         "INSERT INTO dynamic_provider_models
-         (provider_id, public_model, public_model_key, upstream_model)
-         VALUES (?1, ?2, ?3, ?4)",
+         (provider_id, public_model, public_model_key, upstream_model, upstream_override)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
     )?;
     for mapping in mappings {
         stmt.execute(params![
@@ -2309,6 +2336,11 @@ fn insert_dynamic_provider_models_on(
             mapping.public_model,
             mapping.public_model.to_ascii_lowercase(),
             mapping.upstream_model,
+            mapping
+                .upstream_override
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()?,
         ])?;
     }
     Ok(())
@@ -2336,6 +2368,40 @@ fn ensure_dynamic_provider_tables(conn: &Connection) -> Result<()> {
          CREATE INDEX IF NOT EXISTS idx_dynamic_provider_models_provider
             ON dynamic_provider_models(provider_id);",
     )?;
+    Ok(())
+}
+
+/// Missing model overrides inherit the existing Provider defaults unchanged.
+fn migrate_to_v40(conn: &Connection) -> Result<()> {
+    if schema_version_on(conn)? >= 40 {
+        return Ok(());
+    }
+    let tx = conn.unchecked_transaction()?;
+    let version = schema_version_on(&tx)?;
+    if version >= 40 {
+        return Ok(());
+    }
+    anyhow::ensure!(version == 39, "v40 requires schema v39");
+    ensure_column(&tx, "dynamic_provider_models", "upstream_override", "TEXT")?;
+    tx.execute_batch("INSERT OR REPLACE INTO schema_version(version) VALUES(40);")?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// v39 preserves template provenance independently of routing configuration.
+fn migrate_to_v39(conn: &Connection) -> Result<()> {
+    if schema_version_on(conn)? >= 39 {
+        return Ok(());
+    }
+    let tx = conn.unchecked_transaction()?;
+    let version = schema_version_on(&tx)?;
+    if version >= 39 {
+        return Ok(());
+    }
+    anyhow::ensure!(version == 38, "v39 requires schema v38");
+    ensure_column(&tx, "dynamic_providers", "preset_id", "TEXT")?;
+    tx.execute_batch("INSERT OR REPLACE INTO schema_version(version) VALUES(39);")?;
+    tx.commit()?;
     Ok(())
 }
 
@@ -3228,7 +3294,10 @@ impl Database {
         migrate_to_v35(&db.conn, &db_path, is_fresh)?;
         migrate_to_v36(&db.conn)?;
         migrate_to_v37(&db.conn)?;
+        platform::migrate_to_v38(&db.conn)?;
         ensure_dynamic_provider_tables(&db.conn)?;
+        migrate_to_v39(&db.conn)?;
+        migrate_to_v40(&db.conn)?;
         Ok(db)
     }
 
@@ -5134,7 +5203,7 @@ impl Database {
             .ok_or_else(|| anyhow::anyhow!("unknown provider `{}`", runtime.id))?;
         tx.execute(
             "UPDATE dynamic_providers
-             SET name = ?1, endpoint_url = ?2, upstream_protocol = ?3, auth_kind = ?4, updated_at = ?5
+             SET name = ?1, endpoint_url = ?2, upstream_protocol = ?3, auth_kind = ?4, updated_at = ?5, preset_id = ?7
              WHERE id = ?6",
             params![
                 runtime.name,
@@ -5143,6 +5212,7 @@ impl Database {
                 runtime.auth_kind.as_str(),
                 runtime.updated_at.to_rfc3339(),
                 existing.id,
+                runtime.preset_id,
             ],
         )?;
         tx.execute(
@@ -5280,9 +5350,23 @@ impl Database {
         for runtime in &record.dynamic_providers {
             upsert_imported_dynamic_provider_on(&tx, runtime, &imported_account_ids)?;
         }
+        if record.platform_links_authoritative {
+            for account in &record.accounts {
+                tx.execute(
+                    "DELETE FROM platform_links WHERE account_id=?1",
+                    [&account.account.id],
+                )?;
+            }
+        }
         for account in &record.accounts {
             merge_import_account_on(&tx, account)?;
         }
+        platform::merge_platforms_on(
+            &tx,
+            &record.platform_accounts,
+            &record.platform_links,
+            &imported_account_ids,
+        )?;
 
         let (sanitized, primary) = sanitize_config_json_primary_key(&record.config_json)?;
         let primary =
@@ -5565,6 +5649,12 @@ impl Database {
         if let Some(tier) = ollama_billing {
             set_ollama_cloud_billing_tier_on(&tx, id, tier)?;
         }
+        if key_replaced {
+            tx.execute(
+                "UPDATE platform_links SET snapshot=NULL,version=version+1 WHERE account_id=?1",
+                [id],
+            )?;
+        }
         tx.commit()?;
         Ok(())
     }
@@ -5839,6 +5929,7 @@ impl Database {
         );
         let tx = self.conn.transaction()?;
         tx.execute("DELETE FROM quota_windows WHERE account_id = ?1", [id])?;
+        tx.execute("DELETE FROM platform_links WHERE account_id = ?1", [id])?;
         tx.execute("DELETE FROM credit_balances WHERE account_id = ?1", [id])?;
         tx.execute(
             "DELETE FROM provider_usage_sync_state WHERE account_id = ?1",
@@ -6153,7 +6244,10 @@ impl Database {
         })?;
         let mut runtimes = Vec::new();
         for row in rows {
-            let (account_id, enabled, verification_status, setup_ready, has_key, config) = row?;
+            let (account_id, enabled, verification_status, setup_ready, has_key, mut config) = row?;
+            if let Some(endpoint) = self.platform_endpoint(&account_id, config.upstream_protocol)? {
+                config.endpoint_url = endpoint;
+            }
             let capabilities = self.list_account_model_capabilities_declared(&account_id)?;
             runtimes.push(crate::custom::CustomAccountRuntime {
                 account_id,

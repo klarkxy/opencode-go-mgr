@@ -170,7 +170,15 @@ export type DashboardApiV3 =
   | DynamicProviderDiscoverResponse
   | DynamicProviderTestRequest
   | DynamicProviderTestResponse
-  | OllamaBillingTier;
+  | OllamaBillingTier
+  | PlatformAccounts
+  | PlatformAccount
+  | PlatformLink
+  | PlatformSnapshot
+  | PlatformCreate
+  | PlatformUpdate
+  | PlatformLinkWrite
+  | PlatformRefresh;
 /**
  * Which listed models take the list-mode exception leg.
  */
@@ -281,6 +289,8 @@ export type CpaRuntimePhase = "idle" | "checking" | "downloading" | "installing"
  * Auth kind owned by a dynamic Provider. Independent of protocol.
  */
 export type DynamicProviderAuthKind = "bearer" | "x-api-key" | "none";
+export type PlatformKind = "new_api" | "sub2api";
+export type PlatformQuotaKind = "wallet" | "subscription" | "key_limit";
 
 /**
  * Live CAS token, process generation, and pricing snapshot id.
@@ -1974,12 +1984,17 @@ export interface CpaRuntimeKeyCreated {
   revision: number;
   secret: string;
 }
-/**
- * One public-to-upstream mapping owned by a dynamic Provider.
- */
 export interface DynamicProviderModel {
   publicModel: string;
   upstreamModel: string;
+  upstreamOverride?: DynamicModelUpstreamOverride | null;
+}
+/**
+ * One public-to-upstream mapping owned by a dynamic Provider.
+ */
+export interface DynamicModelUpstreamOverride {
+  endpointUrl: string;
+  protocol: AccountUpstreamProtocol;
 }
 /**
  * Secret-free dynamic Provider definition.
@@ -1991,6 +2006,7 @@ export interface DynamicProvider {
   id: string;
   models: DynamicProviderModel[];
   name: string;
+  presetId?: string | null;
   processGeneration: number;
   revision: number;
   updatedAt: string;
@@ -2008,6 +2024,7 @@ export interface DynamicProviderCreate {
   models: DynamicProviderModel[];
   name: string;
   notes?: string | null;
+  presetId?: string | null;
   processGeneration: number;
   upstreamProtocol: AccountUpstreamProtocol;
 }
@@ -2021,6 +2038,10 @@ export interface DynamicProviderUpdate {
   key?: string | null;
   models: DynamicProviderModel[];
   name: string;
+  /**
+   * Omitted/null preserves provenance; an empty string clears it.
+   */
+  presetId?: string | null;
   processGeneration: number;
   upstreamProtocol: AccountUpstreamProtocol;
 }
@@ -2069,4 +2090,140 @@ export interface DynamicProviderTestResponse {
   ok: boolean;
   processGeneration: number;
   revision: number;
+}
+export interface PlatformAccounts {
+  accounts: PlatformAccount[];
+  links: PlatformLink[];
+  processGeneration: number;
+  revision: number;
+}
+export interface PlatformAccount {
+  baseUrl: string;
+  hasUserCredential: boolean;
+  id: string;
+  kind: PlatformKind;
+  name: string;
+  snapshot: PlatformSnapshot | null;
+  version: number;
+}
+export interface PlatformSnapshot {
+  billingPreference: string | null;
+  /**
+   * Fixed component/error codes only, never upstream bodies or credentials.
+   */
+  errors: string[];
+  groups: PlatformGroup[];
+  models: PlatformModel[];
+  observedAt: number;
+  prices: PlatformPrice[];
+  quotas: PlatformQuota[];
+  stale: boolean;
+  walletOverflow: boolean | null;
+}
+export interface PlatformGroup {
+  autoGroups: string[];
+  id: string | null;
+  platform: string | null;
+  subscriptionType: string | null;
+  verified: boolean;
+}
+export interface PlatformModel {
+  groupId: string | null;
+  id: string;
+  platform: string | null;
+  /**
+   * A storefront row is never proof of inference permission.
+   */
+  source: string;
+}
+export interface PlatformPrice {
+  cacheRead: number | null;
+  cacheWrite: number | null;
+  currency: string;
+  groupId: string | null;
+  /**
+   * All numeric rates are currency per token, never per million tokens.
+   */
+  input: number | null;
+  model: string;
+  officialReference: boolean;
+  output: number | null;
+  source: string;
+  unavailableReason: string | null;
+  validUntil: number;
+}
+export interface PlatformQuota {
+  expiresAt: number | null;
+  kind: PlatformQuotaKind;
+  limit: number | null;
+  period: string | null;
+  remaining: number | null;
+  resetsAt: number | null;
+  scopeId: string;
+  source: string;
+  unit: string;
+  unlimited: boolean;
+  used: number | null;
+}
+export interface PlatformLink {
+  accountId: string;
+  group: PlatformGroup;
+  platformAccountId: string;
+  snapshot: PlatformSnapshot | null;
+}
+/**
+ * Required process-scoped mutation precondition.
+ *
+ * Both fields travel at the top level of every mutation request. The random
+ * process generation prevents a revision captured before restart from being
+ * accepted by a fresh process whose in-memory counter reused the same value.
+ */
+export interface PlatformCreate {
+  baseUrl: string;
+  expectedRevision: number;
+  kind: PlatformKind;
+  name: string;
+  processGeneration: number;
+  userCredential?: string | null;
+}
+/**
+ * Required process-scoped mutation precondition.
+ *
+ * Both fields travel at the top level of every mutation request. The random
+ * process generation prevents a revision captured before restart from being
+ * accepted by a fresh process whose in-memory counter reused the same value.
+ */
+export interface PlatformUpdate {
+  expectedRevision: number;
+  name: string;
+  processGeneration: number;
+  /**
+   * Omitted/null preserves, empty clears.
+   */
+  userCredential?: string | null;
+}
+/**
+ * Required process-scoped mutation precondition.
+ *
+ * Both fields travel at the top level of every mutation request. The random
+ * process generation prevents a revision captured before restart from being
+ * accepted by a fresh process whose in-memory counter reused the same value.
+ */
+export interface PlatformLinkWrite {
+  expectedRevision: number;
+  group: PlatformGroup;
+  platformAccountId: string;
+  processGeneration: number;
+}
+/**
+ * Required process-scoped mutation precondition.
+ *
+ * Both fields travel at the top level of every mutation request. The random
+ * process generation prevents a revision captured before restart from being
+ * accepted by a fresh process whose in-memory counter reused the same value.
+ */
+export interface PlatformRefresh {
+  accountId?: string | null;
+  expectedRevision: number;
+  processGeneration: number;
 }

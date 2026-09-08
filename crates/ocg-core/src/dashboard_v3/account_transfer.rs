@@ -56,7 +56,7 @@ const ENVELOPE_VERSION: u32 = 1;
 const LEGACY_PAYLOAD_VERSION: u32 = 1;
 #[cfg(test)]
 const NODE_PAYLOAD_VERSION: u32 = 2;
-const PAYLOAD_VERSION: u32 = 4;
+const PAYLOAD_VERSION: u32 = 5;
 const AAD: &[u8] = b"ocg-manager-account-backup:v1:argon2id-m65536-t3-p1:aes-256-gcm";
 const ARGON_MEMORY_KIB: u32 = 64 * 1024;
 const ARGON_ITERATIONS: u32 = 3;
@@ -94,6 +94,10 @@ struct EncryptedEnvelope {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct PortablePayload {
+    #[serde(default)]
+    platform_accounts: Vec<crate::platform::PortablePlatformAccount>,
+    #[serde(default)]
+    platform_links: Vec<crate::platform::PortablePlatformLink>,
     version: u32,
     exported_at: String,
     accounts: Vec<PortableAccount>,
@@ -199,6 +203,8 @@ struct PortableCustomConfig {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct PortableDynamicProvider {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    preset_id: Option<String>,
     id: String,
     name: String,
     endpoint_url: String,
@@ -212,6 +218,15 @@ struct PortableDynamicProvider {
 struct PortableDynamicModel {
     public_model: String,
     upstream_model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    upstream_override: Option<PortableDynamicModelOverride>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PortableDynamicModelOverride {
+    protocol: String,
+    endpoint_url: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -337,6 +352,7 @@ impl Zeroize for PortableCustomConfig {
 
 impl Zeroize for PortableDynamicProvider {
     fn zeroize(&mut self) {
+        self.preset_id.zeroize();
         self.id.zeroize();
         self.name.zeroize();
         self.endpoint_url.zeroize();
@@ -350,6 +366,10 @@ impl Zeroize for PortableDynamicModel {
     fn zeroize(&mut self) {
         self.public_model.zeroize();
         self.upstream_model.zeroize();
+        if let Some(value) = self.upstream_override.as_mut() {
+            value.protocol.zeroize();
+            value.endpoint_url.zeroize();
+        }
     }
 }
 
@@ -395,6 +415,9 @@ struct ValidatedAccount {
 
 #[derive(Debug)]
 struct ValidatedMigration {
+    platform_links_authoritative: bool,
+    platform_accounts: Vec<crate::platform::PortablePlatformAccount>,
+    platform_links: Vec<crate::platform::PortablePlatformLink>,
     exported_at: String,
     accounts: Vec<ValidatedAccount>,
     node: Option<Zeroizing<PortableNodeState>>,
@@ -654,6 +677,9 @@ async fn import_accounts_inner(
             })
             .collect::<Result<Vec<_>, V3ApiError>>()?;
         let node_record = NodeImportRecord {
+            platform_links_authoritative: validated.platform_links_authoritative,
+            platform_accounts: validated.platform_accounts,
+            platform_links: validated.platform_links,
             accounts: records,
             account_order: node.account_order.clone(),
             config_json: serde_json::to_string(&node.config)
@@ -710,7 +736,14 @@ async fn import_accounts_inner(
 fn export_payload(state: &CoreState) -> Result<(PortablePayload, u64, u64), TransferError> {
     let _settings_update = state.settings_update.lock();
     let revision = state.settings_revision();
-    let (snapshots, sub_keys, persisted_contracts, dynamic_runtimes) = {
+    let (
+        snapshots,
+        sub_keys,
+        persisted_contracts,
+        dynamic_runtimes,
+        platform_accounts,
+        platform_links,
+    ) = {
         let db = state.db.lock();
         let accounts = db.list_accounts().map_err(|_| TransferError::Internal)?;
         let snapshots = accounts
@@ -737,7 +770,40 @@ fn export_payload(state: &CoreState) -> Result<(PortablePayload, u64, u64), Tran
         let dynamic_runtimes = db
             .list_dynamic_providers()
             .map_err(|_| TransferError::Internal)?;
-        (snapshots, sub_keys, persisted_contracts, dynamic_runtimes)
+        let parents = db
+            .list_platform_accounts()
+            .map_err(|_| TransferError::Internal)?
+            .into_iter()
+            .map(|p| crate::platform::PortablePlatformAccount {
+                id: p.id,
+                kind: p.kind,
+                name: p.name,
+                base_url: p.base_url,
+            })
+            .collect::<Vec<_>>();
+        let links = db
+            .list_platform_links()
+            .map_err(|_| TransferError::Internal)?
+            .into_iter()
+            .map(|l| {
+                let mut group = l.group;
+                group.verified = false;
+                group.subscription_type = None;
+                crate::platform::PortablePlatformLink {
+                    account_id: l.account_id,
+                    platform_account_id: l.platform_account_id,
+                    group,
+                }
+            })
+            .collect::<Vec<_>>();
+        (
+            snapshots,
+            sub_keys,
+            persisted_contracts,
+            dynamic_runtimes,
+            parents,
+            links,
+        )
     };
     let mut accounts = Zeroizing::new(Vec::new());
     let mut account_order = Vec::new();
@@ -894,6 +960,7 @@ fn export_payload(state: &CoreState) -> Result<(PortablePayload, u64, u64), Tran
     let mut portable_dynamics = dynamic_runtimes
         .into_iter()
         .map(|runtime| PortableDynamicProvider {
+            preset_id: runtime.preset_id,
             id: runtime.id,
             name: runtime.name,
             endpoint_url: runtime.endpoint_url,
@@ -905,6 +972,12 @@ fn export_payload(state: &CoreState) -> Result<(PortablePayload, u64, u64), Tran
                 .map(|mapping| PortableDynamicModel {
                     public_model: mapping.public_model,
                     upstream_model: mapping.upstream_model,
+                    upstream_override: mapping.upstream_override.map(|value| {
+                        PortableDynamicModelOverride {
+                            protocol: value.protocol.as_str().to_string(),
+                            endpoint_url: value.endpoint_url,
+                        }
+                    }),
                 })
                 .collect(),
         })
@@ -913,6 +986,15 @@ fn export_payload(state: &CoreState) -> Result<(PortablePayload, u64, u64), Tran
     let zen_catalog = state.zen_free_model_catalog();
     Ok((
         PortablePayload {
+            platform_accounts,
+            platform_links: platform_links
+                .into_iter()
+                .filter(|l| {
+                    accounts
+                        .iter()
+                        .any(|a| a.id.as_deref() == Some(l.account_id.as_str()))
+                })
+                .collect(),
             version: PAYLOAD_VERSION,
             exported_at: Utc::now().to_rfc3339(),
             accounts: std::mem::take(&mut *accounts),
@@ -1022,7 +1104,7 @@ fn decrypt_and_validate(bundle: &str, password: &str) -> Result<ValidatedMigrati
     let value: serde_json::Value =
         serde_json::from_slice(plaintext.as_slice()).map_err(|_| TransferError::InvalidBundle)?;
     match value.get("version").and_then(|version| version.as_u64()) {
-        Some(version) if version == u64::from(PAYLOAD_VERSION) => {}
+        Some(version) if version == 4 || version == u64::from(PAYLOAD_VERSION) => {}
         Some(version) => return Err(TransferError::UnsupportedVersion(version as u32)),
         None => return Err(TransferError::InvalidBundle),
     }
@@ -1044,7 +1126,7 @@ fn derive_key(password: &str, salt: &[u8]) -> Result<Zeroizing<[u8; 32]>, Transf
 
 fn validate_payload(payload: PortablePayload) -> Result<ValidatedMigration, TransferError> {
     let mut payload = Zeroizing::new(payload);
-    if payload.version != PAYLOAD_VERSION {
+    if payload.version != 4 && payload.version != PAYLOAD_VERSION {
         return Err(TransferError::UnsupportedVersion(payload.version));
     }
     if payload.accounts.len() > MAX_ACCOUNTS || payload.node.is_none() {
@@ -1420,6 +1502,41 @@ fn validate_payload(payload: PortablePayload) -> Result<ValidatedMigration, Tran
                 .expect("imported account provider was resolved"),
         });
     }
+    if payload.platform_accounts.len() > MAX_ACCOUNTS || payload.platform_links.len() > MAX_ACCOUNTS
+    {
+        return Err(TransferError::InvalidBundle);
+    }
+    if payload.version == 4
+        && (!payload.platform_accounts.is_empty() || !payload.platform_links.is_empty())
+    {
+        return Err(TransferError::InvalidBundle);
+    }
+    let mut parent_ids = HashSet::new();
+    for parent in &mut payload.platform_accounts {
+        if uuid::Uuid::parse_str(&parent.id).is_err()
+            || !parent_ids.insert(parent.id.clone())
+            || parent.name.trim().is_empty()
+            || parent.name.len() > 200
+        {
+            return Err(TransferError::InvalidBundle);
+        }
+        parent.base_url = crate::platform::validate_platform_base_url(&parent.base_url)
+            .map_err(|_| TransferError::InvalidBundle)?;
+    }
+    let mut linked_ids = HashSet::new();
+    for link in &mut payload.platform_links {
+        if !parent_ids.contains(&link.platform_account_id)
+            || !linked_ids.insert(link.account_id.clone())
+            || !validated.iter().any(|a| {
+                a.id.as_deref() == Some(link.account_id.as_str())
+                    && crate::provider::is_custom_api(&a.provider_id)
+            })
+        {
+            return Err(TransferError::InvalidBundle);
+        }
+        link.group.verified = false;
+        link.group.subscription_type = None;
+    }
     let node = payload
         .node
         .take()
@@ -1427,6 +1544,9 @@ fn validate_payload(payload: PortablePayload) -> Result<ValidatedMigration, Tran
         .transpose()?
         .map(Zeroizing::new);
     Ok(ValidatedMigration {
+        platform_links_authoritative: payload.version == PAYLOAD_VERSION,
+        platform_accounts: payload.platform_accounts.clone(),
+        platform_links: payload.platform_links.clone(),
         exported_at,
         accounts: validated,
         node,
@@ -1470,12 +1590,35 @@ fn validate_portable_dynamic_providers(
         let mappings = provider
             .models
             .iter()
-            .map(|model| DynamicModelMapping {
-                public_model: model.public_model.clone(),
-                upstream_model: model.upstream_model.clone(),
+            .map(|model| {
+                Ok(DynamicModelMapping {
+                    public_model: model.public_model.clone(),
+                    upstream_model: model.upstream_model.clone(),
+                    upstream_override: model
+                        .upstream_override
+                        .as_ref()
+                        .map(|value| {
+                            Ok::<_, TransferError>(
+                                ocg_domain::dynamic::DynamicModelUpstreamOverride {
+                                    protocol: UpstreamProtocolKind::try_from(
+                                        value.protocol.as_str(),
+                                    )
+                                    .map_err(|_| {
+                                        TransferError::Invalid(format!(
+                                            "{} has an invalid model protocol override",
+                                            prefix()
+                                        ))
+                                    })?,
+                                    endpoint_url: value.endpoint_url.clone(),
+                                },
+                            )
+                        })
+                        .transpose()?,
+                })
             })
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, TransferError>>()?;
         let definition = crate::dynamic::validate_definition(DynamicProviderDefinition {
+            preset_id: provider.preset_id.clone(),
             id: id.to_string(),
             name: provider.name.clone(),
             endpoint_url,
@@ -1485,6 +1628,7 @@ fn validate_portable_dynamic_providers(
         })
         .map_err(|error| TransferError::Invalid(format!("{} is invalid: {error}", prefix())))?;
         validated.push(DynamicProviderRuntime {
+            preset_id: definition.preset_id,
             id: definition.id,
             name: definition.name,
             endpoint_url: definition.endpoint_url,
@@ -1941,6 +2085,8 @@ mod tests {
         let mut account = sample_account("Primary");
         account.id = Some(account_id.to_string());
         PortablePayload {
+            platform_accounts: Vec::new(),
+            platform_links: Vec::new(),
             version: PAYLOAD_VERSION,
             exported_at: "2026-08-29T00:00:00Z".to_string(),
             accounts: vec![account],
@@ -2023,6 +2169,8 @@ mod tests {
                 None
             };
             let error = validate_payload(PortablePayload {
+                platform_accounts: Vec::new(),
+                platform_links: Vec::new(),
                 version,
                 exported_at: "2026-08-29T00:00:00Z".to_string(),
                 accounts: vec![account],
@@ -2039,6 +2187,12 @@ mod tests {
 
     #[test]
     fn unsupported_payload_version_is_not_a_password_or_damage_error() {
+        let mut v4 = sample_payload();
+        v4.version = 4;
+        let bundle = encrypt_payload(&v4, "correct horse battery").unwrap();
+        let imported = decrypt_and_validate(&bundle, "correct horse battery").unwrap();
+        assert!(imported.platform_accounts.is_empty());
+        assert!(imported.platform_links.is_empty());
         let mut payload = sample_payload();
         payload.version = 3;
         let bundle = encrypt_payload(&payload, "correct horse battery").unwrap();
@@ -2057,6 +2211,7 @@ mod tests {
 
     fn sample_dynamic_provider(id: &str, name: &str) -> PortableDynamicProvider {
         PortableDynamicProvider {
+            preset_id: None,
             id: id.to_string(),
             name: name.to_string(),
             endpoint_url: "http://127.0.0.1:9/v1".to_string(),
@@ -2065,8 +2220,61 @@ mod tests {
             models: vec![PortableDynamicModel {
                 public_model: "lab-opus".to_string(),
                 upstream_model: "vendor/opus".to_string(),
+                upstream_override: None,
             }],
         }
+    }
+
+    #[test]
+    fn portable_preset_provenance_is_optional_and_survives_validation() {
+        let mut provider =
+            sample_dynamic_provider("dc7f6bbf-18a1-458b-845b-54c219c19dba", "Renamed");
+        provider.preset_id = Some("azure-openai".into());
+        let encoded = serde_json::to_value(&provider).unwrap();
+        assert_eq!(encoded["presetId"], "azure-openai");
+        let decoded: PortableDynamicProvider = serde_json::from_value(encoded.clone()).unwrap();
+        let validated = validate_portable_dynamic_providers(&[decoded]).unwrap();
+        assert_eq!(validated[0].preset_id.as_deref(), Some("azure-openai"));
+        let mut legacy = encoded;
+        legacy.as_object_mut().unwrap().remove("presetId");
+        let decoded: PortableDynamicProvider = serde_json::from_value(legacy).unwrap();
+        assert_eq!(
+            validate_portable_dynamic_providers(&[decoded]).unwrap()[0].preset_id,
+            None
+        );
+    }
+
+    #[test]
+    fn portable_model_override_roundtrips_and_missing_override_inherits() {
+        let mut provider = sample_dynamic_provider("dc7f6bbf-18a1-458b-845b-54c219c19dba", "Lab");
+        let legacy = serde_json::to_value(&provider).unwrap();
+        assert!(legacy["models"][0].get("upstreamOverride").is_none());
+        provider.models[0].upstream_override = Some(PortableDynamicModelOverride {
+            protocol: "messages".into(),
+            endpoint_url: "https://example.test/anthropic/v1/messages".into(),
+        });
+        let encoded = serde_json::to_value(&provider).unwrap();
+        assert_eq!(
+            encoded["models"][0]["upstreamOverride"]["protocol"],
+            "messages"
+        );
+        let decoded = serde_json::from_value(encoded).unwrap();
+        let validated = validate_portable_dynamic_providers(&[decoded]).unwrap();
+        let route = validated[0].mappings[0].upstream_override.as_ref().unwrap();
+        assert_eq!(route.protocol, UpstreamProtocolKind::Messages);
+        assert_eq!(
+            route.endpoint_url,
+            "https://example.test/anthropic/v1/messages"
+        );
+        let old = validate_portable_dynamic_providers(&[serde_json::from_value(legacy).unwrap()])
+            .unwrap();
+        assert!(old[0].mappings[0].upstream_override.is_none());
+        provider.models[0]
+            .upstream_override
+            .as_mut()
+            .unwrap()
+            .protocol = "unknown".into();
+        assert!(validate_portable_dynamic_providers(&[provider]).is_err());
     }
 
     #[test]
@@ -2077,6 +2285,8 @@ mod tests {
         account.id = Some(account_id.to_string());
         account.provider_id = provider_id.to_string();
         let payload = PortablePayload {
+            platform_accounts: Vec::new(),
+            platform_links: Vec::new(),
             version: PAYLOAD_VERSION,
             exported_at: "2026-08-29T00:00:00Z".to_string(),
             accounts: vec![account],
@@ -2095,6 +2305,8 @@ mod tests {
         dangling_account.id = Some(account_id.to_string());
         dangling_account.provider_id = provider_id.to_string();
         let dangling = PortablePayload {
+            platform_accounts: Vec::new(),
+            platform_links: Vec::new(),
             version: PAYLOAD_VERSION,
             exported_at: "2026-08-29T00:00:00Z".to_string(),
             accounts: vec![dangling_account],
@@ -2121,6 +2333,8 @@ mod tests {
             },
         )];
         let payload = PortablePayload {
+            platform_accounts: Vec::new(),
+            platform_links: Vec::new(),
             version: PAYLOAD_VERSION,
             exported_at: "2026-08-29T00:00:00Z".to_string(),
             accounts: vec![account],
@@ -2297,7 +2511,8 @@ mod tests {
         .unwrap();
         assert_eq!(
             format!("{:x}", Sha256::digest(bundle.as_bytes())),
-            "afa7b6590844628ec70a76f6ed213c02033141ee9488db4842dc8cdf90c4c2b8"
+            // Envelope V1 with the portable V5 sample payload.
+            "0a0111257ed3fb7a7071a65b06c79a9bc4ef1003af97ad728bdee678b18d6cc4"
         );
     }
 }

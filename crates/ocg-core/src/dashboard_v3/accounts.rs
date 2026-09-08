@@ -689,10 +689,28 @@ fn put_custom_config_locked(
         &account,
         "custom config is only available for Custom API accounts",
     )?;
-    let config = AccountCustomConfigInput {
+    let mut config = AccountCustomConfigInput {
         endpoint_url: input.endpoint_url,
         upstream_protocol: input.upstream_protocol.into(),
     };
+    {
+        let db = state.db.lock();
+        if let Some(endpoint) = db
+            .platform_endpoint(id, config.upstream_protocol)
+            .map_err(V3ApiError::internal)?
+        {
+            let old = db.account_custom_config(id).map_err(V3ApiError::internal)?;
+            if config.endpoint_url != endpoint
+                && !old.is_some_and(|c| c.endpoint_url == config.endpoint_url)
+            {
+                return Err(V3ApiError::invalid_request_at(
+                    state,
+                    "endpoint belongs to the platform account; unlink the Key to change it",
+                ));
+            }
+            config.endpoint_url = endpoint;
+        }
+    }
     let capabilities = input
         .model_capabilities
         .iter()

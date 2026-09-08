@@ -33,7 +33,9 @@ use harness::{V3Harness, start_loopback, start_public};
 
 const GO_KEY: &str = "sk-probe-secret-key";
 const CUSTOM_KEY: &str = "custom-x-api-key";
-const SUCCESS_BODY: &str = r#"{"id":"ok","object":"json"}"#;
+#[path = "fixtures/probe_response.rs"]
+mod probe_response;
+const SUCCESS_BODY: &str = probe_response::CHAT;
 
 #[derive(Clone, Debug)]
 struct CapturedProbe {
@@ -42,6 +44,7 @@ struct CapturedProbe {
     authorization: Option<String>,
     x_api_key: Option<String>,
     cookie: Option<String>,
+    opencode_session: Option<String>,
     body: String,
 }
 
@@ -71,7 +74,24 @@ async fn start_probe_origin(status: StatusCode, body: &str, delay: Duration) -> 
     let app = Router::new().fallback(any(
         move |method: HttpMethod, uri: OriginalUri, headers: HeaderMap, payload: Bytes| {
             let calls = calls_for_handler.clone();
-            let body = body.clone();
+            // Model the real Go rejection that a generic 200 fixture missed.
+            let missing_session = status.is_success()
+                && !uri.0.path().starts_with("/provider/")
+                && (header_value(&headers, "authorization").as_deref() == Some(&format!("Bearer {GO_KEY}"))
+                    || header_value(&headers, "x-api-key").as_deref() == Some(GO_KEY))
+                && !headers.contains_key("x-opencode-session");
+            let too_small = uri.0.path().ends_with("/responses")
+                && serde_json::from_slice::<Value>(&payload).ok()
+                    .and_then(|value| value["max_output_tokens"].as_u64())
+                    .is_some_and(|tokens| tokens < 16);
+            let status = if missing_session || too_small { StatusCode::BAD_REQUEST } else { status };
+            let body = if missing_session || too_small {
+                r#"{"error":{"message":"missing session identity or invalid Responses token budget"}}"#.to_string()
+            } else if body == SUCCESS_BODY {
+                probe_response::for_path(uri.0.path()).to_string()
+            } else {
+                body.clone()
+            };
             async move {
                 if !delay.is_zero() {
                     tokio::time::sleep(delay).await;
@@ -82,6 +102,7 @@ async fn start_probe_origin(status: StatusCode, body: &str, delay: Duration) -> 
                     authorization: header_value(&headers, "authorization"),
                     x_api_key: header_value(&headers, "x-api-key"),
                     cookie: header_value(&headers, "cookie"),
+                    opencode_session: header_value(&headers, "x-opencode-session"),
                     body: String::from_utf8_lossy(&payload).into_owned(),
                 });
                 (
@@ -126,6 +147,7 @@ async fn start_fallback_probe_origin(failing_key: &str) -> ProbeOrigin {
                     authorization: authorization.clone(),
                     x_api_key: header_value(&headers, "x-api-key"),
                     cookie: header_value(&headers, "cookie"),
+                    opencode_session: header_value(&headers, "x-opencode-session"),
                     body: String::from_utf8_lossy(&payload).into_owned(),
                 });
                 if authorization.as_deref() == Some(failing_bearer.as_str()) {
@@ -138,7 +160,7 @@ async fn start_fallback_probe_origin(failing_key: &str) -> ProbeOrigin {
                     (
                         StatusCode::OK,
                         [(axum::http::header::CONTENT_TYPE, "application/json")],
-                        SUCCESS_BODY,
+                        probe_response::for_path(uri.0.path()),
                     )
                 }
             }
@@ -1056,6 +1078,14 @@ async fn goat_protocol_probes_use_only_each_models_sealed_native_family_path() {
         ),
         ("claude-sonnet-5", AccountUpstreamProtocol::Messages),
     ] {
+        let previously_enabled = harness
+            .state
+            .provider_contracts()
+            .scope(&scope)
+            .and_then(|scope| scope.model(model_id))
+            .unwrap()
+            .enabled_protocols()
+            .contains(&expected_protocol.into());
         let (status, body) = send_json(
             &harness,
             Method::POST,
@@ -1084,7 +1114,7 @@ async fn goat_protocol_probes_use_only_each_models_sealed_native_family_path() {
         }
         .expect("probed family protocol");
         assert!(evidence.available);
-        assert!(evidence.enabled);
+        assert_eq!(evidence.enabled, previously_enabled);
         assert_secret_free(&body, &[GO_KEY]);
     }
 
@@ -1096,6 +1126,7 @@ async fn goat_protocol_probes_use_only_each_models_sealed_native_family_path() {
         call.authorization.as_deref() == Some("Bearer sk-probe-secret-key")
             && call.x_api_key.is_none()
             && call.cookie.is_none()
+            && call.opencode_session.is_none()
     }));
     harness.stop();
 }
@@ -1178,7 +1209,7 @@ async fn protocol_probe_falls_back_to_the_next_eligible_account() {
         .unwrap();
     assert_eq!(
         stored.protocols.get("responses").unwrap().r#override,
-        ProtocolOverrideState::ForceOn
+        ProtocolOverrideState::Auto
     );
     harness.stop();
 }
@@ -1564,13 +1595,13 @@ async fn transport_failure_returns_200_persists_observation_and_redacts_secrets(
 }
 
 #[tokio::test]
-async fn probe_success_pins_force_on_while_failure_never_pins_force_off() {
+async fn connection_test_success_and_failure_never_change_protocol_overrides() {
     let harness = start_loopback("probes-write-overrides").await;
     let ok_origin = start_probe_origin(StatusCode::OK, SUCCESS_BODY, Duration::ZERO).await;
     point_upstream(&harness, &ok_origin.url);
     let account_id = create_go_account(&harness).await;
 
-    // Every protocol the probe ran to success pins force_on.
+    // Success records reachability, not a routing configuration change.
     let (status, body) = send_json(
         &harness,
         Method::POST,
@@ -1594,9 +1625,9 @@ async fn probe_success_pins_force_on_while_failure_never_pins_force_off() {
         .unwrap();
     for protocol in ["chat_completions", "responses"] {
         let row = stored.protocols.get(protocol).unwrap();
-        assert_eq!(row.r#override, ProtocolOverrideState::ForceOn, "{protocol}");
-        assert!(row.available, "{protocol}");
-        assert!(row.enabled, "{protocol}");
+        assert_eq!(row.r#override, ProtocolOverrideState::Auto, "{protocol}");
+        assert_eq!(row.enabled, protocol == "responses", "{protocol}");
+        assert_eq!(row.last_probe_result, Some(ProbeResultKind::Success));
     }
 
     // A failed account-level attempt records evidence but never pins a shared
@@ -1637,10 +1668,10 @@ async fn probe_success_pins_force_on_while_failure_never_pins_force_off() {
     assert!(!messages.enabled);
     assert_eq!(
         stored.protocols.get("chat_completions").unwrap().r#override,
-        ProtocolOverrideState::ForceOn
+        ProtocolOverrideState::Auto
     );
 
-    // The overrides are persisted rows, not just runtime state.
+    // No hidden override rows were written to persistence either.
     let conn = open_sqlite(&harness);
     let mut statement = conn
         .prepare(
@@ -1656,20 +1687,14 @@ async fn probe_success_pins_force_on_while_failure_never_pins_force_off() {
         .unwrap()
         .collect::<Result<_, _>>()
         .unwrap();
-    assert_eq!(
-        rows,
-        vec![
-            ("chat_completions".to_string(), "force_on".to_string()),
-            ("responses".to_string(), "force_on".to_string()),
-        ]
-    );
+    assert!(rows.is_empty(), "{rows:?}");
     drop(statement);
     drop(conn);
     harness.stop();
 }
 
 #[tokio::test]
-async fn successful_probe_adds_contract_and_does_not_forward_dashboard_headers() {
+async fn successful_test_records_observation_and_does_not_forward_dashboard_headers() {
     let harness = start_loopback("probes-success-headers").await;
     let origin = start_probe_origin(StatusCode::OK, SUCCESS_BODY, Duration::ZERO).await;
     point_upstream(&harness, &origin.url);
@@ -1704,13 +1729,15 @@ async fn successful_probe_adds_contract_and_does_not_forward_dashboard_headers()
     assert_eq!(status, StatusCode::OK, "{body}");
     let parsed = parse_probe(&body);
     assert!(parsed.results[0].success);
-    let contract = parsed.contract.expect("success should add a contract");
+    let contract = parsed
+        .contract
+        .expect("test should return the model contract");
     assert!(
         contract
             .protocols
             .chat_completions
             .as_ref()
-            .is_some_and(|row| row.available)
+            .is_some_and(|row| !row.enabled)
     );
     assert_eq!(parsed.revision, before + 1);
     let call = origin.calls.lock().unwrap()[0].clone();
@@ -1862,7 +1889,7 @@ async fn two_protocol_success_stores_both_rows_and_bumps_nested_scope_once() {
         .scope(&go_scope())
         .and_then(|scope| scope.model("grok-4.5").cloned())
         .unwrap();
-    assert!(stored.protocols["chat_completions"].available);
+    assert!(!stored.protocols["chat_completions"].enabled);
     assert!(stored.protocols["responses"].available);
     assert_eq!(origin.call_count(), 2);
     harness.stop();

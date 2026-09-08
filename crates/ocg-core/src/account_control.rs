@@ -601,12 +601,14 @@ mod tests {
         let now = Utc::now();
         let provider_id = uuid::Uuid::new_v4().to_string();
         let runtime = crate::dynamic::DynamicProviderRuntime {
+            preset_id: None,
             id: provider_id.clone(),
             name: "Lab".into(),
             endpoint_url: "http://127.0.0.1:9".into(),
             upstream_protocol: crate::provider::UpstreamProtocolKind::ChatCompletions,
             auth_kind: ocg_domain::dynamic::DynamicAuthKind::None,
             mappings: vec![ocg_domain::dynamic::DynamicModelMapping {
+                upstream_override: None,
                 public_model: "lab-opus".into(),
                 upstream_model: "vendor/opus".into(),
             }],

@@ -6,6 +6,54 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+#[test]
+fn official_presets_resolve_to_their_exact_inference_endpoints() {
+    // Exercise the shipped data through the same resolver used by discovery,
+    // verification and forwarding, including nested v3/v4/compatibility paths.
+    let presets: Vec<serde_json::Value> =
+        serde_json::from_str(include_str!("../../../../resources/provider-presets.json")).unwrap();
+    assert!(!presets.is_empty());
+    for preset in presets {
+        let id = preset["id"].as_str().unwrap();
+        let endpoint = preset["endpointUrl"].as_str().unwrap();
+        let protocol =
+            UpstreamProtocolKind::try_from(preset["protocol"].as_str().unwrap()).unwrap();
+        let auth =
+            ocg_domain::dynamic::DynamicAuthKind::try_from(preset["authKind"].as_str().unwrap())
+                .unwrap();
+        assert!(auth.requires_key(), "{id}");
+        if endpoint.is_empty() {
+            assert!(
+                resolve_custom_endpoints(endpoint, protocol).is_err(),
+                "{id}"
+            );
+            continue;
+        }
+        let resolved = resolve_custom_endpoints(endpoint, protocol).unwrap();
+        assert_eq!(resolved.inference.as_str(), endpoint, "{id}");
+        assert_eq!(resolved.inference.scheme(), "https", "{id}");
+        assert!(resolved.inference.query().is_none(), "{id}");
+        let headers =
+            isolated_inference_headers(auth.upstream_auth().unwrap(), "preset-test-key").unwrap();
+        match auth {
+            ocg_domain::dynamic::DynamicAuthKind::Bearer => {
+                assert_eq!(headers[AUTHORIZATION], "Bearer preset-test-key", "{id}");
+                assert!(!headers.contains_key("x-api-key"), "{id}");
+            }
+            ocg_domain::dynamic::DynamicAuthKind::XApiKey => {
+                assert_eq!(headers["x-api-key"], "preset-test-key", "{id}");
+                assert!(!headers.contains_key(AUTHORIZATION), "{id}");
+            }
+            ocg_domain::dynamic::DynamicAuthKind::None => unreachable!(),
+        }
+        if preset["modelDiscovery"].as_bool() != Some(false) {
+            let models = resolved.models.expect(id);
+            assert_eq!(models.origin(), resolved.inference.origin(), "{id}");
+            assert!(models.path().ends_with("/models"), "{id}");
+        }
+    }
+}
+
 fn test_config(mode: ProxyMode, proxy_url: &str) -> AppConfig {
     AppConfig {
         proxy_mode: mode,

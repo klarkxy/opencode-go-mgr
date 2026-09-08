@@ -952,7 +952,7 @@ async fn patch_account_key(harness: &BlackBoxHarness, id: &str, key: &str) -> (S
 #[tokio::test]
 async fn delayed_verify_probe_conflicts_on_key_config_caps_delete_and_concurrent() {
     async fn delayed_key_race() {
-        let held = HeldJsonServer::start(200, r#"{"id":"ok"}"#).await;
+        let held = HeldJsonServer::start(200, SUCCESS_CHAT_BODY).await;
         let harness = BlackBoxHarness::start().await;
         let draft = create_pending_custom(
             &harness,
@@ -984,7 +984,7 @@ async fn delayed_verify_probe_conflicts_on_key_config_caps_delete_and_concurrent
     }
 
     async fn delayed_config_race() {
-        let held = HeldJsonServer::start(200, r#"{"id":"ok"}"#).await;
+        let held = HeldJsonServer::start(200, SUCCESS_CHAT_BODY).await;
         let harness = BlackBoxHarness::start().await;
         let draft = create_pending_custom(
             &harness,
@@ -1031,7 +1031,7 @@ async fn delayed_verify_probe_conflicts_on_key_config_caps_delete_and_concurrent
     }
 
     async fn delayed_capability_race() {
-        let held = HeldJsonServer::start(200, r#"{"id":"ok"}"#).await;
+        let held = HeldJsonServer::start(200, SUCCESS_CHAT_BODY).await;
         let harness = BlackBoxHarness::start().await;
         let draft = create_pending_custom(
             &harness,
@@ -1078,7 +1078,7 @@ async fn delayed_verify_probe_conflicts_on_key_config_caps_delete_and_concurrent
     }
 
     async fn delayed_delete_race() {
-        let held = HeldJsonServer::start(200, r#"{"id":"ok"}"#).await;
+        let held = HeldJsonServer::start(200, SUCCESS_CHAT_BODY).await;
         let harness = BlackBoxHarness::start().await;
         let draft = create_pending_custom(
             &harness,
@@ -1117,7 +1117,7 @@ async fn delayed_verify_probe_conflicts_on_key_config_caps_delete_and_concurrent
     }
 
     async fn delayed_concurrent_verifies() {
-        let held = HeldJsonServer::start(200, r#"{"id":"ok"}"#).await;
+        let held = HeldJsonServer::start(200, SUCCESS_CHAT_BODY).await;
         let harness = BlackBoxHarness::start().await;
         let draft = create_pending_custom(
             &harness,

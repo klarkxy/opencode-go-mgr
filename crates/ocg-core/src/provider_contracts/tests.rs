@@ -51,7 +51,7 @@ fn provider_scopes_identify_one_exact_registered_offering() {
 }
 
 #[test]
-fn probe_success_adds_inside_ceiling_and_failure_does_not_remove_static() {
+fn connection_test_records_observation_without_changing_protocol_configuration() {
     let now = Utc::now();
     let scope = ContractScope::provider(OPENCODE_PROVIDER_ID);
     let static_row = PersistedModelProtocol {
@@ -91,7 +91,9 @@ fn probe_success_adds_inside_ceiling_and_failure_does_not_remove_static() {
         true,
     )
     .unwrap();
-    assert_eq!(added.source, ContractEvidenceSource::ProbeConfirmed);
+    assert_eq!(added.source, ContractEvidenceSource::ProbeObserved);
+    assert!(!added.source.confers_support());
+    assert_eq!(added.last_probe_result, Some(ProbeResultKind::Success));
 
     let rejected = apply_probe_observation(
         None,
@@ -464,7 +466,7 @@ fn stale_probe_failure_does_not_demote_static_support() {
 }
 
 #[test]
-fn protocol_fallback_prefers_client_then_adapter_priority() {
+fn protocol_fallback_uses_adapter_priority_independent_of_client() {
     let mut go = go_contract();
     let glm = go.models.get_mut("glm-5.2").unwrap();
     glm.protocols.get_mut("chat_completions").unwrap().enabled = false;
@@ -473,7 +475,7 @@ fn protocol_fallback_prefers_client_then_adapter_priority() {
     glm.routable = true;
 
     let selected = select_upstream_protocol(&go, ApiFormat::Messages, "glm-5.2").unwrap();
-    assert_eq!(selected, ApiFormat::Messages);
+    assert_eq!(selected, ApiFormat::Responses);
 
     let selected = select_upstream_protocol(&go, ApiFormat::Gemini, "glm-5.2").unwrap();
     assert_eq!(selected, ApiFormat::Responses);
@@ -759,4 +761,71 @@ fn stale_override_outside_fixed_provider_ceiling_is_not_materialized() {
     assert!(model.protocols.contains_key("chat_completions"));
     assert!(model.protocols.contains_key("messages"));
     assert!(!model.protocols.contains_key("responses"));
+}
+
+#[test]
+fn minimax_recommended_default_wins_over_client_and_respects_manual_disable() {
+    let set = build_effective_contracts(&zen_seed(), &[], empty_persisted());
+    let minimax = set.providers.get(MINIMAX_PROVIDER_ID).unwrap();
+    let model_id = "MiniMax-M3";
+    assert_eq!(
+        minimax.model(model_id).unwrap().preferred_protocol,
+        UpstreamProtocolKind::Messages
+    );
+    assert_eq!(
+        select_upstream_protocol(minimax, ApiFormat::Responses, model_id).unwrap(),
+        ApiFormat::Messages
+    );
+    assert_eq!(
+        select_upstream_protocol(minimax, ApiFormat::ChatCompletions, model_id).unwrap(),
+        ApiFormat::Messages
+    );
+    let mut persisted = empty_persisted();
+    let scope = ContractScope::provider(MINIMAX_PROVIDER_ID);
+    persisted.overrides.insert(
+        scope.clone(),
+        vec![PersistedModelProtocolOverride {
+            scope,
+            model_id: model_id.into(),
+            protocol: UpstreamProtocolKind::Messages,
+            state: ProtocolOverrideState::ForceOff,
+            updated_at: Utc::now(),
+        }],
+    );
+    let set = build_effective_contracts(&zen_seed(), &[], persisted);
+    let minimax = set.providers.get(MINIMAX_PROVIDER_ID).unwrap();
+    assert_eq!(
+        select_upstream_protocol(minimax, ApiFormat::Responses, model_id).unwrap(),
+        ApiFormat::ChatCompletions
+    );
+}
+
+#[test]
+fn cpa_preserves_all_supported_client_protocols_and_converts_gemini_to_chat() {
+    let set = build_effective_contracts(&zen_seed(), &[], empty_persisted());
+    let mut cpa = go_contract();
+    cpa.adapter_kind = ProviderAdapterKind::Cpa;
+    let model = cpa.models.get_mut("glm-5.2").unwrap();
+    for protocol in model.protocols.values_mut() {
+        protocol.enabled = true;
+    }
+    for protocol in [
+        ApiFormat::ChatCompletions,
+        ApiFormat::Responses,
+        ApiFormat::Messages,
+    ] {
+        assert_eq!(
+            select_upstream_protocol(&cpa, protocol, "glm-5.2").unwrap(),
+            protocol
+        );
+    }
+    assert_eq!(
+        select_upstream_protocol(&cpa, ApiFormat::Gemini, "glm-5.2").unwrap(),
+        ApiFormat::ChatCompletions
+    );
+    let minimax = set.providers.get(MINIMAX_PROVIDER_ID).unwrap();
+    assert_eq!(
+        minimax.model("MiniMax-M3").unwrap().preferred_protocol,
+        UpstreamProtocolKind::Messages
+    );
 }

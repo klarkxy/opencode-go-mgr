@@ -36,7 +36,9 @@ use harness::{V3Harness, start_loopback, start_public};
 const CUSTOM_KEY: &str = "v3-verify-secret-key";
 const CUSTOM_MODEL: &str = "custom-local-model";
 const CUSTOM_MODEL_2: &str = "custom-other-model";
-const SUCCESS_BODY: &str = r#"{"id":"ok","object":"json"}"#;
+#[path = "fixtures/probe_response.rs"]
+mod probe_response;
+const SUCCESS_BODY: &str = probe_response::CHAT;
 const LEAKY_401_BODY: &str = r#"{"error":"rejected v3-verify-secret-key"}"#;
 const GOAT_MODELS_BODY: &str =
     r#"{"object":"list","data":[{"id":"deepseek/deepseek-v4-flash"},{"id":"claude-sonnet-4-6"}]}"#;
@@ -77,7 +79,11 @@ async fn start_origin(status: StatusCode, body: &str, delay: Duration) -> ProbeO
     let app = Router::new().fallback(any(
         move |method: HttpMethod, uri: OriginalUri, headers: HeaderMap, payload: Bytes| {
             let calls = calls_for_handler.clone();
-            let body = body.clone();
+            let body = if body == SUCCESS_BODY {
+                probe_response::for_path(uri.0.path()).to_string()
+            } else {
+                body.clone()
+            };
             async move {
                 if !delay.is_zero() {
                     tokio::time::sleep(delay).await;
@@ -125,7 +131,7 @@ async fn start_redirect_origin() -> (ProbeOrigin, Arc<AtomicUsize>) {
                     return (
                         StatusCode::OK,
                         [(header::CONTENT_TYPE, "application/json")],
-                        SUCCESS_BODY,
+                        probe_response::for_path(uri.0.path()),
                     )
                         .into_response();
                 }

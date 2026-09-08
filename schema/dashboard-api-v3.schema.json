@@ -3078,6 +3078,23 @@
       ],
       "type": "string"
     },
+    "DynamicModelUpstreamOverride": {
+      "additionalProperties": false,
+      "description": "One public-to-upstream mapping owned by a dynamic Provider.",
+      "properties": {
+        "endpointUrl": {
+          "type": "string"
+        },
+        "protocol": {
+          "$ref": "#/$defs/AccountUpstreamProtocol"
+        }
+      },
+      "required": [
+        "protocol",
+        "endpointUrl"
+      ],
+      "type": "object"
+    },
     "DynamicProvider": {
       "additionalProperties": false,
       "description": "Secret-free dynamic Provider definition.",
@@ -3102,6 +3119,12 @@
         },
         "name": {
           "type": "string"
+        },
+        "presetId": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "processGeneration": {
           "format": "uint64",
@@ -3180,6 +3203,12 @@
           "type": "string"
         },
         "notes": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "presetId": {
           "type": [
             "string",
             "null"
@@ -3266,13 +3295,22 @@
     },
     "DynamicProviderModel": {
       "additionalProperties": false,
-      "description": "One public-to-upstream mapping owned by a dynamic Provider.",
       "properties": {
         "publicModel": {
           "type": "string"
         },
         "upstreamModel": {
           "type": "string"
+        },
+        "upstreamOverride": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DynamicModelUpstreamOverride"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -3402,6 +3440,13 @@
         },
         "name": {
           "type": "string"
+        },
+        "presetId": {
+          "description": "Omitted/null preserves provenance; an empty string clears it.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "processGeneration": {
           "format": "uint64",
@@ -4454,6 +4499,536 @@
         "team"
       ],
       "type": "string"
+    },
+    "PlatformAccount": {
+      "properties": {
+        "baseUrl": {
+          "type": "string"
+        },
+        "hasUserCredential": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/PlatformKind"
+        },
+        "name": {
+          "type": "string"
+        },
+        "snapshot": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PlatformSnapshot"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "version": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "name",
+        "baseUrl",
+        "hasUserCredential",
+        "version",
+        "snapshot"
+      ],
+      "type": "object"
+    },
+    "PlatformAccounts": {
+      "properties": {
+        "accounts": {
+          "items": {
+            "$ref": "#/$defs/PlatformAccount"
+          },
+          "type": "array"
+        },
+        "links": {
+          "items": {
+            "$ref": "#/$defs/PlatformLink"
+          },
+          "type": "array"
+        },
+        "processGeneration": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "accounts",
+        "links",
+        "revision",
+        "processGeneration"
+      ],
+      "type": "object"
+    },
+    "PlatformCreate": {
+      "description": "Required process-scoped mutation precondition.\n\nBoth fields travel at the top level of every mutation request. The random\nprocess generation prevents a revision captured before restart from being\naccepted by a fresh process whose in-memory counter reused the same value.",
+      "properties": {
+        "baseUrl": {
+          "type": "string"
+        },
+        "expectedRevision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "kind": {
+          "$ref": "#/$defs/PlatformKind"
+        },
+        "name": {
+          "type": "string"
+        },
+        "processGeneration": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "userCredential": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "expectedRevision",
+        "processGeneration",
+        "kind",
+        "name",
+        "baseUrl"
+      ],
+      "type": "object"
+    },
+    "PlatformGroup": {
+      "properties": {
+        "autoGroups": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "platform": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "subscriptionType": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "verified": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "platform",
+        "subscriptionType",
+        "autoGroups",
+        "verified"
+      ],
+      "type": "object"
+    },
+    "PlatformKind": {
+      "enum": [
+        "new_api",
+        "sub2api"
+      ],
+      "type": "string"
+    },
+    "PlatformLink": {
+      "properties": {
+        "accountId": {
+          "type": "string"
+        },
+        "group": {
+          "$ref": "#/$defs/PlatformGroup"
+        },
+        "platformAccountId": {
+          "type": "string"
+        },
+        "snapshot": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PlatformSnapshot"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "accountId",
+        "platformAccountId",
+        "group",
+        "snapshot"
+      ],
+      "type": "object"
+    },
+    "PlatformLinkWrite": {
+      "description": "Required process-scoped mutation precondition.\n\nBoth fields travel at the top level of every mutation request. The random\nprocess generation prevents a revision captured before restart from being\naccepted by a fresh process whose in-memory counter reused the same value.",
+      "properties": {
+        "expectedRevision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "group": {
+          "$ref": "#/$defs/PlatformGroup"
+        },
+        "platformAccountId": {
+          "type": "string"
+        },
+        "processGeneration": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "expectedRevision",
+        "processGeneration",
+        "platformAccountId",
+        "group"
+      ],
+      "type": "object"
+    },
+    "PlatformModel": {
+      "properties": {
+        "groupId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "platform": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "description": "A storefront row is never proof of inference permission.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "platform",
+        "groupId",
+        "source"
+      ],
+      "type": "object"
+    },
+    "PlatformPrice": {
+      "properties": {
+        "cacheRead": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "cacheWrite": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "currency": {
+          "type": "string"
+        },
+        "groupId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "input": {
+          "description": "All numeric rates are currency per token, never per million tokens.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "model": {
+          "type": "string"
+        },
+        "officialReference": {
+          "type": "boolean"
+        },
+        "output": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "source": {
+          "type": "string"
+        },
+        "unavailableReason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "validUntil": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "model",
+        "groupId",
+        "currency",
+        "input",
+        "output",
+        "cacheRead",
+        "cacheWrite",
+        "source",
+        "officialReference",
+        "unavailableReason",
+        "validUntil"
+      ],
+      "type": "object"
+    },
+    "PlatformQuota": {
+      "properties": {
+        "expiresAt": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "kind": {
+          "$ref": "#/$defs/PlatformQuotaKind"
+        },
+        "limit": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "period": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "remaining": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "resetsAt": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "scopeId": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "unit": {
+          "type": "string"
+        },
+        "unlimited": {
+          "type": "boolean"
+        },
+        "used": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "scopeId",
+        "unit",
+        "used",
+        "remaining",
+        "limit",
+        "unlimited",
+        "period",
+        "resetsAt",
+        "expiresAt",
+        "source"
+      ],
+      "type": "object"
+    },
+    "PlatformQuotaKind": {
+      "enum": [
+        "wallet",
+        "subscription",
+        "key_limit"
+      ],
+      "type": "string"
+    },
+    "PlatformRefresh": {
+      "description": "Required process-scoped mutation precondition.\n\nBoth fields travel at the top level of every mutation request. The random\nprocess generation prevents a revision captured before restart from being\naccepted by a fresh process whose in-memory counter reused the same value.",
+      "properties": {
+        "accountId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "expectedRevision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "processGeneration": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "expectedRevision",
+        "processGeneration"
+      ],
+      "type": "object"
+    },
+    "PlatformSnapshot": {
+      "properties": {
+        "billingPreference": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "errors": {
+          "description": "Fixed component/error codes only, never upstream bodies or credentials.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "groups": {
+          "items": {
+            "$ref": "#/$defs/PlatformGroup"
+          },
+          "type": "array"
+        },
+        "models": {
+          "items": {
+            "$ref": "#/$defs/PlatformModel"
+          },
+          "type": "array"
+        },
+        "observedAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "prices": {
+          "items": {
+            "$ref": "#/$defs/PlatformPrice"
+          },
+          "type": "array"
+        },
+        "quotas": {
+          "items": {
+            "$ref": "#/$defs/PlatformQuota"
+          },
+          "type": "array"
+        },
+        "stale": {
+          "type": "boolean"
+        },
+        "walletOverflow": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "observedAt",
+        "stale",
+        "errors",
+        "quotas",
+        "models",
+        "prices",
+        "groups",
+        "billingPreference",
+        "walletOverflow"
+      ],
+      "type": "object"
+    },
+    "PlatformUpdate": {
+      "description": "Required process-scoped mutation precondition.\n\nBoth fields travel at the top level of every mutation request. The random\nprocess generation prevents a revision captured before restart from being\naccepted by a fresh process whose in-memory counter reused the same value.",
+      "properties": {
+        "expectedRevision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "processGeneration": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "userCredential": {
+          "description": "Omitted/null preserves, empty clears.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "expectedRevision",
+        "processGeneration",
+        "name"
+      ],
+      "type": "object"
     },
     "PricingAdjustment": {
       "additionalProperties": false,
@@ -7166,6 +7741,30 @@
     },
     {
       "$ref": "#/$defs/OllamaBillingTier"
+    },
+    {
+      "$ref": "#/$defs/PlatformAccounts"
+    },
+    {
+      "$ref": "#/$defs/PlatformAccount"
+    },
+    {
+      "$ref": "#/$defs/PlatformLink"
+    },
+    {
+      "$ref": "#/$defs/PlatformSnapshot"
+    },
+    {
+      "$ref": "#/$defs/PlatformCreate"
+    },
+    {
+      "$ref": "#/$defs/PlatformUpdate"
+    },
+    {
+      "$ref": "#/$defs/PlatformLinkWrite"
+    },
+    {
+      "$ref": "#/$defs/PlatformRefresh"
     }
   ],
   "title": "DashboardApiV3"

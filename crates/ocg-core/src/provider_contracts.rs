@@ -546,18 +546,16 @@ pub fn select_upstream_protocol(
         return Err(ProtocolSelectError::new(NO_ENABLED_UPSTREAM_PROTOCOL));
     }
     let preferred = model.preferred_protocol;
-    if available.contains(&preferred) {
-        return Ok(match protocol_from_api(client) {
-            Some(client_protocol) if available.contains(&client_protocol) => {
-                protocol_to_api(client_protocol)
-            }
-            _ => protocol_to_api(preferred),
-        });
-    }
-    if let Some(client_protocol) = protocol_from_api(client)
+    // CPA owns its internal upstream selection. Preserve supported client wire
+    // formats; Gemini remains client-only and uses the configured fallback.
+    if contract.adapter_kind == ProviderAdapterKind::Cpa
+        && let Some(client_protocol) = protocol_from_api(client)
         && available.contains(&client_protocol)
     {
         return Ok(protocol_to_api(client_protocol));
+    }
+    if available.contains(&preferred) {
+        return Ok(protocol_to_api(preferred));
     }
     for protocol in contract.fallback_priority {
         if available.contains(protocol) {
@@ -699,9 +697,6 @@ pub fn apply_probe_observation(
             if next.verified_at.is_none() {
                 next.verified_at = Some(now);
             }
-            if !next.source.confers_support() {
-                next.source = ContractEvidenceSource::ProbeConfirmed;
-            }
         }
         return Ok(next);
     }
@@ -710,7 +705,7 @@ pub fn apply_probe_observation(
             scope,
             model_id: model_id.to_string(),
             protocol,
-            source: ContractEvidenceSource::ProbeConfirmed,
+            source: ContractEvidenceSource::ProbeObserved,
             verified_at: Some(now),
             observed_at: Some(now),
             last_probe_result: Some(ProbeResultKind::Success),
@@ -1118,9 +1113,10 @@ fn preferred_protocol(
                 .and_then(protocol_from_api)
                 .unwrap_or(UpstreamProtocolKind::ChatCompletions)
         }
-        ProviderAdapterKind::MiniMaxCn | ProviderAdapterKind::KimiCn => {
-            UpstreamProtocolKind::ChatCompletions
-        }
+        // MiniMax recommends its Anthropic-compatible API. Enabled alternatives
+        // are fallback choices only when this configured preference is disabled.
+        ProviderAdapterKind::MiniMaxCn => UpstreamProtocolKind::Messages,
+        ProviderAdapterKind::KimiCn => UpstreamProtocolKind::ChatCompletions,
         ProviderAdapterKind::OllamaCloud => UpstreamProtocolKind::ChatCompletions,
         ProviderAdapterKind::Cpa => UpstreamProtocolKind::ChatCompletions,
         ProviderAdapterKind::ConfigurableHttp => {

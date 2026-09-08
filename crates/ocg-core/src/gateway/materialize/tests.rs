@@ -280,41 +280,62 @@ fn go_alias_materializes_opencode_go_candidates() {
 }
 
 #[test]
-fn unknown_cpa_raw_model_defaults_to_chat_and_uses_local_base() {
-    let model = "vendor/cpa-new-model";
-    let cpa_models = vec![model.to_string()];
-    let resolved = alias::resolve_with_runtime_catalogs(
-        model,
-        alias::RuntimeCatalogs {
-            cpa: &cpa_models,
-            ..alias::RuntimeCatalogs::default()
-        },
-    )
-    .unwrap();
-    let body = chat_body(model);
-    let parsed = parse_client_request(ApiFormat::ChatCompletions, body.clone()).unwrap();
-    let set = materialize_account_routes(
-        &[cpa_account()],
-        &AppConfig::default(),
-        &parsed,
-        &resolved,
-        model,
-        model,
-        &body,
-        true,
-        &std::collections::HashMap::new(),
-        &std::collections::HashMap::new(),
-        Some(crate::cpa::DEFAULT_CPA_BASE_URL),
-        &static_contracts(),
-        &[],
-    )
-    .unwrap();
-    assert_eq!(set.routes.len(), 1);
-    assert_eq!(set.routes[0].plan.upstream, ApiFormat::ChatCompletions);
-    assert_eq!(
-        set.routes[0].plan.upstream_base_override.as_deref(),
-        Some(crate::cpa::DEFAULT_CPA_BASE_URL)
-    );
+fn cpa_preserves_client_protocol_for_known_and_unknown_models() {
+    for model in ["vendor/cpa-new-model", "grok-4.5"] {
+        let cpa_models = vec![model.to_string()];
+        let resolved = alias::resolve_with_runtime_catalogs(
+            model,
+            alias::RuntimeCatalogs {
+                cpa: &cpa_models,
+                ..alias::RuntimeCatalogs::default()
+            },
+        )
+        .unwrap();
+        for client in [
+            ApiFormat::ChatCompletions,
+            ApiFormat::Responses,
+            ApiFormat::Messages,
+            ApiFormat::Gemini,
+        ] {
+            let body = Bytes::from(serde_json::to_vec(&match client {
+                ApiFormat::Responses => json!({"model":model,"input":"hi","store":false}),
+        ApiFormat::Gemini => json!({"contents":[{"role":"user","parts":[{"text":"hi"}]}]}),
+        _ => json!({"model":model,"messages":[{"role":"user","content":"hi"}],"max_tokens":16}),
+    }).unwrap());
+            let parsed = if client == ApiFormat::Gemini {
+                parse_gemini(model.into(), false, body.clone()).unwrap()
+            } else {
+                parse_client_request(client, body.clone()).unwrap()
+            };
+            let set = materialize_account_routes(
+                &[cpa_account()],
+                &AppConfig::default(),
+                &parsed,
+                &resolved,
+                model,
+                model,
+                &body,
+                true,
+                &std::collections::HashMap::new(),
+                &std::collections::HashMap::new(),
+                Some(crate::cpa::DEFAULT_CPA_BASE_URL),
+                &static_contracts(),
+                &[],
+            )
+            .unwrap();
+            assert_eq!(set.routes.len(), 1);
+            let expected = if client == ApiFormat::Gemini {
+                ApiFormat::ChatCompletions
+            } else {
+                client
+            };
+            assert_eq!(set.routes[0].plan.upstream, expected, "{model} {client:?}");
+            assert_eq!(
+                set.routes[0].plan.upstream_base_override.as_deref(),
+                Some(crate::cpa::DEFAULT_CPA_BASE_URL)
+            );
+        }
+    }
 }
 
 #[test]
@@ -1048,7 +1069,7 @@ fn custom_without_scope_contract_does_not_produce_a_candidate() {
 }
 
 #[test]
-fn probed_opencode_protocol_is_selected_after_contract_evidence() {
+fn model_preference_survives_legacy_probe_evidence() {
     let body = chat_body("grok-4.5");
     let parsed = parse_client_request(ApiFormat::ChatCompletions, body.clone()).unwrap();
     let resolved = alias::resolve("grok-4.5").unwrap();
@@ -1111,6 +1132,6 @@ fn probed_opencode_protocol_is_selected_after_contract_evidence() {
     )
     .unwrap();
     assert_eq!(after.routes.len(), 1);
-    assert_eq!(after.routes[0].plan.upstream, ApiFormat::ChatCompletions);
+    assert_eq!(after.routes[0].plan.upstream, ApiFormat::Responses);
     assert_eq!(after.routes[0].routing.account.id, "go-probe");
 }

@@ -157,7 +157,7 @@ fn create_locked(
     check_expectation(state, &input.expectation)?;
     let now = Utc::now();
     let auth_kind = DynamicAuthKind::from(input.auth_kind);
-    let definition = validate_wire_definition(
+    let mut definition = validate_wire_definition(
         uuid::Uuid::new_v4().to_string(),
         input.name,
         input.endpoint_url,
@@ -166,6 +166,8 @@ fn create_locked(
         input.models,
     )
     .map_err(|error| V3ApiError::invalid_request_at(state, error.to_string()))?;
+    definition.preset_id = crate::dynamic::normalize_preset_id(input.preset_id)
+        .map_err(|error| V3ApiError::invalid_request_at(state, error.to_string()))?;
     let existing = state.dynamic_providers();
     if collides_with_known_id(&definition.id, &existing) {
         return Err(V3ApiError::conflict_at(
@@ -238,7 +240,7 @@ fn update_locked(
         .map_err(V3ApiError::internal)?
         .ok_or_else(|| V3ApiError::not_found_at(state, "provider not found"))?;
     let auth_kind = DynamicAuthKind::from(input.auth_kind);
-    let definition = validate_wire_definition(
+    let mut definition = validate_wire_definition(
         existing.id.clone(),
         input.name,
         input.endpoint_url,
@@ -247,6 +249,9 @@ fn update_locked(
         input.models,
     )
     .map_err(|error| V3ApiError::invalid_request_at(state, error.to_string()))?;
+    definition.preset_id =
+        crate::dynamic::normalize_preset_id(input.preset_id.or(existing.preset_id.clone()))
+            .map_err(|error| V3ApiError::invalid_request_at(state, error.to_string()))?;
     let account_count = state
         .db
         .lock()
@@ -340,9 +345,16 @@ fn validate_wire_definition(
         .map(|model| DynamicModelMapping {
             public_model: model.public_model,
             upstream_model: model.upstream_model,
+            upstream_override: model.upstream_override.map(|value| {
+                ocg_domain::dynamic::DynamicModelUpstreamOverride {
+                    protocol: value.protocol.into(),
+                    endpoint_url: value.endpoint_url,
+                }
+            }),
         })
         .collect::<Vec<_>>();
     validate_definition(DynamicProviderDefinition {
+        preset_id: None,
         id,
         name: normalize_dynamic_provider_name(&name)?,
         endpoint_url,
@@ -358,6 +370,7 @@ fn runtime_from_definition(
     updated_at: chrono::DateTime<Utc>,
 ) -> DynamicProviderRuntime {
     DynamicProviderRuntime {
+        preset_id: definition.preset_id,
         id: definition.id,
         name: definition.name,
         endpoint_url: definition.endpoint_url,
@@ -442,6 +455,7 @@ fn to_wire(
     process_generation: u64,
 ) -> DynamicProvider {
     DynamicProvider {
+        preset_id: runtime.preset_id,
         id: runtime.id,
         name: runtime.name,
         endpoint_url: runtime.endpoint_url,
@@ -453,6 +467,12 @@ fn to_wire(
             .map(|mapping| DynamicProviderModel {
                 public_model: mapping.public_model,
                 upstream_model: mapping.upstream_model,
+                upstream_override: mapping.upstream_override.map(|value| {
+                    super::types::DynamicModelUpstreamOverride {
+                        protocol: value.protocol.into(),
+                        endpoint_url: value.endpoint_url,
+                    }
+                }),
             })
             .collect(),
         created_at: runtime.created_at.to_rfc3339(),

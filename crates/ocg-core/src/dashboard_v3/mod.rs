@@ -33,6 +33,7 @@ mod dynamic_providers;
 mod keys;
 mod managed_key_verify;
 mod observability;
+mod platforms;
 mod pricing;
 mod providers;
 mod proxy_test;
@@ -144,6 +145,19 @@ pub fn api_router(state: CoreState) -> Router<CoreState> {
         ))
         .layer(middleware::map_response(account_transfer::add_no_store));
     let protected = Router::new()
+        .route(
+            "/platform-accounts",
+            get(platforms::list).post(platforms::create),
+        )
+        .route(
+            "/platform-accounts/{id}",
+            put(platforms::update).delete(platforms::delete),
+        )
+        .route("/platform-accounts/{id}/refresh", post(platforms::refresh))
+        .route(
+            "/accounts/{id}/platform-link",
+            put(platforms::link).delete(platforms::unlink),
+        )
         .route("/contract", get(get_contract))
         .route("/connection", get(connection::get_connection))
         .route(

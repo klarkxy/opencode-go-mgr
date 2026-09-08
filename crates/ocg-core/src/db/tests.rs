@@ -5,6 +5,198 @@ use std::fs;
 use std::sync::Arc;
 
 const TEST_HOST_SECRET: &str = "ocg-db-v27-test-host";
+
+#[test]
+fn v39_preserves_existing_provider_configuration_and_adds_optional_provenance() {
+    let conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch("CREATE TABLE schema_version(version INTEGER PRIMARY KEY); INSERT INTO schema_version VALUES(38);").unwrap();
+    ensure_dynamic_provider_tables(&conn).unwrap();
+    conn.execute_batch("INSERT INTO dynamic_providers VALUES('old','Old provider','https://example.test/v1','responses','bearer','2026-09-08T00:00:00Z','2026-09-08T00:00:00Z');
+        INSERT INTO dynamic_provider_models VALUES('old','public-name','public-name','exact/ID');").unwrap();
+    migrate_to_v39(&conn).unwrap();
+    migrate_to_v39(&conn).unwrap();
+    assert_eq!(schema_version_on(&conn).unwrap(), 39);
+    migrate_to_v40(&conn).unwrap();
+    migrate_to_v40(&conn).unwrap();
+    assert_eq!(schema_version_on(&conn).unwrap(), 40);
+    let old = get_dynamic_provider_on(&conn, "old").unwrap().unwrap();
+    assert_eq!(old.preset_id, None);
+    assert_eq!(old.endpoint_url, "https://example.test/v1");
+    assert_eq!(old.mappings[0].upstream_model, "exact/ID");
+    assert!(old.mappings[0].upstream_override.is_none());
+    conn.execute(
+        "UPDATE dynamic_providers SET preset_id = 'azure-openai' WHERE id = 'old'",
+        [],
+    )
+    .unwrap();
+    assert_eq!(
+        get_dynamic_provider_on(&conn, "old")
+            .unwrap()
+            .unwrap()
+            .preset_id
+            .as_deref(),
+        Some("azure-openai")
+    );
+}
+
+#[test]
+fn platform_link_lifecycle_and_refresh_races() {
+    use crate::platform::{PlatformGroup, PlatformKind, PlatformSnapshot};
+    let dir = temp_data_dir("platform-link");
+    let mut db = Database::open(dir.clone()).unwrap();
+    let mut key = account("platform-key");
+    key.provider_id = CUSTOM_PROVIDER_ID.into();
+    db.create_account_with_contract(
+        &key,
+        Some(&AccountCustomConfigInput {
+            endpoint_url: "https://old.example/v1/chat/completions".into(),
+            upstream_protocol: UpstreamProtocolKind::ChatCompletions,
+        }),
+        &[AccountModelCapabilityInput {
+            public_model: "model-a".into(),
+            upstream_model: "model-a".into(),
+            protocol: UpstreamProtocolKind::ChatCompletions,
+            source: None,
+        }],
+    )
+    .unwrap();
+    db.create_platform_account(
+        "parent",
+        PlatformKind::NewApi,
+        "Parent",
+        "https://new.example/v1",
+        Some("obfuscated-test-credential"),
+    )
+    .unwrap();
+    db.link_platform_account(&key.id, "parent", &PlatformGroup::default())
+        .unwrap();
+    assert_eq!(
+        db.account_custom_config(&key.id)
+            .unwrap()
+            .unwrap()
+            .endpoint_url,
+        "https://new.example/v1/chat/completions"
+    );
+    assert!(db.delete_platform_account("parent").is_err());
+    let old = db.platform_refresh_token("parent", Some(&key.id)).unwrap();
+    db.unlink_platform_account(&key.id).unwrap();
+    db.link_platform_account(&key.id, "parent", &PlatformGroup::default())
+        .unwrap();
+    assert!(
+        !db.save_platform_refresh("parent", Some(&key.id), &old, &PlatformSnapshot::default())
+            .unwrap()
+    );
+    let old = db.platform_refresh_token("parent", Some(&key.id)).unwrap();
+    db.update_platform_account("parent", "Parent", Some(None))
+        .unwrap();
+    assert!(
+        !db.save_platform_refresh("parent", Some(&key.id), &old, &PlatformSnapshot::default())
+            .unwrap()
+    );
+    assert!(
+        !db.platform_account("parent")
+            .unwrap()
+            .unwrap()
+            .has_user_credential
+    );
+    let current = db.platform_refresh_token("parent", Some(&key.id)).unwrap();
+    assert!(
+        db.save_platform_refresh(
+            "parent",
+            Some(&key.id),
+            &current,
+            &PlatformSnapshot::default()
+        )
+        .unwrap()
+    );
+    assert!(
+        !db.save_platform_refresh(
+            "parent",
+            Some(&key.id),
+            &current,
+            &PlatformSnapshot::default()
+        )
+        .unwrap()
+    );
+    let untouched = db.platform_refresh_token("parent", Some(&key.id)).unwrap();
+    platform::merge_platforms_on(&db.conn, &[], &[], &HashSet::new()).unwrap();
+    assert_eq!(
+        db.platform_refresh_token("parent", Some(&key.id)).unwrap(),
+        untouched
+    );
+    assert!(db.list_platform_links().unwrap()[0].snapshot.is_some());
+    db.unlink_platform_account(&key.id).unwrap();
+    assert_eq!(
+        db.account_custom_config(&key.id)
+            .unwrap()
+            .unwrap()
+            .endpoint_url,
+        "https://new.example/v1/chat/completions"
+    );
+    db.link_platform_account(&key.id, "parent", &PlatformGroup::default())
+        .unwrap();
+    db.delete_account(&key.id).unwrap();
+    assert!(db.list_platform_links().unwrap().is_empty());
+    db.delete_platform_account("parent").unwrap();
+    drop(db);
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn platform_link_failure_rolls_back_endpoint() {
+    use crate::platform::{PlatformGroup, PlatformKind};
+    let dir = temp_data_dir("platform-atomic");
+    let db = Database::open(dir.clone()).unwrap();
+    assert!(
+        db.create_platform_account(
+            "invalid",
+            PlatformKind::Sub2api,
+            "Invalid",
+            "https://new.example/v1/messages",
+            None
+        )
+        .is_err()
+    );
+    let mut key = account("platform-key");
+    key.provider_id = CUSTOM_PROVIDER_ID.into();
+    db.create_account_with_contract(
+        &key,
+        Some(&AccountCustomConfigInput {
+            endpoint_url: "https://old.example/v1/chat/completions".into(),
+            upstream_protocol: UpstreamProtocolKind::ChatCompletions,
+        }),
+        &[AccountModelCapabilityInput {
+            public_model: "model-a".into(),
+            upstream_model: "model-a".into(),
+            protocol: UpstreamProtocolKind::ChatCompletions,
+            source: None,
+        }],
+    )
+    .unwrap();
+    db.create_platform_account(
+        "parent",
+        PlatformKind::Sub2api,
+        "Parent",
+        "https://new.example",
+        None,
+    )
+    .unwrap();
+    db.conn.execute_batch("CREATE TRIGGER reject_platform BEFORE INSERT ON platform_links BEGIN SELECT RAISE(ABORT,'injected failure'); END;").unwrap();
+    assert!(
+        db.link_platform_account(&key.id, "parent", &PlatformGroup::default())
+            .is_err()
+    );
+    assert_eq!(
+        db.account_custom_config(&key.id)
+            .unwrap()
+            .unwrap()
+            .endpoint_url,
+        "https://old.example/v1/chat/completions"
+    );
+    assert!(db.list_platform_links().unwrap().is_empty());
+    drop(db);
+    fs::remove_dir_all(dir).unwrap();
+}
 const FIXTURE_ACCOUNT_PLAINTEXT: &str = "sk-fixture";
 
 fn test_host_cipher() -> Arc<dyn KeyCipher + Send + Sync> {
@@ -7617,6 +7809,7 @@ fn v35_dynamic_provider_tables_round_trip_and_reject_duplicate_public_models() {
     let now = Utc::now();
     let provider_id = uuid::Uuid::new_v4().to_string();
     let runtime = crate::dynamic::DynamicProviderRuntime {
+        preset_id: None,
         id: provider_id.clone(),
         name: "Lab".into(),
         endpoint_url: "http://127.0.0.1:9".into(),
@@ -7625,6 +7818,7 @@ fn v35_dynamic_provider_tables_round_trip_and_reject_duplicate_public_models() {
         mappings: vec![ocg_domain::dynamic::DynamicModelMapping {
             public_model: "lab-opus".into(),
             upstream_model: "vendor/opus".into(),
+            upstream_override: None,
         }],
         created_at: now,
         updated_at: now,
@@ -7637,6 +7831,32 @@ fn v35_dynamic_provider_tables_round_trip_and_reject_duplicate_public_models() {
     assert_eq!(loaded.name, "Lab");
     assert_eq!(loaded.mappings[0].public_model, "lab-opus");
     assert_eq!(db.count_accounts_for_provider(&provider_id).unwrap(), 1);
+
+    let mut changed = loaded.clone();
+    changed.mappings[0].upstream_override =
+        Some(ocg_domain::dynamic::DynamicModelUpstreamOverride {
+            protocol: crate::provider::UpstreamProtocolKind::Messages,
+            endpoint_url: "https://example.test/anthropic/v1/messages".into(),
+        });
+    db.replace_dynamic_provider(&changed, true, false, None)
+        .unwrap();
+    let saved = db.get_dynamic_provider(&provider_id).unwrap().unwrap();
+    assert_eq!(saved.mappings, changed.mappings);
+    assert_eq!(saved.upstream_protocol, loaded.upstream_protocol);
+    assert_eq!(
+        db.get_account(&first.id).unwrap().unwrap().key_cipher,
+        first.key_cipher
+    );
+    db.replace_dynamic_provider(&loaded, true, false, None)
+        .unwrap();
+    assert!(
+        db.get_dynamic_provider(&provider_id)
+            .unwrap()
+            .unwrap()
+            .mappings[0]
+            .upstream_override
+            .is_none()
+    );
 
     let duplicate = db.conn.execute(
         "INSERT INTO dynamic_provider_models
@@ -7656,6 +7876,7 @@ fn dynamic_provider_create_fault_rolls_back_provider_and_account() {
     let now = Utc::now();
     let provider_id = uuid::Uuid::new_v4().to_string();
     let runtime = crate::dynamic::DynamicProviderRuntime {
+        preset_id: None,
         id: provider_id.clone(),
         name: "Faulty".into(),
         endpoint_url: "http://127.0.0.1:9".into(),
@@ -7664,6 +7885,7 @@ fn dynamic_provider_create_fault_rolls_back_provider_and_account() {
         mappings: vec![ocg_domain::dynamic::DynamicModelMapping {
             public_model: "free-model".into(),
             upstream_model: "free-model".into(),
+            upstream_override: None,
         }],
         created_at: now,
         updated_at: now,
@@ -7693,6 +7915,7 @@ fn dynamic_provider_patch_fault_rolls_back_mappings_and_runtime_state() {
     let now = Utc::now();
     let provider_id = uuid::Uuid::new_v4().to_string();
     let runtime = crate::dynamic::DynamicProviderRuntime {
+        preset_id: None,
         id: provider_id.clone(),
         name: "PatchFault".into(),
         endpoint_url: "http://127.0.0.1:9".into(),
@@ -7701,6 +7924,7 @@ fn dynamic_provider_patch_fault_rolls_back_mappings_and_runtime_state() {
         mappings: vec![ocg_domain::dynamic::DynamicModelMapping {
             public_model: "lab-opus".into(),
             upstream_model: "vendor/opus".into(),
+            upstream_override: None,
         }],
         created_at: now,
         updated_at: now,
@@ -7721,6 +7945,7 @@ fn dynamic_provider_patch_fault_rolls_back_mappings_and_runtime_state() {
     updated.mappings = vec![ocg_domain::dynamic::DynamicModelMapping {
         public_model: "lab-opus".into(),
         upstream_model: "vendor/opus-2".into(),
+        upstream_override: None,
     }];
     crate::db::dynamic_provider_fault::install("after_mapping_replace");
     let error = db
@@ -7748,6 +7973,7 @@ fn replace_dynamic_provider_refuses_to_fan_out_a_replacement_key() {
     let now = Utc::now();
     let provider_id = uuid::Uuid::new_v4().to_string();
     let runtime = crate::dynamic::DynamicProviderRuntime {
+        preset_id: None,
         id: provider_id.clone(),
         name: "Fanout".into(),
         endpoint_url: "http://127.0.0.1:9".into(),
@@ -7756,6 +7982,7 @@ fn replace_dynamic_provider_refuses_to_fan_out_a_replacement_key() {
         mappings: vec![ocg_domain::dynamic::DynamicModelMapping {
             public_model: "lab-opus".into(),
             upstream_model: "vendor/opus".into(),
+            upstream_override: None,
         }],
         created_at: now,
         updated_at: now,
@@ -7793,6 +8020,7 @@ fn imported_dynamic_auth_change_rejects_destination_only_accounts() {
     let now = Utc::now();
     let provider_id = uuid::Uuid::new_v4().to_string();
     let mut runtime = crate::dynamic::DynamicProviderRuntime {
+        preset_id: None,
         id: provider_id.clone(),
         name: "Auth conflict".into(),
         endpoint_url: "http://127.0.0.1:9".into(),
@@ -7801,6 +8029,7 @@ fn imported_dynamic_auth_change_rejects_destination_only_accounts() {
         mappings: vec![ocg_domain::dynamic::DynamicModelMapping {
             public_model: "lab-opus".into(),
             upstream_model: "vendor/opus".into(),
+            upstream_override: None,
         }],
         created_at: now,
         updated_at: now,

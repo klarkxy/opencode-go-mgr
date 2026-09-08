@@ -18,6 +18,8 @@ mod harness;
 
 use harness::{V3Harness, start_loopback};
 
+#[path = "fixtures/probe_response.rs"]
+mod probe_response;
 const TARGET_KEY: &str = "sk-account-model-target-secret";
 const SIBLING_KEY: &str = "sk-account-model-sibling-secret";
 const CUSTOM_KEY: &str = "custom-account-model-secret";
@@ -70,7 +72,7 @@ async fn start_origin() -> ProbeOrigin {
                     (
                         StatusCode::OK,
                         [(axum::http::header::CONTENT_TYPE, "application/json")],
-                        r#"{"id":"ok","object":"response"}"#.to_string(),
+                        probe_response::for_path(uri.0.path()).to_string(),
                     )
                 }
             }
