@@ -242,7 +242,7 @@
           :row-key="logRowKey"
           :loading="forwardLoading"
           :pagination="forwardPagination"
-          :scroll-x="2000"
+          :scroll-x="2150"
           remote
           size="small"
           @update:page="changeForwardPage"
@@ -301,6 +301,7 @@ import {
   forwardLogTotalTokens,
   forwardLogUpstreamModel,
 } from "./forward-log-display.ts";
+import { formatNativeCostEstimate, forwardLogNativeEstimate } from "../domain/native-cost.ts";
 
 type LogTab = "gateway" | "forward";
 type SortBy = "timestamp" | "attempt" | "prompt_tokens" | "completion_tokens" | "cached_tokens" | "cost";
@@ -521,6 +522,13 @@ function formatQuotaCost(row: ForwardLog): string {
   return formatCost(row.cost, 5);
 }
 
+// Original-currency platform token estimate; never a quota debit or wallet
+// charge, so it renders in its own column and is never summed with USD.
+function formatNativeCost(row: ForwardLog): string {
+  const estimate = forwardLogNativeEstimate(row);
+  return estimate ? formatNativeCostEstimate(estimate, locale.value) : "—";
+}
+
 async function copyText(target: string, value: string, label: string) {
   try {
     await copy(target, value, label);
@@ -635,6 +643,16 @@ function renderProviderCost(row: ForwardLog) {
     [t("额度扣减"), costValue(row.quota_debit)],
     [t("有效付费成本"), costValue(row.effective_paid_cost_usd)],
   ];
+  // Platform-native estimate: original currency, frozen pricing provenance,
+  // and the actual wallet debit stays unknown — never implied by the estimate.
+  const estimate = forwardLogNativeEstimate(row);
+  if (estimate) {
+    items.push(
+      [t("平台估算（原始货币）"), formatNativeCostEstimate(estimate, locale.value)],
+      [t("计价来源（冻结）"), row.pricing_revision_id ?? t("未知")],
+      [t("实际平台扣减"), t("未知")],
+    );
+  }
   return h("section", [
     h("h4", t("服务商与费用")),
     h("dl", { class: "diagnostic-meta" }, items.flatMap(([label, value]) => [
@@ -762,6 +780,7 @@ const forwardColumns = computed(() => [
   { title: t("缓存"), key: "cached_tokens", width: 92, align: "right" as const, render: (row: ForwardLog) => formatNumber(row.cached_tokens) },
   { title: t("缓存写"), key: "cache_creation_tokens", width: 92, align: "right" as const, render: (row: ForwardLog) => formatNumber(row.cache_creation_tokens) },
   { title: t("额度消耗（估算）"), key: "cost", width: 152, align: "right" as const, render: formatQuotaCost },
+  { title: t("平台估算（原始货币）"), key: "native_cost", width: 150, align: "right" as const, render: formatNativeCost },
   { title: t("错误"), key: "error_message", minWidth: 220, ellipsis: { tooltip: true } },
 ]);
 

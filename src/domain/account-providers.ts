@@ -36,7 +36,7 @@ export const ZEN_FREE_PROVIDER_ID = "opencode-zen-free";
 
 /** Static external-integration singleton; it is routable but not a Provider Plan. */
 const CPA_ACCOUNT_ID = "00000000-0000-0000-0000-000000000003";
-const CPA_PROVIDER_ID = "cpa";
+export const CPA_PROVIDER_ID = "cpa";
 
 const ALL_PROVIDER_OFFERINGS: readonly ProviderOffering[] = PLAN_DEFINITIONS.map((plan) => ({
   provider_id: plan.provider_id,

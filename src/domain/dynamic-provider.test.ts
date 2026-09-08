@@ -3,13 +3,17 @@ import test from "node:test";
 import {
   buildDynamicProviderCreateBody,
   buildDynamicProviderUpdateBody,
+  completeDynamicTestTargets,
   dynamicAuthRequiresKey,
+  dynamicMappingOverrideError,
   dynamicProviderActionNeedsConfirm,
   emptyDynamicProviderDraft,
   isDynamicCatalogEntry,
   normalizeDynamicMappings,
+  resolveDynamicMappingRoute,
   sanitizeDynamicProviderDraft,
   validateDynamicProviderDraft,
+  type DynamicProviderMapping,
 } from "./dynamic-provider.ts";
 import type { ProviderCatalogEntry } from "../api/providers.ts";
 
@@ -59,8 +63,8 @@ test("mapping validation requires one unique public model and allows repeated up
       { public_model: "sonnet", upstream_model: "vendor/a" },
     ]),
     [
-      { public_model: "opus", upstream_model: "vendor/a" },
-      { public_model: "sonnet", upstream_model: "vendor/a" },
+      { public_model: "opus", upstream_model: "vendor/a", upstream_override: null },
+      { public_model: "sonnet", upstream_model: "vendor/a", upstream_override: null },
     ],
   );
 });
@@ -135,4 +139,129 @@ test("paid tests and deletes require confirmation; Enter submits save", () => {
   assert.equal(dynamicProviderActionNeedsConfirm("delete"), true);
   assert.equal(dynamicProviderActionNeedsConfirm("save"), false);
   assert.equal(dynamicProviderActionNeedsConfirm("discover"), false);
+});
+
+test("only complete trimmed mappings become selectable test targets, overrides included", () => {
+  assert.deepEqual(completeDynamicTestTargets([
+    { public_model: "  pub-a ", upstream_model: " up-a " },
+    {
+      public_model: "pub-b",
+      upstream_model: "up-b",
+      upstream_override: { protocol: "messages", endpoint_url: " https://up.example.com/v1/messages " },
+    },
+    { public_model: "", upstream_model: "up-c" },
+    { public_model: "pub-d", upstream_model: "   " },
+    { public_model: "", upstream_model: "" },
+  ]), [
+    { public_model: "pub-a", upstream_model: "up-a", upstream_override: null },
+    {
+      public_model: "pub-b",
+      upstream_model: "up-b",
+      upstream_override: { protocol: "messages", endpoint_url: "https://up.example.com/v1/messages" },
+    },
+  ]);
+  assert.deepEqual(completeDynamicTestTargets([]), []);
+});
+
+test("any present override wins verbatim, even unfinished; only absence inherits the supplier default", () => {
+  const supplier = { endpoint_url: "https://api.example.com/v1/responses", upstream_protocol: "responses" as const };
+  assert.deepEqual(resolveDynamicMappingRoute(supplier, { upstream_override: null }), supplier);
+  assert.deepEqual(resolveDynamicMappingRoute(supplier, {}), supplier);
+  // An explicit but empty override never silently falls back to the supplier:
+  // the empty route is returned so the pre-request validation can reject it.
+  assert.deepEqual(
+    resolveDynamicMappingRoute(supplier, { upstream_override: { protocol: "messages", endpoint_url: "  " } }),
+    { endpoint_url: "", upstream_protocol: "messages" },
+  );
+  assert.deepEqual(
+    resolveDynamicMappingRoute(supplier, {
+      upstream_override: { protocol: "messages", endpoint_url: "https://other.example.com/anthropic/v1/messages" },
+    }),
+    { endpoint_url: "https://other.example.com/anthropic/v1/messages", upstream_protocol: "messages" },
+  );
+});
+
+test("the selected-row override gate rejects an empty explicit override before any request", () => {
+  // Presence is enough to fail: the test must not run against the supplier.
+  assert.equal(
+    dynamicMappingOverrideError({ upstream_override: { protocol: "messages", endpoint_url: " " } }),
+    "missing_override_endpoint",
+  );
+  assert.equal(
+    dynamicMappingOverrideError({ upstream_override: { protocol: "messages", endpoint_url: "not a url" } }),
+    "invalid_override_endpoint",
+  );
+  // Inherit rows and well-formed overrides pass without touching other rows.
+  assert.equal(dynamicMappingOverrideError({ upstream_override: null }), null);
+  assert.equal(dynamicMappingOverrideError({}), null);
+  assert.equal(
+    dynamicMappingOverrideError({
+      upstream_override: { protocol: "messages", endpoint_url: "https://up.example.com/v1/messages" },
+    }),
+    null,
+  );
+});
+
+test("an override requires an explicit well-formed endpoint and never guesses siblings", () => {
+  const rows = (override: DynamicProviderMapping["upstream_override"]) => [
+    { public_model: "opus", upstream_model: "vendor/a", upstream_override: override },
+  ];
+  assert.equal(
+    normalizeDynamicMappings(rows({ protocol: "messages", endpoint_url: "" })),
+    "missing_override_endpoint",
+  );
+  assert.equal(
+    normalizeDynamicMappings(rows({ protocol: "messages", endpoint_url: "not a url" })),
+    "invalid_override_endpoint",
+  );
+  assert.equal(
+    normalizeDynamicMappings(rows({ protocol: "messages", endpoint_url: "ftp://up.example.com/v1/messages" })),
+    "override_endpoint_not_http",
+  );
+  assert.equal(
+    normalizeDynamicMappings(rows({ protocol: "messages", endpoint_url: "https://user:pw@up.example.com/v1/messages" })),
+    "override_endpoint_with_credentials",
+  );
+  assert.deepEqual(
+    normalizeDynamicMappings(rows({ protocol: "messages", endpoint_url: " https://up.example.com/v1/messages " })),
+    [{
+      public_model: "opus",
+      upstream_model: "vendor/a",
+      upstream_override: { protocol: "messages", endpoint_url: "https://up.example.com/v1/messages" },
+    }],
+  );
+});
+
+test("create and edit bodies roundtrip the override; null on edit clears it", () => {
+  const draft = emptyDynamicProviderDraft();
+  draft.name = "Lab";
+  draft.endpoint_url = "https://api.example.com/v1/responses";
+  draft.upstream_protocol = "responses";
+  draft.auth_kind = "none";
+  draft.models = [
+    { public_model: "inherit-row", upstream_model: "vendor/a" },
+    {
+      public_model: "override-row",
+      upstream_model: "vendor/b",
+      upstream_override: { protocol: "messages", endpoint_url: "https://up.example.com/v1/messages" },
+    },
+  ];
+  const created = buildDynamicProviderCreateBody(draft);
+  assert.deepEqual(created.models, [
+    { publicModel: "inherit-row", upstreamModel: "vendor/a", upstreamOverride: null },
+    {
+      publicModel: "override-row",
+      upstreamModel: "vendor/b",
+      upstreamOverride: { protocol: "messages", endpointUrl: "https://up.example.com/v1/messages" },
+    },
+  ]);
+  // Edit sends the same full model list: a preserved override rides through,
+  // and null explicitly returns the row to the supplier default.
+  const updated = buildDynamicProviderUpdateBody(draft, "none");
+  assert.deepEqual(updated.models, created.models);
+  const cleared = buildDynamicProviderUpdateBody({
+    ...draft,
+    models: draft.models.map((model) => ({ ...model, upstream_override: null })),
+  }, "none");
+  assert.deepEqual(cleared.models.map((model) => model.upstreamOverride), [null, null]);
 });

@@ -11,6 +11,7 @@ import type {
 import {
   applyModelContractToResponse,
   catalogRefreshSupported,
+  effectiveModelTestProtocol,
   enabledProtocols,
   findAccountScopeView,
   flattenProviderScopes,
@@ -332,4 +333,23 @@ test("returned model contracts merge into the last good provider response", () =
     merged.providers[0]?.models[0]?.protocols.messages?.source,
     "probe_confirmed",
   );
+});
+
+test("a row test submits only the effective preferred enabled protocol or the first enabled fallback", () => {
+  // Preferred protocol enabled: it wins.
+  assert.equal(
+    effectiveModelTestProtocol(modelContract("m", { responses: true, chat_completions: true })),
+    "responses",
+  );
+  // Preferred disabled: the first enabled protocol in fixed order is the fallback.
+  assert.equal(
+    effectiveModelTestProtocol(modelContract("m", { chat_completions: true })),
+    "chat_completions",
+  );
+  const messagesOnly = modelContract("m", {});
+  messagesOnly.protocols.messages = { ...messagesOnly.protocols.messages!, enabled: true };
+  assert.equal(effectiveModelTestProtocol(messagesOnly), "messages");
+  // Nothing enabled means no test is submitted at all.
+  assert.equal(effectiveModelTestProtocol(modelContract("m", {})), null);
+  assert.equal(effectiveModelTestProtocol(undefined), null);
 });

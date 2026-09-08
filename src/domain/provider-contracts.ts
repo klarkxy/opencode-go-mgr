@@ -32,6 +32,22 @@ export function modelProtocolOverrideKey(
   return JSON.stringify([scopeKind, scopeId, modelId, protocol]);
 }
 
+/**
+ * The single protocol a built-in row connection test submits: the preferred
+ * protocol when its effective state is enabled, otherwise the first enabled
+ * fallback. Null when nothing is enabled — no blind multi-protocol scan.
+ */
+export function effectiveModelTestProtocol(
+  model: Pick<EffectiveModelContract, "preferred_protocol" | "protocols"> | undefined,
+): ProviderProtocol | null {
+  if (!model) return null;
+  if (model.protocols[model.preferred_protocol]?.enabled) return model.preferred_protocol;
+  for (const protocol of PROVIDER_PROTOCOLS) {
+    if (model.protocols[protocol]?.enabled) return protocol;
+  }
+  return null;
+}
+
 export const CATALOG_SOURCE_STATIC = "static";
 export const CATALOG_SOURCE_OFFICIAL_ZEN = "official_zen";
 export const CATALOG_SOURCE_CUSTOM_DISCOVERY = "custom_discovery";

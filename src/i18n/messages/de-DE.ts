@@ -623,8 +623,6 @@ export const deDEMessages = {
   "账号声明": "Vom Konto deklariert",
   "供应商设置已在其他位置更新，已重新加载，请重试": "Anbietereinstellungen wurden andernorts aktualisiert und neu geladen. Bitte erneut versuchen.",
   "不可用": "Nicht verfügbar",
-  "探测完成": "Sonde abgeschlossen",
-  "探测失败: {error}": "Sonde fehlgeschlagen: {error}",
   "全部供应商协议已关闭": "Alle Anbieterprotokolle sind deaktiviert",
   "已选择过期范围，已回到第一个供应商": "Dieser Bereich ist nicht mehr vorhanden; der erste Anbieter wird angezeigt",
   "选择供应商范围": "Anbieterbereich auswählen",

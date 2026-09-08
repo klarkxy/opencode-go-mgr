@@ -65,6 +65,11 @@ export type DynamicProviderAuthKind = "bearer" | "x-api-key" | "none";
 export interface DynamicProviderModelView {
   public_model: string;
   upstream_model: string;
+  /** Explicit per-model upstream; null inherits the supplier endpoint/protocol. */
+  upstream_override: {
+    protocol: "chat_completions" | "responses" | "messages";
+    endpoint_url: string;
+  } | null;
 }
 
 export interface DynamicProviderView {
@@ -74,6 +79,8 @@ export interface DynamicProviderView {
   upstream_protocol: "chat_completions" | "responses" | "messages";
   auth_kind: DynamicProviderAuthKind;
   models: DynamicProviderModelView[];
+  /** Persisted source-template preset ID; null for manual providers. */
+  preset_id: string | null;
   created_at: string;
   updated_at: string;
   revision: number;
@@ -324,6 +331,20 @@ function formFieldKind(value: string): ProviderCatalogFormField["kind"] {
   throw new Error(`unknown form field kind: ${value}`);
 }
 
+function presentDynamicMappingOverride(
+  model: V3DynamicProvider["models"][number],
+): DynamicProviderModelView["upstream_override"] {
+  const override = model.upstreamOverride;
+  if (!override) return null;
+  const protocol = override.protocol;
+  const endpointUrl = override.endpointUrl.trim();
+  if (!endpointUrl) return null;
+  if (protocol !== "chat_completions" && protocol !== "responses" && protocol !== "messages") {
+    return null;
+  }
+  return { protocol, endpoint_url: endpointUrl };
+}
+
 function presentDynamicProvider(value: V3DynamicProvider): DynamicProviderView {
   return {
     id: value.id,
@@ -334,7 +355,9 @@ function presentDynamicProvider(value: V3DynamicProvider): DynamicProviderView {
     models: value.models.map((model) => ({
       public_model: model.publicModel,
       upstream_model: model.upstreamModel,
+      upstream_override: presentDynamicMappingOverride(model),
     })),
+    preset_id: value.presetId ?? null,
     created_at: value.createdAt,
     updated_at: value.updatedAt,
     revision: value.revision,

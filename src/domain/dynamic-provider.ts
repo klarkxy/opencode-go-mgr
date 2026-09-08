@@ -6,9 +6,21 @@ const DYNAMIC_PROVIDER_MODEL_SOURCE = "dynamic_provider";
 export type DynamicAuthKind = "bearer" | "x-api-key" | "none";
 export type DynamicUpstreamProtocol = "chat_completions" | "responses" | "messages";
 
+/**
+ * Per-model upstream override. Both fields are explicit; when absent the
+ * mapping inherits the supplier endpoint/protocol. Auth is always
+ * supplier-owned and never overridden here.
+ */
+export interface DynamicMappingOverride {
+  protocol: DynamicUpstreamProtocol;
+  endpoint_url: string;
+}
+
 export interface DynamicProviderMapping {
   public_model: string;
   upstream_model: string;
+  /** Null/undefined inherits the supplier default protocol and endpoint. */
+  upstream_override?: DynamicMappingOverride | null;
 }
 
 export interface DynamicProviderDraft {
@@ -20,6 +32,11 @@ export interface DynamicProviderDraft {
   account_name: string;
   notes: string;
   key: string;
+  /**
+   * Source-template provenance. "" or undefined means manual/none; undefined
+   * on edit means "do not touch the persisted value" (PATCH omits it).
+   */
+  preset_id?: string;
 }
 
 export type DynamicProviderDraftError =
@@ -38,6 +55,10 @@ export type DynamicProviderDraftError =
   | "public_model_has_control_character"
   | "upstream_model_too_long"
   | "upstream_model_has_control_character"
+  | "missing_override_endpoint"
+  | "invalid_override_endpoint"
+  | "override_endpoint_not_http"
+  | "override_endpoint_with_credentials"
   | "missing_key"
   | "missing_replacement_key";
 
@@ -57,6 +78,10 @@ export const DYNAMIC_PROVIDER_DRAFT_ERROR_KEYS = {
   public_model_has_control_character: "对外模型名不能包含控制字符",
   upstream_model_too_long: "上游模型 ID 最多 200 个字符",
   upstream_model_has_control_character: "上游模型 ID 不能包含控制字符",
+  missing_override_endpoint: "请填写该模型覆盖的上游地址，或改回跟随供应商默认",
+  invalid_override_endpoint: "覆盖的上游地址格式无效",
+  override_endpoint_not_http: "覆盖的上游地址必须是 http:// 或 https:// URL",
+  override_endpoint_with_credentials: "覆盖的上游地址不能包含用户名或密码",
   missing_key: "请填写 API Key",
   missing_replacement_key: "从无鉴权改为需要 Key 时必须填写替换 Key",
 } as const satisfies Record<DynamicProviderDraftError, string>;
@@ -88,6 +113,7 @@ export function emptyDynamicProviderDraft(): DynamicProviderDraft {
     account_name: "",
     notes: "",
     key: "",
+    preset_id: "",
   };
 }
 
@@ -105,6 +131,24 @@ function hasControlCharacter(value: string): boolean {
   });
 }
 
+function normalizeDynamicOverride(
+  override: DynamicMappingOverride | null | undefined,
+): DynamicMappingOverride | null | DynamicProviderDraftError {
+  if (!override) return null;
+  if (override.protocol !== "chat_completions"
+    && override.protocol !== "responses"
+    && override.protocol !== "messages") {
+    return "missing_protocol";
+  }
+  const endpointUrl = override.endpoint_url.trim();
+  if (!endpointUrl) return "missing_override_endpoint";
+  const issue = customEndpointUrlIssue(endpointUrl);
+  if (issue === "malformed") return "invalid_override_endpoint";
+  if (issue === "not_http") return "override_endpoint_not_http";
+  if (issue === "with_credentials") return "override_endpoint_with_credentials";
+  return { protocol: override.protocol, endpoint_url: endpointUrl };
+}
+
 export function normalizeDynamicMappings(
   mappings: readonly DynamicProviderMapping[],
 ): DynamicProviderMapping[] | DynamicProviderDraftError {
@@ -120,13 +164,69 @@ export function normalizeDynamicMappings(
     if (hasControlCharacter(publicModel)) return "public_model_has_control_character";
     if (upstreamModel.length > 200) return "upstream_model_too_long";
     if (hasControlCharacter(upstreamModel)) return "upstream_model_has_control_character";
+    const override = normalizeDynamicOverride(mapping.upstream_override);
+    if (typeof override === "string") return override;
     const key = publicModel.toLocaleLowerCase();
     if (seen.has(key)) return "duplicate_public_model";
     seen.add(key);
-    normalized.push({ public_model: publicModel, upstream_model: upstreamModel });
+    normalized.push({
+      public_model: publicModel,
+      upstream_model: upstreamModel,
+      upstream_override: override,
+    });
   }
   if (normalized.length === 0) return "missing_mappings";
   return normalized;
+}
+
+/** Only fully filled mapping rows can be tested; the picker never silently selects a partial row. */
+export function completeDynamicTestTargets(
+  models: readonly DynamicProviderMapping[],
+): DynamicProviderMapping[] {
+  return models
+    .map((mapping) => ({
+      public_model: mapping.public_model.trim(),
+      upstream_model: mapping.upstream_model.trim(),
+      upstream_override: mapping.upstream_override
+        ? {
+          protocol: mapping.upstream_override.protocol,
+          endpoint_url: mapping.upstream_override.endpoint_url.trim(),
+        }
+        : null,
+    }))
+    .filter((mapping) => mapping.public_model && mapping.upstream_model);
+}
+
+/**
+ * Effective route for one mapping: ANY present override wins verbatim — even
+ * an unfinished one — so an explicit override never silently falls back to
+ * the supplier default. Callers validate a present override before use (same
+ * rules as Save). No sibling endpoints are ever guessed.
+ */
+export function resolveDynamicMappingRoute(
+  supplier: { endpoint_url: string; upstream_protocol: DynamicUpstreamProtocol | "" },
+  mapping: Pick<DynamicProviderMapping, "upstream_override">,
+): { endpoint_url: string; upstream_protocol: DynamicUpstreamProtocol | "" } {
+  const override = mapping.upstream_override;
+  if (override) {
+    return { endpoint_url: override.endpoint_url.trim(), upstream_protocol: override.protocol };
+  }
+  return {
+    endpoint_url: supplier.endpoint_url.trim(),
+    upstream_protocol: supplier.upstream_protocol,
+  };
+}
+
+/**
+ * Validates one mapping's override only — unrelated unfinished draft rows are
+ * not checked. Null when the row inherits the supplier default or the
+ * override satisfies the same endpoint rules as Save.
+ */
+export function dynamicMappingOverrideError(
+  mapping: Pick<DynamicProviderMapping, "upstream_override">,
+): DynamicProviderDraftError | null {
+  const result = normalizeDynamicOverride(mapping.upstream_override);
+  return typeof result === "string" ? result : null;
 }
 
 export function validateDynamicProviderDraft(
@@ -168,10 +268,16 @@ export function buildDynamicProviderCreateBody(draft: DynamicProviderDraft): {
   endpointUrl: string;
   upstreamProtocol: DynamicUpstreamProtocol;
   authKind: DynamicAuthKind;
-  models: Array<{ publicModel: string; upstreamModel: string }>;
+  models: Array<{
+    publicModel: string;
+    upstreamModel: string;
+    /** Explicit per-model upstream; null inherits the supplier default. */
+    upstreamOverride: { protocol: DynamicUpstreamProtocol; endpointUrl: string } | null;
+  }>;
   accountName?: string;
   notes?: string;
   key?: string;
+  presetId?: string;
 } {
   const error = validateDynamicProviderDraft(draft, { mode: "create" });
   if (error) throw new Error(error);
@@ -185,6 +291,9 @@ export function buildDynamicProviderCreateBody(draft: DynamicProviderDraft): {
     models: models.map((mapping) => ({
       publicModel: mapping.public_model,
       upstreamModel: mapping.upstream_model,
+      upstreamOverride: mapping.upstream_override
+        ? { protocol: mapping.upstream_override.protocol, endpointUrl: mapping.upstream_override.endpoint_url }
+        : null,
     })),
   };
   const accountName = draft.account_name.trim();
@@ -192,6 +301,8 @@ export function buildDynamicProviderCreateBody(draft: DynamicProviderDraft): {
   const notes = draft.notes.trim();
   if (notes) body.notes = notes;
   if (dynamicAuthRequiresKey(draft.auth_kind)) body.key = draft.key.trim();
+  // Create omits provenance when manual; only a concrete preset ID is sent.
+  if (draft.preset_id) body.presetId = draft.preset_id;
   return body;
 }
 
@@ -203,8 +314,13 @@ export function buildDynamicProviderUpdateBody(
   endpointUrl: string;
   upstreamProtocol: DynamicUpstreamProtocol;
   authKind: DynamicAuthKind;
-  models: Array<{ publicModel: string; upstreamModel: string }>;
+  models: Array<{
+    publicModel: string;
+    upstreamModel: string;
+    upstreamOverride: { protocol: DynamicUpstreamProtocol; endpointUrl: string } | null;
+  }>;
   key?: string;
+  presetId?: string;
 } {
   const error = validateDynamicProviderDraft(draft, { mode: "edit", previousAuthKind });
   if (error) throw new Error(error);
@@ -218,6 +334,9 @@ export function buildDynamicProviderUpdateBody(
     models: models.map((mapping) => ({
       publicModel: mapping.public_model,
       upstreamModel: mapping.upstream_model,
+      upstreamOverride: mapping.upstream_override
+        ? { protocol: mapping.upstream_override.protocol, endpointUrl: mapping.upstream_override.endpoint_url }
+        : null,
     })),
   };
   const sendReplacementKey =
@@ -225,6 +344,8 @@ export function buildDynamicProviderUpdateBody(
   if (sendReplacementKey && draft.key.trim()) {
     body.key = draft.key.trim();
   }
+  // Omitted preserves the persisted source; "" explicitly clears it.
+  if (draft.preset_id !== undefined) body.presetId = draft.preset_id;
   return body;
 }
 

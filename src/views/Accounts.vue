@@ -78,6 +78,14 @@
         >{{ t("重试") }}</n-button>
       </n-alert>
 
+      <PlatformAccountsSection
+        ref="platformSectionRef"
+        :accounts="accounts"
+        @changed="loadAccounts"
+        @account-updated="replaceAccount"
+        @links-change="onPlatformLinksChange"
+      />
+
       <n-empty
         v-if="!accountListLoading && !accountListError && displayedAccounts.length === 0"
         :description="t('暂无账号')"
@@ -154,6 +162,8 @@
       :busy="busy"
       :plan="selectedPlanForCreate"
       :catalog="providerCatalog"
+      :endpoint-locked="!!editingPlatformLink"
+      :endpoint-lock-hint="editingEndpointLockHint"
       @update:show="setAccountFormVisible"
       @save="onFormSave"
       @reset-cooldown="resetCooldown(editingAccount!.id)"
@@ -286,6 +296,8 @@ import {
   executeCustomAccountEdit,
   isCustomApiAccount,
 } from "../domain/custom-account.ts";
+import { linkForAccount } from "../domain/platform-accounts.ts";
+import type { PlatformLink } from "../api/platform-accounts.ts";
 import { useAccountUsage } from "../domain/useAccountUsage.ts";
 import { useAccountOrder } from "./useAccountOrder.ts";
 import {
@@ -321,6 +333,7 @@ import AccountConnectionTestModal from "../components/AccountConnectionTestModal
 import AccountFormModal, { type AccountFormPayload } from "../components/AccountFormModal.vue";
 import ManagedAccountWizard from "../components/ManagedAccountWizard.vue";
 import AccountTransferModal from "../components/AccountTransferModal.vue";
+import PlatformAccountsSection from "../components/PlatformAccountsSection.vue";
 
 const dialog = useDialog();
 const message = useMessage();
@@ -359,6 +372,20 @@ const openingBrowserTarget = ref<BrowserTarget | null>(null);
 const busy = ref(false);
 const now = ref(Date.now());
 const planFilter = ref<AccountPlanFilter>("all");
+const platformSectionRef = ref<InstanceType<typeof PlatformAccountsSection> | null>(null);
+const platformLinks = ref<PlatformLink[]>([]);
+const platformParents = ref<{ id: string; name: string }[]>([]);
+const editingPlatformLink = computed(() => (
+  editingAccount.value ? linkForAccount(platformLinks.value, editingAccount.value.id) : null
+));
+const editingEndpointLockHint = computed(() => {
+  const link = editingPlatformLink.value;
+  if (!link) return "";
+  const parentName = platformParents.value.find((parent) => parent.id === link.platformAccountId)?.name;
+  return parentName
+    ? t("已关联平台账号 {name}，Endpoint 由平台托管", { name: parentName })
+    : t("已关联平台账号，Endpoint 由平台托管");
+});
 const OLLAMA_WEBSITE_URL = "https://ollama.com";
 
 const statusFilter = ref<AccountStatusFilter>("all");
@@ -542,6 +569,11 @@ function handleSelectPlan(plan: PlanDefinition): void {
 function resetFilters(): void {
   planFilter.value = "all";
   statusFilter.value = "all";
+}
+
+function onPlatformLinksChange(links: PlatformLink[], parents: { id: string; name: string }[]): void {
+  platformLinks.value = links;
+  platformParents.value = parents;
 }
 
 function openManagedCreateModal(): void {
@@ -1171,8 +1203,10 @@ onActivated(() => {
   startClock();
   now.value = Date.now();
   applyCachedAccountDeepLink();
-  if (activatedOnce) void initializeAccounts();
-  else activatedOnce = true;
+  if (activatedOnce) {
+    void initializeAccounts();
+    platformSectionRef.value?.reload();
+  } else activatedOnce = true;
 });
 onDeactivated(stopClock);
 onUnmounted(() => {

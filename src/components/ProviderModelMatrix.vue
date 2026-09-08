@@ -81,7 +81,7 @@
                     </template>
                   </n-button>
                 </template>
-                {{ t("探测可能通过多个符合条件的账号发送真实最小请求，可能消耗额度。是否继续？") }}
+                {{ t("将按当前生效的协议发送一次最小真实请求测试连接，可能消耗额度；测试只作观测，不会开启路由。是否继续？") }}
               </n-popconfirm>
             </td>
           </tr>
@@ -111,6 +111,7 @@ import type {
   ProtocolOverrideState,
 } from "../api/providers.ts";
 import type { ProviderScopeView } from "../domain/provider-contracts.ts";
+import { CPA_PROVIDER_ID } from "../domain/account-providers.ts";
 import { t } from "../i18n/index.ts";
 import {
   modelProtocolOverrideKey,
@@ -152,7 +153,11 @@ const matrixProtocols = computed<ProviderProtocol[]>(() => {
   ));
 });
 
-const probeSupported = computed(() => props.scope.card.protocol_probe);
+// CPA is a separate static external integration: it never gets a scan/test
+// column here even if a backend card flag claims probe support.
+const probeSupported = computed(() => (
+  props.scope.card.protocol_probe && props.scope.provider_id !== CPA_PROVIDER_ID
+));
 
 function modelContract(modelId: string): ProviderScopeView["models"][number] | undefined {
   return props.scope.models.find((model) => model.model_id === modelId);

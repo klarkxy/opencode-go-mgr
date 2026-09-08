@@ -624,8 +624,6 @@ export const frFRMessages = {
   "账号声明": "Déclaré par le compte",
   "供应商设置已在其他位置更新，已重新加载，请重试": "Les réglages fournisseur ont été mis à jour ailleurs et rechargés. Réessayez.",
   "不可用": "Indisponible",
-  "探测完成": "Sonde terminée",
-  "探测失败: {error}": "Échec de la sonde : {error}",
   "全部供应商协议已关闭": "Tous les protocoles fournisseur sont désactivés",
   "已选择过期范围，已回到第一个供应商": "Ce périmètre n’existe plus ; affichage du premier fournisseur",
   "选择供应商范围": "Choisir un périmètre fournisseur",

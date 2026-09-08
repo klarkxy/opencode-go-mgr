@@ -119,10 +119,12 @@
           <div class="endpoint-field">
             <n-input
               v-model:value="form.endpointUrl"
+              :disabled="endpointLocked"
               :input-props="{ 'aria-label': t('API 地址') }"
               :placeholder="endpointPlaceholder"
             />
-            <p class="field-hint">
+            <p v-if="endpointLocked" class="field-hint">{{ endpointLockHint }}</p>
+            <p v-else class="field-hint">
               {{ t("推荐填写不带 /v1 的 API 根地址；OCG 会自动补全 /v1 和协议路径。已带 /v1 时不会重复添加。") }}
             </p>
           </div>
@@ -349,12 +351,18 @@ const props = withDefaults(defineProps<{
   plan: PlanDefinition | null;
   /** Provider catalog; when null, only the legacy OpenCode Go path is supported. */
   catalog: readonly ProviderCatalogEntry[] | null;
+  /** Linked platform Key: the endpoint is parent-owned and read-only here. */
+  endpointLocked?: boolean;
+  /** Concise parent-owned hint shown in place of the endpoint guidance. */
+  endpointLockHint?: string;
 }>(), {
   account: null,
   isCooling: false,
   busy: false,
   plan: null,
   catalog: null,
+  endpointLocked: false,
+  endpointLockHint: "",
 });
 
 const emit = defineEmits<{

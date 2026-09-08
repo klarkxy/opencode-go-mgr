@@ -623,8 +623,6 @@ export const esESMessages = {
   "账号声明": "Declarado por la cuenta",
   "供应商设置已在其他位置更新，已重新加载，请重试": "Los ajustes del proveedor se actualizaron en otro lugar y se recargaron. Inténtalo de nuevo.",
   "不可用": "No disponible",
-  "探测完成": "Sonda finalizada",
-  "探测失败: {error}": "La sonda falló: {error}",
   "全部供应商协议已关闭": "Todos los protocolos del proveedor están desactivados",
   "已选择过期范围，已回到第一个供应商": "Ese ámbito ya no existe; se muestra el primer proveedor",
   "选择供应商范围": "Seleccionar un ámbito de proveedor",

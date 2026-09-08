@@ -624,8 +624,6 @@ export const ptBRMessages = {
   "账号声明": "Declarado pela conta",
   "供应商设置已在其他位置更新，已重新加载，请重试": "As configurações do fornecedor foram atualizadas em outro lugar e recarregadas. Tente novamente.",
   "不可用": "Indisponível",
-  "探测完成": "Sonda concluída",
-  "探测失败: {error}": "Falha na sonda: {error}",
   "全部供应商协议已关闭": "Todos os protocolos do fornecedor estão desativados",
   "已选择过期范围，已回到第一个供应商": "Esse escopo não existe mais; mostrando o primeiro fornecedor",
   "选择供应商范围": "Selecionar um escopo de fornecedor",

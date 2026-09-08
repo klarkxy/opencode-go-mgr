@@ -166,7 +166,7 @@
               <n-alert
                 v-if="probeSummary"
                 :type="probeSummary.hasFailures ? 'warning' : 'success'"
-                :title="probeSummary.hasFailures ? t('测试完成，部分协议失败') : t('测试完成')"
+                :title="probeSummary.hasFailures ? t('连接测试失败') : t('连接测试成功')"
                 class="providers-probe-summary"
               >
                 <div v-for="result in probeSummary.results" :key="result.protocol" class="providers-probe-result">
@@ -190,7 +190,7 @@
               <n-alert
                 v-if="probeError"
                 type="error"
-                :title="t('探测失败: {error}', { error: probeError })"
+                :title="t('连接测试失败: {error}', { error: probeError })"
               />
               <ProviderModelMatrix
                 :scope="activeScope"
@@ -267,12 +267,12 @@ import { applyAppViewSearchParams, PROVIDER_OTHER_TAB, readProviderScopeQuery } 
 import {
   applyModelContractToResponse,
   catalogRefreshSupported,
+  effectiveModelTestProtocol,
   flattenProviderScopes,
   isSafeSourceUrl,
   modelProtocolOverrideKey,
   normalizeProviderContractsResponse,
   protocolDisplayName,
-  PROVIDER_PROTOCOLS,
   selectProviderScope,
 } from "../domain/provider-contracts.ts";
 import { DEFAULT_PROVIDER_ID } from "../domain/account-providers.ts";
@@ -673,12 +673,21 @@ async function persistOverrides(payload: OverridePayload, sequence: number) {
 async function runModelProbe(payload: { modelId: string }) {
   const scope = activeScope.value;
   if (!scope || actionLocked.value || probingModels.value.has(payload.modelId)) return;
+  // Configured-route test only: the effective preferred protocol, or the first
+  // enabled fallback when the preferred one is disabled. Never a blind scan.
+  const model = scope.models.find((item) => item.model_id === payload.modelId);
+  const protocol = effectiveModelTestProtocol(model);
+  if (!protocol) {
+    probeError.value = t("该模型没有已开启的协议；请先在矩阵中开启后再测试");
+    message.warning(probeError.value);
+    return;
+  }
   probingModels.value = new Set(probingModels.value).add(payload.modelId);
   probeError.value = "";
   try {
     const response = await providerApi.runProtocolProbes(scope.provider_id, {
       model_id: payload.modelId,
-      protocols: [...PROVIDER_PROTOCOLS],
+      protocols: [protocol],
     });
     probeSummary.value = probeSummaryFromResponse(response);
     if (response.contract && contracts.value) {
@@ -690,20 +699,20 @@ async function runModelProbe(payload: { modelId: string }) {
     const loaded = await loadContracts({ retain: true });
     if (!loaded.ok) {
       probeError.value = loaded.error;
-      message.error(t("探测失败: {error}", { error: probeError.value }));
+      message.error(t("连接测试失败: {error}", { error: probeError.value }));
       return;
     }
     const failures = response.results.filter((result) => !result.success);
     if (failures.length > 0) {
-      actionLive.value = t("测试完成，部分协议失败");
+      actionLive.value = t("连接测试失败");
       message.warning(actionLive.value);
       return;
     }
-    actionLive.value = t("探测完成");
-    message.success(t("探测完成"));
+    actionLive.value = t("连接测试成功");
+    message.success(t("连接测试成功"));
   } catch (error) {
     probeError.value = dashboardErrorDetail(error);
-    message.error(t("探测失败: {error}", { error: probeError.value }));
+    message.error(t("连接测试失败: {error}", { error: probeError.value }));
   } finally {
     const next = new Set(probingModels.value);
     next.delete(payload.modelId);
