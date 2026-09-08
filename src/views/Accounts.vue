@@ -331,8 +331,6 @@ const accountListError = ref("");
 const testingAccountId = ref<string | null>(null);
 const providerSettingsSaving = ref<Record<string, boolean>>({});
 const purchaseDateSaving = ref<Record<string, boolean>>({});
-/** Settings revision from `GET /settings`, used for conditional Zen writes. */
-const settingsRevision = ref<number | null>(null);
 const showModal = ref(false);
 const showAddModal = ref(false);
 const showTransfer = ref(false);
@@ -402,8 +400,6 @@ const {
 } = useAccountOrder({
   accounts,
   busy,
-  revision: settingsRevision,
-  runWithFreshRevision: runWithFreshSettingsRevision,
   reloadAfterRevisionConflict: reloadAfterControlPlaneConflict,
 });
 
@@ -570,13 +566,11 @@ function normalizeManagedInviteDraft(): void {
 async function ensureInviteUrlSaved(inviteUrl: string): Promise<void> {
   if (inviteUrl === opencodeInviteUrl.value) return;
   const settings = await dashboardApi.getSettings();
-  settingsRevision.value = settings.revision;
-  const result = await dashboardApi.updateSettings({
+  await dashboardApi.updateSettings({
     ...settings,
     opencode_invite_url: inviteUrl,
   });
   opencodeInviteUrl.value = inviteUrl;
-  settingsRevision.value = result.revision;
 }
 
 function setManagedCreateVisible(show: boolean): void {
@@ -667,10 +661,10 @@ async function createManagedAccount(): Promise<void> {
   try {
     await ensureInviteUrlSaved(inviteUrl);
     const username = managedDraft.value.username.trim();
-    const created = await runWithFreshSettingsRevision(() => dashboardApi.createManagedAccount({
+    const created = await dashboardApi.createManagedAccount({
       name,
       ...(username ? { username } : {}),
-    }));
+    });
     addAccount(created);
     showManagedCreate.value = false;
     managedWizardAccountId.value = created.id;
@@ -688,9 +682,7 @@ async function advanceManagedSetup(accountId: string, setupStep: AccountSetupSte
   if (busy.value) return;
   busy.value = true;
   try {
-    const updated = await runWithFreshSettingsRevision(() => (
-      dashboardApi.advanceAccountSetup(accountId, setupStep)
-    ));
+    const updated = await dashboardApi.advanceAccountSetup(accountId, setupStep);
     replaceAccount(updated);
     message.success(t("注册进度已保存"));
   } catch (error) {
@@ -706,9 +698,7 @@ async function verifyManagedKey(accountId: string, key: string): Promise<void> {
   if (busy.value) return;
   busy.value = true;
   try {
-    const updated = await runWithFreshSettingsRevision(() => (
-      dashboardApi.verifyManagedAccountKey(accountId, key)
-    ));
+    const updated = await dashboardApi.verifyManagedAccountKey(accountId, key);
     replaceAccount(updated);
     if (accountIsReady(updated)) {
       showManagedWizard.value = false;
@@ -763,9 +753,7 @@ async function openAccountBrowser(accountId: string, target: BrowserTarget): Pro
 
 async function resetBrowserProfile(accountId: string): Promise<void> {
   try {
-    const updated = await runWithFreshSettingsRevision(() => (
-      dashboardApi.resetAccountBrowserProfile(accountId)
-    ));
+    const updated = await dashboardApi.resetAccountBrowserProfile(accountId);
     replaceAccount(updated);
     if (!accountIsReady(updated)) {
       delete usageMap.value[accountId];
@@ -780,13 +768,11 @@ async function resetBrowserProfile(accountId: string): Promise<void> {
 
 function replaceAccount(account: Account): void {
   accounts.value = accounts.value.map((item) => (item.id === account.id ? account : item));
-  settingsRevision.value = account.revision ?? settingsRevision.value;
   if (editingAccount.value?.id === account.id) editingAccount.value = account;
 }
 
 function addAccount(account: Account): void {
   accounts.value = [...accounts.value, account];
-  settingsRevision.value = account.revision ?? settingsRevision.value;
 }
 
 function removeAccountState(id: string): void {
@@ -811,7 +797,6 @@ function accountHasUsageDisplay(account: Account): boolean {
 async function refreshAccountState(id: string): Promise<Account | null> {
   const loaded = await accountsStore.loadPresented();
   accounts.value = loaded;
-  settingsRevision.value = loaded[0]?.revision ?? settingsRevision.value;
   const account = loaded.find((item) => item.id === id);
   if (!account) {
     removeAccountState(id);
@@ -847,7 +832,6 @@ async function loadAccounts() {
   try {
     const loaded = await accountsStore.loadPresented();
     accounts.value = loaded;
-    settingsRevision.value = loaded[0]?.revision ?? settingsRevision.value;
     applyAccountDeepLink();
     // 限流并发拉取用量，避免账号多时 N 次请求同时打到后端；Zen Free 无 Key 维度用量。
     // GOAT 的本地估算不依赖 OpenCode Go 定价快照是否加载成功。
@@ -889,10 +873,8 @@ async function loadRegistrationOptions(): Promise<void> {
   ]);
   if (settingsResult.status === "fulfilled") {
     opencodeInviteUrl.value = settingsResult.value.opencode_invite_url || "";
-    settingsRevision.value = settingsResult.value.revision;
   } else {
     opencodeInviteUrl.value = "";
-    settingsRevision.value = null;
   }
   if (browserResult.status === "fulfilled") {
     browserCapabilities.value = browserResult.value;
@@ -947,7 +929,7 @@ async function onFormSave(payload: AccountInput | AccountFormPayload) {
     }
     busy.value = true;
     try {
-      const saved = await runWithFreshSettingsRevision(() => dashboardApi.updateAccount(editing.id, update));
+      const saved = await dashboardApi.updateAccount(editing.id, update);
       replaceAccount(saved);
       // purchase_date defines the monthly usage window and changing it clears
       // the persisted calibration offset, so the local usage snapshot must be
@@ -968,9 +950,8 @@ async function onFormSave(payload: AccountInput | AccountFormPayload) {
     };
     busy.value = true;
     try {
-      const created = await runWithFreshSettingsRevision(() => dashboardApi.createAccount(input));
+      const created = await dashboardApi.createAccount(input);
       addAccount(created);
-      settingsRevision.value = created.revision ?? settingsRevision.value;
       message.success(t("账号已添加"));
       // Go uses official usage; GOAT and Ollama project locally priced OCG request logs.
       if (accountHasUsageDisplay(created) && accountIsReady(created)) {
@@ -999,9 +980,9 @@ async function updatePurchaseDate(accountId: string, purchaseDate: string): Prom
 
   purchaseDateSaving.value[accountId] = true;
   try {
-    const saved = await runWithFreshSettingsRevision(() => dashboardApi.updateAccount(accountId, {
+    const saved = await dashboardApi.updateAccount(accountId, {
       purchase_date: purchaseDate,
-    }));
+    });
     replaceAccount(saved);
     if (accountHasUsageDisplay(saved)) await loadAccountUsage(saved.id);
     message.success(t("购买日期已更新"));
@@ -1036,18 +1017,10 @@ async function saveCustomAccountEdit(
   try {
     await executeCustomAccountEdit(editing, payload, {
       account: async (update) => {
-        replaceAccount(await runWithFreshSettingsRevision(() => dashboardApi.updateAccount(editing.id, update)));
+        replaceAccount(await dashboardApi.updateAccount(editing.id, update));
       },
       customConfig: async (config) => {
-        replaceAccount(await runWithFreshSettingsRevision(() => dashboardApi.updateAccountCustomConfig(
-          editing.id,
-          config,
-        )));
-      },
-      capabilities: async (capabilities) => {
-        replaceAccount(await runWithFreshSettingsRevision(() => (
-          dashboardApi.updateAccountModelCapabilities(editing.id, capabilities)
-        )));
+        replaceAccount(await dashboardApi.updateAccountCustomConfig(editing.id, config));
       },
     });
 
@@ -1075,7 +1048,7 @@ async function toggleAccount(id: string) {
     return;
   }
   try {
-    const updated = await runWithFreshSettingsRevision(() => dashboardApi.toggleAccount(id));
+    const updated = await dashboardApi.toggleAccount(id);
     replaceAccount(updated);
   } catch (e) {
     if (await recoverAccountMutationConflict(e)) return;
@@ -1083,24 +1056,15 @@ async function toggleAccount(id: string) {
   }
 }
 
-async function runWithFreshSettingsRevision<T>(
-  mutation: () => Promise<T>,
-): Promise<T> {
-  return mutation();
-}
-
 async function reloadAfterControlPlaneConflict(): Promise<void> {
   const knownIds = new Set(accounts.value.map(({ id }) => id));
-  const [settingsResult, accountsResult] = await Promise.allSettled([
-    dashboardApi.getSettings(),
-    accountsStore.loadPresented(),
-  ]);
-  settingsRevision.value = settingsResult.status === "fulfilled"
-    ? settingsResult.value.revision
-    : null;
-  if (accountsResult.status !== "fulfilled") return;
+  let loaded: Account[];
+  try {
+    loaded = await accountsStore.loadPresented();
+  } catch {
+    return;
+  }
 
-  const loaded = accountsResult.value;
   const loadedIds = new Set(loaded.map(({ id }) => id));
   for (const id of knownIds) {
     if (!loadedIds.has(id)) removeAccountState(id);
@@ -1143,10 +1107,9 @@ async function saveZenProviderSettings(
   if (providerSettingsSaving.value[account.id]) return;
   providerSettingsSaving.value[account.id] = true;
   try {
-    const result = await runWithFreshSettingsRevision(() => providerApi.updateProviderSettings(account.id, {
+    const result = await providerApi.updateProviderSettings(account.id, {
       enabled,
-    }));
-    settingsRevision.value = result.revision;
+    });
     replaceAccount(result.account);
     if (successMessage) message.success(successMessage);
   } catch (error) {
@@ -1160,11 +1123,7 @@ async function saveZenProviderSettings(
 
 async function deleteAccount(id: string) {
   try {
-    await runWithFreshSettingsRevision(() => dashboardApi.deleteAccount(id));
-    // DELETE returns the new revision in a response header; the shared JSON
-    // transport intentionally stays body-only, so reload it before the next
-    // mutation instead of guessing the counter.
-    settingsRevision.value = null;
+    await dashboardApi.deleteAccount(id);
     message.success(t("账号已删除"));
     removeAccountState(id);
   } catch (e) {
@@ -1175,9 +1134,7 @@ async function deleteAccount(id: string) {
 
 async function resetCooldown(id: string) {
   try {
-    const updated = await runWithFreshSettingsRevision(() => (
-      dashboardApi.resetAccountCooldown(id)
-    ));
+    const updated = await dashboardApi.resetAccountCooldown(id);
     replaceAccount(updated);
     message.success(t("已重置冷却"));
   } catch (e) {
