@@ -9,6 +9,8 @@
 - [新增供应商](user/add-provider.zh-CN.md) — 创建用户定义供应商、通过 Custom API 接入单个兼容上游，或贡献一个具备完整 HTTP 与路由契约的密封内置供应商。
 - [手动客户端配置](user/add-application.zh-CN.md) — 通过 Gateway API 直接连接客户端。
 
+- [New API 与 Sub2API 账号](user/platform-accounts.zh-CN.md) — 归组多个 Custom API Key，手动刷新分范围额度和价格，保留全局路由顺序。
+
 ## 章节
 
 - [产品定位](user/overview.zh-CN.md) — 产品定位与 Gateway 承担的四个职责。

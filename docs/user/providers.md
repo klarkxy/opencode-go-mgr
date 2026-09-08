@@ -2,6 +2,20 @@
 
 # Providers
 
+## Protocol defaults and connection tests
+
+Each user-defined Provider supplies the default endpoint, protocol and authentication. A model inherits them unless its mapping has an explicit protocol and endpoint override. Clearing the override restores inheritance. Authentication remains Provider-owned. Different public aliases for one upstream model must resolve to the same route.
+
+Routing uses the model preference first, then the Provider fallback among enabled protocols. The client's wire format does not override that choice. CPA preserves supported Chat, Responses and Messages client formats for CPA to handle; Gemini clients are converted to Chat.
+
+Official presets initialize new Providers from documented defaults. Manual configuration starts with unverified Chat. There is no automatic protocol scan, and template updates never rewrite saved choices. New API and Sub2API are site types with independent instances; their linked Custom accounts retain account-owned configuration.
+
+**Test model** sends a minimal request using the selected model's effective configuration. It does not guess alternate URLs, enable protocols or change preference. Draft tests need an explicit temporary Key; account tests use that account's saved Key. Model discovery is separate and does not certify inference support.
+
+Defaults reviewed on **2026-09-08**: xAI uses [Responses](https://docs.x.ai/developers/model-capabilities/text/comparison); MiniMax uses [Messages with Bearer auth](https://platform.minimax.io/docs/api-reference/text-chat-anthropic). Other presets retain documented compatible defaults. Built-in model profiles and manual disabled states remain in effect.
+
+**New Provider** includes reviewed [official API presets](provider-presets.md), with separate regional/plan endpoints and selected established aggregation platforms. Select a preset, enter its Key and models, then save.
+
 Want to connect another upstream or contribute a built-in integration? Start with [Add a Provider](add-provider.md), which includes user-defined Providers, Custom API, and the sealed Adapter Registry path.
 
 **Providers** is the supplier control plane — the page you land on when an old
@@ -43,8 +57,7 @@ runs in the background; only affected cells show saving progress.
 
 Underlying static, preset, and probe evidence remains in the contract, but is
 not shown as a separate badge in this compact matrix. `auto` remains the stored
-default until an explicit switch or a successful probe writes an override. A
-successful provider-level probe pins `force_on`. Failed account attempts are
+default until an explicit switch writes an override. Connection tests record observations only. Failed account attempts are
 reported and retained as evidence, but never pin the shared protocol
 `force_off`; only an explicit switch can do that.
 
@@ -59,7 +72,7 @@ other Provider families, with newly discovered non-preset models still off by
 default. MiniMax CN and Kimi Code CN both default to Chat Completions and
 Messages; neither advertises Responses. Protocols absent from the official
 baseline remain off until an administrator explicitly enables a constructible
-path or a successful explicit probe records positive evidence.
+path through a manual setting.
 
 The compact source line, refresh action, and matrix share one content panel.
 Every refreshable scope uses the same action. OpenCode Go refreshes from the
@@ -82,7 +95,7 @@ Before the first successful refresh, the built-in static catalog is the initial
 preset. After success, the saved official snapshot is authoritative and
 replaces that preset. Models newly added by a refresh are visible in the matrix.
 For OpenCode Go and Command Code, new protocol cells remain disabled until you
-turn one on or a successful Test confirms it. MiniMax CN and Kimi Code CN rows
+explicitly turn one on. MiniMax CN and Kimi Code CN rows
 enable their sealed Chat Completions and Messages contracts; Responses stays
 unsupported. Existing overrides and probe results for
 surviving models are preserved. A failed or empty refresh keeps the previous
@@ -116,8 +129,8 @@ no route. Authenticated downstream `GET /v1/models` publishes only routeable
 public names. It omits raw-only identities and raw-name conflicts; an ambiguous
 raw identity fails as `ambiguous_model_id` without an upstream request.
 
-Every built-in Provider row has a **Test** button.
-For each probeable protocol the provider automatically tries its eligible
+Built-in Provider rows whose adapter exposes connection testing have a **Test** button. The dashboard tests the effective configured protocol.
+For the configured protocol the provider automatically tries its eligible
 accounts in saved routing order and stops at the first success. OpenCode Go and
 Zen Free use their constructable protocol set. GOAT tests only its sealed native
 family path: Messages for Anthropic IDs and Chat Completions otherwise. MiniMax

@@ -33,7 +33,11 @@ GUI 或 CLI 启动时会原地执行 SQLite 迁移。打开新版二进制前：
 
 ## Schema v27 与 pre-v3 快照
 
-`CURRENT_SCHEMA_VERSION = 37`（`crates/ocg-core/src/db.rs`）。打开历史库会先规范迁移到 v26，再由 v27 重写把主 Key 与全部 `sub_gateway_keys` 行复制进一张 `access_keys` 表（主 Key 固定 id `00000000-0000-0000-0000-000000000001`），删除 `sub_gateway_keys`，并删除 `accounts` 上遗留的五列 `usage_sync_*`（用量同步元数据在 `provider_usage_sync_state`）。v33 新增 Custom 精确上游模型身份；v34 新增 CPA 单例配置表，但不会导入或导出 CPA 状态。v35 把 Provider/Plan 身份收成只有 `provider_id`：先预检每一个已知的 v34 provider/offering 对，未知对与会丢数据的复合键冲突在写入前失败，再重建受影响的表，使 offering 列不存在。v36 增量创建过 `ollama_cloud_usage_state`（未发布的 Cookie 用量抓取）。v37 删除该表且不动账号 Key 与日志，并创建 `ollama_cloud_billing`。账号 `key_cipher` / `password_cipher` 用 Host cipher 就地校验，**不会重新加密**。
+`CURRENT_SCHEMA_VERSION = 40`（`crates/ocg-core/src/db.rs`）。打开历史库会先规范迁移到 v26，再由 v27 重写把主 Key 与全部 `sub_gateway_keys` 行复制进一张 `access_keys` 表（主 Key 固定 id `00000000-0000-0000-0000-000000000001`），删除 `sub_gateway_keys`，并删除 `accounts` 上遗留的五列 `usage_sync_*`（用量同步元数据在 `provider_usage_sync_state`）。v33 新增 Custom 精确上游模型身份；v34 新增 CPA 单例配置表，但不会导入或导出 CPA 状态。v35 把 Provider/Plan 身份收成只有 `provider_id`：先预检每一个已知的 v34 provider/offering 对，未知对与会丢数据的复合键冲突在写入前失败，再重建受影响的表，使 offering 列不存在。v36 增量创建过 `ollama_cloud_usage_state`（未发布的 Cookie 用量抓取）。v37 删除该表且不动账号 Key 与日志，并创建 `ollama_cloud_billing`。账号 `key_cipher` / `password_cipher` 用 Host cipher 就地校验，**不会重新加密**。
+
+## Schema v40 — 模型路由覆盖
+
+Schema v40 为 `dynamic_provider_models` 增加可空的 `upstream_override` JSON，保存模型显式协议与地址。空值继承原供应商默认配置，不改写账号凭据或现有路由。供应商替换与节点导入原子保存完整模型列表。V5 节点备份携带可选 `upstreamOverride`；没有该字段的旧备份继续继承默认值。旧读取器会拒绝未知字段，不会静默丢弃模型路由设置。降级应恢复升级前的完整数据目录备份。
 
 ## Schema v31 — 按模型/按协议覆盖
 
@@ -71,6 +75,12 @@ v36 创建 `ollama_cloud_usage_state` 表。每个已配置账号一行，包含
 - `last_error`、`last_success_at`、`last_attempt_at`、`next_eligible_at`、`failure_streak` — 手动刷新 30 秒限速与最近一次尝试的元数据。
 
 该行以 `account_id` 为键并 `ON DELETE CASCADE`，删除账号会带走用量状态；清除 Cookie 会删除该行并回到未配置。该迁移只做加法：现有表、行和路由事实保持不变。它不新增备份族。回滚仍是既有的整目录恢复。
+
+## Schema v38 — 平台账号归属
+
+v38 新增 `platform_accounts` 与 `platform_links`，保留既有账号 ID、Key、顺序、冷却、模型与日志。父账号地址不可变，关联指向既有 Custom API 账号；建立关联与生成端点在同一事务内完成。存在关联 Key 时禁止删除父账号，删除子账号会删除其关联。
+
+新节点导出使用 V5 负载，不包含平台管理凭证和缓存观察值；仍支持 V4 导入。导入关联保持未验证，同一父账号 ID 的平台类型或地址冲突会使整笔导入回滚。回滚沿用完整目录备份恢复，v38 不增加另一套备份机制。
 
 ## Schema v37 — Ollama Cloud 计费档位
 
@@ -117,3 +127,7 @@ Windows 上用 `Get-FileHash -Algorithm SHA256` 与 sidecar 第一个字段比�
 ---
 
 [维护者指南索引](../MAINTAINER.zh-CN.md) · [English](storage-migration.md) · [文档索引](../README.zh-CN.md)
+
+## Schema v39 — 预设来源
+
+v39 为用户定义供应商增加可空的 `preset_id`，在资源地址需要自填或名称修改后保留选择的配置模板。它不控制路由，也不是平台实例身份；既有行保持未分类。V5 迁移负载携带该可选字段，仍接受没有此字段的旧负载。

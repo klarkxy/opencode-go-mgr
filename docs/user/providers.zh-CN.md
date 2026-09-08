@@ -2,6 +2,20 @@
 
 # 供应商
 
+## 协议默认值与连接测试
+
+每个用户定义供应商提供默认地址、协议和鉴权方式。模型没有覆盖时继承供应商配置；模型显式设置协议与地址时优先使用模型设置，清除覆盖即恢复继承。鉴权仍归供应商所有。同一上游模型的多个公开别名必须解析到相同路由。
+
+路由优先使用模型首选协议，再从已启用协议中按供应商顺序回退；客户端格式不会覆盖该选择。CPA 保持 Chat、Responses、Messages 客户端格式交给 CPA，Gemini 客户端请求转换为 Chat。
+
+官方预设按文档默认值初始化新供应商，手动配置初始为未验证的 Chat。不自动扫描其他协议，模板更新不改写已经保存的选择。New API、Sub2API 是可包含多个独立实例的站点类型，其关联 Custom 账号仍保留账号所有的配置。
+
+**测试模型**只按所选模型的有效配置发送最小请求，不猜测其他地址，不自动开启协议、不改变优先级。草稿测试需要显式填写临时 Key，账号测试使用该账号已保存的 Key。模型目录拉取是独立动作，不证明推理一定可用。
+
+默认值复核于 **2026-09-08**：xAI 使用 [Responses](https://docs.x.ai/developers/model-capabilities/text/comparison)，MiniMax 使用 [Messages 与 Bearer 鉴权](https://platform.minimax.io/docs/api-reference/text-chat-anthropic)。其他预设保留文档中的兼容默认值，内置模型设置与用户手动禁用状态继续生效。
+
+**新建供应商** 提供经过核实的[官方 API 预设](provider-presets.zh-CN.md)，区分地区与套餐端点，并包含选定的成熟聚合平台。选择预设、填写 Key 和模型后即可保存。
+
 要接入另一个上游或贡献内置集成，请先阅读[新增供应商](add-provider.zh-CN.md)；其中包含用户定义供应商、Custom API 与密封适配器注册表路径。
 
 **供应商** 是供应商控制面——如果你的旧书签还挂着 `?view=pricing`，进来的就是这个视图。
@@ -18,15 +32,15 @@
 
 **模型目录** 是本地的。矩阵只列出当前目录中的模型，并以三个上游协议（Chat Completions、Responses、Messages）为列。每格是 effective 模型/协议状态的二态开关：打开写入 `force_on`，关闭写入 `force_off`；列菜单可以整列打开或关闭。开关会先立即更新显示，再在后台执行带 CAS 保护的保存，只有受影响的格子显示保存进度。
 
-底层静态、预设与探测证据仍保留在合约中，但紧凑矩阵不再显示独立徽标。显式开关或成功探测写入覆盖前，存储默认仍是 `auto`。供应商级探测成功会固定为 `force_on`；账号尝试失败会报告并保留证据，但不会把共享协议固定为 `force_off`，只有显式关闭开关才会这样做。
+底层静态、预设与探测证据仍保留在合约中，但紧凑矩阵不再显示独立徽标。显式开关写入覆盖前，存储默认仍是 `auto`。连接测试只记录观察结果；账号尝试失败会报告并保留证据，但不会把共享协议固定为 `force_off`，只有显式关闭开关才会这样做。
 
-内置 **OpenCode Go**、**Zen Free**、**Command Code GOAT**、**MiniMax CN** 与 **Kimi Code CN** 的目录头部都提供 **恢复官方协议基线**。它不会请求上游，保留当前模型目录，清除手动开关和探测证据，并恢复 **2026-09-06** 审阅的开发时官方基线。OpenCode Go 与已知 Zen 行默认使用各自文档中的单一上游端点。GOAT 对 Anthropic 模型 ID 使用 Messages，对其余 Provider 家族使用 Chat Completions，新发现的非预设模型默认关闭。MiniMax CN 与 Kimi Code CN 默认同时支持 Chat Completions 与 Messages，不宣称 Responses。官方基线中没有的协议保持关闭，直到管理员显式打开可构造路径或成功探测写入证据。
+内置 **OpenCode Go**、**Zen Free**、**Command Code GOAT**、**MiniMax CN** 与 **Kimi Code CN** 的目录头部都提供 **恢复官方协议基线**。它不会请求上游，保留当前模型目录，清除手动开关和探测证据，并恢复 **2026-09-06** 审阅的开发时官方基线。OpenCode Go 与已知 Zen 行默认使用各自文档中的单一上游端点。GOAT 对 Anthropic 模型 ID 使用 Messages，对其余 Provider 家族使用 Chat Completions，新发现的非预设模型默认关闭。MiniMax CN 与 Kimi Code CN 默认同时支持 Chat Completions 与 Messages，不宣称 Responses。官方基线中没有的协议保持关闭，直到管理员显式打开可构造路径。
 
 轻量来源信息、刷新动作与矩阵共用同一块内容区域。所有可刷新的范围使用同一个动作：OpenCode Go 由后端选择符合条件的 Go 账号访问官方鉴权目录；Zen Free 访问固定的官方无鉴权目录 `https://opencode.ai/zen/v1/models`；Command Code 直接访问固定的公开官方 `/models` 目录，不选择账号。刷新始终由用户显式触发。
 
 MiniMax 与 Kimi 需要一个符合条件的账号 Key。MiniMax 刷新 `https://api.minimaxi.com/v1/models`；Kimi 刷新 `https://api.kimi.com/coding/v1/models`。保存的模型只激活代码内的密封映射；无法匹配的模型保留为精确 raw ID。MiniMax 把 M3、M2.7/M2.5/M2.1 的标准与 highspeed 变体，以及 M2 映射到对应的小写 kebab Alias。Kimi 映射为 `kimi-for-coding` → `kimi-k2.7-code`、`kimi-for-coding-highspeed` → `kimi-k2.7-code-highspeed`、`k3` → `kimi-k3`、`k3-256k` → `kimi-k3-256k`。转发始终保留每个准确的上游 ID。
 
-首次成功刷新前，内置静态目录只是初始预设；刷新成功后，保存的官方快照成为权威目录并替代静态预设。刷新新增的模型会出现在矩阵中。OpenCode Go 与 Command Code 的新增协议单元格默认关闭，只有手动打开或测试成功后才会启用；MiniMax CN 与 Kimi Code CN 则启用密封合约中的 Chat Completions 与 Messages，Responses 不受支持。仍留在目录中的模型会保留既有覆盖与探测结果；刷新失败或结果为空时继续保留旧快照。
+首次成功刷新前，内置静态目录只是初始预设；刷新成功后，保存的官方快照成为权威目录并替代静态预设。刷新新增的模型会出现在矩阵中。OpenCode Go 与 Command Code 的新增协议单元格默认关闭，只有手动打开才会启用；MiniMax CN 与 Kimi Code CN 则启用密封合约中的 Chat Completions 与 Messages，Responses 不受支持。仍留在目录中的模型会保留既有覆盖与探测结果；刷新失败或结果为空时继续保留旧快照。
 
 Custom API 继续使用账号所有的公开名称 → 上游 ID 映射，发现结果不会静默替换它们。账号表单里的 **获取模型** 只是未保存表单辅助，且只返回上游 ID。选择一个 ID 时，原样导入为“公开名称 = 上游 ID”。Command Code 使用官方公开的 `/models` 目录：GOAT 预设默认开启，后续发现的额外模型默认关闭，只有在矩阵中开启其受支持协议后才会供应。
 
@@ -34,7 +48,7 @@ Custom API 继续使用账号所有的公开名称 → 上游 ID 映射，发现
 
 当某个供应商的模型/协议单元格全部关闭时，该供应商不再产生路由。带鉴权的下游 `GET /v1/models` 只公布可路由的公开名称；raw-only 身份和 raw 名称冲突都会排除。歧义 raw 身份以 `ambiguous_model_id` 失败，绝不请求上游。
 
-所有内置供应商的每行都有 **测试** 按钮。供应商会按已保存的路由顺序自动尝试符合条件的账号，并在首次成功后停止。OpenCode Go 与 Zen Free 使用各自可构造的协议集合；GOAT 只测试密封的原生家族路径（Anthropic ID 使用 Messages，其他 ID 使用 Chat Completions）；MiniMax CN 与 Kimi Code CN 测试密封的 Chat Completions 与 Messages 路径。Custom 端点测试仍由具体账号所有。模型必须属于当前供应商目录，包括静态表尚未收录的新拉取模型。Popconfirm 会提示这些真实最小请求可能消耗额度。页面会在矩阵上方逐项展示成功、失败或跳过状态、HTTP 状态、可读的上游错误消息，以及上游给出时的安全帮助/计费链接；每个真实账号尝试都会写入脱敏的请求日志，协议探测内容不会进入运行日志。单个账号失败不会禁用其他符合条件账号可以服务的协议。
+适配器开放连接测试的内置供应商行提供 **测试** 按钮，测试当前有效配置选择的协议。供应商会按已保存的路由顺序自动尝试符合条件的账号，并在首次成功后停止。OpenCode Go 与 Zen Free 使用各自可构造的协议集合；GOAT 只测试密封的原生家族路径（Anthropic ID 使用 Messages，其他 ID 使用 Chat Completions）；MiniMax CN 与 Kimi Code CN 测试密封的 Chat Completions 与 Messages 路径。Custom 端点测试仍由具体账号所有。模型必须属于当前供应商目录，包括静态表尚未收录的新拉取模型。Popconfirm 会提示这些真实最小请求可能消耗额度。页面会在矩阵上方逐项展示成功、失败或跳过状态、HTTP 状态、可读的上游错误消息，以及上游给出时的安全帮助/计费链接；每个真实账号尝试都会写入脱敏的请求日志，协议探测内容不会进入运行日志。单个账号失败不会禁用其他符合条件账号可以服务的协议。
 
 **价格** 按所选供应商限定范围。**刷新价格表** 只抓取并校验当前所选 Provider 自己的官方来源。OpenCode 与 Command Code 的 revision 和最后成功快照彼此独立；一个失败不会动另一个。以后某个 Provider 若包含多个有价格的 Plan，一次操作也只刷新该 Provider 内的 Plan。刷新仍只能手动发起：
 

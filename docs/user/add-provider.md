@@ -15,6 +15,7 @@ The **Adapter Registry** stays static and sealed. User-defined Providers are typ
 ## Create a user-defined Provider
 
 1. Open **Providers** and choose **New Provider**.
+   Select an [official API preset](provider-presets.md) to fill the connection fields, or continue with manual configuration. Changing presets clears the draft Key and model mappings.
 2. Enter a name, one API Endpoint, one upstream protocol (Chat Completions, Responses, or Messages), and one auth kind (Bearer, `x-api-key`, or none).
 3. Add at least one public-model → exact-upstream-ID mapping. **Fetch models** is optional and does not save.
 4. If auth requires a Key, enter the first account name and a write-only Key. A no-auth Provider creates one singleton account without a Key.
