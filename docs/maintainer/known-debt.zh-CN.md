@@ -17,7 +17,7 @@
 - Responses 端点是无状态。`previous_response_id`、`conversation`、 `store: true`、`background: true` 返回 `400`。详见 `protocol.rs` 和[限制](../user/limits.zh-CN.md)。
 - Gemini 是客户端兼容格式。转发、`400` 与 `501` 行为见[限制](../user/limits.zh-CN.md)和[协议转换](../user/protocol-conversion.zh-CN.md)。
 - Claude Desktop 公布三个固定 Claude 别名，再映射到受支持的实际模型。
-- Command Code GOAT 没有可机读的官方用量端点。其公开模型目录不能验证已保存 Key，因此鉴权失败只能从真实推理 401/403 得知。Custom API 仍是独立的已上线路由，遵循受信管理员边界（`custom.rs` + `custom_http.rs`）。
+- Command Code GOAT 账号用量来自官方 CLI 使用、但公开 Provider API 未文档化的第一方 `/alpha/billing/credits` 端点。其响应稳定性没有公开契约保证，因此手工刷新会校验精确 GOAT 上限，并在 schema 或套餐漂移时 fail closed。公开模型目录仍不能验证已保存 Key，因此鉴权失败只能从真实推理 401/403 得知。Custom API 仍是独立的已上线路由，遵循受信管理员边界（`custom.rs` + `custom_http.rs`）。
 - 按模型/按协议覆盖已在 V3。Custom 账号级按协议探测暂无 V3 对应端点；历史 V2 账号侧探测路径已 410。Custom 验证与模型发现是现行路径。
 
 ## 明确非目标

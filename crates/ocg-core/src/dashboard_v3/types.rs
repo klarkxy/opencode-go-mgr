@@ -2598,8 +2598,8 @@ pub struct BrowserCapabilities {
 }
 
 /// POST `/accounts/{id}/usage/refresh` result. Nested `usage` is the V3
-/// window projection; `revision` is captured after the shared coordinator
-/// returns and is not advanced by official calibration.
+/// window projection; `revision` is captured after the provider-specific
+/// refresh returns and is not advanced by official calibration.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 #[schemars(rename_all = "camelCase", deny_unknown_fields)]
