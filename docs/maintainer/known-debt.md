@@ -9,10 +9,6 @@ proposal or pull request, with corresponding code and documentation changes.
 
 ## Known Debt
 
-- The legacy Applications subsystem is retired. Its guide generation, Desktop
-  connectors, Pi/DSH templates, related APIs, and tests still need code cleanup.
-  A replacement will be designed separately; see the [retirement notice](../user/applications.md).
-
 - Auto-start is capability-gated: Windows x64, macOS, and Linux x64
   release/installed Tauri processes inject the login-start sync hook.
   Development builds, the CLI, and Docker dashboards do not expose the

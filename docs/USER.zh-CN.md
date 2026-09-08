@@ -17,7 +17,7 @@
 - [接入第一个客户端](user/first-client.zh-CN.md) — 复制 Key 与 API Base URL，用一个请求验证连通。
 - [升级、备份、恢复与卸载](user/upgrade-backup.zh-CN.md) — 升级通道、手动升级、备份、恢复与卸载。
 - [管理面板](user/dashboard.zh-CN.md) — 七个核心页面、扩展分组、国际化与接入中心。
-- [旧应用功能——已退役](user/applications.zh-CN.md) — 退役范围与残留实现说明。
+- [旧应用功能——已退役](user/applications.zh-CN.md) — 退役范围。
 - [账号](user/accounts.zh-CN.md) — Plan、凭据、排序、额度行为与托管注册。
 - [供应商](user/providers.zh-CN.md) — 目录、供应商合约、按模型协议覆盖、探测与用户定义供应商。
 - [日志与设置](user/logs-settings.zh-CN.md) — 请求日志、设置、代理模式与主题。

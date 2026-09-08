@@ -2,10 +2,6 @@
 
 # HTTP Routes
 
-Legacy Applications routes and model-list behavior mentioned below describe
-remaining implementation pending cleanup, not a supported application subsystem.
-See the [retirement notice](../user/applications.md).
-
 All routes share one port: inference, Dashboard V3, V2 tombstone, and SPA. See [Architecture](architecture.md).
 
 Retired `/dashboard/api/...` REST returns empty-body **401** when anonymous

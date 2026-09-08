@@ -132,15 +132,6 @@ export type DashboardApiV3 =
   | AccountImportDisposition
   | AccountImportRequest
   | AccountImportResult
-  | ApplicationConnectorAction
-  | ApplicationConnectorStatus
-  | ApplicationConnectorChange
-  | ApplicationConnectorItem
-  | ApplicationConnectors
-  | ApplicationConnectorPreviewRequest
-  | ApplicationConnectorPreview
-  | ApplicationConnectorCommitRequest
-  | ApplicationConnectorCommitResult
   | CpaIntegration
   | CpaIntegrationUpdate
   | CpaTestRequest
@@ -283,16 +274,6 @@ export type BrowserTarget = "google_signup" | "google_login" | "github_signup" |
  */
 export type DesktopUpdatePhase = "idle" | "checking" | "downloading" | "installing" | "failed";
 export type AccountImportDisposition = "import" | "imported" | "merge" | "merged" | "duplicate";
-/**
- * Operation supported by the local Desktop application-connector Host.
- */
-export type ApplicationConnectorAction = "connect" | "restore";
-/**
- * Secret-free connector state. Automatic writes exist only in the local
- * Desktop Host; every other runtime reports `unsupported_runtime`.
- */
-export type ApplicationConnectorStatus =
-  "unsupported_runtime" | "not_detected" | "manual_only" | "ready" | "connected" | "conflict" | "partial";
 export type CpaOAuthProvider = "codex" | "anthropic" | "antigravity" | "kimi" | "xai";
 export type CpaCliImportOutcome = "imported" | "alreadyImported" | "unconfirmed";
 export type CpaRuntimePhase = "idle" | "checking" | "downloading" | "installing" | "starting" | "failed";
@@ -1074,7 +1055,7 @@ export interface GatewayStatus {
   upstreamBaseUrl: string;
 }
 /**
- * Local Applications picker: Go routable Alias 鈭?current pricing snapshot.
+ * Local Go-routable Alias ∩ current Go pricing snapshot (no request-time upstream).
  */
 export interface ApplicationModels {
   models: string[];
@@ -1714,84 +1695,6 @@ export interface AccountImportResult {
   duplicateAccounts: number;
   importedAccounts: number;
   items: AccountImportPreviewItem[];
-  processGeneration: number;
-  revision: number;
-}
-/**
- * One redacted field-level change. Sensitive values are represented by a
- * fixed mask; this DTO never carries a plaintext Key or whole config file.
- */
-export interface ApplicationConnectorChange {
-  after: string | null;
-  before: string | null;
-  field: string;
-  sensitive: boolean;
-}
-/**
- * One of the eight statically supported local client surfaces.
- */
-export interface ApplicationConnectorItem {
-  automatic: boolean;
-  detail: string | null;
-  detected: boolean;
-  id: string;
-  status: ApplicationConnectorStatus;
-  targetPaths: string[];
-}
-/**
- * GET `/applications/connectors` response.
- */
-export interface ApplicationConnectors {
-  items: ApplicationConnectorItem[];
-  processGeneration: number;
-  revision: number;
-}
-/**
- * POST `/applications/connectors/{id}/preview` request. Paths, Gateway URLs,
- * config text and Key material are intentionally not accepted from callers.
- */
-export interface ApplicationConnectorPreviewRequest {
-  action: ApplicationConnectorAction;
-  keyId?: string | null;
-  modelValues?: {
-    [k: string]: string;
-  };
-}
-/**
- * Redacted preview tied to the current target-file state by `fingerprint`.
- */
-export interface ApplicationConnectorPreview {
-  action: ApplicationConnectorAction;
-  changes: ApplicationConnectorChange[];
-  detail: string | null;
-  fingerprint: string;
-  id: string;
-  processGeneration: number;
-  revision: number;
-  status: ApplicationConnectorStatus;
-  targetPaths: string[];
-}
-/**
- * POST `/applications/connectors/{id}/commit` request. CAS protects the OCG
- * selection while `previewFingerprint` protects the external config files.
- */
-export interface ApplicationConnectorCommitRequest {
-  action: ApplicationConnectorAction;
-  expectedRevision: number;
-  keyId?: string | null;
-  modelValues?: {
-    [k: string]: string;
-  };
-  previewFingerprint: string;
-  processGeneration: number;
-}
-/**
- * Successful commit result. The settings revision advances exactly once for
- * a real external write and stays unchanged for a verified no-op.
- */
-export interface ApplicationConnectorCommitResult {
-  changed: boolean;
-  connector: ApplicationConnectorItem;
   processGeneration: number;
   revision: number;
 }

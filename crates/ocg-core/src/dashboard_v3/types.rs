@@ -25,7 +25,6 @@ use schemars::JsonSchema;
 use schemars::generate::{SchemaGenerator, SchemaSettings};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
-use std::collections::BTreeMap;
 
 use crate::models::{AccountSetupStep as ModelAccountSetupStep, AccountType as ModelAccountType};
 use crate::provider::{
@@ -170,15 +169,6 @@ pub const CATALOG_TYPE_NAMES: &[&str] = &[
     "AccountImportDisposition",
     "AccountImportRequest",
     "AccountImportResult",
-    "ApplicationConnectorAction",
-    "ApplicationConnectorStatus",
-    "ApplicationConnectorChange",
-    "ApplicationConnectorItem",
-    "ApplicationConnectors",
-    "ApplicationConnectorPreviewRequest",
-    "ApplicationConnectorPreview",
-    "ApplicationConnectorCommitRequest",
-    "ApplicationConnectorCommitResult",
     "CpaIntegration",
     "CpaIntegrationUpdate",
     "CpaTestRequest",
@@ -2082,7 +2072,7 @@ pub struct GatewayStatus {
     pub pricing_revision: String,
 }
 
-/// Local Applications picker: Go routable Alias 鈭?current pricing snapshot.
+/// Local Go-routable Alias ∩ current Go pricing snapshot (no request-time upstream).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 #[schemars(rename_all = "camelCase", deny_unknown_fields)]
@@ -2091,122 +2081,6 @@ pub struct ApplicationModels {
     pub revision: u64,
     pub process_generation: u64,
     pub pricing_revision: String,
-}
-
-/// Operation supported by the local Desktop application-connector Host.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-#[schemars(rename_all = "snake_case")]
-pub enum ApplicationConnectorAction {
-    Connect,
-    Restore,
-}
-
-/// Secret-free connector state. Automatic writes exist only in the local
-/// Desktop Host; every other runtime reports `unsupported_runtime`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-#[schemars(rename_all = "snake_case")]
-pub enum ApplicationConnectorStatus {
-    UnsupportedRuntime,
-    NotDetected,
-    ManualOnly,
-    Ready,
-    Connected,
-    Conflict,
-    Partial,
-}
-
-/// One redacted field-level change. Sensitive values are represented by a
-/// fixed mask; this DTO never carries a plaintext Key or whole config file.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-#[schemars(rename_all = "camelCase", deny_unknown_fields)]
-pub struct ApplicationConnectorChange {
-    pub field: String,
-    pub before: Option<String>,
-    pub after: Option<String>,
-    pub sensitive: bool,
-}
-
-/// One of the eight statically supported local client surfaces.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-#[schemars(rename_all = "camelCase", deny_unknown_fields)]
-pub struct ApplicationConnectorItem {
-    pub id: String,
-    pub status: ApplicationConnectorStatus,
-    pub detected: bool,
-    pub automatic: bool,
-    pub detail: Option<String>,
-    pub target_paths: Vec<String>,
-}
-
-/// GET `/applications/connectors` response.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-#[schemars(rename_all = "camelCase", deny_unknown_fields)]
-pub struct ApplicationConnectors {
-    pub items: Vec<ApplicationConnectorItem>,
-    pub revision: u64,
-    pub process_generation: u64,
-}
-
-/// POST `/applications/connectors/{id}/preview` request. Paths, Gateway URLs,
-/// config text and Key material are intentionally not accepted from callers.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-#[schemars(rename_all = "camelCase", deny_unknown_fields)]
-pub struct ApplicationConnectorPreviewRequest {
-    pub action: ApplicationConnectorAction,
-    #[serde(default)]
-    pub key_id: Option<String>,
-    #[serde(default)]
-    pub model_values: BTreeMap<String, String>,
-}
-
-/// Redacted preview tied to the current target-file state by `fingerprint`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-#[schemars(rename_all = "camelCase", deny_unknown_fields)]
-pub struct ApplicationConnectorPreview {
-    pub id: String,
-    pub action: ApplicationConnectorAction,
-    pub status: ApplicationConnectorStatus,
-    pub fingerprint: String,
-    pub detail: Option<String>,
-    pub target_paths: Vec<String>,
-    pub changes: Vec<ApplicationConnectorChange>,
-    pub revision: u64,
-    pub process_generation: u64,
-}
-
-/// POST `/applications/connectors/{id}/commit` request. CAS protects the OCG
-/// selection while `previewFingerprint` protects the external config files.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-#[schemars(rename_all = "camelCase", deny_unknown_fields)]
-pub struct ApplicationConnectorCommitRequest {
-    #[serde(flatten)]
-    pub expectation: MutationExpectation,
-    pub action: ApplicationConnectorAction,
-    #[serde(default)]
-    pub key_id: Option<String>,
-    #[serde(default)]
-    pub model_values: BTreeMap<String, String>,
-    pub preview_fingerprint: String,
-}
-
-/// Successful commit result. The settings revision advances exactly once for
-/// a real external write and stays unchanged for a verified no-op.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-#[schemars(rename_all = "camelCase", deny_unknown_fields)]
-pub struct ApplicationConnectorCommitResult {
-    pub connector: ApplicationConnectorItem,
-    pub changed: bool,
-    pub revision: u64,
-    pub process_generation: u64,
 }
 
 /// Dashboard home totals. `availableAccounts` counts accounts that can
@@ -3304,13 +3178,6 @@ pub fn contract_schema() -> Value {
     include_type::<UsageRefresh>(&mut serialize);
     include_type::<UsageRefreshThrottleError>(&mut serialize);
     include_type::<OllamaBillingTier>(&mut serialize);
-    include_type::<ApplicationConnectorAction>(&mut serialize);
-    include_type::<ApplicationConnectorStatus>(&mut serialize);
-    include_type::<ApplicationConnectorChange>(&mut serialize);
-    include_type::<ApplicationConnectorItem>(&mut serialize);
-    include_type::<ApplicationConnectors>(&mut serialize);
-    include_type::<ApplicationConnectorPreview>(&mut serialize);
-    include_type::<ApplicationConnectorCommitResult>(&mut serialize);
     include_type::<CpaIntegration>(&mut serialize);
     include_type::<CpaConnectionReport>(&mut serialize);
     include_type::<CpaModel>(&mut serialize);
@@ -3381,8 +3248,6 @@ pub fn contract_schema() -> Value {
     include_type::<InstallUpdate>(&mut deserialize);
     include_type::<UsageRefreshUpdate>(&mut deserialize);
     include_type::<ProviderModelsRefreshUpdate>(&mut deserialize);
-    include_type::<ApplicationConnectorPreviewRequest>(&mut deserialize);
-    include_type::<ApplicationConnectorCommitRequest>(&mut deserialize);
     include_type::<CpaIntegrationUpdate>(&mut deserialize);
     include_type::<CpaTestRequest>(&mut deserialize);
     include_type::<CpaAccountStatusUpdate>(&mut deserialize);

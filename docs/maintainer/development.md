@@ -54,9 +54,6 @@ Rust unit tests live in sibling `tests.rs` modules (`src/db.rs` declares
 `mod tests;` and the tests are in `src/db/tests.rs`). Do not add tests that
 assert on source text, workflow YAML, or documentation prose.
 
-The legacy Applications code, including `src/views/application-guides.ts`, is
-retired and pending cleanup; see the [retirement notice](../user/applications.md).
-
 CLI sandbox (OpenCode Go cards only; no Custom, sub keys, or settings):
 
 ```bash

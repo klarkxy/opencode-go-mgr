@@ -23,7 +23,6 @@ mod account_model_test;
 mod account_transfer;
 mod account_verify;
 mod accounts;
-mod application_connectors;
 mod auth;
 mod browser;
 mod claude_desktop;
@@ -74,45 +73,41 @@ pub use types::{
     AccountModelCapability, AccountModelCapabilityWrite, AccountModelTestRequest,
     AccountModelTestResponse, AccountMutation, AccountOrder, AccountQuotaScope, AccountSetupStep,
     AccountSetupUpdate, AccountType, AccountUpdate, AccountUpstreamProtocol, AccountUsageUpdate,
-    AccountVerificationStatus, AccountVerify, ApplicationConnectorAction,
-    ApplicationConnectorChange, ApplicationConnectorCommitRequest,
-    ApplicationConnectorCommitResult, ApplicationConnectorItem, ApplicationConnectorPreview,
-    ApplicationConnectorPreviewRequest, ApplicationConnectorStatus, ApplicationConnectors,
-    ApplicationModels, AuthLogin, AuthLogout, AuthRegister, AuthStatus, BrowserCapabilities,
-    BrowserMode, BrowserOpen, BrowserOpenRequest, BrowserTarget, CATALOG_TYPE_NAMES,
-    CapabilitySummary, CardCapabilitySummary, ClaudeDesktopModels, ClaudeDesktopModelsUpdate,
-    ConnectionInfo, ConnectionSubKey, ContractScopeKind, ControlRevision, CpaAccount,
-    CpaAccountDelete, CpaAccountStatusUpdate, CpaAccounts, CpaConnectionReport, CpaIntegration,
-    CpaIntegrationUpdate, CpaModel, CpaModels, CpaOAuthProvider, CpaOAuthSessionDelete,
-    CpaOAuthStart, CpaOAuthStartRequest, CpaOAuthStatus, CpaQuotaReset, CpaRuntime,
-    CpaRuntimeCheck, CpaRuntimeInstall, CpaRuntimeKey, CpaRuntimeKeyCreated, CpaRuntimeKeys,
-    CpaRuntimeLogs, CpaRuntimePhase, CpaTestRequest, CreditBalance, CustomEndpointContract,
-    CustomModelDiscoveryRequest, CustomModelDiscoveryResponse, DailyModelTokens,
-    DailyTokensByModel, DailyTokensQuery, DashboardSummary, DesktopUpdate, DesktopUpdatePhase,
-    DynamicProvider, DynamicProviderAuthKind, DynamicProviderCreate,
-    DynamicProviderDiscoverRequest, DynamicProviderDiscoverResponse, DynamicProviderModel,
-    DynamicProviderMutation, DynamicProviderTestRequest, DynamicProviderTestResponse,
-    DynamicProviderUpdate, ERROR_CONFLICT, ERROR_FORBIDDEN, ERROR_GATEWAY_TIMEOUT, ERROR_GONE,
-    ERROR_INTERNAL, ERROR_INVALID_JSON, ERROR_INVALID_REQUEST, ERROR_MISSING_EXPECTED_REVISION,
-    ERROR_NOT_FOUND, ERROR_NOT_IMPLEMENTED, ERROR_OUTBOUND_FAILED, ERROR_PRECONDITION_FAILED,
-    ERROR_REVISION_CONFLICT, ERROR_SERVICE_UNAVAILABLE, ERROR_THROTTLED, ERROR_UNAUTHORIZED,
-    EffectiveCatalog, EffectiveModelContract, EffectiveModelProtocols, EffectiveProtocolEvidence,
-    ForwardLog, ForwardLogClientKey, ForwardLogKeys, ForwardLogModels, ForwardLogQuery,
-    ForwardLogSummary, ForwardLogs, GatewayLog, GatewayLogQuery, GatewayLogs, GatewayStatus,
-    InstallUpdate, KeyCreate, KeyUpdate, ModelProtocolOverride, ModelProtocolOverridesUpdate,
-    MutationAck, MutationExpectation, OllamaBillingTier, PricingAdjustment, PricingAvailability,
-    PricingLimits, PricingModel, PricingMultiplierChange, PricingMultiplierWrite,
-    PricingMultipliersUpdate, PricingRefresh, PricingRefreshPolicy, PricingRefreshStatus,
-    PricingRefreshUpdate, PricingRevision, PricingSnapshot, PricingTimeWindow,
-    ProtocolOverrideState, ProtocolProbeRequest, ProtocolProbeResponse, ProtocolProbeResult,
-    ProviderAccountChoice, ProviderCatalog, ProviderCatalogEntry, ProviderCatalogFormField,
-    ProviderCatalogRiskNotice, ProviderContractGroup, ProviderContracts, ProviderModelCapability,
-    ProviderPricing, ProviderPricingRefresh, ProviderPricingRefreshUpdate, ProviderUsage,
-    ProxyListDirection, ProxyMode, ProxySupportedModel, ProxyTestRequest, ProxyTestResponse,
-    QuotaWindow, RoutingMode, Settings, SettingsUpdate, UpdateCheck, UsageAvailability,
-    UsageMutation, UsageRefresh, UsageRefreshThrottleError, UsageRefreshUpdate, UsageSyncState,
-    UsageWindow, V3Error, ZenFreeModel, ZenFreeModels, ZenFreeSettings, ZenFreeSettingsUpdate,
-    contract_schema, contract_schema_pretty,
+    AccountVerificationStatus, AccountVerify, ApplicationModels, AuthLogin, AuthLogout,
+    AuthRegister, AuthStatus, BrowserCapabilities, BrowserMode, BrowserOpen, BrowserOpenRequest,
+    BrowserTarget, CATALOG_TYPE_NAMES, CapabilitySummary, CardCapabilitySummary,
+    ClaudeDesktopModels, ClaudeDesktopModelsUpdate, ConnectionInfo, ConnectionSubKey,
+    ContractScopeKind, ControlRevision, CpaAccount, CpaAccountDelete, CpaAccountStatusUpdate,
+    CpaAccounts, CpaConnectionReport, CpaIntegration, CpaIntegrationUpdate, CpaModel, CpaModels,
+    CpaOAuthProvider, CpaOAuthSessionDelete, CpaOAuthStart, CpaOAuthStartRequest, CpaOAuthStatus,
+    CpaQuotaReset, CpaRuntime, CpaRuntimeCheck, CpaRuntimeInstall, CpaRuntimeKey,
+    CpaRuntimeKeyCreated, CpaRuntimeKeys, CpaRuntimeLogs, CpaRuntimePhase, CpaTestRequest,
+    CreditBalance, CustomEndpointContract, CustomModelDiscoveryRequest,
+    CustomModelDiscoveryResponse, DailyModelTokens, DailyTokensByModel, DailyTokensQuery,
+    DashboardSummary, DesktopUpdate, DesktopUpdatePhase, DynamicProvider, DynamicProviderAuthKind,
+    DynamicProviderCreate, DynamicProviderDiscoverRequest, DynamicProviderDiscoverResponse,
+    DynamicProviderModel, DynamicProviderMutation, DynamicProviderTestRequest,
+    DynamicProviderTestResponse, DynamicProviderUpdate, ERROR_CONFLICT, ERROR_FORBIDDEN,
+    ERROR_GATEWAY_TIMEOUT, ERROR_GONE, ERROR_INTERNAL, ERROR_INVALID_JSON, ERROR_INVALID_REQUEST,
+    ERROR_MISSING_EXPECTED_REVISION, ERROR_NOT_FOUND, ERROR_NOT_IMPLEMENTED, ERROR_OUTBOUND_FAILED,
+    ERROR_PRECONDITION_FAILED, ERROR_REVISION_CONFLICT, ERROR_SERVICE_UNAVAILABLE, ERROR_THROTTLED,
+    ERROR_UNAUTHORIZED, EffectiveCatalog, EffectiveModelContract, EffectiveModelProtocols,
+    EffectiveProtocolEvidence, ForwardLog, ForwardLogClientKey, ForwardLogKeys, ForwardLogModels,
+    ForwardLogQuery, ForwardLogSummary, ForwardLogs, GatewayLog, GatewayLogQuery, GatewayLogs,
+    GatewayStatus, InstallUpdate, KeyCreate, KeyUpdate, ModelProtocolOverride,
+    ModelProtocolOverridesUpdate, MutationAck, MutationExpectation, OllamaBillingTier,
+    PricingAdjustment, PricingAvailability, PricingLimits, PricingModel, PricingMultiplierChange,
+    PricingMultiplierWrite, PricingMultipliersUpdate, PricingRefresh, PricingRefreshPolicy,
+    PricingRefreshStatus, PricingRefreshUpdate, PricingRevision, PricingSnapshot,
+    PricingTimeWindow, ProtocolOverrideState, ProtocolProbeRequest, ProtocolProbeResponse,
+    ProtocolProbeResult, ProviderAccountChoice, ProviderCatalog, ProviderCatalogEntry,
+    ProviderCatalogFormField, ProviderCatalogRiskNotice, ProviderContractGroup, ProviderContracts,
+    ProviderModelCapability, ProviderPricing, ProviderPricingRefresh, ProviderPricingRefreshUpdate,
+    ProviderUsage, ProxyListDirection, ProxyMode, ProxySupportedModel, ProxyTestRequest,
+    ProxyTestResponse, QuotaWindow, RoutingMode, Settings, SettingsUpdate, UpdateCheck,
+    UsageAvailability, UsageMutation, UsageRefresh, UsageRefreshThrottleError, UsageRefreshUpdate,
+    UsageSyncState, UsageWindow, V3Error, ZenFreeModel, ZenFreeModels, ZenFreeSettings,
+    ZenFreeSettingsUpdate, contract_schema, contract_schema_pretty,
 };
 pub use updater::{GITHUB_LATEST_RELEASE_API, GITHUB_LATEST_RELEASE_URL};
 
@@ -237,18 +232,6 @@ pub fn api_router(state: CoreState) -> Router<CoreState> {
         .route(
             "/external-integrations/cpa/client-keys/{fingerprint}",
             delete(cpa::delete_runtime_key),
-        )
-        .route(
-            "/applications/connectors",
-            get(application_connectors::list_connectors),
-        )
-        .route(
-            "/applications/connectors/{id}/preview",
-            post(application_connectors::preview_connector),
-        )
-        .route(
-            "/applications/connectors/{id}/commit",
-            post(application_connectors::commit_connector),
         )
         .route(
             "/settings",

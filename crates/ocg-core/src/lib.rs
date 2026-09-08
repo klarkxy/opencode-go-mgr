@@ -1,6 +1,5 @@
 pub mod account_control;
 pub mod alias;
-pub mod application_connectors;
 pub mod auth;
 pub mod browser;
 pub(crate) mod control;

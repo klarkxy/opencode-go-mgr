@@ -47,8 +47,6 @@ Tauri 与 Vite；变量生效时，设置页以只读方式显示实际端口。
 Rust 单元测试放在同名子模块：`src/db.rs` 声明 `mod tests;`，测试正文在
 `src/db/tests.rs`。不要写断言源码文本、工作流 YAML 或文档正文的测试。
 
-旧 Applications 代码（包括 `src/views/application-guides.ts`）已退役，等待清理，见[退役说明](../user/applications.zh-CN.md)。
-
 CLI 沙箱（只创建 OpenCode Go 卡；不能创建 Custom、子 Key 或设置）：
 
 ```bash

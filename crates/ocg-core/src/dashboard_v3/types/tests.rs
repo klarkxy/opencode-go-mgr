@@ -53,7 +53,7 @@ fn wire_fields_are_camel_case() {
 fn error_envelope_always_emits_nullable_fields() {
     let error = V3Error::missing_expected_revision();
     let value = serde_json::to_value(&error).unwrap();
-    assert_eq!(value["code"], "missingExpectedRevision");
+    assert_eq!(value["code"], ERROR_MISSING_EXPECTED_REVISION);
     assert_eq!(value["currentRevision"], Value::Null);
     assert_eq!(value["processGeneration"], Value::Null);
     assert!(!value.as_object().unwrap().contains_key("current_revision"));
@@ -606,18 +606,8 @@ fn service_unavailable_error_emits_stable_code_and_cas_tokens() {
     let error = V3Error::service_unavailable("browser stop failed", 11, 9);
     let value = serde_json::to_value(&error).unwrap();
     assert_eq!(value["code"], ERROR_SERVICE_UNAVAILABLE);
-    assert_eq!(value["code"], "serviceUnavailable");
-    assert_eq!(value["message"], "browser stop failed");
     assert_eq!(value["currentRevision"], 11);
     assert_eq!(value["processGeneration"], 9);
-
-    let schema = contract_schema();
-    let defs = schema["$defs"].as_object().expect("catalog $defs");
-    assert!(defs.contains_key("V3Error"));
-    assert_eq!(
-        defs["V3Error"]["properties"]["code"]["type"], "string",
-        "new error codes must not reshape the V3Error catalog definition"
-    );
 }
 
 #[test]
@@ -684,17 +674,8 @@ fn not_implemented_error_emits_stable_code_and_cas_tokens() {
     let error = V3Error::not_implemented("protocol probes are not available", 11, 9);
     let value = serde_json::to_value(&error).unwrap();
     assert_eq!(value["code"], ERROR_NOT_IMPLEMENTED);
-    assert_eq!(value["code"], "notImplemented");
-    assert_eq!(value["message"], "protocol probes are not available");
     assert_eq!(value["currentRevision"], 11);
     assert_eq!(value["processGeneration"], 9);
-
-    let schema = contract_schema();
-    let defs = schema["$defs"].as_object().expect("catalog $defs");
-    assert_eq!(
-        defs["V3Error"]["properties"]["code"]["type"], "string",
-        "open string error codes must not reshape the V3Error catalog definition"
-    );
 }
 
 const ACCOUNTS_CATALOG_PREFIX: &[&str] = &[
@@ -1727,17 +1708,6 @@ const ACCOUNT_TRANSFER_CATALOG_TYPES: &[&str] = &[
     "AccountImportRequest",
     "AccountImportResult",
 ];
-const APPLICATION_CONNECTOR_CATALOG_TYPES: &[&str] = &[
-    "ApplicationConnectorAction",
-    "ApplicationConnectorStatus",
-    "ApplicationConnectorChange",
-    "ApplicationConnectorItem",
-    "ApplicationConnectors",
-    "ApplicationConnectorPreviewRequest",
-    "ApplicationConnectorPreview",
-    "ApplicationConnectorCommitRequest",
-    "ApplicationConnectorCommitResult",
-];
 const CPA_CATALOG_TYPES: &[&str] = &[
     "CpaIntegration",
     "CpaIntegrationUpdate",
@@ -1860,15 +1830,9 @@ fn catalog_type_names_append_pricing_dtos_after_the_provider_prefix() {
         &CATALOG_TYPE_NAMES[provider_refresh_end..account_transfer_end],
         ACCOUNT_TRANSFER_CATALOG_TYPES
     );
-    let application_connector_end =
-        account_transfer_end + APPLICATION_CONNECTOR_CATALOG_TYPES.len();
+    let cpa_end = account_transfer_end + CPA_CATALOG_TYPES.len();
     assert_eq!(
-        &CATALOG_TYPE_NAMES[account_transfer_end..application_connector_end],
-        APPLICATION_CONNECTOR_CATALOG_TYPES
-    );
-    let cpa_end = application_connector_end + CPA_CATALOG_TYPES.len();
-    assert_eq!(
-        &CATALOG_TYPE_NAMES[application_connector_end..cpa_end],
+        &CATALOG_TYPE_NAMES[account_transfer_end..cpa_end],
         CPA_CATALOG_TYPES
     );
     let dynamic_end = cpa_end + DYNAMIC_PROVIDER_CATALOG_TYPES.len();

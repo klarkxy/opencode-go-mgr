@@ -2,8 +2,6 @@
 
 # HTTP 路由
 
-下文涉及的旧应用接口与模型列表行为用于说明待清理的残留实现，不代表应用子系统仍受支持，见[退役说明](../user/applications.zh-CN.md)。
-
 所有路由共享一个端口：推理、Dashboard V3、V2 墓碑与 SPA。详见[架构](architecture.zh-CN.md)。
 
 已退役的 `/dashboard/api/...` REST 在匿名时返回空 body 的 **401**（鉴权先于墓碑），已鉴权时（含回环本地模式）返回 **410** `{ "code": "dashboardV2Removed", "message": "Dashboard API V2 has been removed; refresh the page and retry." }`。既非 V3 也非保留家族的未知 `/dashboard/api/...` 路径，在已鉴权时同样 410。保留的 `/dashboard/api` 家族（精确路径，无尾斜杠，无额外段）：`auth/status`、`auth/register`、`auth/login`、`auth/logout`，以及 `browser/sessions/{token}/ws`（token 非空）。受保护的 V2 REST 保持退役；新 JSON 属于 V3。

@@ -20,20 +20,12 @@ import type {
   AccountSetupUpdate,
   AccountUpdate,
   AccountUsageUpdate,
-  ApplicationModels,
-  ApplicationConnectorCommitRequest,
-  ApplicationConnectorCommitResult,
-  ApplicationConnectorPreview,
-  ApplicationConnectorPreviewRequest,
-  ApplicationConnectors,
   AuthLogin,
   AuthRegister,
   AuthStatus,
   BrowserCapabilities,
   BrowserOpen,
   BrowserOpenRequest,
-  ClaudeDesktopModels,
-  ClaudeDesktopModelsUpdate,
   ConnectionInfo,
   CpaAccountDelete,
   CpaAccountStatusUpdate,
@@ -239,7 +231,7 @@ export class DashboardThrottledError extends DashboardRequestError {
 }
 
 /** Structured upgrade/refresh guidance surfaced on old-API 410 responses. */
-export function goneGuidance(): string {
+function goneGuidance(): string {
   // This is intentionally a stable transport-level fallback, outside the
   // generated i18n key union. Shell-level UI may localize it further.
   return "页面版本与服务不匹配，请刷新页面后重试；若仍失败请升级到最新版本";
@@ -250,7 +242,7 @@ export function isRevisionConflict(error: unknown): error is DashboardConflictEr
     || (error instanceof DashboardRequestError && error.status === 409 && error.code === "revisionConflict");
 }
 
-export function v3ApiBase(): string {
+function v3ApiBase(): string {
   if (window.location.pathname.startsWith("/dashboard")) {
     return "/dashboard/api/v3";
   }
@@ -515,22 +507,6 @@ export const dashboardV3 = {
       },
     ),
 
-  // --- local Desktop application connectors ---
-  getApplicationConnectors: () => requestV3<ApplicationConnectors>("/applications/connectors"),
-  previewApplicationConnector: (id: string, input: ApplicationConnectorPreviewRequest) =>
-    requestV3<ApplicationConnectorPreview>(`/applications/connectors/${encode(id)}/preview`, {
-      method: "POST",
-      body: json(input),
-    }),
-  commitApplicationConnector: (
-    id: string,
-    input: WithoutExpectation<ApplicationConnectorCommitRequest>,
-    expectation: MutationExpectation,
-  ) => requestV3<ApplicationConnectorCommitResult>(`/applications/connectors/${encode(id)}/commit`, {
-    method: "POST",
-    body: withExpectation(input, expectation),
-  }),
-
   // --- access keys ---
   createKey: (name: string, expectation: MutationExpectation) =>
     requestV3<MutationAck>("/keys", {
@@ -569,15 +545,6 @@ export const dashboardV3 = {
     requestV3<ProxyTestResponse>("/settings/test-proxy", {
       method: "POST",
       body: json(input),
-    }),
-  getClaudeDesktopModels: () => requestV3<ClaudeDesktopModels>("/claude-desktop/models"),
-  putClaudeDesktopModels: (
-    models: WithoutExpectation<ClaudeDesktopModelsUpdate>,
-    expectation: MutationExpectation,
-  ) =>
-    requestV3<ClaudeDesktopModels>("/claude-desktop/models", {
-      method: "PUT",
-      body: withExpectation(models, expectation),
     }),
 
   // --- desktop updater ---
@@ -829,7 +796,6 @@ export const dashboardV3 = {
     }),
 
   // --- observability (read-only, page-local state) ---
-  getApplicationModels: () => requestV3<ApplicationModels>("/application-models"),
   getDashboardSummary: () => requestV3<DashboardSummary>("/dashboard/summary"),
   getDailyTokensByModel: (days?: number) =>
     requestV3<DailyTokensByModel>(`/dashboard/daily-tokens-by-model?days=${days ?? 30}`),

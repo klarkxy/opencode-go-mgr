@@ -21,10 +21,7 @@ import type {
   AccountModelCapabilitiesUpdate,
   AccountSetupStep,
   AccountUsageUpdate,
-  ApplicationConnectorCommitRequest,
-  ApplicationConnectorPreviewRequest,
   AuthStatus,
-  ClaudeDesktopModelsUpdate,
   ForwardLogQuery as V3ForwardLogQuery,
   KeyUpdate,
   MutationExpectation,
@@ -139,13 +136,6 @@ export const dashboardApi = {
     dashboardV3.logoutAdmin(expectation),
 
   getConnection: async (): Promise<ConnectionInfo> => presentConnection(await dashboardV3.getConnection()),
-  getApplicationConnectors: () => dashboardV3.getApplicationConnectors(),
-  previewApplicationConnector: (id: string, input: ApplicationConnectorPreviewRequest) =>
-    dashboardV3.previewApplicationConnector(id, input),
-  commitApplicationConnector: (
-    id: string,
-    input: WithoutExpectation<ApplicationConnectorCommitRequest>,
-  ) => withCas((expectation) => dashboardV3.commitApplicationConnector(id, input, expectation)),
   createKey: async (name: string, expectation: MutationExpectation): Promise<void> => {
     await dashboardV3.createKey(name, expectation);
   },
@@ -331,20 +321,6 @@ export const dashboardApi = {
         multiplier: multiplier.multiplier,
       })),
     }, expectation)));
-  },
-
-  getApplicationModels: async () => (await dashboardV3.getApplicationModels()).models,
-  getClaudeDesktopModels: async () => {
-    const value = await dashboardV3.getClaudeDesktopModels();
-    return { sonnet: value.sonnet, opus: value.opus, haiku: value.haiku };
-  },
-  updateClaudeDesktopModels: async (models: { sonnet: string; opus: string; haiku: string }) => {
-    const result = await withCas((expectation) => dashboardV3.putClaudeDesktopModels({
-      sonnet: models.sonnet,
-      opus: models.opus,
-      haiku: models.haiku,
-    } satisfies WithoutExpectation<ClaudeDesktopModelsUpdate>, expectation));
-    return { sonnet: result.sonnet, opus: result.opus, haiku: result.haiku };
   },
 
   checkForUpdate: async () => presentUpdateCheck(await dashboardV3.checkForUpdate()),

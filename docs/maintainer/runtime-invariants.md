@@ -2,10 +2,6 @@
 
 # Runtime Invariants
 
-Legacy Applications routes and model-list behavior mentioned below describe
-remaining implementation pending cleanup, not a supported application subsystem.
-See the [retirement notice](../user/applications.md).
-
 Behavioral invariants of the running system. Read this before changing gateway routing, aliases, Zen Free, the plan catalog, access keys, outbound proxy, or usage sync. Code is the source of truth; this page maps semantics that are easy to get wrong.
 
 ## Gateway And Model Lists

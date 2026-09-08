@@ -3,7 +3,6 @@
 # Extending Open Console Gateway
 
 Provider adapters and external integrations are the current extension paths.
-The legacy application-connector path below is retired.
 
 ## 1. Provider or Plan: sealed and static
 
@@ -28,8 +27,8 @@ single `provider_id` identity.
 ## 2. Legacy application connectors: retired
 
 The old Applications subsystem, guide generation, automatic connectors, and
-Pi/DSH templates are retired. Do not extend this implementation. Remaining code
-is pending cleanup; a replacement will be designed separately. See the
+Pi/DSH templates have been removed. Do not extend that implementation. A
+replacement will be designed separately. See the
 [retirement notice](../user/applications.md).
 
 ## 3. External integration: static local-service adapter
