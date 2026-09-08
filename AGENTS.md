@@ -21,6 +21,6 @@ Open Console Gateway is a local multi-Plan console: Rust workspace, Vue 3 dashbo
 - Known limits: [known debt](docs/maintainer/known-debt.md).
 - User docs: [docs/USER.md](docs/USER.md). Maintainer index: [docs/MAINTAINER.md](docs/MAINTAINER.md).
 
-Use checks that can expose a failure in the changed behavior. Documentation-only work needs link/content checks, not a Rust or frontend build. V3 contract changes require `pnpm run contract:v3:check`; Vue changes require `pnpm run build:web`.
+Use checks that can expose a failure in the changed behavior. Documentation-only work needs paired English and `.zh-CN.md` content review, not a Rust or frontend build. V3 contract changes require `pnpm run contract:v3:check`; Vue changes require `pnpm run build:web`.
 
 Quit the release tray app before local Tauri development. Report source checks, builds, and real desktop use as distinct evidence.
