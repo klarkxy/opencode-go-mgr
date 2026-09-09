@@ -1,24 +1,10 @@
 <template>
-  <n-card class="platform-section" size="small">
+  <n-card v-if="sectionVisible" class="platform-section" size="small">
     <template #header>
       <span class="platform-section-title">{{ t("平台账号") }}</span>
       <n-tag v-if="view" size="small" :bordered="false" class="platform-count-tag">
         {{ view.accounts.length }}
       </n-tag>
-    </template>
-    <template #header-extra>
-      <n-dropdown
-        trigger="click"
-        :options="addOptions"
-        @select="openCreate"
-      >
-        <n-button size="small" type="primary" secondary>
-          <template #icon>
-            <n-icon :component="PlusOutlined" />
-          </template>
-          {{ t("添加平台账号") }}
-        </n-button>
-      </n-dropdown>
     </template>
 
     <div v-if="loading" class="platform-state" role="status" :aria-label="t('加载中…')">
@@ -31,10 +17,6 @@
     >
       <n-button size="small" secondary @click="load">{{ t("重试") }}</n-button>
     </n-alert>
-    <n-empty
-      v-else-if="view && view.accounts.length === 0"
-      :description="t('暂无平台账号')"
-    />
 
     <n-collapse v-else-if="view" v-model:expanded-names="expanded">
       <n-collapse-item
@@ -264,32 +246,32 @@
         </div>
       </n-collapse-item>
     </n-collapse>
-
-    <PlatformAccountFormModal
-      :show="showForm"
-      :editing="editingPlatform"
-      :preset-kind="presetKind"
-      :busy="mutating"
-      @update:show="showForm = $event"
-      @save="onFormSave"
-    />
-    <PlatformLinkModal
-      :show="showLink"
-      :parent="linkParent"
-      :candidates="linkCandidates"
-      :busy="mutating"
-      @update:show="showLink = $event"
-      @submit="onLinkSubmit"
-    />
-    <PlatformModelImportModal
-      :show="!!importTarget"
-      :account="importTarget?.account ?? null"
-      :link="importTarget?.link ?? null"
-      :busy="mutating"
-      @update:show="setImportVisible"
-      @submit="onImportSubmit"
-    />
   </n-card>
+
+  <PlatformAccountFormModal
+    :show="showForm"
+    :editing="editingPlatform"
+    :preset-kind="presetKind"
+    :busy="mutating"
+    @update:show="showForm = $event"
+    @save="onFormSave"
+  />
+  <PlatformLinkModal
+    :show="showLink"
+    :parent="linkParent"
+    :candidates="linkCandidates"
+    :busy="mutating"
+    @update:show="showLink = $event"
+    @submit="onLinkSubmit"
+  />
+  <PlatformModelImportModal
+    :show="!!importTarget"
+    :account="importTarget?.account ?? null"
+    :link="importTarget?.link ?? null"
+    :busy="mutating"
+    @update:show="setImportVisible"
+    @submit="onImportSubmit"
+  />
 </template>
 
 <script setup lang="ts">
@@ -300,9 +282,6 @@ import {
   NCard,
   NCollapse,
   NCollapseItem,
-  NDropdown,
-  NEmpty,
-  NIcon,
   NSpace,
   NSpin,
   NTag,
@@ -310,7 +289,6 @@ import {
   useDialog,
   useMessage,
 } from "naive-ui";
-import { PlusOutlined } from "@vicons/antd";
 import { dashboardApi, type Account } from "../api/dashboard.ts";
 import { isRevisionConflict } from "../api/dashboard-v3.ts";
 import {
@@ -383,11 +361,15 @@ const importTarget = ref<{ account: Account; link: PlatformLink } | null>(null);
 
 const quotaKindKeys = PLATFORM_QUOTA_KIND_KEYS;
 
-const addOptions = computed(() => (
-  (Object.entries(PLATFORM_KIND_LABELS) as [PlatformKind, string][]).map(([kind, label]) => ({
-    key: kind,
-    label: `${t("添加平台账号")} · ${label}`,
-  }))
+// The card hides once a successful load reports zero platform accounts;
+// creation lives in the Add Account chooser (createPlatform), and the form
+// modal below stays mounted outside the card so edits keep working. Loading
+// and error/retry states remain visible.
+const sectionVisible = computed(() => (
+  loading.value
+  || Boolean(loadError.value)
+  || !view.value
+  || view.value.accounts.length > 0
 ));
 
 const linkCandidates = computed(() => {
@@ -507,11 +489,20 @@ function openEdit(parent: PlatformAccount): void {
   showForm.value = true;
 }
 
-async function onFormSave(payload: PlatformAccountFormPayload): Promise<void> {
-  if (mutating.value) return;
+type PlatformPersistOutcome = "saved" | "conflict" | "error";
+
+/**
+ * Single owner of the platform create/update write: the edit modal and the
+ * Add Account chooser's embedded create form both funnel through here so
+ * validation results, CAS conflict recovery, and the card reload match.
+ */
+async function persistPlatform(
+  payload: PlatformAccountFormPayload,
+  editing: PlatformAccount | null,
+): Promise<PlatformPersistOutcome> {
+  if (mutating.value) return "error";
   mutating.value = true;
   try {
-    const editing = editingPlatform.value;
     acceptView(editing
       ? await platformAccountsApi.update(editing.id, {
         name: payload.name,
@@ -523,18 +514,30 @@ async function onFormSave(payload: PlatformAccountFormPayload): Promise<void> {
         baseUrl: payload.baseUrl,
         ...(payload.userCredential !== undefined ? { userCredential: payload.userCredential } : {}),
       }));
-    showForm.value = false;
     message.success(editing ? t("平台账号已更新") : t("平台账号已创建"));
+    return "saved";
   } catch (error) {
     if (isRevisionConflict(error)) {
-      showForm.value = false;
       await recoverConflict();
-    } else {
-      mutationError(error, "保存失败: {error}");
+      return "conflict";
     }
+    mutationError(error, "保存失败: {error}");
+    return "error";
   } finally {
     mutating.value = false;
   }
+}
+
+async function onFormSave(payload: PlatformAccountFormPayload): Promise<void> {
+  const outcome = await persistPlatform(payload, editingPlatform.value);
+  // A conflict already reloaded the world; keeping the stale modal open would
+  // invite a second write against the old revision.
+  if (outcome !== "error") showForm.value = false;
+}
+
+/** Add Account chooser entry point; true only when the create persisted. */
+async function createPlatform(payload: PlatformAccountFormPayload): Promise<boolean> {
+  return (await persistPlatform(payload, null)) === "saved";
 }
 
 function confirmDelete(parent: PlatformAccount): void {
@@ -694,7 +697,7 @@ async function onImportSubmit(modelIds: string[]): Promise<void> {
 
 onMounted(load);
 
-defineExpose({ reload: load });
+defineExpose({ reload: load, openCreate, createPlatform, mutating });
 </script>
 
 <style scoped>

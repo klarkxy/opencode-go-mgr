@@ -149,10 +149,15 @@
       :managed-available="managedRegistrationAvailable"
       :managed-reason="managedRegistrationReason"
       :invite-missing="!opencodeInviteUrl"
-      @import-key="openCreateModal(OPENCODE_GO_PLAN)"
+      :create-busy="busy"
+      :platform-busy="platformMutating"
+      :initial-option-id="addInitialOptionId"
       @register-managed="openManagedCreateModal"
       @open-invite-url="openInviteUrl"
-      @select-plan="handleSelectPlan"
+      @save-account="onFormSave"
+      @create-platform="handleCreatePlatform"
+      @preset-saved="onPresetAccountSaved"
+      @preset-conflict="onPresetAccountConflict"
     />
 
     <AccountFormModal
@@ -160,7 +165,6 @@
       :account="editingAccount"
       :is-cooling="editingAccount ? isCooling(editingAccount, now) : false"
       :busy="busy"
-      :plan="selectedPlanForCreate"
       :catalog="providerCatalog"
       :endpoint-locked="!!editingPlatformLink"
       :endpoint-lock-hint="editingEndpointLockHint"
@@ -307,16 +311,14 @@ import {
   type AccountStatusFilter,
 } from "./account-filters.ts";
 import {
-  OPENCODE_GO_PLAN,
   PLAN_DEFINITIONS,
   dynamicPlanDefinition,
   planFamilyLabel,
-  type PlanDefinition,
 } from "../domain/plans.ts";
 import { isDynamicCatalogEntry } from "../domain/dynamic-provider.ts";
 import { t, type MessageKey } from "../i18n/index.ts";
 import { dashboardErrorDetail } from "../utils/errors.ts";
-import { applyAppViewSearchParams, PROVIDER_OTHER_TAB, readAccountDeepLink } from "./app-navigation.ts";
+import { applyAppViewSearchParams, PROVIDER_OTHER_TAB, readAccountAddDeepLink, readAccountDeepLink } from "./app-navigation.ts";
 import { mapWithConcurrency } from "../utils/async.ts";
 import { useLocalizedModalCloseLabel } from "../utils/modal-close-label.ts";
 import {
@@ -334,6 +336,7 @@ import AccountFormModal, { type AccountFormPayload } from "../components/Account
 import ManagedAccountWizard from "../components/ManagedAccountWizard.vue";
 import AccountTransferModal from "../components/AccountTransferModal.vue";
 import PlatformAccountsSection from "../components/PlatformAccountsSection.vue";
+import type { PlatformAccountFormPayload } from "../components/PlatformAccountFormModal.vue";
 
 const dialog = useDialog();
 const message = useMessage();
@@ -346,6 +349,8 @@ const providerSettingsSaving = ref<Record<string, boolean>>({});
 const purchaseDateSaving = ref<Record<string, boolean>>({});
 const showModal = ref(false);
 const showAddModal = ref(false);
+/** One-shot chooser preselection from the `add` deep link; cleared on close. */
+const addInitialOptionId = ref<string | null>(null);
 const showTransfer = ref(false);
 const transferMode = ref<"import" | "export">("import");
 const showManagedCreate = ref(false);
@@ -392,7 +397,7 @@ const statusFilter = ref<AccountStatusFilter>("all");
 const providerCatalog = ref<ProviderCatalogEntry[] | null>(null);
 const catalogLoading = ref(false);
 const catalogError = ref("");
-const selectedPlanForCreate = ref<PlanDefinition | null>(null);
+const platformMutating = computed(() => Boolean(platformSectionRef.value?.mutating));
 
 const {
   quotaLimits,
@@ -542,6 +547,26 @@ function openCpa(): void {
 }
 
 function openAddModal(): void {
+  // Add Account owns creation now; a stale edit target would turn the
+  // chooser's save payload into an update of the previously edited account.
+  editingAccount.value = null;
+  addInitialOptionId.value = null;
+  showAddModal.value = true;
+}
+
+/**
+ * One-shot deep link (Suppliers Custom API row): open Add Account with the
+ * requested chooser option preselected. The parameter is deleted before the
+ * modal opens so a reload or close never replays it.
+ */
+function applyAccountAddDeepLink(): void {
+  const optionId = readAccountAddDeepLink(window.location.search);
+  if (!optionId) return;
+  const url = new URL(window.location.href);
+  url.searchParams.delete("add");
+  window.history.replaceState(null, "", url);
+  editingAccount.value = null;
+  addInitialOptionId.value = optionId;
   showAddModal.value = true;
 }
 
@@ -555,15 +580,23 @@ async function handleAccountsImported(count: number): Promise<void> {
   message.success(t("节点配置迁移完成：处理 {count} 项账号。", { count }));
 }
 
-function openCreateModal(plan?: PlanDefinition): void {
-  showAddModal.value = false;
-  editingAccount.value = null;
-  selectedPlanForCreate.value = plan ?? null;
-  showModal.value = true;
+// The chooser's embedded platform form delegates the write to the section so
+// validation, CAS conflict recovery, and the card reload stay in one place.
+async function handleCreatePlatform(payload: PlatformAccountFormPayload): Promise<void> {
+  const created = await platformSectionRef.value?.createPlatform(payload);
+  if (created) showAddModal.value = false;
 }
 
-function handleSelectPlan(plan: PlanDefinition): void {
-  openCreateModal(plan);
+// The atomic create already saved supplier + first account; reload both lists
+// so the account and the new user-defined choice appear.
+async function onPresetAccountSaved(): Promise<void> {
+  await Promise.allSettled([loadAccounts(), loadProviderCatalog()]);
+  message.success(t("账号已添加"));
+  showAddModal.value = false;
+}
+
+async function onPresetAccountConflict(): Promise<void> {
+  await Promise.allSettled([loadAccounts(), loadProviderCatalog()]);
 }
 
 function resetFilters(): void {
@@ -670,6 +703,10 @@ function applyCachedAccountDeepLink(): void {
 
 watch(showModal, (show) => {
   if (!show) clearAccountDeepLink();
+});
+
+watch(showAddModal, (show) => {
+  if (!show) addInitialOptionId.value = null;
 });
 
 async function createManagedAccount(): Promise<void> {
@@ -990,6 +1027,9 @@ async function onFormSave(payload: AccountInput | AccountFormPayload) {
         await loadAccountUsage(created.id);
       }
       showModal.value = false;
+      // Create payloads arrive from the Add Account chooser's embedded form;
+      // only a successful create closes it, so a failed save keeps the draft.
+      showAddModal.value = false;
     } catch (e) {
       if (await recoverAccountMutationConflict(e)) return;
       message.error(t("保存失败: {error}", { error: dashboardErrorDetail(e) }));
@@ -1194,6 +1234,7 @@ function stopClock() {
 }
 
 onMounted(() => {
+  applyAccountAddDeepLink();
   void initializeAccounts();
 });
 // This view is kept alive by App.vue; coarse states (cooling tags, editor
@@ -1202,6 +1243,7 @@ onMounted(() => {
 onActivated(() => {
   startClock();
   now.value = Date.now();
+  applyAccountAddDeepLink();
   applyCachedAccountDeepLink();
   if (activatedOnce) {
     void initializeAccounts();
