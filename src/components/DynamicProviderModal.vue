@@ -1,11 +1,10 @@
 <template>
-  <n-modal
+  <FormSurface
     :show="show"
-    preset="card"
-    :title="isEdit ? t('编辑供应商') : t('新建供应商')"
-    class="dynamic-provider-modal"
-    style="width: 720px; max-width: calc(100vw - 32px)"
-    :mask-closable="false"
+    :title="isEdit ? t('编辑供应商') : createTitle"
+    :embedded="embedded"
+    modal-class="dynamic-provider-modal"
+    modal-style="width: 720px; max-width: calc(100vw - 32px)"
     @update:show="$emit('update:show', $event)"
   >
     <n-form label-placement="top" @submit.prevent="save">
@@ -18,12 +17,12 @@
       <n-alert v-if="conflictNotice" type="warning" class="form-error" role="alert">
         {{ conflictNotice }}
       </n-alert>
-      <n-alert type="default" :show-icon="false" class="form-error">
+      <n-alert v-if="showAdvancedDetails" type="default" :show-icon="false" class="form-error">
         {{ t("填写连接信息即可保存；该供应商的价格和官方用量始终未知。") }}
       </n-alert>
 
       <div class="modal-grid">
-        <n-form-item v-if="!isEdit" :label="t('供应商预设')" class="full-width-field">
+        <n-form-item v-if="!isEdit && !presetSelectionLocked" :label="t('供应商预设')" class="full-width-field">
           <div class="preset-picker">
             <n-select
               :value="selectedPresetId"
@@ -43,14 +42,14 @@
             </div>
           </div>
         </n-form-item>
-        <n-form-item :label="t('名称')" path="name">
+        <n-form-item v-if="!fixedPreset || settingsOpen" :label="t('名称')" path="name">
           <n-input
             v-model:value="draft.name"
             :input-props="{ 'aria-label': t('名称') }"
             :placeholder="t('例如：主号')"
           />
         </n-form-item>
-        <n-form-item :label="t('鉴权方式')">
+        <n-form-item v-if="!fixedPreset" :label="t('鉴权方式')">
           <n-select
             v-model:value="draft.auth_kind"
             :options="authOptions"
@@ -58,7 +57,7 @@
             :aria-label="t('鉴权方式')"
           />
         </n-form-item>
-        <n-form-item :label="t('API 地址')" class="full-width-field">
+        <n-form-item v-if="!fixedPreset || fixedEndpointRequired" :label="t('API 地址')" class="full-width-field">
           <n-input
             v-model:value="draft.endpoint_url"
             :disabled="busy"
@@ -66,7 +65,7 @@
             :placeholder="endpointPlaceholder"
           />
         </n-form-item>
-        <n-form-item :label="t('上游协议')">
+        <n-form-item v-if="!fixedPreset" :label="t('上游协议')">
           <n-select
             v-model:value="draft.upstream_protocol"
             :options="protocolOptions"
@@ -74,7 +73,10 @@
             :aria-label="t('上游协议')"
           />
         </n-form-item>
-        <n-form-item v-if="!isEdit" :label="t('第一个账号名称')">
+        <p v-if="fixedSeeded" class="fixed-models-summary">
+          {{ t("默认模型：{models}", { models: fixedSeededModels.join(", ") }) }}
+        </p>
+        <n-form-item v-if="!isEdit && (!fixedPreset || settingsOpen)" :label="t('第一个账号名称')">
           <n-input
             v-model:value="draft.account_name"
             :input-props="{ 'aria-label': t('第一个账号名称') }"
@@ -97,7 +99,7 @@
             {{ t("此 Key 仅临时用于获取模型和测试模型，保存不会更新它；更换已保存的 Key 请到账号页。") }}
           </p>
         </n-form-item>
-        <n-form-item v-if="!isEdit" :label="t('备注')" class="full-width-field">
+        <n-form-item v-if="!isEdit && (!fixedPreset || settingsOpen)" :label="t('备注')" class="full-width-field">
           <n-input
             v-model:value="draft.notes"
             type="textarea"
@@ -105,7 +107,7 @@
             :input-props="{ 'aria-label': t('备注') }"
           />
         </n-form-item>
-        <n-form-item :label="t('模型映射')" class="full-width-field">
+        <n-form-item v-if="showAdvancedDetails" :label="t('模型映射')" class="full-width-field">
           <div class="capability-rows">
             <div class="capability-actions">
               <n-button
@@ -155,7 +157,7 @@
                   {{ t("删除映射") }}
                 </n-button>
               </div>
-              <div class="mapping-row-route">
+              <div v-if="!fixedPreset" class="mapping-row-route">
                 <n-select
                   :value="row.upstream_override ? 'override' : 'inherit'"
                   :options="routeModeOptions"
@@ -195,7 +197,7 @@
             </p>
           </div>
         </n-form-item>
-        <n-form-item :label="t('模型测试')" class="full-width-field">
+        <n-form-item v-if="showAdvancedDetails" :label="t('模型测试')" class="full-width-field">
           <div class="test-section">
             <n-select
               v-model:value="testTargetIndex"
@@ -210,12 +212,26 @@
             </p>
           </div>
         </n-form-item>
+        <div v-if="fixedPreset" class="fixed-settings-toggle">
+          <n-button
+            attr-type="button"
+            text
+            size="small"
+            :aria-expanded="settingsOpen"
+            @click="settingsOpen = !settingsOpen"
+          >
+            <template #icon>
+              <n-icon :component="settingsOpen ? DownOutlined : RightOutlined" aria-hidden="true" />
+            </template>
+            {{ t("更多设置") }}
+          </n-button>
+        </div>
       </div>
     </n-form>
     <template #footer>
       <div class="modal-footer">
         <n-popconfirm
-          v-if="testNeedsConfirm"
+          v-if="testNeedsConfirm && showAdvancedDetails"
           :positive-text="t('测试模型')"
           :negative-text="t('取消')"
           @positive-click="runTest"
@@ -228,29 +244,30 @@
           {{ t(paidTestWarningKey) }}
         </n-popconfirm>
         <n-space>
-          <n-button attr-type="button" :disabled="busy" @click="$emit('update:show', false)">{{ t("取消") }}</n-button>
+          <n-button v-if="!embedded" attr-type="button" :disabled="busy" @click="$emit('update:show', false)">{{ t("取消") }}</n-button>
           <n-button type="primary" attr-type="submit" :loading="saving" :disabled="busy" @click="save">
-            {{ saving ? t("正在保存…") : t("保存供应商") }}
+            {{ saving ? t("正在保存…") : (isEdit ? t("保存供应商") : createTitle) }}
           </n-button>
         </n-space>
       </div>
     </template>
-  </n-modal>
+  </FormSurface>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onUnmounted, ref, watch } from "vue";
 import {
   NAlert,
   NButton,
   NForm,
   NFormItem,
+  NIcon,
   NInput,
-  NModal,
   NPopconfirm,
   NSelect,
   NSpace,
 } from "naive-ui";
+import { DownOutlined, RightOutlined } from "@vicons/antd";
 import { isRevisionConflict, providerApi, type DynamicProviderView } from "../api/providers.ts";
 import { locale, t, type MessageKey } from "../i18n/index.ts";
 import { dashboardErrorDetail } from "../utils/errors.ts";
@@ -258,6 +275,8 @@ import { protocolDisplayName } from "../domain/provider-contracts.ts";
 import {
   PROVIDER_PRESETS,
   applyProviderPresetToDraft,
+  groupProviderPresetsByOffering,
+  providerPresetDefaultModels,
   providerPresetEndpointPlaceholder,
   providerPresetImportPublicName,
   providerPresetModelDiscoveryEnabled,
@@ -284,16 +303,27 @@ import {
   type DynamicProviderMapping,
   type DynamicUpstreamProtocol,
 } from "../domain/dynamic-provider.ts";
+import FormSurface from "./FormSurface.vue";
 
 const props = defineProps<{
   show: boolean;
   provider: DynamicProviderView | null;
+  /** Create mode only: preset applied on every open; null/unknown stays manual. */
+  initialPresetId?: string | null;
+  /** "account" titles the atomic create as adding an account, not a supplier. */
+  context?: "provider" | "account";
+  /** Inline rendering inside a host pane instead of a modal. */
+  embedded?: boolean;
+  /** Create mode only: the host rail owns preset choice, so hide the picker. */
+  presetSelectionLocked?: boolean;
 }>();
 
 const emit = defineEmits<{
   (event: "update:show", value: boolean): void;
   (event: "saved", providerId: string): void;
   (event: "conflict"): void;
+  /** Hosts embed the form and block dismissal while work is in flight. */
+  (event: "busyChange", busy: boolean): void;
 }>();
 
 const draft = ref<DynamicProviderDraft>(emptyDynamicProviderDraft());
@@ -308,6 +338,8 @@ const saving = ref(false);
 const discovering = ref(false);
 const testing = ref(false);
 const testTargetIndex = ref(0);
+/** Optional settings section for fixed-preset creates; collapsed on open/switch. */
+const settingsOpen = ref(false);
 const MANUAL_PRESET_ID = "manual";
 const selectedPresetId = ref(MANUAL_PRESET_ID);
 // Bumped on close/reopen and on every preset switch so a slow discovery or
@@ -315,7 +347,22 @@ const selectedPresetId = ref(MANUAL_PRESET_ID);
 const requestGeneration = ref(0);
 
 const isEdit = computed(() => Boolean(props.provider));
+const createTitle = computed(() => (
+  props.context === "account" ? t("新增账号") : t("新建供应商")
+));
 const busy = computed(() => saving.value || discovering.value || testing.value);
+// Hosts embedding this form block switching/closing on this signal.
+watch(busy, (value) => emit("busyChange", value));
+onUnmounted(() => {
+  // The busy watcher is already stopped at this point, so release the host's
+  // lock with a direct emit, and invalidate in-flight discovery/test via the
+  // generation counter so an abandoned response can never commit anywhere.
+  requestGeneration.value += 1;
+  saving.value = false;
+  discovering.value = false;
+  testing.value = false;
+  emit("busyChange", false);
+});
 const testNeedsConfirm = dynamicProviderActionNeedsConfirm("test");
 const paidTestWarningKey = DYNAMIC_PAID_TEST_WARNING_KEY;
 const selectedPreset = computed(() => (
@@ -346,14 +393,16 @@ const importPresetId = computed(() => (
 ));
 const presetOptions = computed(() => {
   const manual = { label: t("手动（自定义）"), value: MANUAL_PRESET_ID };
-  const groups = (["official", "aggregator"] as const)
-    .map((category) => ({
+  const offeringGroups = groupProviderPresetsByOffering(PROVIDER_PRESETS);
+  const groups = ([
+    ["plan", "Plan", offeringGroups.plan],
+    ["api", "API", offeringGroups.api],
+  ] as const)
+    .map(([offering, label, presets]) => ({
       type: "group" as const,
-      label: category === "official" ? t("官方 API") : t("聚合平台"),
-      key: `preset-group-${category}`,
-      children: PROVIDER_PRESETS
-        .filter((preset) => preset.category === category)
-        .map((preset) => ({ label: preset.name, value: preset.id })),
+      label,
+      key: `preset-group-${offering}`,
+      children: presets.map((preset) => ({ label: preset.name, value: preset.id })),
     }))
     .filter((group) => group.children.length > 0);
   return [manual, ...groups];
@@ -364,6 +413,24 @@ const presetNote = computed(() => (
 const discoveryUnavailable = computed(() => (
   effectivePreset.value ? !providerPresetModelDiscoveryEnabled(effectivePreset.value) : false
 ));
+/**
+ * Create mode with an explicit preset is a fixed connection: protocol, auth,
+ * and a configured preset endpoint are pinned by the preset and never offered
+ * as controls. Edit mode and manual creation keep every existing control.
+ */
+const fixedPreset = computed(() => (isEdit.value ? null : selectedPreset.value));
+const fixedSeededModels = computed(() => (
+  fixedPreset.value ? providerPresetDefaultModels(fixedPreset.value) : []
+));
+const fixedSeeded = computed(() => fixedSeededModels.value.length > 0);
+/** Azure/Bedrock-style presets have no fixed endpoint; the address stays required. */
+const fixedEndpointRequired = computed(() => Boolean(fixedPreset.value && !fixedPreset.value.endpointUrl));
+/**
+ * Seeded fixed rows keep the model editor and model test behind More
+ * settings; without seeds the editor stays visible so save validation is
+ * never a hidden blocker.
+ */
+const showAdvancedDetails = computed(() => !fixedSeeded.value || settingsOpen.value);
 const testTargets = computed(() => completeDynamicTestTargets(draft.value.models));
 const testTarget = computed(() => (
   testTargets.value[Math.min(testTargetIndex.value, Math.max(testTargets.value.length - 1, 0))] ?? null
@@ -421,11 +488,12 @@ const authOptions = computed(() => DYNAMIC_AUTH_KINDS.map((value) => ({
 })));
 
 watch(
-  () => [props.show, props.provider] as const,
+  () => [props.show, props.provider, props.initialPresetId] as const,
   ([visible, provider]) => {
     // Any close/reopen invalidates in-flight discovery/test responses.
     requestGeneration.value += 1;
     testTargetIndex.value = 0;
+    settingsOpen.value = false;
     if (!visible) return;
     formError.value = "";
     conflictNotice.value = "";
@@ -456,7 +524,16 @@ watch(
         preset_id: provider.preset_id ?? undefined,
       };
     } else {
+      // Every create open starts from a clean draft (no Key or models carry
+      // over), then the explicit preset from the chooser is applied on top.
       draft.value = emptyDynamicProviderDraft();
+      const preset = props.initialPresetId
+        ? PROVIDER_PRESETS.find((entry) => entry.id === props.initialPresetId) ?? null
+        : null;
+      if (preset) {
+        selectedPresetId.value = preset.id;
+        draft.value = applyProviderPresetToDraft(draft.value, preset);
+      }
     }
   },
   { immediate: true },
@@ -485,6 +562,7 @@ function onPresetChange(value: string): void {
   selectedPresetId.value = value;
   requestGeneration.value += 1;
   testTargetIndex.value = 0;
+  settingsOpen.value = false;
   const preset = PROVIDER_PRESETS.find((entry) => entry.id === value) ?? null;
   draft.value = applyProviderPresetToDraft(draft.value, preset);
   formError.value = "";
@@ -674,4 +752,11 @@ async function save(): Promise<void> {
 }
 .discovery-import { grid-column: 1 / -1; }
 .test-section { display: grid; gap: 8px; width: 100%; }
+.fixed-models-summary {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--ocg-muted);
+  font-size: var(--ocg-font-xs);
+}
+.fixed-settings-toggle { grid-column: 1 / -1; }
 </style>
