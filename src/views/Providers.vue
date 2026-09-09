@@ -28,18 +28,35 @@
     </n-alert>
 
     <n-empty
-      v-else-if="!loading && scopes.length === 0 && dynamicEntries.length === 0"
+      v-else-if="!loading && scopes.length === 0 && dynamicEntries.length === 0 && !selectedPreset"
       :description="t('暂无供应商范围')"
     />
 
-    <div v-else-if="activeScope || selectedDynamic" class="providers-layout">
+    <div v-else-if="activeScope || selectedDynamic || selectedPreset" class="providers-layout">
       <aside class="providers-rail">
-        <n-menu
-          :value="selectedKey"
-          :options="scopeMenuOptions"
-          :aria-label="t('选择供应商范围')"
-          @update:value="selectScopeKey"
-        />
+        <div class="providers-rail-search">
+          <n-input
+            v-model:value="presetQuery"
+            size="small"
+            clearable
+            :placeholder="t('搜索预设')"
+            :input-props="{ 'aria-label': t('搜索预设') }"
+          />
+        </div>
+        <div class="providers-rail-panes">
+          <section v-for="pane in scopeMenuPanes" :key="pane.id" class="providers-rail-pane">
+            <h3 class="providers-rail-pane__label">{{ pane.label }}</h3>
+            <div class="providers-rail-pane__items">
+              <n-menu
+                :value="selectedKey"
+                :options="pane.options"
+                :aria-label="`${t('选择供应商范围')} · ${pane.label}`"
+                @update:value="selectScopeKey"
+              />
+            </div>
+          </section>
+        </div>
+        <p v-if="presetFilteredOut" class="providers-rail-empty">{{ t("无匹配预设") }}</p>
       </aside>
 
       <div class="providers-main">
@@ -47,8 +64,9 @@
           <n-select
             :value="selectedKey"
             :options="scopeSelectOptions"
+            filterable
             :aria-label="t('选择供应商范围')"
-            :disabled="actionLocked"
+            :disabled="actionLocked || inlineFormBusy"
             :consistent-menu-width="false"
             @update:value="selectScopeKey"
           />
@@ -106,6 +124,33 @@
               </tr>
             </tbody>
           </table>
+        </section>
+
+        <section v-else-if="selectedPreset" class="providers-section" aria-labelledby="preset-provider-title">
+          <div class="providers-catalog-head">
+            <div class="providers-catalog-heading">
+              <h2 id="preset-provider-title">{{ selectedPreset.name }}</h2>
+              <div class="providers-catalog-meta">
+                <n-tag size="small" :bordered="false">
+                  {{ providerPresetOffering(selectedPreset) === "plan" ? "Plan" : "API" }}
+                </n-tag>
+                <n-tag size="small" :bordered="false">{{ t("供应商预设") }}</n-tag>
+                <a :href="selectedPreset.docsUrl" target="_blank" rel="noopener noreferrer">{{ t("官方文档") }}</a>
+                <a :href="selectedPreset.websiteUrl" target="_blank" rel="noopener noreferrer">{{ t("控制台") }}</a>
+              </div>
+            </div>
+          </div>
+          <DynamicProviderModal
+            :key="`preset-form:${selectedPreset.id}`"
+            embedded
+            :show="true"
+            :provider="null"
+            :initial-preset-id="selectedPreset.id"
+            preset-selection-locked
+            @saved="onDynamicSaved"
+            @conflict="onDynamicConflict"
+            @busy-change="inlineFormBusy = $event"
+          />
         </section>
 
         <template v-else-if="activeScope">
@@ -222,6 +267,7 @@
     <DynamicProviderModal
       v-model:show="showDynamicModal"
       :provider="editingDynamic"
+      :initial-preset-id="createPresetId"
       @saved="onDynamicSaved"
       @conflict="onDynamicConflict"
     />
@@ -235,6 +281,7 @@ import {
   NAlert,
   NButton,
   NEmpty,
+  NInput,
   NMenu,
   NPopconfirm,
   NSelect,
@@ -263,7 +310,7 @@ import DynamicProviderModal from "../components/DynamicProviderModal.vue";
 import OpenCodeInviteUrlField from "../components/OpenCodeInviteUrlField.vue";
 import { locale, t } from "../i18n/index.ts";
 import { dashboardErrorDetail } from "../utils/errors.ts";
-import { applyAppViewSearchParams, PROVIDER_OTHER_TAB, readProviderScopeQuery } from "./app-navigation.ts";
+import { applyAppViewSearchParams, PROVIDER_OTHER_TAB, readProviderScopeQuery, resolveAppViewKey } from "./app-navigation.ts";
 import {
   applyModelContractToResponse,
   catalogRefreshSupported,
@@ -274,9 +321,18 @@ import {
   normalizeProviderContractsResponse,
   protocolDisplayName,
   selectProviderScope,
+  type ProviderScopeView,
 } from "../domain/provider-contracts.ts";
 import { DEFAULT_PROVIDER_ID } from "../domain/account-providers.ts";
 import { isDynamicCatalogEntry } from "../domain/dynamic-provider.ts";
+import {
+  PROVIDER_PRESETS,
+  filterProviderPresets,
+  groupProviderPresetsByOffering,
+  providerPresetOffering,
+  providerPresetOfferingForId,
+} from "../domain/provider-presets.ts";
+import { providerScopeOffering } from "../domain/plans.ts";
 import {
   CATALOG_SOURCE_CUSTOM_DISCOVERY,
   CATALOG_SOURCE_DECLARED,
@@ -293,6 +349,10 @@ const catalog = ref<ProviderCatalogEntry[] | null>(null);
 const dynamicDetails = ref<DynamicProviderView[]>([]);
 const showDynamicModal = ref(false);
 const editingDynamic = ref<DynamicProviderView | null>(null);
+const createPresetId = ref<string | null>(null);
+/** In-flight save/test/discovery inside the inline preset create form. */
+const inlineFormBusy = ref(false);
+const presetQuery = ref("");
 const loading = ref(false);
 const loadError = ref("");
 const selectedKey = ref<string | null>(null);
@@ -324,6 +384,21 @@ const selectedDynamic = computed(() => {
   const id = selectedKey.value.slice("dynamic:".length);
   return dynamicDetails.value.find((item) => item.id === id) ?? null;
 });
+// Preset entries are a local UI scope only (scope_kind=preset): they never hit
+// the backend and never imply a configured Provider.
+const presetGroups = computed(() => (
+  groupProviderPresetsByOffering(filterProviderPresets(PROVIDER_PRESETS, presetQuery.value))
+));
+const presetFilteredOut = computed(() => (
+  Boolean(presetQuery.value.trim())
+  && presetGroups.value.plan.length === 0
+  && presetGroups.value.api.length === 0
+));
+const selectedPreset = computed(() => {
+  if (!selectedKey.value?.startsWith("preset:")) return null;
+  const id = selectedKey.value.slice("preset:".length);
+  return PROVIDER_PRESETS.find((preset) => preset.id === id) ?? null;
+});
 const activeSelection = computed(() => {
   const query = selectedKey.value?.split(":") ?? [];
   const scopeKind = query[0] ?? null;
@@ -344,34 +419,89 @@ const matrixActionLocked = computed(() => (
   || staticProtocolResetting.value
   || probingModels.value.size > 0
 ));
-const scopeMenuOptions = computed<MenuOption[]>(() => {
-  const builtin: MenuOption = {
-    type: "group",
-    label: t("内置"),
-    key: "builtin",
-    children: scopes.value.map((scope) => ({ key: scope.key, label: `${scope.label}` })),
-  };
-  const userDefined: MenuOption = {
-    type: "group",
-    label: t("用户定义"),
-    key: "user-defined",
-    children: dynamicEntries.value.map((entry) => ({
-      key: `dynamic:${entry.provider_id}`,
-      label: entry.display_name,
-    })),
-  };
+/**
+ * Rail key for the account-owned Custom API action. It is a navigation entry,
+ * never a scope: Custom API accounts are created on the Accounts view and no
+ * Provider row exists for them here.
+ */
+const CUSTOM_API_MENU_KEY = "custom-api";
+
+function scopeOffering(scope: ProviderScopeView): "plan" | "api" {
+  // Only the explicit built-in paid families are Plan; Zen Free, Custom, and
+  // unknown providers are API.
+  return providerScopeOffering(scope.provider_id);
+}
+
+/**
+ * Offering of a saved user-defined Provider from its persisted preset ID
+ * (already loaded in dynamicDetails); unknown or manual rows are API.
+ */
+function dynamicOffering(providerId: string): "plan" | "api" {
+  const detail = dynamicDetails.value.find((item) => item.id === providerId);
+  return providerPresetOfferingForId(detail?.preset_id);
+}
+
+const dynamicPlanEntries = computed(() => (
+  dynamicEntries.value.filter((entry) => dynamicOffering(entry.provider_id) === "plan")
+));
+const dynamicApiEntries = computed(() => (
+  dynamicEntries.value.filter((entry) => dynamicOffering(entry.provider_id) === "api")
+));
+const planScopes = computed(() => scopes.value.filter((scope) => scopeOffering(scope) === "plan"));
+const apiScopes = computed(() => scopes.value.filter((scope) => scopeOffering(scope) === "api"));
+
+const scopeMenuPanes = computed<Array<{ id: "plan" | "api"; label: "Plan" | "API"; options: MenuOption[] }>>(() => {
+  const presetItems = (presets: readonly (typeof PROVIDER_PRESETS)[number][]) => (
+    presets.map((preset) => ({ key: `preset:${preset.id}`, label: preset.name }))
+  );
+  const scopeItems = (list: readonly ProviderScopeView[]) => (
+    list.map((scope) => ({ key: scope.key, label: `${scope.label}` }))
+  );
+  const dynamicItems = (list: readonly ProviderCatalogEntry[]) => (
+    list.map((entry) => ({ key: `dynamic:${entry.provider_id}`, label: entry.display_name }))
+  );
+  const planOptions: MenuOption[] = [
+    ...scopeItems(planScopes.value),
+    ...dynamicItems(dynamicPlanEntries.value),
+    ...presetItems(presetGroups.value.plan),
+  ];
+  const apiOptions: MenuOption[] = [
+    { key: CUSTOM_API_MENU_KEY, label: "Custom API" },
+    ...scopeItems(apiScopes.value),
+    ...dynamicItems(dynamicApiEntries.value),
+    ...presetItems(presetGroups.value.api),
+  ];
+  const panes: Array<{ id: "plan" | "api"; label: "Plan" | "API"; options: MenuOption[] }> = [];
+  if (planOptions.length) panes.push({ id: "plan", label: "Plan", options: planOptions });
+  panes.push({ id: "api", label: "API", options: apiOptions });
+  return panes;
+});
+const scopeSelectOptions = computed<SelectOption[]>(() => {
+  // The mobile selector has its own built-in filter; the rail search query
+  // must not shrink these options when the rail itself is hidden.
+  const allPresetGroups = groupProviderPresetsByOffering(PROVIDER_PRESETS);
   return [
-    ...(scopes.value.length ? [builtin] : []),
-    ...(dynamicEntries.value.length ? [userDefined] : []),
+    ...planScopes.value.map((scope) => ({ value: scope.key, label: `${scope.label} · Plan` })),
+    ...dynamicPlanEntries.value.map((entry) => ({
+      value: `dynamic:${entry.provider_id}`,
+      label: `${entry.display_name} · Plan`,
+    })),
+    ...allPresetGroups.plan.map((preset) => ({
+      value: `preset:${preset.id}`,
+      label: `${preset.name} · Plan`,
+    })),
+    { value: CUSTOM_API_MENU_KEY, label: "Custom API · API" },
+    ...apiScopes.value.map((scope) => ({ value: scope.key, label: `${scope.label} · API` })),
+    ...dynamicApiEntries.value.map((entry) => ({
+      value: `dynamic:${entry.provider_id}`,
+      label: `${entry.display_name} · API`,
+    })),
+    ...allPresetGroups.api.map((preset) => ({
+      value: `preset:${preset.id}`,
+      label: `${preset.name} · API`,
+    })),
   ];
 });
-const scopeSelectOptions = computed<SelectOption[]>(() => [
-  ...scopes.value.map((scope) => ({ value: scope.key, label: `${scope.label} · ${t("内置")}` })),
-  ...dynamicEntries.value.map((entry) => ({
-    value: `dynamic:${entry.provider_id}`,
-    label: `${entry.display_name} · ${t("用户定义")}`,
-  })),
-]);
 const catalogRefreshVisible = computed(() => {
   const scope = activeScope.value;
   return Boolean(scope && catalogRefreshSupported(scope));
@@ -413,7 +543,20 @@ function formatTimestamp(value: string): string {
   }).format(date);
 }
 
+/**
+ * This view stays mounted under KeepAlive after the user leaves it; only
+ * touch scope state or the URL when the current URL actually targets it.
+ * Legacy "pricing" resolves to providers, so bookmarks keep working.
+ */
+function currentUrlIsProvidersView(): boolean {
+  const view = new URL(window.location.href).searchParams.get("view");
+  return resolveAppViewKey(view) === "providers";
+}
+
 function writeScopeToUrl(scopeKind: string, scopeId: string) {
+  // An in-flight load finishing after navigation must not rewrite the URL
+  // (e.g. strip the one-shot Accounts `add` deep link) for another view.
+  if (!currentUrlIsProvidersView()) return;
   const url = applyAppViewSearchParams(new URL(window.location.href), "providers", {
     scope_kind: scopeKind,
     scope_id: scopeId,
@@ -439,18 +582,37 @@ function selectDynamicProvider(providerId: string): boolean {
   return true;
 }
 
+function selectPresetScope(presetId: string): boolean {
+  if (!PROVIDER_PRESETS.some((preset) => preset.id === presetId)) return false;
+  selectedKey.value = `preset:${presetId}`;
+  writeScopeToUrl("preset", presetId);
+  return true;
+}
+
 function applyScopeFromQuery(fellBackNotice = false, preferDynamicId?: string) {
   if (preferDynamicId && selectDynamicProvider(preferDynamicId)) return;
   if (selectedKey.value?.startsWith("dynamic:")) {
     const id = selectedKey.value.slice("dynamic:".length);
     if (selectDynamicProvider(id)) return;
   }
+  // A preset selection is valid on its own and must survive reloads instead of
+  // being treated as a stale builtin scope.
+  if (selectedKey.value?.startsWith("preset:")) {
+    const id = selectedKey.value.slice("preset:".length);
+    if (selectPresetScope(id)) return;
+  }
   const query = readProviderScopeQuery(window.location.search);
   if (query.scope_kind === "dynamic" && query.scope_id && selectDynamicProvider(query.scope_id)) {
     return;
   }
+  if (query.scope_kind === "preset" && query.scope_id && selectPresetScope(query.scope_id)) {
+    return;
+  }
   const selected = selectProviderScope(scopes.value, query.scope_kind, query.scope_id);
   if (!selected.scope) {
+    // No saved provider scope: keep the rail usable through preset choices.
+    const firstPreset = PROVIDER_PRESETS[0];
+    if (firstPreset && selectPresetScope(firstPreset.id)) return;
     selectedKey.value = null;
     return;
   }
@@ -463,9 +625,26 @@ function applyScopeFromQuery(fellBackNotice = false, preferDynamicId?: string) {
 }
 
 function selectScopeKey(key: string | number) {
+  // A preset form with in-flight save/test/discovery must not be swapped out;
+  // its stale-generation guards only cover responses, not dismissal.
+  if (inlineFormBusy.value) return;
   const value = String(key);
+  if (value === CUSTOM_API_MENU_KEY) {
+    // Custom API accounts are account-owned: deep-link straight into Add
+    // Account with custom-endpoint preselected. Accounts consumes and
+    // deletes the one-shot `add` parameter when it opens the modal.
+    const url = applyAppViewSearchParams(new URL(window.location.href), "accounts");
+    url.searchParams.set("add", "custom-endpoint");
+    window.history.pushState(null, "", url);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    return;
+  }
   if (value.startsWith("dynamic:")) {
     selectDynamicProvider(value.slice("dynamic:".length));
+    return;
+  }
+  if (value.startsWith("preset:")) {
+    selectPresetScope(value.slice("preset:".length));
     return;
   }
   const scope = scopes.value.find((item) => item.key === value);
@@ -522,12 +701,14 @@ async function loadContracts(options: { retain?: boolean; preferDynamicId?: stri
 
 function openCreateDynamic(): void {
   editingDynamic.value = null;
+  createPresetId.value = null;
   showDynamicModal.value = true;
 }
 
 function openEditDynamic(): void {
   if (!selectedDynamic.value) return;
   editingDynamic.value = selectedDynamic.value;
+  createPresetId.value = null;
   showDynamicModal.value = true;
 }
 
@@ -784,8 +965,17 @@ function probeResultUrl(error: string | null): string {
 }
 
 function onPopState() {
+  // KeepAlive keeps this view mounted; a popstate for another view (e.g. the
+  // Accounts add deep link) is not ours to apply.
+  if (!currentUrlIsProvidersView()) return;
   applyScopeFromQuery();
 }
+
+watch(selectedKey, () => {
+  // The inline preset form unmounts on selection change; its busy flags die
+  // with it, so the navigation lock must not outlive the form.
+  inlineFormBusy.value = false;
+});
 
 watch(activeScope, (scope, previous) => {
   if (scope?.key !== previous?.key) {
@@ -910,11 +1100,55 @@ onUnmounted(() => {
   gap: 8px;
 }
 .providers-rail {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
+  max-height: calc(100vh - 140px);
   padding: 8px 0;
+  overflow: hidden;
   border: 1px solid var(--ocg-border);
   border-radius: 10px;
   background: var(--ocg-surface);
+}
+.providers-rail-search {
+  flex: none;
+  padding: 0 8px 8px;
+}
+/* Plan and API panes share the rail height and scroll independently, so both
+   headings and the first API row (Custom API) stay visible without scrolling. */
+.providers-rail-panes {
+  flex: 1;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+  min-height: 0;
+}
+.providers-rail-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.providers-rail-pane + .providers-rail-pane {
+  border-top: 1px solid var(--ocg-border);
+}
+.providers-rail-pane__label {
+  flex: none;
+  margin: 0;
+  padding: 4px 12px;
+  color: var(--ocg-subtle);
+  font-size: var(--ocg-font-xs);
+  font-weight: 600;
+  line-height: 1.3;
+}
+.providers-rail-pane__items {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.providers-rail-empty {
+  margin: 0;
+  padding: 8px 12px;
+  color: var(--ocg-muted);
+  font-size: var(--ocg-font-xs);
 }
 .providers-mobile-nav {
   display: none;

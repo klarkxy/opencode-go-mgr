@@ -87,13 +87,28 @@ export function readAccountDeepLink(search: string): string | null {
   return params.get("account_id");
 }
 
+/**
+ * One-shot "open Add Account with this chooser option" deep link (Accounts
+ * view only). Only an explicit Accounts view qualifies — a missing or
+ * different view returns null. Consumers must delete the parameter on use so
+ * a reload or a close/reopen cycle never reopens the modal.
+ */
+export function readAccountAddDeepLink(search: string): string | null {
+  const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
+  if (resolveAppViewKey(params.get("view")) !== "accounts") return null;
+  return params.get("add");
+}
+
 export function applyAppViewSearchParams(
   url: URL,
   view: AppViewKey,
   scope?: ProviderScopeQuery | null,
 ): URL {
   url.searchParams.set("view", view);
-  if (view !== "accounts") url.searchParams.delete("account_id");
+  if (view !== "accounts") {
+    url.searchParams.delete("account_id");
+    url.searchParams.delete("add");
+  }
   if (view !== "providers") {
     url.searchParams.delete("scope_kind");
     url.searchParams.delete("scope_id");

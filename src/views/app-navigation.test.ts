@@ -6,6 +6,7 @@ import {
   PROVIDER_OTHER_TAB,
   applyAppViewSearchParams,
   isLegacyPricingView,
+  readAccountAddDeepLink,
   readProviderScopeQuery,
   resolveAppViewKey,
 } from "./app-navigation.ts";
@@ -85,4 +86,26 @@ test("leaving Accounts strips a stale account deep-link parameter", () => {
   );
   assert.equal(url.searchParams.get("view"), "providers");
   assert.equal(url.searchParams.get("account_id"), null);
+});
+
+test("the add-account deep link reads on Accounts and is stripped elsewhere", () => {
+  assert.equal(readAccountAddDeepLink("?view=accounts&add=custom-endpoint"), "custom-endpoint");
+  assert.equal(readAccountAddDeepLink("?view=accounts"), null);
+  // Wrong or missing view never qualifies, even with the parameter present.
+  assert.equal(readAccountAddDeepLink("?view=providers&add=custom-endpoint"), null);
+  assert.equal(readAccountAddDeepLink("?view=keys&add=custom-endpoint"), null);
+  assert.equal(readAccountAddDeepLink("?add=custom-endpoint"), null);
+  assert.equal(readAccountAddDeepLink(""), null);
+  const url = applyAppViewSearchParams(
+    new URL("http://127.0.0.1:9042/dashboard/?view=accounts&add=custom-endpoint"),
+    "logs",
+  );
+  assert.equal(url.searchParams.get("view"), "logs");
+  assert.equal(url.searchParams.get("add"), null);
+  const stay = applyAppViewSearchParams(
+    new URL("http://127.0.0.1:9042/dashboard/?view=providers&scope_kind=preset&scope_id=openai"),
+    "accounts",
+  );
+  assert.equal(stay.searchParams.get("view"), "accounts");
+  assert.equal(stay.searchParams.get("scope_kind"), null);
 });
