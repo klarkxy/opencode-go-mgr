@@ -4,21 +4,25 @@
     preset="card"
     :title="t('新增账号')"
     class="account-add-modal"
-    style="width: 760px; max-width: calc(100vw - 32px)"
-    @update:show="$emit('update:show', $event)"
+    style="width: 920px; max-width: calc(100vw - 32px)"
+    :mask-closable="false"
+    :close-on-esc="!interactionLocked"
+    @update:show="onOuterUpdateShow"
   >
-    <div v-if="catalogLoading" class="account-add-loading">
+    <div v-if="showCatalogLoading" class="account-add-loading">
       <n-spin size="large" :description="t('加载中…')" />
     </div>
 
     <div v-else class="account-add-layout">
       <div class="account-add-mobile">
         <n-select
-          :value="selectedPlanId || null"
+          :value="selectedOptionId || null"
           :options="selectOptions"
+          filterable
+          :disabled="interactionLocked"
           :aria-label="t('选择要添加的方案')"
           :consistent-menu-width="false"
-          @update:value="selectPlanId"
+          @update:value="selectOption"
         />
       </div>
 
@@ -27,150 +31,181 @@
         :aria-label="t('选择要添加的方案')"
         @keydown="onRailKeydown"
       >
-        <section v-for="group in groups" :key="group.id" class="account-add-group">
-          <h3 class="account-add-group__label">{{ t(group.label) }}</h3>
-          <button
-            v-for="option in group.options"
-            :id="`account-add-option-${option.optionId}`"
-            :key="option.optionId"
-            type="button"
-            class="account-add-item"
-            :class="{
-              'account-add-item--active': option.optionId === selectedPlanId,
-              'account-add-item--disabled': option.disabled,
-            }"
-            :aria-pressed="option.optionId === selectedPlanId"
-            :aria-current="option.optionId === selectedPlanId ? 'true' : undefined"
-            @click="selectPlanId(option.optionId)"
-          >
-            <n-icon :component="planIcon(option.plan.id)" size="16" aria-hidden="true" />
-            <span class="account-add-item__label">{{ option.label }}</span>
-          </button>
-        </section>
+        <div class="account-add-search">
+          <n-input
+            v-model:value="presetQuery"
+            size="small"
+            clearable
+            :placeholder="t('搜索预设')"
+            :input-props="{ 'aria-label': t('搜索预设') }"
+          />
+        </div>
+        <div class="account-add-list">
+          <section v-for="group in chooserGroups" :key="group.id" class="account-add-group">
+            <h3 class="account-add-group__label">{{ group.label }}</h3>
+            <button
+              v-for="option in group.options"
+              :id="`account-add-option-${option.optionId}`"
+              :key="option.optionId"
+              type="button"
+              class="account-add-item"
+              :class="{
+                'account-add-item--active': option.optionId === selectedOptionId,
+                'account-add-item--disabled': isChooserOptionDisabled(option),
+              }"
+              :aria-pressed="option.optionId === selectedOptionId"
+              :aria-current="option.optionId === selectedOptionId ? 'true' : undefined"
+              @click="selectOption(option.optionId)"
+            >
+              <n-icon :component="iconFor(chooserOptionIconKey(option))" size="16" aria-hidden="true" />
+              <span class="account-add-item__label">{{ option.label }}</span>
+            </button>
+          </section>
+          <p v-if="presetSearchMiss" class="account-add-empty">{{ t("无匹配预设") }}</p>
+        </div>
       </aside>
 
-      <div v-if="selectedOption" class="account-add-detail">
+      <div v-if="selected && detail" class="account-add-detail">
         <header class="account-add-detail__header">
-          <n-icon :component="planIcon(selectedOption.plan.id)" size="22" aria-hidden="true" />
+          <n-icon :component="iconFor(detail.iconKey)" size="22" aria-hidden="true" />
           <div class="account-add-detail__titles">
-            <h2>{{ selectedOption.label }}</h2>
+            <h2>{{ detail.title }}</h2>
             <n-tag
-              v-if="selectedOption.source === 'user-defined'"
+              v-if="detail.tag"
               size="small"
               :bordered="false"
+              :type="detail.tag.type"
             >
-              {{ t("用户定义") }}
+              {{ t(detail.tag.label) }}
             </n-tag>
-            <n-tag
-              v-else-if="planKindTag(selectedOption.plan)"
-              size="small"
-              :bordered="false"
-              :type="planKindTag(selectedOption.plan)!.type"
-            >
-              {{ planKindTag(selectedOption.plan)!.label }}
-            </n-tag>
+            <span v-if="detail.links" class="account-add-detail__links">
+              <a :href="detail.links.docsUrl" target="_blank" rel="noopener noreferrer">{{ t("官方文档") }}</a>
+              <a :href="detail.links.websiteUrl" target="_blank" rel="noopener noreferrer">{{ t("控制台") }}</a>
+            </span>
           </div>
         </header>
 
-        <p v-if="planDescription(selectedOption.plan)" class="account-add-detail__copy">
-          {{ planDescription(selectedOption.plan) }}
-        </p>
-        <p
-          v-if="selectedOption.managed"
-          class="account-add-detail__copy account-add-detail__copy--secondary"
-        >
-          {{ t("独立 Profile：登录 → 邀请 → 支付 → 验证 Key。") }}
-        </p>
+        <template v-if="selectedPlanOption">
+          <n-alert
+            v-if="selectedPlanOption.disabled"
+            type="warning"
+            :title="selectedPlanOption.disabledReason ? t(selectedPlanOption.disabledReason) : ''"
+          />
 
-        <n-alert
-          v-if="selectedOption.disabled"
-          type="warning"
-          :title="selectedOption.disabledReason ? t(selectedOption.disabledReason) : ''"
-        />
-        <n-alert
-          v-else-if="selectedOption.creationHint"
-          type="default"
-          :title="t(selectedOption.creationHint)"
-        />
-        <n-alert
-          v-if="selectedOption.managed && !managedAvailable"
-          type="warning"
-          class="account-add-hint"
-        >
-          <div class="account-add-hint__content">
-            <span>{{ managedReason }}</span>
-            <n-button v-if="inviteMissing" text type="primary" @click="$emit('openInviteUrl')">
-              {{ t("前往 OpenCode Go 填写邀请链接") }}
-            </n-button>
-          </div>
-        </n-alert>
+          <template v-else>
+            <AccountFormModal
+              v-if="show"
+              embedded
+              :show="true"
+              :account="null"
+              :busy="createBusy"
+              :plan="selectedPlanOption.plan"
+              :catalog="catalog ?? null"
+              @save="(payload) => emit('saveAccount', payload)"
+            />
 
-        <n-space v-if="selectedOption.managed" :size="8" class="account-add-detail__actions">
-          <n-button secondary @click="$emit('importKey')">
-            {{ t("导入已有 Key") }}
-          </n-button>
-          <n-tooltip :disabled="managedAvailable">
-            <template #trigger>
-              <n-button
-                type="primary"
-                :disabled="!managedAvailable"
-                @click="managedAvailable && $emit('registerManaged')"
+            <template v-if="selectedPlanOption.managed">
+              <n-alert
+                v-if="!managedAvailable"
+                type="warning"
+                class="account-add-hint"
               >
-                {{ t("注册新账号（Beta）") }}
-              </n-button>
+                <div class="account-add-hint__content">
+                  <span>{{ managedReason }}</span>
+                  <n-button v-if="inviteMissing" text type="primary" @click="emit('openInviteUrl')">
+                    {{ t("前往 OpenCode Go 填写邀请链接") }}
+                  </n-button>
+                </div>
+              </n-alert>
+              <div class="account-add-detail__actions">
+                <n-tooltip :disabled="managedAvailable">
+                  <template #trigger>
+                    <n-button
+                      secondary
+                      :disabled="!managedAvailable || interactionLocked"
+                      @click="managedAvailable && !interactionLocked && emit('registerManaged')"
+                    >
+                      {{ t("注册新账号（Beta）") }}
+                    </n-button>
+                  </template>
+                  {{ managedReason }}
+                </n-tooltip>
+              </div>
             </template>
-            {{ managedReason }}
-          </n-tooltip>
-        </n-space>
+          </template>
+        </template>
 
-        <n-space
-          v-else-if="!selectedOption.disabled"
-          :size="8"
-          class="account-add-detail__actions"
-        >
-          <n-button
-            :type="selectedOption.plan.id === 'custom-endpoint' ? 'primary' : 'default'"
-            @click="handleSelect(selectedOption)"
-          >
-            {{ t(planActionLabel(selectedOption)) }}
-          </n-button>
-        </n-space>
+        <DynamicProviderModal
+          v-else-if="selectedPresetOption && show"
+          embedded
+          :show="true"
+          :provider="null"
+          :initial-preset-id="selectedPresetOption.preset.id"
+          preset-selection-locked
+          context="account"
+          @saved="(providerId) => emit('presetSaved', providerId)"
+          @conflict="emit('presetConflict')"
+          @busy-change="embeddedFormBusy = $event"
+        />
+
+        <PlatformAccountFormModal
+          v-else-if="selectedPlatformOption && show"
+          embedded
+          :show="true"
+          :editing="null"
+          :preset-kind="selectedPlatformOption.kind"
+          :busy="platformBusy"
+          @save="(payload) => emit('createPlatform', payload)"
+        />
       </div>
     </div>
   </n-modal>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, toRef, watch } from "vue";
+import { computed, nextTick, ref, toRef, watch } from "vue";
 import type { Component } from "vue";
 import {
   NAlert,
   NButton,
   NIcon,
+  NInput,
   NModal,
   NSelect,
-  NSpace,
   NSpin,
   NTag,
   NTooltip,
-  type SelectGroupOption,
-  type SelectOption,
 } from "naive-ui";
 import {
   KeyOutlined,
   CloudOutlined,
   ApiOutlined,
+  DatabaseOutlined,
   SwapOutlined,
 } from "@vicons/antd";
-import { t, type MessageKey } from "../i18n/index.ts";
+import { t } from "../i18n/index.ts";
 import { useLocalizedModalCloseLabel } from "../utils/modal-close-label.ts";
 import {
-  buildPlanChooserGroups,
-  planChooserGroupId,
-  type PlanOption,
-} from "../domain/account-plan-options.ts";
-import type { PlanDefinition } from "../domain/plans.ts";
+  buildChooserGroups,
+  chooserOptionIconKey,
+  chooserPresetSearchMiss,
+  chooserSelectOptions,
+  chooserUniverse,
+  defaultChooserOptionId,
+  describeChooserSelection,
+  isChooserOptionDisabled,
+  isValidChooserOption,
+  visibleChooserOptions,
+} from "../domain/account-add-chooser.ts";
+import { isDynamicCatalogEntry } from "../domain/dynamic-provider.ts";
+import { providerApi } from "../api/providers.ts";
+import type { AccountInput } from "../api/dashboard.ts";
 import type { ProviderCatalogEntry } from "../api/providers.ts";
+import AccountFormModal, { type AccountFormPayload } from "./AccountFormModal.vue";
+import DynamicProviderModal from "./DynamicProviderModal.vue";
+import PlatformAccountFormModal, {
+  type PlatformAccountFormPayload,
+} from "./PlatformAccountFormModal.vue";
 
 const props = defineProps<{
   show: boolean;
@@ -179,56 +214,159 @@ const props = defineProps<{
   managedAvailable: boolean;
   managedReason: string;
   inviteMissing: boolean;
+  /** Parent account mutation in flight; embedded account forms bind to it. */
+  createBusy: boolean;
+  /** Platform section mutation in flight; embedded platform form binds to it. */
+  platformBusy: boolean;
+  /**
+   * One-shot deep-link target (e.g. from the Suppliers Custom API row):
+   * preselected only on the closed-to-open transition, never re-applied while
+   * the modal is open, so a catalog refresh cannot steal the user's draft.
+   */
+  initialOptionId?: string | null;
 }>();
 
 const emit = defineEmits<{
   (event: "update:show", value: boolean): void;
-  (event: "importKey"): void;
   (event: "registerManaged"): void;
   (event: "openInviteUrl"): void;
-  (event: "selectPlan", plan: PlanDefinition): void;
+  /** Create path only; the parent owns the account mutation and closes us. */
+  (event: "saveAccount", payload: AccountInput | AccountFormPayload): void;
+  /** The platform section owns validation, CAS handling, and the write. */
+  (event: "createPlatform", payload: PlatformAccountFormPayload): void;
+  /** The atomic supplier+first-account create already persisted both lists. */
+  (event: "presetSaved", providerId: string): void;
+  (event: "presetConflict"): void;
 }>();
 
 useLocalizedModalCloseLabel(toRef(props, "show"), "account-add-modal");
 
-const selectedPlanId = ref<string>("");
+const selectedOptionId = ref<string>("");
+const presetQuery = ref("");
+/**
+ * provider_id → persisted preset_id for saved user-defined Providers, loaded
+ * once per catalog revision so their preset offering can group them. Entries
+ * that fail to load stay absent (API). Selection is by optionId, so a late
+ * completion only re-slots rail items and never unmounts an open form.
+ */
+const dynamicPresetIds = ref<ReadonlyMap<string, string | null>>(new Map());
+let dynamicPresetGeneration = 0;
+/** In-flight save/test/discovery inside the embedded dynamic-provider form. */
+const embeddedFormBusy = ref(false);
 
-const groups = computed(() => buildPlanChooserGroups(props.catalog));
-const flatOptions = computed(() => groups.value.flatMap((group) => group.options));
-const selectedOption = computed(() => (
-  flatOptions.value.find((option) => option.optionId === selectedPlanId.value) ?? null
+/**
+ * The full-screen spinner is only for the first open with no catalog at all.
+ * Once the layout has rendered, a background catalog reconciliation (e.g. the
+ * reload after a CAS conflict on save) must not swap back to the spinner:
+ * doing so unmounts the embedded form and destroys the user's draft, Key,
+ * and the conflict notice they need for an explicit retry.
+ */
+const layoutRendered = ref(false);
+const showCatalogLoading = computed(() => (
+  props.catalogLoading && !layoutRendered.value && !props.catalog
 ));
 
-const selectOptions = computed<Array<SelectOption | SelectGroupOption>>(() => (
-  groups.value.map((group) => ({
-    type: "group" as const,
-    key: group.id,
-    label: t(group.label),
-    children: group.options.map((option) => ({
-      label: option.source === "user-defined" ? `${option.label} · ${t("用户定义")}` : option.label,
-      value: option.optionId,
-    })),
-  }))
+watch(
+  () => [props.show, props.catalogLoading] as const,
+  ([visible, loading]) => {
+    if (visible && !loading) layoutRendered.value = true;
+  },
+  { immediate: true },
+);
+
+watch(
+  () => [props.show, props.catalog] as const,
+  ([visible, catalog]) => {
+    const generation = ++dynamicPresetGeneration;
+    if (!visible) return;
+    const ids = (catalog ?? [])
+      .filter(isDynamicCatalogEntry)
+      .map((entry) => entry.provider_id);
+    if (ids.length === 0) {
+      dynamicPresetIds.value = new Map();
+      return;
+    }
+    void Promise.allSettled(ids.map((id) => providerApi.getDynamicProvider(id))).then((results) => {
+      if (generation !== dynamicPresetGeneration) return;
+      const next = new Map<string, string | null>();
+      results.forEach((result, index) => {
+        next.set(ids[index]!, result.status === "fulfilled" ? result.value.preset_id : null);
+      });
+      dynamicPresetIds.value = next;
+    });
+  },
+  { immediate: true },
+);
+
+const chooserGroups = computed(() => (
+  buildChooserGroups(props.catalog, dynamicPresetIds.value, presetQuery.value)
+));
+const universe = computed(() => chooserUniverse(props.catalog, dynamicPresetIds.value));
+const navOptions = computed(() => visibleChooserOptions(chooserGroups.value));
+const selectOptions = computed(() => chooserSelectOptions(chooserGroups.value, t("用户定义")));
+const presetSearchMiss = computed(() => chooserPresetSearchMiss(presetQuery.value));
+
+const selected = computed(() => (
+  universe.value.find((option) => option.optionId === selectedOptionId.value) ?? null
+));
+const detail = computed(() => (
+  selected.value ? describeChooserSelection(selected.value) : null
+));
+const selectedPlanOption = computed(() => (
+  selected.value && "plan" in selected.value ? selected.value : null
+));
+const selectedPresetOption = computed(() => (
+  selected.value && "preset" in selected.value ? selected.value : null
+));
+const selectedPlatformOption = computed(() => (
+  selected.value && !("plan" in selected.value) && !("preset" in selected.value)
+    ? selected.value
+    : null
 ));
 
-function defaultPlanId(): string {
-  return flatOptions.value.find((option) => !option.disabled)?.optionId
-    ?? flatOptions.value[0]?.optionId
-    ?? "";
-}
+/**
+ * Any in-flight create (parent account save, platform save, or embedded
+ * supplier save/test/discovery) blocks closing and switching, so a late
+ * success can never land in a different form or duplicate a write.
+ */
+const interactionLocked = computed(() => (
+  props.createBusy || props.platformBusy || embeddedFormBusy.value
+));
 
-function selectPlanId(value: string): void {
-  if (flatOptions.value.some((option) => option.optionId === value)) {
-    selectedPlanId.value = value;
+function selectOption(value: string): void {
+  if (interactionLocked.value) return;
+  if (isValidChooserOption(universe.value, value)) {
+    selectedOptionId.value = value;
   }
 }
 
+watch(selectedOptionId, () => {
+  // A selection swap unmounts the previous embedded form; its in-flight flags
+  // die with it, so the close guard must not outlive the form.
+  embeddedFormBusy.value = false;
+});
+
+let chooserWasVisible = false;
 watch(
-  () => [props.show, flatOptions.value] as const,
-  ([visible, options]) => {
-    if (!visible) return;
-    if (!options.some((option) => option.optionId === selectedPlanId.value)) {
-      selectedPlanId.value = defaultPlanId();
+  () => [props.show, universe.value, props.initialOptionId] as const,
+  ([visible, options, initialOptionId]) => {
+    const justOpened = visible && !chooserWasVisible;
+    chooserWasVisible = visible;
+    if (!visible) {
+      embeddedFormBusy.value = false;
+      return;
+    }
+    // The search resets only on a fresh open; a background catalog or
+    // preset-id reload must not clear what the user is typing.
+    if (justOpened) {
+      presetQuery.value = "";
+      if (initialOptionId && isValidChooserOption(options, initialOptionId)) {
+        selectedOptionId.value = initialOptionId;
+        return;
+      }
+    }
+    if (!isValidChooserOption(options, selectedOptionId.value)) {
+      selectedOptionId.value = defaultChooserOptionId(options);
     }
   },
   { immediate: true },
@@ -236,13 +374,27 @@ watch(
 
 function onRailKeydown(event: KeyboardEvent): void {
   if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
-  const ids = flatOptions.value.map((option) => option.optionId);
+  const ids = navOptions.value.map((option) => option.optionId);
   if (ids.length === 0) return;
   event.preventDefault();
-  const current = ids.indexOf(selectedPlanId.value);
+  const current = ids.indexOf(selectedOptionId.value);
   const delta = event.key === "ArrowDown" ? 1 : -1;
   const next = ids[(current + delta + ids.length) % ids.length];
-  if (next) selectedPlanId.value = next;
+  if (!next) return;
+  selectOption(next);
+  void nextTick(() => {
+    document.getElementById(`account-add-option-${next}`)?.scrollIntoView({ block: "nearest" });
+  });
+}
+
+function onOuterUpdateShow(value: boolean): void {
+  if (value) {
+    emit("update:show", true);
+    return;
+  }
+  // Failed saves keep the draft; in-flight work keeps the modal open.
+  if (interactionLocked.value) return;
+  emit("update:show", false);
 }
 
 const ICONS: Record<string, Component> = {
@@ -251,44 +403,12 @@ const ICONS: Record<string, Component> = {
   "minimax-cn": ApiOutlined,
   "kimi-cn": ApiOutlined,
   "custom-endpoint": SwapOutlined,
+  api: ApiOutlined,
+  database: DatabaseOutlined,
 };
 
-function planIcon(planId: string): Component {
-  return ICONS[planId] ?? KeyOutlined;
-}
-
-function planKindTag(plan: PlanDefinition): { label: string; type: "warning" | "default" } | null {
-  if (plan.kind === "custom") return { label: t("自定义端点"), type: "default" };
-  if (plan.id === "dynamic-http") return { label: t("用户定义"), type: "default" };
-  return null;
-}
-
-function planDescription(plan: PlanDefinition): string {
-  switch (plan.id) {
-    case "opencode-go":
-      return t("已有 OpenCode Go Key，直接添加并参与账号路由。");
-    case "minimax-cn":
-      return `${t("API Key")} · ${t("刷新模型目录")}`;
-    case "kimi-cn":
-      return `${t("API Key")} · ${t("刷新模型目录")}`;
-    case "custom-endpoint":
-      return t("自定义端点由你自行维护，Gateway 无法验证其价格、额度与协议兼容性。");
-    case "dynamic-http":
-      return t("账号不拥有 Endpoint、协议或模型映射。");
-    default:
-      return "";
-  }
-}
-
-function planActionLabel(option: PlanOption): MessageKey {
-  if (option.plan.id === "custom-endpoint") return "添加账号";
-  if (planChooserGroupId(option, props.catalog) === "draft") return "创建草稿";
-  return "添加账号";
-}
-
-function handleSelect(option: PlanOption): void {
-  if (option.disabled || option.managed) return;
-  emit("selectPlan", option.plan);
+function iconFor(iconKey: string): Component {
+  return ICONS[iconKey] ?? KeyOutlined;
 }
 </script>
 
@@ -299,10 +419,12 @@ function handleSelect(option: PlanOption): void {
   min-height: 220px;
 }
 
+/* Fixed-height shell: the rail list and the embedded form body are the only
+   scroll regions; the detail header and the form footer stay put. */
 .account-add-layout {
   display: grid;
-  grid-template-columns: 220px minmax(0, 1fr);
-  min-height: 280px;
+  grid-template-columns: 240px minmax(0, 1fr);
+  height: min(620px, calc(100vh - 96px));
   overflow: hidden;
   border: 1px solid var(--ocg-border);
   border-radius: 14px;
@@ -314,24 +436,51 @@ function handleSelect(option: PlanOption): void {
 }
 
 .account-add-rail {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
-  padding: 8px 0 12px;
-  overflow: auto;
+  min-height: 0;
+  overflow: hidden;
   border-right: 1px solid var(--ocg-border);
   background: var(--ocg-canvas);
 }
 
+.account-add-search {
+  flex: none;
+  padding: 8px 12px;
+  background: var(--ocg-canvas);
+}
+
+/* One list scrolls; the Plan / API group labels stick to its top edge. */
+.account-add-list {
+  flex: 1;
+  min-height: 0;
+  padding-bottom: 12px;
+  overflow: auto;
+}
+
 .account-add-group + .account-add-group {
-  margin-top: 8px;
+  border-top: 1px solid var(--ocg-border);
 }
 
 .account-add-group__label {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   margin: 0;
-  padding: 8px 12px 4px;
+  padding: 8px 12px;
   color: var(--ocg-subtle);
   font-size: var(--ocg-font-xs);
   font-weight: 600;
   line-height: 1.3;
+  background: var(--ocg-canvas);
+}
+
+.account-add-empty {
+  margin: 0;
+  padding: 8px 12px;
+  color: var(--ocg-muted);
+  font-size: var(--ocg-font-xs);
 }
 
 .account-add-item {
@@ -383,15 +532,18 @@ function handleSelect(option: PlanOption): void {
 }
 
 .account-add-detail {
-  display: grid;
-  align-content: start;
+  display: flex;
+  flex-direction: column;
   gap: 12px;
   min-width: 0;
-  padding: 20px;
+  min-height: 0;
+  padding: 16px 20px;
+  overflow: hidden;
 }
 
 .account-add-detail__header {
   display: flex;
+  flex: none;
   align-items: center;
   gap: 12px;
 }
@@ -416,19 +568,20 @@ function handleSelect(option: PlanOption): void {
   line-height: 1.3;
 }
 
-.account-add-detail__copy {
-  margin: 0;
-  color: var(--ocg-muted);
-  font-size: var(--ocg-font-sm);
-  line-height: 1.5;
-}
-
-.account-add-detail__copy--secondary {
+.account-add-detail__links {
+  display: flex;
+  gap: 12px;
   font-size: var(--ocg-font-xs);
 }
 
 .account-add-detail__actions {
-  margin-top: 4px;
+  display: flex;
+  flex: none;
+  gap: 8px;
+}
+
+.account-add-hint {
+  flex: none;
 }
 
 .account-add-hint__content {
@@ -442,6 +595,7 @@ function handleSelect(option: PlanOption): void {
 @media (max-width: 640px) {
   .account-add-layout {
     grid-template-columns: minmax(0, 1fr);
+    height: auto;
   }
 
   .account-add-rail {
@@ -451,6 +605,10 @@ function handleSelect(option: PlanOption): void {
   .account-add-mobile {
     display: block;
     padding: 12px 12px 0;
+  }
+
+  .account-add-detail {
+    overflow: visible;
   }
 }
 </style>
