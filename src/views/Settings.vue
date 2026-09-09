@@ -108,8 +108,9 @@
                 :max="65535"
                 :precision="0"
                 :disabled="!loaded || saving || config.gateway_port_from_env"
-                :aria-label="t('Gateway 端口')"
-              />
+                :input-props="{ 'aria-label': t('Gateway 端口') }"
+              ><template #minus-icon><span aria-hidden="true">−</span><span class="sr-only">{{ t('减少{field}', { field: t('Gateway 端口') }) }}</span></template>
+              <template #add-icon><span aria-hidden="true">+</span><span class="sr-only">{{ t('增加{field}', { field: t('Gateway 端口') }) }}</span></template></n-input-number>
               <p v-if="config.gateway_port_from_env">
                 {{ t("由环境变量 OCG_GATEWAY_PORT 管理；修改环境变量并重启后生效。") }}
               </p>
@@ -241,7 +242,8 @@
                 :input-props="{ 'aria-label': t('连接超时（秒）') }"
               >
                 <template #suffix>{{ t("秒") }}</template>
-              </n-input-number>
+              <template #minus-icon><span aria-hidden="true">−</span><span class="sr-only">{{ t('减少{field}', { field: t('连接超时（秒）') }) }}</span></template>
+              <template #add-icon><span aria-hidden="true">+</span><span class="sr-only">{{ t('增加{field}', { field: t('连接超时（秒）') }) }}</span></template></n-input-number>
               <span class="field-caption">{{ t("建立上游连接的初始超时（秒）") }}</span>
             </div>
           </n-form-item>
@@ -256,7 +258,8 @@
                 :input-props="{ 'aria-label': t('非流式总超时（秒）') }"
               >
                 <template #suffix>{{ t("秒") }}</template>
-              </n-input-number>
+              <template #minus-icon><span aria-hidden="true">−</span><span class="sr-only">{{ t('减少{field}', { field: t('非流式总超时（秒）') }) }}</span></template>
+              <template #add-icon><span aria-hidden="true">+</span><span class="sr-only">{{ t('增加{field}', { field: t('非流式总超时（秒）') }) }}</span></template></n-input-number>
               <span class="field-caption">{{ t("非流式请求从发起到完整响应的总超时（秒）") }}</span>
             </div>
           </n-form-item>
@@ -271,7 +274,8 @@
                 :input-props="{ 'aria-label': t('流式空闲超时（秒）') }"
               >
                 <template #suffix>{{ t("秒") }}</template>
-              </n-input-number>
+              <template #minus-icon><span aria-hidden="true">−</span><span class="sr-only">{{ t('减少{field}', { field: t('流式空闲超时（秒）') }) }}</span></template>
+              <template #add-icon><span aria-hidden="true">+</span><span class="sr-only">{{ t('增加{field}', { field: t('流式空闲超时（秒）') }) }}</span></template></n-input-number>
               <span class="field-caption">{{ t("流式响应两次数据块之间的最大空闲时间（秒）") }}</span>
             </div>
           </n-form-item>

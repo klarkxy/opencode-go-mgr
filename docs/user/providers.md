@@ -45,8 +45,11 @@ edit/delete. User-defined Providers are unpriced.
 **Aliases** is a separate core page because its read-only table spans every
 Provider contract, user-defined Provider mapping, and Custom account instead of
 the selected Provider. It aggregates existing contracts and account capabilities
-into public names with their routeability and exact upstream identities.
-Custom mappings stay editable only on **Accounts**.
+into public names with their configuration state, enabled-account counts, and
+exact upstream identities. These are configuration facts, not a guarantee that
+a request will succeed. Overlapping public names and upstream IDs are flagged
+for inspection. Search by public name, upstream ID, or Provider; **Edit mappings**
+opens the relevant Custom account editor on **Accounts**.
 
 **Model catalog** is local. The matrix has one row per current catalog model and
 three columns — Chat Completions, Responses, and Messages. Each cell is a binary

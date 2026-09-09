@@ -27,6 +27,8 @@
 
     <section v-else class="aliases-section" aria-labelledby="alias-table-title">
       <h2 id="alias-table-title" class="sr-only">{{ t("别名") }}</h2>
+      <p class="aliases-help">{{ t('此页展示模型与账号配置，不保证当前可调用；实际调用还取决于账号状态、名称冲突和上游服务。') }}</p>
+      <n-input v-model:value="search" clearable :input-props="{ 'aria-label': t('搜索模型或供应商') }" :placeholder="t('搜索模型或供应商')" class="aliases-search" />
       <n-alert
         v-if="loadError && contracts"
         type="warning"
@@ -55,15 +57,17 @@
         </n-button>
       </n-alert>
 
-      <n-empty v-if="aliasGroups.length === 0" :description="t('暂无 Alias')" />
-      <div v-else class="aliases-table-wrap">
+      <n-empty v-if="aliasGroups.length === 0" :description="search.trim() ? t('无匹配模型') : t('暂无 Alias')" />
+      <div v-else class="aliases-table-wrap" tabindex="0" role="region" :aria-label="t('模型映射')">
         <table class="aliases-table">
           <thead>
             <tr>
               <th>{{ t("对外模型名") }}</th>
               <th>{{ t("供应商 / 方案") }}</th>
               <th>{{ t("上游模型 ID") }}</th>
-              <th>{{ t("可路由") }}</th>
+              <th>{{ t("配置状态") }}</th>
+              <th>{{ t("账号配置") }}</th>
+              <th>{{ t("操作") }}</th>
             </tr>
           </thead>
           <tbody v-for="group in aliasGroups" :key="group.public_model">
@@ -73,7 +77,12 @@
               </td>
               <td>{{ row.provider_plan }}</td>
               <td><code>{{ row.upstream_model }}</code></td>
-              <td>{{ row.routable ? t("可用") : t("不可用") }}</td>
+              <td>
+                {{ row.routable ? t('已启用') : t('未启用') }}
+                <p v-if="aliasNameOverlaps(row, aliasRows)" class="alias-warning">{{ t('名称与其他上游 ID 重叠，请检查调用名称。') }}</p>
+              </td>
+              <td>{{ accountConfiguration(row) }}</td>
+              <td><a v-if="row.custom_account_id" :href="`?view=accounts&account_id=${encodeURIComponent(row.custom_account_id)}`">{{ t('编辑映射') }}</a></td>
             </tr>
           </tbody>
         </table>
@@ -84,7 +93,7 @@
 
 <script setup lang="ts">
 import { computed, onActivated, onMounted, ref } from "vue";
-import { NAlert, NButton, NEmpty, NSpin } from "naive-ui";
+import { NAlert, NButton, NEmpty, NInput, NSpin } from "naive-ui";
 import type { Account } from "../api/dashboard.ts";
 import type {
   DynamicProviderView,
@@ -94,7 +103,7 @@ import type {
 import { providerApi } from "../api/providers.ts";
 import { isDynamicCatalogEntry } from "../domain/dynamic-provider.ts";
 import { flattenProviderScopes, normalizeProviderContractsResponse } from "../domain/provider-contracts.ts";
-import { mergeProviderAliasRows } from "../domain/provider-aliases.ts";
+import { aliasAccountCounts, aliasNameOverlaps, mergeProviderAliasRows, type ProviderAliasRow } from "../domain/provider-aliases.ts";
 import { t } from "../i18n/index.ts";
 import { useAccountsStore } from "../stores/accounts.ts";
 import { useProvidersStore } from "../stores/providers.ts";
@@ -107,6 +116,7 @@ const catalog = ref<ProviderCatalogEntry[] | null>(null);
 const accounts = ref<Account[]>([]);
 const dynamicProviders = ref<DynamicProviderView[]>([]);
 const loading = ref(false);
+const search = ref("");
 const loadError = ref("");
 const accountsLoadError = ref("");
 const dynamicLoadError = ref("");
@@ -124,7 +134,9 @@ const aliasRows = computed(() => (
 ));
 const aliasGroups = computed(() => {
   const groups = new Map<string, typeof aliasRows.value>();
+  const query = search.value.trim().toLocaleLowerCase();
   for (const row of aliasRows.value) {
+    if (query && ![row.public_model, row.upstream_model, row.provider_plan, row.custom_account ?? ""].some((value) => value.toLocaleLowerCase().includes(query))) continue;
     const key = row.public_model.toLocaleLowerCase();
     const existing = groups.get(key);
     if (existing) existing.push(row);
@@ -134,6 +146,13 @@ const aliasGroups = computed(() => {
     .map((rows) => ({ public_model: rows[0]?.public_model ?? "", rows }))
     .sort((left, right) => left.public_model.localeCompare(right.public_model));
 });
+
+function accountConfiguration(row: ProviderAliasRow): string {
+  if (accountsLoadError.value) return t('账号状态未知');
+  const count = aliasAccountCounts(row, accounts.value);
+  if (!count.total) return t('未添加账号');
+  return count.enabled ? t('{count} 个启用账号', { count: count.enabled }) : t('无启用账号');
+}
 
 async function loadAliases(options: { retain?: boolean } = {}): Promise<void> {
   if (loading.value) return;
@@ -239,6 +258,13 @@ onActivated(() => {
 .aliases-table-wrap {
   overflow-x: auto;
 }
+.aliases-help {
+  margin: 0 0 12px;
+  color: var(--ocg-muted);
+}
+.aliases-search { margin-bottom: 16px; }
+.alias-warning { color: var(--ocg-warning); margin: 4px 0 0; }
+.aliases-table a { color: var(--ocg-primary); }
 .aliases-table {
   width: 100%;
   min-width: 760px;
@@ -259,5 +285,17 @@ onActivated(() => {
 }
 .aliases-table .aliases-name {
   vertical-align: top;
+}
+@media (max-width: 720px) {
+  .aliases-table th:first-child,
+  .aliases-name {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: var(--ocg-surface);
+    max-width: 140px;
+    overflow-wrap: anywhere;
+    box-shadow: 1px 0 var(--ocg-border);
+  }
 }
 </style>

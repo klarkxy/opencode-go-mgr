@@ -3,6 +3,7 @@ import type { DynamicProviderView } from "../api/providers.ts";
 import type { ProviderScopeView } from "./provider-contracts.ts";
 
 export interface ProviderAliasRow {
+  provider_id: string;
   key: string;
   public_model: string;
   provider_plan: string;
@@ -36,6 +37,7 @@ export function providerAliasRows(
     for (const model of scope.models) {
       if (!model.alias) continue;
       rows.push({
+        provider_id: scope.provider_id || scope.scope_id,
         key: `${scope.key}:${model.alias}:${model.model_id}`,
         public_model: model.alias,
         provider_plan: providerPlanLabel(scope),
@@ -59,6 +61,7 @@ export function providerAliasRows(
       ));
       const conflictsWithProviderRaw = providerRawModels.has(capability.public_model);
       rows.push({
+        provider_id: account.provider_id,
         key: `custom:${account.id}:${capability.public_model}:${capability.upstream_model}`,
         public_model: capability.public_model,
         provider_plan: scope?.label || "Custom API",
@@ -80,6 +83,7 @@ export function dynamicProviderAliasRows(
   providers: readonly DynamicProviderView[],
 ): ProviderAliasRow[] {
   return providers.flatMap((provider) => provider.models.map((model) => ({
+    provider_id: provider.id,
     key: `dynamic:${provider.id}:${model.public_model}:${model.upstream_model}`,
     public_model: model.public_model,
     provider_plan: provider.name,
@@ -97,4 +101,19 @@ export function mergeProviderAliasRows(
   providers: readonly DynamicProviderView[],
 ): ProviderAliasRow[] {
   return [...providerAliasRows(scopes, accounts), ...dynamicProviderAliasRows(providers)];
+}
+
+/** Configuration inventory only; these counts do not predict request-time eligibility. */
+export function aliasAccountCounts(row: ProviderAliasRow, accounts: readonly Account[]) {
+  const matching = accounts.filter((account) => row.custom_account_id
+    ? account.id === row.custom_account_id
+    : account.provider_id === row.provider_id);
+  return { total: matching.length, enabled: matching.filter((account) => account.enabled).length };
+}
+
+/** Flag cross-provider names that can be interpreted as another exact upstream ID. */
+export function aliasNameOverlaps(row: ProviderAliasRow, rows: readonly ProviderAliasRow[]): boolean {
+  return rows.some((other) => other.provider_id !== row.provider_id
+    && other.upstream_model === row.public_model
+    && other.public_model.toLocaleLowerCase() !== row.public_model.toLocaleLowerCase());
 }

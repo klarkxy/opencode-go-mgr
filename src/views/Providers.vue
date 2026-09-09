@@ -1157,8 +1157,13 @@ onUnmounted(() => {
 }
 .providers-main {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
   min-width: 0;
+}
+.providers-tabs {
+  min-width: 0;
+  max-width: 100%;
 }
 .providers-tabs :deep(.n-tabs-nav) {
   margin-bottom: 12px;

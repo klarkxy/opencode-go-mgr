@@ -4,7 +4,6 @@ import type { ProviderCatalogEntry } from "../api/providers.ts";
 import {
   buildChooserGroups,
   chooserOptionIconKey,
-  chooserPresetSearchMiss,
   chooserSelectOptions,
   chooserUniverse,
   defaultChooserOptionId,
@@ -82,27 +81,20 @@ test("groups: Plan holds built-in subscriptions and plan presets; API heads Cust
   assert.deepEqual(apiIds.slice(-2), ["platform:new_api", "platform:sub2api"]);
 });
 
-test("preset search filters presets only and never invalidates the current selection", () => {
+test("search filters the complete chooser without invalidating the saved selection", () => {
   const groups = buildChooserGroups(fullCatalog(), null, "azure");
   const planIds = groups[0]!.options.map((option) => option.optionId);
-  assert.deepEqual(planIds.slice(0, 5), [
-    "opencode-go",
-    "command-code-goat",
-    "minimax-cn",
-    "kimi-cn",
-    "ollama-cloud",
-  ]);
-  assert.equal(planIds.filter((id) => id.startsWith("preset:")).length, 0);
+  assert.deepEqual(planIds, []);
   const apiIds = groups[1]!.options.map((option) => option.optionId);
-  assert.deepEqual(apiIds.filter((id) => id.startsWith("preset:")), ["preset:azure-openai"]);
-  assert.deepEqual(apiIds.slice(-2), ["platform:new_api", "platform:sub2api"]);
+  assert.deepEqual(apiIds, ["preset:azure-openai"]);
 
   const universe = chooserUniverse(fullCatalog(), null);
   assert.equal(isValidChooserOption(universe, "preset:deepseek"), true);
   assert.equal(isValidChooserOption(universe, "preset:nope"), false);
-  assert.equal(chooserPresetSearchMiss("azure"), false);
-  assert.equal(chooserPresetSearchMiss("no-such-preset"), true);
-  assert.equal(chooserPresetSearchMiss(""), false);
+  for (const [query, expected] of [[" Custom ", "custom-endpoint"], ["new api", "platform:new_api"], ["Ollama", "ollama-cloud"]]) {
+    assert.deepEqual(visibleChooserOptions(buildChooserGroups(fullCatalog(), null, query)).map((item) => item.optionId), [expected]);
+  }
+  assert.equal(visibleChooserOptions(buildChooserGroups(fullCatalog(), null, "no-such-preset")).length, 0);
 });
 
 test("saved user-defined Providers follow their persisted preset offering", () => {

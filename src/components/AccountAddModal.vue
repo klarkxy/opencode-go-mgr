@@ -36,8 +36,8 @@
             v-model:value="presetQuery"
             size="small"
             clearable
-            :placeholder="t('搜索预设')"
-            :input-props="{ 'aria-label': t('搜索预设') }"
+            :placeholder="t('搜索全部选项')"
+            :input-props="{ 'aria-label': t('搜索全部选项') }"
           />
         </div>
         <div class="account-add-list">
@@ -61,7 +61,7 @@
               <span class="account-add-item__label">{{ option.label }}</span>
             </button>
           </section>
-          <p v-if="presetSearchMiss" class="account-add-empty">{{ t("无匹配预设") }}</p>
+          <p v-if="presetSearchMiss" class="account-add-empty" role="status">{{ t("无匹配选项") }}</p>
         </div>
       </aside>
 
@@ -111,7 +111,7 @@
                 class="account-add-hint"
               >
                 <div class="account-add-hint__content">
-                  <span>{{ managedReason }}</span>
+                  <span>{{ dashboardErrorDetail(managedReason) }}</span>
                   <n-button v-if="inviteMissing" text type="primary" @click="emit('openInviteUrl')">
                     {{ t("前往 OpenCode Go 填写邀请链接") }}
                   </n-button>
@@ -128,7 +128,7 @@
                       {{ t("注册新账号（Beta）") }}
                     </n-button>
                   </template>
-                  {{ managedReason }}
+                  {{ dashboardErrorDetail(managedReason) }}
                 </n-tooltip>
               </div>
             </template>
@@ -185,10 +185,10 @@ import {
 } from "@vicons/antd";
 import { t } from "../i18n/index.ts";
 import { useLocalizedModalCloseLabel } from "../utils/modal-close-label.ts";
+import { dashboardErrorDetail } from "../utils/errors.ts";
 import {
   buildChooserGroups,
   chooserOptionIconKey,
-  chooserPresetSearchMiss,
   chooserSelectOptions,
   chooserUniverse,
   defaultChooserOptionId,
@@ -304,7 +304,7 @@ const chooserGroups = computed(() => (
 const universe = computed(() => chooserUniverse(props.catalog, dynamicPresetIds.value));
 const navOptions = computed(() => visibleChooserOptions(chooserGroups.value));
 const selectOptions = computed(() => chooserSelectOptions(chooserGroups.value, t("用户定义")));
-const presetSearchMiss = computed(() => chooserPresetSearchMiss(presetQuery.value));
+const presetSearchMiss = computed(() => Boolean(presetQuery.value.trim()) && navOptions.value.length === 0);
 
 const selected = computed(() => (
   universe.value.find((option) => option.optionId === selectedOptionId.value) ?? null

@@ -8,6 +8,7 @@
             clearable
             class="request-id-filter"
             :placeholder="t('按请求 ID 精确搜索')"
+              :input-props="{ 'aria-label': t('请求 ID') }"
           />
           <n-tooltip trigger="hover">
             <template #trigger>
@@ -62,13 +63,17 @@
             <div class="stat-value">{{ formatNumber(forwardTotals.prompt_tokens + forwardTotals.completion_tokens) }}</div>
           </div>
         </div>
-        <div class="filter-bar">
-          <div class="filter-field request-id-field">
+        <n-button class="advanced-filter-toggle" size="small" :aria-expanded="showAdvancedFilters" aria-controls="request-log-filters" @click="showAdvancedFilters = !showAdvancedFilters">
+          {{ showAdvancedFilters ? t('收起筛选') : t('更多筛选（{count}）', { count: advancedFilterCount }) }}
+        </n-button>
+        <div id="request-log-filters" class="filter-bar" :class="{ 'show-advanced': showAdvancedFilters }">
+          <div class="filter-field request-id-field advanced-filter">
             <span class="filter-label">{{ t("请求 ID") }}</span>
             <n-input
               v-model:value="requestIdFilter"
               clearable
               :placeholder="t('按请求 ID 精确搜索')"
+              :input-props="{ 'aria-label': t('请求 ID') }"
             />
           </div>
           <div class="filter-field">
@@ -77,14 +82,16 @@
               v-model:value="statusFilter"
               :options="statusOptions"
               :placeholder="t('状态')"
+              :aria-label="t('状态')"
             />
           </div>
-          <div class="filter-field">
+          <div class="filter-field advanced-filter">
             <span class="filter-label">{{ t("账号") }}</span>
             <n-select
               v-model:value="accountFilter"
               :options="accountOptions"
               :placeholder="t('账号')"
+              :aria-label="t('账号')"
             />
           </div>
           <div class="filter-field">
@@ -93,18 +100,20 @@
               v-model:value="modelFilter"
               :options="modelOptions"
               :placeholder="t('模型')"
+              :aria-label="t('模型')"
             />
           </div>
-          <div class="filter-field key-filter-field">
+          <div class="filter-field key-filter-field advanced-filter">
             <span class="filter-label">{{ t("接入 Key") }}</span>
             <n-select
               v-model:value="keyFilter"
               :options="keyOptions"
               :placeholder="t('接入 Key')"
+              :aria-label="t('接入 Key')"
               :consistent-menu-width="false"
             />
           </div>
-          <div class="filter-field">
+          <div class="filter-field advanced-filter">
             <span class="filter-label">{{ t("服务商") }}</span>
             <n-select
               v-model:value="providerFilter"
@@ -114,7 +123,7 @@
               :consistent-menu-width="false"
             />
           </div>
-          <div class="filter-field">
+          <div class="filter-field advanced-filter">
             <span class="filter-label">{{ t("路由账号") }}</span>
             <n-select
               v-model:value="routeAccountFilter"
@@ -124,7 +133,7 @@
               :consistent-menu-width="false"
             />
           </div>
-          <div class="filter-field">
+          <div class="filter-field advanced-filter">
             <span class="filter-label">{{ t("凭证账号") }}</span>
             <n-select
               v-model:value="credentialAccountFilter"
@@ -180,12 +189,13 @@
               </div>
             </n-popover>
           </div>
-          <div class="filter-field">
+          <div class="filter-field advanced-filter">
             <span class="filter-label">{{ t("排序") }}</span>
             <n-select
               v-model:value="sortBy"
               :options="sortOptions"
               :placeholder="t('排序')"
+              :aria-label="t('排序')"
               :consistent-menu-width="false"
               class="sort-select"
             />
@@ -343,6 +353,13 @@ const sortBy = ref<SortBy>(
   querySort !== null && sortValues.has(querySort as SortBy) ? querySort as SortBy : "timestamp",
 );
 const sortOrder = ref<SortOrder>(queryOrder === "asc" || queryOrder === "desc" ? queryOrder : "desc");
+const advancedFilterCount = computed(() => [
+  requestIdFilter.value, accountFilter.value, keyFilter.value, providerFilter.value,
+  routeAccountFilter.value, credentialAccountFilter.value,
+  sortBy.value !== 'timestamp' ? sortBy.value : '',
+].filter(Boolean).length);
+const showAdvancedFilters = ref(advancedFilterCount.value > 0);
+
 function parseQueryTimeRange(): [number, number] | null {
   const start = query.get("start");
   const end = query.get("end");
@@ -1214,6 +1231,8 @@ onUnmounted(cleanup);
   overflow: auto;
 }
 
+.advanced-filter-toggle { display: none; }
+
 @media (max-width: 860px) {
   .time-range-panel {
     flex-direction: column;
@@ -1239,11 +1258,15 @@ onUnmounted(cleanup);
 }
 
 @media (max-width: 560px) {
+  .advanced-filter-toggle { display: inline-flex; margin-bottom: 12px; }
+  .filter-bar:not(.show-advanced) .advanced-filter { display: none; }
+  .stat-card { padding: 10px; }
+  .stats-row { margin-bottom: 12px; }
   .logs-card {
     padding: 2px 12px 12px;
   }
   .stats-row {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
   .filter-field {
     flex: 1 1 140px;

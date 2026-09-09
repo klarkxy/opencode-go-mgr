@@ -56,7 +56,7 @@ export function chooserOptionKind(option: ChooserOption): "plan" | "preset" | "p
  * Visible groups for the rail: Custom API heads the API group, account-owned
  * user-defined Providers follow their persisted preset's offering via
  * `dynamicPresetIds`, API presets and platform kinds trail. The preset search
- * query filters preset entries only; plan and platform entries always show.
+ * query filters every visible option, including plans and platform kinds.
  */
 export function buildChooserGroups(
   catalog: readonly ProviderCatalogEntry[] | null | undefined,
@@ -65,19 +65,21 @@ export function buildChooserGroups(
 ): ChooserGroup[] {
   const split = splitPlanOptionsByOffering(catalog, dynamicPresetIds);
   const presets = groupProviderPresetsByOffering(filterProviderPresets(PROVIDER_PRESETS, query));
+  const normalized = query.trim().toLocaleLowerCase();
+  const matches = (option: ChooserOption) => option.label.toLocaleLowerCase().includes(normalized);
   return [
     {
       id: "plan",
       label: "Plan",
-      options: [...split.plan, ...presets.plan.map(toPresetChooserOption)],
+      options: [...split.plan.filter(matches), ...presets.plan.map(toPresetChooserOption)],
     },
     {
       id: "api",
       label: "API",
       options: [
-        ...split.api,
+        ...split.api.filter(matches),
         ...presets.api.map(toPresetChooserOption),
-        ...buildPlatformKindOptions(),
+        ...buildPlatformKindOptions().filter(matches),
       ],
     },
   ];
@@ -122,11 +124,6 @@ export function defaultChooserOptionId(options: readonly ChooserOption[]): strin
   return options.find((option) => !isChooserOptionDisabled(option))?.optionId
     ?? options[0]?.optionId
     ?? "";
-}
-
-/** True when a non-empty preset search matched no preset at all. */
-export function chooserPresetSearchMiss(query: string): boolean {
-  return Boolean(query.trim()) && filterProviderPresets(PROVIDER_PRESETS, query).length === 0;
 }
 
 export interface ChooserSelectChild {

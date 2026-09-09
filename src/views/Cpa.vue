@@ -454,7 +454,10 @@
               @click="refreshModels"
             >{{ catalogRefreshingLabel }}</n-button>
           </div>
-          <div v-if="catalogLoading" class="cpa-state"><n-spin size="small" /></div>
+          <n-alert v-if="!integration.configured" type="info" :title="t('请先在概览中配置并启动 CPA，再刷新模型目录。')">
+            <n-button size="small" @click="activeTab = 'overview'">{{ t('返回概览') }}</n-button>
+          </n-alert>
+          <div v-else-if="catalogLoading" class="cpa-state"><n-spin size="small" /></div>
           <n-alert v-else-if="catalogError" type="error" :title="t('加载模型目录失败: {error}', { error: catalogError })">
             <n-button size="small" secondary @click="loadCatalog">{{ t("重试") }}</n-button>
           </n-alert>
@@ -478,10 +481,13 @@
         <h2 id="cpa-logs-title" class="cpa-section-title sr-only">{{ t("运行时日志") }}</h2>
 
         <n-card size="small" class="cpa-card">
-          <template #header-extra>
+          <template v-if="runtime?.installed" #header-extra>
             <n-button size="small" quaternary :loading="logsLoading" @click="refreshLogs">{{ t("刷新日志") }}</n-button>
           </template>
-          <div v-if="logsLoading" class="cpa-state"><n-spin size="small" /></div>
+          <n-alert v-if="!runtime?.installed" type="info" :title="t('CPA 尚未安装，请先在概览中安装。')">
+            <n-button size="small" @click="activeTab = 'overview'">{{ t('返回概览') }}</n-button>
+          </n-alert>
+          <div v-else-if="logsLoading" class="cpa-state"><n-spin size="small" /></div>
           <n-alert v-else-if="logsError" type="error" :title="t('加载 CPA 运行时日志失败: {error}', { error: logsError })">
             <n-button size="small" secondary @click="refreshLogs">{{ t("重试") }}</n-button>
           </n-alert>
@@ -1337,14 +1343,14 @@ function confirmRemoveRuntime(): void {
 
 // Logs live in their own tab: load them on first visit, and fall back to the
 // overview tab if the active pane disappears with the managed runtime.
-watch([activeTab, mode], () => {
+watch([activeTab, mode, () => runtime.value?.installed], () => {
   if (activeTab.value === "keys") activeTab.value = "overview";
   if (activeTab.value === "logs" && mode.value !== "managed") activeTab.value = "overview";
   if (activeTab.value === "logs" && !logs.value && !logsLoading.value) void refreshLogs();
 });
 
 async function refreshLogs(): Promise<void> {
-  if (logsLoading.value) return;
+  if (logsLoading.value || !runtime.value?.installed) return;
   logsLoading.value = true;
   logsError.value = "";
   try {

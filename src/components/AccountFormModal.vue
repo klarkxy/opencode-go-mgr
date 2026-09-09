@@ -6,6 +6,7 @@
     modal-class="account-modal"
     @update:show="$emit('update:show', $event)"
   >
+    <div ref="formElement">
     <n-form
       ref="formRef"
       :model="form"
@@ -234,6 +235,7 @@
         </n-form-item>
       </div>
     </n-form>
+    </div>
     <template #footer>
       <div class="modal-footer" :class="{ 'modal-footer--embedded': embedded }">
         <n-button
@@ -255,7 +257,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import type { FormInst, FormRules } from "naive-ui";
 import {
   NAlert,
@@ -366,6 +368,7 @@ const emit = defineEmits<{
 }>();
 
 const formRef = ref<FormInst | null>(null);
+const formElement = ref<HTMLElement | null>(null);
 const form = ref<FormModel>(blankForm());
 const nameWasEdited = ref(false);
 const formError = ref("");
@@ -721,6 +724,10 @@ async function handleSave() {
   try {
     await formRef.value?.validate();
   } catch {
+    await nextTick();
+    formElement.value?.querySelector('.n-form-item-feedback--error')
+      ?.closest('.n-form-item')
+      ?.querySelector<HTMLElement>('input, textarea, [tabindex="0"]')?.focus();
     return;
   }
 

@@ -6,6 +6,8 @@ import {
   dynamicProviderAliasRows,
   mergeProviderAliasRows,
   providerAliasRows,
+  aliasAccountCounts,
+  aliasNameOverlaps,
 } from "./provider-aliases.ts";
 
 const protocol = {
@@ -77,6 +79,7 @@ const customAccount = {
 test("Alias rows combine provider contracts with Custom public-to-upstream mappings", () => {
   assert.deepEqual(providerAliasRows([builtinScope, customScope], [customAccount]), [
     {
+      provider_id: "go",
       key: "provider:go:gpt-5.6:gpt-5.6-upstream",
       public_model: "gpt-5.6",
       provider_plan: "OpenCode Go",
@@ -86,6 +89,7 @@ test("Alias rows combine provider contracts with Custom public-to-upstream mappi
       custom_account_id: null,
     },
     {
+      provider_id: "custom",
       key: "custom:custom-1:public-model:vendor/model:free",
       public_model: "public-model",
       provider_plan: "Home Lab",
@@ -95,6 +99,23 @@ test("Alias rows combine provider contracts with Custom public-to-upstream mappi
       custom_account_id: "custom-1",
     },
   ]);
+});
+
+test("Alias account inventory separates missing and disabled accounts from model configuration", () => {
+  const row = providerAliasRows([builtinScope], [])[0]!;
+  assert.deepEqual(aliasAccountCounts(row, []), { total: 0, enabled: 0 });
+  assert.deepEqual(aliasAccountCounts(row, [{ ...customAccount, provider_id: 'go', enabled: false }, customAccount]), { total: 1, enabled: 0 });
+  assert.deepEqual(aliasAccountCounts(row, [{ ...customAccount, provider_id: 'go' }]), { total: 1, enabled: 1 });
+  const custom = providerAliasRows([customScope], [customAccount])[0]!;
+  assert.deepEqual(aliasAccountCounts(custom, [customAccount, { ...customAccount, id: 'another' }]), { total: 1, enabled: 1 });
+});
+
+test("Alias overlap warning identifies another provider's raw ID without treating shared public aliases as conflicts", () => {
+  const row = { ...providerAliasRows([builtinScope], [])[0]!, public_model: 'audit-model' };
+  const other = { ...row, provider_id: 'dynamic', public_model: 'audit-provider-model', upstream_model: 'audit-model' };
+  assert.equal(aliasNameOverlaps(row, [row, other]), true);
+  assert.equal(aliasNameOverlaps(other, [row, other]), false);
+  assert.equal(aliasNameOverlaps(row, [row, { ...other, public_model: 'audit-model' }]), false);
 });
 
 test("Custom Alias routeability includes account readiness and built-in raw conflicts", () => {
@@ -136,6 +157,7 @@ test("user-defined Provider mappings appear as Alias rows labelled by Provider n
     revision: 1,
     process_generation: 1,
   }]), [{
+    provider_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
     key: "dynamic:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa:lab-opus:vendor/opus",
     public_model: "lab-opus",
     provider_plan: "Lab",
