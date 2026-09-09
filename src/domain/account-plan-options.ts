@@ -9,6 +9,7 @@ import {
   planCreateDisabledReason,
 } from "./plans.ts";
 import { isDynamicCatalogEntry } from "./dynamic-provider.ts";
+import { providerPresetOfferingForId } from "./provider-presets.ts";
 
 /**
  * Plan-option list for the Add Account chooser. Backend-owned singletons
@@ -46,19 +47,6 @@ const GROUP_LABEL: Record<PlanChooserGroupId, MessageKey> = {
   unavailable: "暂不可用",
 };
 
-/**
- * Human-readable hint shown for selectable families whose post-create state
- * needs honest copy. GOAT is live without a Key-verification gate; Custom is
- * enabled by default and exposes account-scoped connection tests afterwards.
- */
-function planCreationHint(
-  plan: PlanDefinition,
-  _catalog: readonly ProviderCatalogEntry[] | null | undefined,
-): MessageKey | "" {
-  if (plan.id === "custom-endpoint") return "创建后默认启用；可随时通过账号卡片测试连接。";
-  return "";
-}
-
 /** True when the family's provider is routable according to the catalog. */
 function planFamilyRoutable(
   plan: PlanDefinition,
@@ -80,7 +68,7 @@ function builtinOption(
     source: "builtin",
     disabled: Boolean(reason),
     disabledReason: reason ?? "",
-    creationHint: reason ? "" : planCreationHint(plan, catalog),
+    creationHint: "",
     managed: !reason && plan.managed_registration,
   };
 }
@@ -138,4 +126,38 @@ export function buildPlanChooserGroups(
   return GROUP_ORDER
     .filter((id) => buckets[id].length > 0)
     .map((id) => ({ id, label: GROUP_LABEL[id], options: buckets[id] }));
+}
+
+export interface PlanOfferingSplit {
+  /** Built-in subscription families first, then saved plan-offering Providers. */
+  plan: PlanOption[];
+  /** Custom API first, then account-owned user-defined API Providers. */
+  api: PlanOption[];
+}
+
+/**
+ * Offering split for the Add Account chooser. Structural only: the custom
+ * plan kind heads the API side and every option keeps its own disabled reason
+ * instead of a status group. Saved user-defined Providers follow their
+ * persisted preset's offering via `dynamicPresetIds` (provider_id → preset_id
+ * from the dynamic Provider detail); unknown or unloaded IDs are API.
+ */
+export function splitPlanOptionsByOffering(
+  catalog: readonly ProviderCatalogEntry[] | null | undefined,
+  dynamicPresetIds?: ReadonlyMap<string, string | null> | null,
+): PlanOfferingSplit {
+  const options = buildPlanOptions(catalog);
+  const dynamicOffering = (option: PlanOption): "plan" | "api" => (
+    providerPresetOfferingForId(dynamicPresetIds?.get(option.optionId))
+  );
+  return {
+    plan: [
+      ...options.filter((option) => option.source === "builtin" && option.plan.kind !== "custom"),
+      ...options.filter((option) => option.source === "user-defined" && dynamicOffering(option) === "plan"),
+    ],
+    api: [
+      ...options.filter((option) => option.source === "builtin" && option.plan.kind === "custom"),
+      ...options.filter((option) => option.source === "user-defined" && dynamicOffering(option) === "api"),
+    ],
+  };
 }

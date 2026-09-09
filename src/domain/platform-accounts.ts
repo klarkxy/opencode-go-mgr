@@ -19,6 +19,30 @@ export const PLATFORM_KIND_LABELS: Record<PlatformKind, string> = {
   sub2api: "Sub2API",
 };
 
+/**
+ * Add-Account chooser entries for platform kinds. These are typed separately
+ * from plan options on purpose: platform accounts are not plans, and no
+ * backend PlanDefinition exists for them. Option ids carry a prefix so they
+ * can never collide with plan option ids.
+ */
+export interface PlatformKindOption {
+  optionId: string;
+  kind: PlatformKind;
+  label: string;
+  disabled: boolean;
+}
+
+export const PLATFORM_KIND_OPTION_ID_PREFIX = "platform:";
+
+export function buildPlatformKindOptions(): PlatformKindOption[] {
+  return (Object.entries(PLATFORM_KIND_LABELS) as [PlatformKind, string][]).map(([kind, label]) => ({
+    optionId: `${PLATFORM_KIND_OPTION_ID_PREFIX}${kind}`,
+    kind,
+    label,
+    disabled: false,
+  }));
+}
+
 export const PLATFORM_QUOTA_KIND_KEYS: Record<PlatformQuotaKind, string> = {
   wallet: "钱包",
   subscription: "订阅",
