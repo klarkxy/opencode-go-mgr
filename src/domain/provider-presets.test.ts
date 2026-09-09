@@ -6,6 +6,7 @@ import {
   applyProviderPresetToDraft,
   filterProviderPresets,
   groupProviderPresets,
+  groupProviderPresetsByOffering,
   inferMappingPresetPrefix,
   normalizeProviderPresetEndpoint,
   parseProviderPresets,
@@ -13,12 +14,15 @@ import {
   providerPresetImportPublicName,
   providerPresetModelDiscoveryEnabled,
   providerPresetNote,
+  providerPresetDefaultModels,
+  providerPresetOffering,
+  providerPresetOfferingForId,
   providerPresetShapeIssues,
   resolveEditPreset,
   resolveProviderPreset,
   type ProviderPreset,
 } from "./provider-presets.ts";
-import { emptyDynamicProviderDraft, buildDynamicProviderCreateBody, buildDynamicProviderUpdateBody, type DynamicProviderDraft } from "./dynamic-provider.ts";
+import { emptyDynamicProviderDraft, buildDynamicProviderCreateBody, buildDynamicProviderUpdateBody, validateDynamicProviderDraft, type DynamicProviderDraft } from "./dynamic-provider.ts";
 
 function samplePreset(extra: Partial<ProviderPreset> = {}): ProviderPreset {
   return {
@@ -127,10 +131,143 @@ test("grouping and search split official presets from aggregators", () => {
   assert.equal(filterProviderPresets(PROVIDER_PRESETS, "  ").length, PROVIDER_PRESETS.length);
 });
 
+test("defaultModels validate as a non-empty array of trimmed unique IDs", () => {
+  assert.deepEqual(providerPresetShapeIssues(samplePreset({ defaultModels: ["a", "b"] })), []);
+  assert.deepEqual(providerPresetDefaultModels(samplePreset()), []);
+  assert.deepEqual(providerPresetDefaultModels(samplePreset({ defaultModels: ["a"] })), ["a"]);
+  assert.ok(providerPresetShapeIssues(samplePreset({ defaultModels: [] })).length > 0);
+  assert.ok(providerPresetShapeIssues(samplePreset({ defaultModels: [""] })).length > 0);
+  assert.ok(providerPresetShapeIssues(samplePreset({ defaultModels: ["  "] })).length > 0);
+  assert.ok(providerPresetShapeIssues(samplePreset({ defaultModels: [" a"] })).length > 0);
+  assert.ok(providerPresetShapeIssues(samplePreset({ defaultModels: ["a "] })).length > 0);
+  assert.ok(providerPresetShapeIssues(samplePreset({ defaultModels: ["a", "a"] })).length > 0);
+  assert.ok(providerPresetShapeIssues(samplePreset({ defaultModels: [1] as never })).length > 0);
+  assert.ok(providerPresetShapeIssues(samplePreset({ defaultModels: "a" as never })).length > 0);
+  const parsed = parseProviderPresets([
+    samplePreset({ id: "seeded", defaultModels: ["a"] }),
+    samplePreset({ id: "bad-seeds", defaultModels: [] }),
+  ]);
+  assert.deepEqual(parsed.map((preset) => preset.id), ["seeded"]);
+});
+
+test("a seeded fixed preset replaces Key and old mappings with exact prefixed IDs", () => {
+  const preset = samplePreset({ defaultModels: ["claude-opus-4-1", "claude-sonnet-4-5"] });
+  const dirty: DynamicProviderDraft = {
+    ...emptyDynamicProviderDraft(),
+    key: "sk-must-clear",
+    models: [
+      { public_model: "old", upstream_model: "old" },
+      {
+        public_model: "old-override",
+        upstream_model: "old-override",
+        upstream_override: { protocol: "responses", endpoint_url: "https://x.example.com/v1" },
+      },
+    ],
+    account_name: "",
+    notes: "保留备注",
+  };
+  const applied = applyProviderPresetToDraft(dirty, preset);
+  assert.equal(applied.key, "");
+  assert.deepEqual(applied.models, [
+    { public_model: "anthropic/claude-opus-4-1", upstream_model: "claude-opus-4-1", upstream_override: null },
+    { public_model: "anthropic/claude-sonnet-4-5", upstream_model: "claude-sonnet-4-5", upstream_override: null },
+  ]);
+  // An empty account name defaults to the preset name; typed notes survive.
+  assert.equal(applied.account_name, "Anthropic API");
+  assert.equal(applied.notes, "保留备注");
+  // The create body carries exact upstream IDs with null overrides.
+  const body = buildDynamicProviderCreateBody({ ...applied, key: "sk-new" });
+  assert.deepEqual(body.models, [
+    { publicModel: "anthropic/claude-opus-4-1", upstreamModel: "claude-opus-4-1", upstreamOverride: null },
+    { publicModel: "anthropic/claude-sonnet-4-5", upstreamModel: "claude-sonnet-4-5", upstreamOverride: null },
+  ]);
+  assert.equal(body.accountName, "Anthropic API");
+  assert.equal(body.presetId, "anthropic");
+});
+
+test("auto-generated account names follow the new preset; typed names stick", () => {
+  const first = applyProviderPresetToDraft(emptyDynamicProviderDraft(), samplePreset());
+  assert.equal(first.account_name, "Anthropic API");
+  // The auto-generated name is replaced on switch instead of carried over.
+  const switched = applyProviderPresetToDraft(first, samplePreset({ id: "openai", name: "OpenAI API" }));
+  assert.equal(switched.account_name, "OpenAI API");
+  // A manual switch clears the auto name rather than naming a custom row after a preset.
+  const manual = applyProviderPresetToDraft(switched, null);
+  assert.equal(manual.account_name, "");
+  // A typed name is never rewritten, and notes always survive.
+  const typed = { ...first, account_name: "我的主号", notes: "n" };
+  assert.equal(applyProviderPresetToDraft(typed, samplePreset({ id: "openai", name: "OpenAI API" })).account_name, "我的主号");
+  assert.equal(applyProviderPresetToDraft(typed, null).account_name, "我的主号");
+  assert.equal(applyProviderPresetToDraft(typed, null).notes, "n");
+});
+
+test("offering by persisted preset ID is metadata-only; unknown IDs are API", () => {
+  const planPreset = samplePreset({ id: "coding-plan", offering: "plan" });
+  const apiPreset = samplePreset({ id: "plain-api" });
+  const presets = [planPreset, apiPreset];
+  assert.equal(providerPresetOfferingForId("coding-plan", presets), "plan");
+  assert.equal(providerPresetOfferingForId("plain-api", presets), "api");
+  assert.equal(providerPresetOfferingForId("missing", presets), "api");
+  assert.equal(providerPresetOfferingForId(null, presets), "api");
+  assert.equal(providerPresetOfferingForId(undefined, presets), "api");
+  assert.equal(providerPresetOfferingForId("", presets), "api");
+});
+
+test("switching reseeds models and keeps typed account fields; manual clears seeds", () => {
+  const first = applyProviderPresetToDraft(
+    emptyDynamicProviderDraft(),
+    samplePreset({ defaultModels: ["a"] }),
+  );
+  const typed = { ...first, account_name: "我的号", notes: "n" };
+  const switched = applyProviderPresetToDraft(
+    typed,
+    samplePreset({ id: "openai", name: "OpenAI API", defaultModels: ["gpt-5"] }),
+  );
+  assert.deepEqual(switched.models, [
+    { public_model: "openai/gpt-5", upstream_model: "gpt-5", upstream_override: null },
+  ]);
+  assert.equal(switched.account_name, "我的号");
+  assert.equal(switched.notes, "n");
+  const manual = applyProviderPresetToDraft(switched, null);
+  assert.deepEqual(manual.models, [{ public_model: "", upstream_model: "" }]);
+  assert.equal(manual.account_name, "我的号");
+  assert.equal(manual.preset_id, "");
+});
+
+test("an unseeded preset keeps the empty mapping row so model editing stays required", () => {
+  const applied = applyProviderPresetToDraft(emptyDynamicProviderDraft(), samplePreset());
+  assert.deepEqual(applied.models, [{ public_model: "", upstream_model: "" }]);
+  // Save validation still blocks a create without a complete mapping.
+  assert.equal(
+    validateDynamicProviderDraft({ ...applied, key: "sk-x" }, { mode: "create" }),
+    "missing_mappings",
+  );
+});
+
 test("model discovery opt-out defaults to enabled and respects an explicit false", () => {
   assert.equal(providerPresetModelDiscoveryEnabled(samplePreset()), true);
   assert.equal(providerPresetModelDiscoveryEnabled(samplePreset({ modelDiscovery: true })), true);
   assert.equal(providerPresetModelDiscoveryEnabled(samplePreset({ modelDiscovery: false })), false);
+});
+
+test("offering comes from metadata only and defaults to api", () => {
+  assert.equal(providerPresetOffering(samplePreset()), "api");
+  assert.equal(providerPresetOffering(samplePreset({ offering: "plan" })), "plan");
+  assert.equal(providerPresetOffering(samplePreset({ offering: "api" })), "api");
+  // An explicit invalid value fails shape validation and the row is skipped.
+  assert.ok(providerPresetShapeIssues(samplePreset({ offering: "bundle" as never })).length > 0);
+  assert.deepEqual(providerPresetShapeIssues(samplePreset({ offering: "plan" })), []);
+  const parsed = parseProviderPresets([
+    samplePreset({ id: "bad-offering", offering: "bundle" as never }),
+    samplePreset({ id: "good-offering", offering: "plan" }),
+  ]);
+  assert.deepEqual(parsed.map((preset) => preset.id), ["good-offering"]);
+  const grouped = groupProviderPresetsByOffering([
+    samplePreset({ id: "paid-plan", offering: "plan" }),
+    samplePreset({ id: "plain-api" }),
+  ]);
+  assert.deepEqual(grouped.plan.map((preset) => preset.id), ["paid-plan"]);
+  assert.deepEqual(grouped.api.map((preset) => preset.id), ["plain-api"]);
 });
 
 test("preset imports use a predictable preset-prefixed public name and keep the exact upstream ID", () => {

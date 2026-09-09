@@ -8,12 +8,23 @@ import {
 } from "./dynamic-provider.ts";
 
 export type ProviderPresetCategory = "official" | "aggregator";
+export type ProviderPresetOffering = "plan" | "api";
 export type ProviderPresetAuthKind = Extract<DynamicAuthKind, "bearer" | "x-api-key">;
 
 export interface ProviderPreset {
   id: string;
   name: string;
   category: ProviderPresetCategory;
+  /**
+   * User-visible offering group. Absent defaults to "api" so old callers and
+   * rows keep their behavior; the UI never infers this from names.
+   */
+  offering?: ProviderPresetOffering;
+  /**
+   * Vetted default model IDs seeded verbatim on create: exact upstream IDs,
+   * never auto-discovered and never typed from a raw /models listing.
+   */
+  defaultModels?: string[];
   /** Full inference URL, or "" when the endpoint is customer-specific. */
   endpointUrl: string;
   protocol: DynamicUpstreamProtocol;
@@ -27,6 +38,7 @@ export interface ProviderPreset {
 }
 
 const PRESET_CATEGORIES: readonly ProviderPresetCategory[] = ["official", "aggregator"];
+const PRESET_OFFERINGS: readonly ProviderPresetOffering[] = ["plan", "api"];
 const PRESET_PROTOCOLS: readonly DynamicUpstreamProtocol[] = [
   "chat_completions",
   "responses",
@@ -79,12 +91,26 @@ export function providerPresetShapeIssues(raw: unknown, index = 0): string[] {
     || typeof note.zh !== "string" || !note.zh.trim()) {
     issues.push(`${where}: note needs non-empty en and zh`);
   }
+  if (row.offering !== undefined
+    && !PRESET_OFFERINGS.includes(row.offering as ProviderPresetOffering)) {
+    issues.push(`${where}: offering must be plan or api when present`);
+  }
   if (row.endpointPlaceholder !== undefined
     && (typeof row.endpointPlaceholder !== "string" || !row.endpointPlaceholder.trim())) {
     issues.push(`${where}: endpointPlaceholder must be a non-empty string when present`);
   }
   if (row.modelDiscovery !== undefined && typeof row.modelDiscovery !== "boolean") {
     issues.push(`${where}: modelDiscovery must be a boolean when present`);
+  }
+  if (row.defaultModels !== undefined) {
+    const models = row.defaultModels;
+    const valid = Array.isArray(models)
+      && models.length > 0
+      && models.every((id) => typeof id === "string" && id.length > 0 && id.trim() === id)
+      && new Set(models).size === models.length;
+    if (!valid) {
+      issues.push(`${where}: defaultModels must be a non-empty array of trimmed unique non-empty IDs`);
+    }
   }
   return issues;
 }
@@ -117,6 +143,44 @@ export function groupProviderPresets(
   };
 }
 
+/**
+ * User-visible offering group from metadata only. Rows without an explicit
+ * offering are general API offerings; nothing is inferred from names.
+ */
+export function providerPresetOffering(
+  preset: Pick<ProviderPreset, "offering">,
+): ProviderPresetOffering {
+  return preset.offering === "plan" ? "plan" : "api";
+}
+
+export function groupProviderPresetsByOffering(
+  presets: readonly ProviderPreset[],
+): { plan: ProviderPreset[]; api: ProviderPreset[] } {
+  return {
+    plan: presets.filter((preset) => providerPresetOffering(preset) === "plan"),
+    api: presets.filter((preset) => providerPresetOffering(preset) === "api"),
+  };
+}
+
+/** Vetted seed IDs for a fixed-preset create; [] means the user edits models. */
+export function providerPresetDefaultModels(
+  preset: Pick<ProviderPreset, "defaultModels">,
+): string[] {
+  return preset.defaultModels ? [...preset.defaultModels] : [];
+}
+
+/**
+ * Offering of a saved provider's persisted preset ID. Unknown or absent IDs
+ * are API; nothing is inferred from display names.
+ */
+export function providerPresetOfferingForId(
+  presetId: string | null | undefined,
+  presets: readonly ProviderPreset[] = PROVIDER_PRESETS,
+): ProviderPresetOffering {
+  const preset = presetId ? presets.find((entry) => entry.id === presetId) ?? null : null;
+  return preset ? providerPresetOffering(preset) : "api";
+}
+
 export function filterProviderPresets(
   presets: readonly ProviderPreset[],
   query: string,
@@ -132,14 +196,25 @@ export function filterProviderPresets(
 /**
  * Builds the draft for a preset selection. Preset-filled fields (name,
  * endpoint, protocol, auth) always reset; the Key and model mappings are
- * cleared on every switch so a secret can never cross providers. The account
- * name and notes the user typed survive a switch.
+ * cleared on every switch so a secret can never cross providers. Vetted
+ * defaultModels then seed exact upstream IDs with preset-prefixed public
+ * names and no per-model override. Typed account names and notes survive a
+ * switch; an auto-generated or empty account name follows the new preset so
+ * the first account is never created nameless.
  */
 export function applyProviderPresetToDraft(
   current: DynamicProviderDraft,
   preset: ProviderPreset | null,
 ): DynamicProviderDraft {
   const base = emptyDynamicProviderDraft();
+  const seeds = preset ? providerPresetDefaultModels(preset) : [];
+  // An account name equal to the previous preset's name was auto-generated by
+  // this helper, not typed; it follows the new preset instead of sticking.
+  const previousPreset = current.preset_id
+    ? PROVIDER_PRESETS.find((entry) => entry.id === current.preset_id) ?? null
+    : null;
+  const accountNameIsAuto = Boolean(previousPreset && current.account_name === previousPreset.name);
+  const typedAccountName = current.account_name && !accountNameIsAuto ? current.account_name : "";
   return {
     ...base,
     name: preset ? preset.name : "",
@@ -149,7 +224,14 @@ export function applyProviderPresetToDraft(
     // Persisted provenance follows the explicit picker choice: the exact
     // preset ID, or "" for a manual switch (create omits, update clears).
     preset_id: preset ? preset.id : "",
-    account_name: current.account_name,
+    models: seeds.length > 0
+      ? seeds.map((id) => ({
+        public_model: providerPresetImportPublicName(preset!.id, id),
+        upstream_model: id,
+        upstream_override: null,
+      }))
+      : base.models,
+    account_name: typedAccountName || (preset ? preset.name : ""),
     notes: current.notes,
   };
 }
