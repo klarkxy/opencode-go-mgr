@@ -1,11 +1,9 @@
 <template>
-  <n-modal
+  <FormSurface
     :show="show"
-    preset="card"
     :title="title"
-    class="account-modal"
-    style="width: 600px; max-width: calc(100vw - 32px)"
-    :mask-closable="false"
+    :embedded="embedded"
+    modal-class="account-modal"
     @update:show="$emit('update:show', $event)"
   >
     <n-form
@@ -16,14 +14,6 @@
     >
       <n-alert v-if="formError" type="error" class="form-error" role="alert">
         {{ formError }}
-      </n-alert>
-      <n-alert
-        v-if="isCustomPlan"
-        type="warning"
-        :show-icon="false"
-        class="form-error"
-      >
-        {{ t("目标端点由管理员自行选择并负责：使用 http:// 时 Key 将明文传输；测试连接会发送最小真实请求，可能产生服务商费用。") }}
       </n-alert>
       <n-alert
         v-if="isDynamicPlan"
@@ -101,13 +91,15 @@
           path="ollamaBillingTier"
           :label="t('计费档位')"
         >
-          <n-select
-            v-model:value="form.ollamaBillingTier"
-            :options="ollamaBillingOptions"
-            :placeholder="t('选择计费档位')"
-            :aria-label="t('计费档位')"
-          />
-          <p class="field-hint">{{ t("新建须选择 Pro / Max / Team 并填写购买日期；未配置的既有账号仍可路由。") }}</p>
+          <div class="billing-field">
+            <n-select
+              v-model:value="form.ollamaBillingTier"
+              :options="ollamaBillingOptions"
+              :placeholder="t('选择计费档位')"
+              :aria-label="t('计费档位')"
+            />
+            <p class="field-hint">{{ t("新建须选择 Pro / Max / Team 并填写购买日期；未配置的既有账号仍可路由。") }}</p>
+          </div>
         </n-form-item>
 
         <n-form-item
@@ -243,7 +235,7 @@
       </div>
     </n-form>
     <template #footer>
-      <div class="modal-footer">
+      <div class="modal-footer" :class="{ 'modal-footer--embedded': embedded }">
         <n-button
           v-if="isEdit && isCooling"
           text
@@ -254,16 +246,16 @@
           {{ t("重置冷却") }}
         </n-button>
         <n-space>
-          <n-button @click="$emit('update:show', false)">{{ t("取消") }}</n-button>
+          <n-button v-if="!embedded" @click="$emit('update:show', false)">{{ t("取消") }}</n-button>
           <n-button type="primary" :loading="busy" @click="handleSave">{{ t("保存") }}</n-button>
         </n-space>
       </div>
     </template>
-  </n-modal>
+  </FormSurface>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, toRef, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import type { FormInst, FormRules } from "naive-ui";
 import {
   NAlert,
@@ -272,14 +264,12 @@ import {
   NForm,
   NFormItem,
   NInput,
-  NModal,
   NSelect,
   NSpace,
 } from "naive-ui";
 import { dashboardApi, type Account, type AccountInput, type AccountProtocol } from "../api/dashboard";
 import type { ProviderCatalogEntry, ProviderCatalogFormField } from "../api/providers.ts";
 import { t } from "../i18n/index.ts";
-import { useLocalizedModalCloseLabel } from "../utils/modal-close-label.ts";
 import { localDateString } from "../domain/account-lifecycle.ts";
 import { findCatalogEntry, planFamilyLabel, planForAccount } from "../domain/plans.ts";
 import type { PlanDefinition } from "../domain/plans.ts";
@@ -299,6 +289,7 @@ import {
   customApiUrlSupportsModelDiscovery,
 } from "../domain/custom-account.ts";
 import { protocolDisplayName } from "../domain/provider-contracts.ts";
+import FormSurface from "./FormSurface.vue";
 
 export type AccountFormPayload = {
   name: string;
@@ -348,13 +339,15 @@ const props = withDefaults(defineProps<{
   isCooling?: boolean;
   busy?: boolean;
   /** The selected plan family when creating an account. */
-  plan: PlanDefinition | null;
+  plan?: PlanDefinition | null;
   /** Provider catalog; when null, only the legacy OpenCode Go path is supported. */
-  catalog: readonly ProviderCatalogEntry[] | null;
+  catalog?: readonly ProviderCatalogEntry[] | null;
   /** Linked platform Key: the endpoint is parent-owned and read-only here. */
   endpointLocked?: boolean;
   /** Concise parent-owned hint shown in place of the endpoint guidance. */
   endpointLockHint?: string;
+  /** Inline rendering inside the Add Account chooser instead of a modal. */
+  embedded?: boolean;
 }>(), {
   account: null,
   isCooling: false,
@@ -363,6 +356,7 @@ const props = withDefaults(defineProps<{
   catalog: null,
   endpointLocked: false,
   endpointLockHint: "",
+  embedded: false,
 });
 
 const emit = defineEmits<{
@@ -370,8 +364,6 @@ const emit = defineEmits<{
   (e: "save", payload: AccountInput | AccountFormPayload): void;
   (e: "resetCooldown"): void;
 }>();
-
-useLocalizedModalCloseLabel(toRef(props, "show"), "account-modal");
 
 const formRef = ref<FormInst | null>(null);
 const form = ref<FormModel>(blankForm());
@@ -546,7 +538,15 @@ const rules = computed<FormRules>(() => {
   return base;
 });
 
-watch(() => props.show, (show) => {
+// Identity keys only: an account refresh with the same id (CAS reconciliation)
+// must not wipe the user's in-progress edits, while a chooser selection change
+// to another plan resets the create form even though `show` stays true.
+const watchedAccountId = computed(() => props.account?.id ?? "");
+const watchedPlanKey = computed(() => (
+  props.plan ? `${props.plan.id}:${props.plan.provider_id}` : ""
+));
+
+watch(() => [props.show, watchedAccountId.value, watchedPlanKey.value], ([show]) => {
   if (show) {
     form.value = props.account ? formFromAccount(props.account) : blankForm();
     nameWasEdited.value = isEdit.value;
@@ -855,7 +855,8 @@ async function handleSave() {
 }
 
 .endpoint-field,
-.protocol-field {
+.protocol-field,
+.billing-field {
   display: grid;
   gap: 4px;
   width: 100%;
@@ -877,6 +878,10 @@ async function handleSave() {
   justify-content: space-between;
   align-items: center;
   gap: 12px;
+}
+
+.modal-footer--embedded {
+  justify-content: flex-end;
 }
 
 @media (max-width: 640px) {

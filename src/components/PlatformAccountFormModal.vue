@@ -1,16 +1,15 @@
 <template>
-  <n-modal
+  <FormSurface
     :show="show"
-    preset="card"
     :title="editing ? t('编辑平台账号') : t('添加平台账号')"
-    class="platform-account-form-modal"
-    style="width: 520px; max-width: calc(100vw - 32px)"
-    :mask-closable="false"
+    :embedded="embedded"
+    modal-class="platform-account-form-modal"
+    modal-style="width: 520px; max-width: calc(100vw - 32px)"
     :close-on-esc="!busy"
     @update:show="setVisible"
   >
     <n-form label-placement="top" @submit.prevent="submit">
-      <n-form-item :label="t('平台类型')" required>
+      <n-form-item v-if="!embedded" :label="t('平台类型')" required>
         <n-select
           v-model:value="form.kind"
           :options="kindOptions"
@@ -69,13 +68,13 @@
     </n-form>
     <template #footer>
       <n-space justify="end">
-        <n-button :disabled="busy" @click="setVisible(false)">{{ t("取消") }}</n-button>
+        <n-button v-if="!embedded" :disabled="busy" @click="setVisible(false)">{{ t("取消") }}</n-button>
         <n-button type="primary" :loading="busy" :disabled="!canSubmit" @click="submit">
           {{ editing ? t("保存") : t("创建") }}
         </n-button>
       </n-space>
     </template>
-  </n-modal>
+  </FormSurface>
 </template>
 
 <script setup lang="ts">
@@ -86,7 +85,6 @@ import {
   NForm,
   NFormItem,
   NInput,
-  NModal,
   NSelect,
   NSpace,
 } from "naive-ui";
@@ -98,7 +96,7 @@ import {
   customEndpointUrlIssue,
 } from "../domain/custom-account.ts";
 import { t, type MessageKey } from "../i18n/index.ts";
-import { useLocalizedModalCloseLabel } from "../utils/modal-close-label.ts";
+import FormSurface from "./FormSurface.vue";
 
 export interface PlatformAccountFormPayload {
   kind: PlatformKind;
@@ -113,14 +111,14 @@ const props = defineProps<{
   editing: PlatformAccount | null;
   presetKind: PlatformKind;
   busy: boolean;
+  /** Inline rendering inside the Add Account chooser instead of a modal. */
+  embedded?: boolean;
 }>();
 
 const emit = defineEmits<{
   "update:show": [show: boolean];
   save: [payload: PlatformAccountFormPayload];
 }>();
-
-useLocalizedModalCloseLabel(computed(() => props.show), "platform-account-form-modal");
 
 const form = ref({ kind: props.presetKind as PlatformKind, name: "", baseUrl: "", userCredential: "" });
 const clearCredential = ref(false);
@@ -149,7 +147,10 @@ const canSubmit = computed(() => {
   return true;
 });
 
-watch(() => props.show, (show) => {
+// `presetKind` joins the trigger so an embedded chooser kind switch resets the
+// draft (name/URL/credential never leak across platform kinds); in modal use
+// the kind is always settled before `show` opens, so behavior is unchanged.
+watch([() => props.show, () => props.presetKind], ([show]) => {
   if (!show) return;
   form.value = {
     kind: props.editing?.kind ?? props.presetKind,
