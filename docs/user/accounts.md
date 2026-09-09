@@ -155,11 +155,10 @@ unpriced: logs record `cost_state=unknown` with no quota debit, and Custom has
 no provider usage refresh. `MODEL_PROTOCOLS` remains Go-specific; Custom
 converts the client protocol to the account's single upstream protocol.
 
-**Add account** is a grouped plan list with a detail pane (**Ready to add** /
-**Draft plans** / **Unavailable**). Zen Free is a backend-owned singleton and
+**Add account** has **Plan** above **API** on the left and the form on the right. **Custom API** is the first API entry and remains available when searching. General APIs, aggregators and platform accounts all belong to API. Fixed presets supply the protocol, authentication, endpoint and a documented default chat model, so entering the service's **Key** is enough; optional settings let you adjust names and models. Azure and Bedrock still require their resource or regional address and model/deployment information. Saving a preset creates the Provider and its first account together. To add another account to an existing Provider, select that saved Provider instead. Zen Free is a backend-owned singleton and
 is not listed there; enable or disable it on the account list.
-Selecting OpenCode Go still offers **Import existing Key** and **Register new
-account (Beta)** in the detail pane:
+Selecting OpenCode Go shows the existing-Key form directly and retains the separate **Register new
+account (Beta)** workflow:
 
 - A **Key account** stores one officially distributable OpenCode Go API key.
 - A **managed account** immediately creates a disabled, recoverable draft, then

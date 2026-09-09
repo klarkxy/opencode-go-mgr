@@ -12,9 +12,9 @@
 
 **测试模型**只按所选模型的有效配置发送最小请求，不猜测其他地址，不自动开启协议、不改变优先级。草稿测试需要显式填写临时 Key，账号测试使用该账号已保存的 Key。模型目录拉取是独立动作，不证明推理一定可用。
 
-默认值复核于 **2026-09-08**：xAI 使用 [Responses](https://docs.x.ai/developers/model-capabilities/text/comparison)，MiniMax 使用 [Messages 与 Bearer 鉴权](https://platform.minimax.io/docs/api-reference/text-chat-anthropic)。其他预设保留文档中的兼容默认值，内置模型设置与用户手动禁用状态继续生效。
+默认值复核于 **2026-09-09**：xAI 使用 [Responses](https://docs.x.ai/developers/model-capabilities/text/comparison)，MiniMax 使用 [Messages 与 Bearer 鉴权](https://platform.minimax.io/docs/api-reference/text-chat-anthropic)。其他预设保留文档中的兼容默认值，内置模型设置与用户手动禁用状态继续生效。
 
-**新建供应商** 提供经过核实的[官方 API 预设](provider-presets.zh-CN.md)，区分地区与套餐端点，并包含选定的成熟聚合平台。选择预设、填写 Key 和模型后即可保存。
+供应商列表按上方 **Plan**、下方 **API** 展示可搜索的[渠道预设](provider-presets.zh-CN.md)，并区分地区与套餐地址。**Custom API** 是 API 第一项，点击直接打开对应新增账号表单。选择固定预设后，右侧只需填写 Key；协议、鉴权、地址和初始对话模型由预设提供，名称和模型可在可选设置中调整。Azure、Bedrock 保留必需的资源／区域地址和模型信息。保存同时创建供应商和首个账号。已保存供应商保留独立入口；模板不改写已有配置。**新建供应商** 仍可手动配置。
 
 要接入另一个上游或贡献内置集成，请先阅读[新增供应商](add-provider.zh-CN.md)；其中包含用户定义供应商、Custom API 与密封适配器注册表路径。
 

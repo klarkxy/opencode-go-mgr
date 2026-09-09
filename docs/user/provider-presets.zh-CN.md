@@ -1,18 +1,20 @@
 [English](provider-presets.md)
 
-# 官方 API 预设
+# Plan 与 API 预设
 
-默认协议复核于 **2026-09-08**：xAI 使用 Responses，MiniMax 国内/国际使用 Messages 与 Bearer 鉴权，依据运营方当前推荐与 REST 文档。OpenAI/Azure/Bedrock 保留 Responses，Anthropic 保留 Messages，其他预设保留文档中的 Chat 兼容默认值。Gemini 原生 Google API 不属于这三种上游格式，因此预设使用官方列明的 OpenAI 兼容接口。“文档支持”不等于“官方唯一推荐”。模板只初始化新草稿，不改写已经保存的选择。
+默认协议和地址复核于 **2026-09-09**：xAI 使用 Responses，MiniMax 国内/国际使用 Messages 与 Bearer 鉴权，依据运营方当前推荐与 REST 文档。OpenAI/Azure/Bedrock 保留 Responses，Anthropic 保留 Messages，其他预设保留文档中的 Chat 兼容默认值。Gemini 原生 Google API 不属于这三种上游格式，因此预设使用官方列明的 OpenAI 兼容接口。“文档支持”不等于“官方唯一推荐”。模板只初始化新草稿，不改写已经保存的选择。
 
 MiniMax 官方 Chat 与 Messages 地址分别使用 `/v1`、`/anthropic/v1` 前缀。覆盖模型协议时明确填写对应地址，面板不猜测其他路径。[当前 MiniMax Messages 鉴权](https://platform.minimax.io/docs/api-reference/text-chat-anthropic)为 Bearer，不能仅因协议格式兼容 Anthropic 就推断为 x-api-key。选择规则见[协议默认值](providers.zh-CN.md#协议默认值与连接测试)。
 
-打开 **供应商 → 新建供应商**，选择预设。OCG 会填好名称、完整推理地址、上游协议和鉴权方式。填写该服务的 **Key**，获取并选择支持对话的模型，或手动填写准确模型 ID，然后保存。需要专属资源地址的供应商会保留空地址，等待你填写。
+在 **账号 → 新增账号** 或**供应商**列表选择渠道：上方是 **Plan**，下方是 **API**，**Custom API** 固定在 API 第一项。普通 API、聚合服务和平台账号统一归入 API。右侧直接填写表单，不再弹出第二层窗口。固定预设锁定协议、鉴权和完整推理地址，并填入一个文档中的对话模型，填写对应服务的 **Key** 即可保存。展开可选设置可调整名称、备注和模型；Azure、Bedrock 仍须提供资源或区域地址和模型／部署信息。保存同时创建供应商和首个账号。Custom API 和手动配置保留完整连接设置。
 
 预设通过已有 Dashboard V3 原子创建流程保存为普通用户定义供应商，参与账号排序、故障回退、模型路由和请求日志，保存后仍可编辑。它不会新增独立适配器，也不会在保存前自动创建账号。
 
 在预设下导入模型时，对外名称会加预设前缀，例如 `openrouter/vendor/model`；准确上游 ID 仍为 `vendor/model`，两个字段都可编辑。手动配置的导入保持原有对外命名行为。
 
-切换预设会清空草稿 Key 和模型映射。链接指向运营方文档、控制台，不携带 CC-Switch 推广参数。获取模型只修改草稿；模型测试可能收费，仍需现有的明确确认。请选择支持当前上游协议的模型；仅用于图片、音频、视频或向量嵌入的模型不属于此对话网关预设流程。
+切换预设会清除上一渠道的 Key 和模型映射，再填入所选渠道的默认模型。链接指向运营方文档、控制台，不携带 CC-Switch 推广参数。获取模型只修改草稿；模型测试可能收费，仍需现有的明确确认。请选择支持当前上游协议的模型；仅用于图片、音频、视频或向量嵌入的模型不属于此对话网关预设流程。
+
+默认模型取自对应运营方的模型文档或调用示例，是可调整的起点，不代表已验证你的账号权限。保存不会调用上游、自动获取全部模型或进行付费测试。模板更新不会改写已有供应商的连接和映射。
 
 ## 拉取目录、测试与重新编辑
 
@@ -30,62 +32,62 @@ MiniMax 官方 Chat 与 Messages 地址分别使用 `/v1`、`/anthropic/v1` 前�
 
 每一行是可用的配置模板，不代表已使用真实 Key 完成在线推理，也不代表账号已经获得模型权限。新增供应商仍为未定价：不同步官方额度、余额和价格。Coding/Token Plan Key、不同地区 API Key 必须与所选端点匹配，并遵循上游套餐允许的使用范围。
 
-| 预设 | 上游协议 | 鉴权 | 运营方文档 |
-| --- | --- | --- | --- |
-| OpenAI API | responses | bearer | [API 文档](https://developers.openai.com/api/reference/overview) |
-| Anthropic API | messages | x-api-key | [API 文档](https://platform.claude.com/docs/en/api/overview) |
-| Google Gemini API | chat_completions | bearer | [API 文档](https://ai.google.dev/gemini-api/docs/openai) |
-| xAI (Grok) API | responses | bearer | [API 文档](https://docs.x.ai/developers/quickstart) |
-| Azure OpenAI v1 | responses | bearer | [API 文档](https://learn.microsoft.com/en-us/azure/foundry/openai/api-version-lifecycle) |
-| AWS Bedrock (API Key) | responses | bearer | [API 文档](https://docs.aws.amazon.com/bedrock/latest/userguide/bedrock-mantle.html) |
-| DeepSeek API | chat_completions | bearer | [API 文档](https://api-docs.deepseek.com/) |
-| Kimi / Moonshot API | chat_completions | bearer | [API 文档](https://platform.kimi.com/docs/api/overview) |
-| Zhipu GLM API | chat_completions | bearer | [API 文档](https://docs.bigmodel.cn/cn/guide/develop/http/introduction) |
-| Zhipu GLM Coding Plan | chat_completions | bearer | [API 文档](https://docs.bigmodel.cn/cn/guide/develop/cursor) |
-| Z.AI GLM API | chat_completions | bearer | [API 文档](https://docs.z.ai/api-reference/introduction) |
-| Z.AI GLM Coding Plan | chat_completions | bearer | [API 文档](https://docs.z.ai/devpack/tool/others) |
-| MiniMax API (CN) | messages | bearer | [API 文档](https://platform.minimaxi.com/docs/api-reference/text-anthropic-api) |
-| MiniMax API / Token Plan (Global) | messages | bearer | [API 文档](https://platform.minimax.io/docs/api-reference/text-anthropic-api) |
-| LongCat API | chat_completions | bearer | [API 文档](https://longcat.chat/platform/docs/api/chat.html) |
-| Tencent Hunyuan / TokenHub API | chat_completions | bearer | [API 文档](https://cloud.tencent.com/document/product/1823/130078) |
-| Tencent Token Plan (CN) | chat_completions | bearer | [API 文档](https://cloud.tencent.com/document/product/1823/130119) |
-| Tencent Token Plan (Global) | chat_completions | bearer | [API 文档](https://www.tencentcloud.com/document/product/1300/81037) |
-| Tencent Token Plan Enterprise Pro (CN) | chat_completions | bearer | [API 文档](https://cloud.tencent.com/document/product/1823/130659) |
-| Tencent Token Plan Enterprise Pro (Global) | chat_completions | bearer | [API 文档](https://www.tencentcloud.com/document/product/1300/81489) |
-| Tencent Token Plan Enterprise Lite (CN) | chat_completions | bearer | [API 文档](https://cloud.tencent.com/document/product/1823/131173) |
-| Tencent Token Plan Enterprise Lite (Global) | chat_completions | bearer | [API 文档](https://www.tencentcloud.com/document/product/1300/81490) |
-| Alibaba Bailian API (CN) | chat_completions | bearer | [API 文档](https://help.aliyun.com/zh/model-studio/base-url) |
-| Alibaba Bailian Coding Plan (CN) | chat_completions | bearer | [API 文档](https://help.aliyun.com/zh/model-studio/coding-plan) |
-| QwenCloud API (Global) | chat_completions | bearer | [API 文档](https://www.alibabacloud.com/help/en/model-studio/base-url) |
-| QwenCloud Coding Plan (Global) | chat_completions | bearer | [API 文档](https://www.alibabacloud.com/help/en/model-studio/coding-plan) |
-| QwenCloud Token Plan (Global) | chat_completions | bearer | [API 文档](https://www.alibabacloud.com/help/en/model-studio/base-url) |
-| Volcengine Ark / Doubao API | chat_completions | bearer | [API 文档](https://www.volcengine.com/docs/ark/chat-api) |
-| Volcengine Agent Plan | chat_completions | bearer | [API 文档](https://www.volcengine.com/docs/82379/2160841) |
-| Volcengine Coding Plan | chat_completions | bearer | [API 文档](https://www.volcengine.com/docs/82379/1928261) |
-| BytePlus Coding Plan | chat_completions | bearer | [API 文档](https://docs.byteplus.com/en/docs/ModelArk/1928261) |
-| Baidu Qianfan API | chat_completions | bearer | [API 文档](https://cloud.baidu.com/doc/qianfan/s/Hmh4suq26) |
-| Baidu Qianfan Coding Plan | chat_completions | bearer | [API 文档](https://cloud.baidu.com/doc/qianfan/s/imlg0beiu) |
-| Baidu Qianfan Token Plan (Team) | chat_completions | bearer | [API 文档](https://cloud.baidu.com/doc/qianfan/s/smqeup7hm) |
-| StepFun API (CN) | chat_completions | bearer | [API 文档](https://platform.stepfun.com/docs/zh/api-reference/chat/chat-completion-create) |
-| StepFun Step Plan (CN) | chat_completions | bearer | [API 文档](https://platform.stepfun.com/docs/zh/step-plan/integrations/reasoning-api) |
-| StepFun API (Global) | chat_completions | bearer | [API 文档](https://platform.stepfun.ai/docs/en/api-reference/chat/chat-completion-create) |
-| StepFun Step Plan (Global) | chat_completions | bearer | [API 文档](https://platform.stepfun.ai/docs/en/step-plan/integrations/reasoning-api) |
-| Xiaomi MiMo API | chat_completions | bearer | [API 文档](https://mimo.mi.com/docs/zh-CN/quick-start/faq/api-integration) |
-| Xiaomi MiMo Token Plan (CN) | chat_completions | bearer | [API 文档](https://mimo.mi.com/docs/zh-CN/tokenplan/integration/tools-overview) |
-| BaiLing / Ant Ling API | chat_completions | bearer | [API 文档](https://developer.ant-ling.com/zh-CN/docs/api-reference/openai/) |
-| KAT-Coder / StreamLake API | chat_completions | bearer | [API 文档](https://www.streamlake.ai/document/DOC/mg6k6nlp8j6qxicx4c9) |
-| KAT-Coder / StreamLake Coding Plan | chat_completions | bearer | [API 文档](https://www.streamlake.ai/document/DOC/mg6k6nlp8j6qxicx4c9) |
-| OpenRouter | chat_completions | bearer | [API 文档](https://openrouter.ai/docs/quickstart) |
-| SiliconFlow (CN) | chat_completions | bearer | [API 文档](https://docs.siliconflow.cn/docs/userguide/quickstart) |
-| SiliconFlow (Global) | chat_completions | bearer | [API 文档](https://docs.siliconflow.com/en/userguide/quickstart) |
-| NVIDIA API Catalog | chat_completions | bearer | [API 文档](https://docs.api.nvidia.com/nim/reference/llm-apis) |
-| ModelScope API Inference | chat_completions | bearer | [API 文档](https://www.modelscope.cn/learn/434797) |
-| PPIO | chat_completions | bearer | [API 文档](https://ppio.com/docs/models/reference-llm-create-chat-completion) |
-| Qiniu AI | chat_completions | bearer | [API 文档](https://developer.qiniu.com/aitokenapi/13379/real-time-ai-interface-api) |
-| Novita AI | chat_completions | bearer | [API 文档](https://docs.novita.ai/api-reference/model-apis-llm-create-chat-completion) |
-| Compshare ModelVerse | chat_completions | bearer | [API 文档](https://compshare.cn/docs/modelverse/models/text_api/openai_compatible) |
-| Compshare Coding Plan | chat_completions | bearer | [API 文档](https://compshare.cn/docs/modelverse/codingfaq) |
-| AtlasCloud Coding Plan | chat_completions | bearer | [API 文档](https://www.atlascloud.ai/docs/coding-plan/api) |
+| 预设 | 上游协议 | 鉴权 | 运营方文档 | 默认模型 |
+| --- | --- | --- | --- | --- |
+| OpenAI API | responses | bearer | [API 文档](https://developers.openai.com/api/reference/overview) | [`gpt-5.6-luna`](https://developers.openai.com/api/docs/models/gpt-5.6-luna) |
+| Anthropic API | messages | x-api-key | [API 文档](https://platform.claude.com/docs/en/api/overview) | [`claude-haiku-4-5-20251001`](https://platform.claude.com/docs/en/models/overview) |
+| Google Gemini API | chat_completions | bearer | [API 文档](https://ai.google.dev/gemini-api/docs/openai) | [`gemini-3.8-flash`](https://ai.google.dev/gemini-api/docs/openai) |
+| xAI (Grok) API | responses | bearer | [API 文档](https://docs.x.ai/developers/quickstart) | [`grok-4.6`](https://docs.x.ai/developers/models) |
+| Azure OpenAI v1 | responses | bearer | [API 文档](https://learn.microsoft.com/en-us/azure/foundry/openai/api-version-lifecycle) | 客户模型／部署 |
+| AWS Bedrock (API Key) | responses | bearer | [API 文档](https://docs.aws.amazon.com/bedrock/latest/userguide/bedrock-mantle.html) | 客户模型／部署 |
+| DeepSeek API | chat_completions | bearer | [API 文档](https://api-docs.deepseek.com/) | [`deepseek-v4-flash`](https://api-docs.deepseek.com/) |
+| Kimi / Moonshot API | chat_completions | bearer | [API 文档](https://platform.kimi.com/docs/api/overview) | [`kimi-k2.6`](https://platform.kimi.com/docs/api/models) |
+| Zhipu GLM API | chat_completions | bearer | [API 文档](https://docs.bigmodel.cn/cn/guide/develop/http/introduction) | [`glm-5.3`](https://docs.bigmodel.cn/cn/guide/develop/http/introduction) |
+| Zhipu GLM Coding Plan | chat_completions | bearer | [API 文档](https://docs.bigmodel.cn/cn/guide/develop/cursor) | [`glm-5.3`](https://docs.bigmodel.cn/cn/guide/develop/cursor) |
+| Z.AI GLM API | chat_completions | bearer | [API 文档](https://docs.z.ai/api-reference/introduction) | [`glm-5.3`](https://docs.z.ai/api-reference/introduction) |
+| Z.AI GLM Coding Plan | chat_completions | bearer | [API 文档](https://docs.z.ai/devpack/tool/others) | [`glm-5.3`](https://docs.z.ai/devpack/tool/others) |
+| MiniMax API (CN) | messages | bearer | [API 文档](https://platform.minimaxi.com/docs/api-reference/text-anthropic-api) | [`MiniMax-M2.5`](https://platform.minimaxi.com/docs/api-reference/text-anthropic-api) |
+| MiniMax API / Token Plan (Global) | messages | bearer | [API 文档](https://platform.minimax.io/docs/api-reference/text-anthropic-api) | [`MiniMax-M3`](https://platform.minimax.io/docs/api-reference/text-chat-anthropic) |
+| LongCat API | chat_completions | bearer | [API 文档](https://longcat.chat/platform/docs/api/chat.html) | [`LongCat-2.0`](https://longcat.chat/platform/docs/api/chat) |
+| Tencent Hunyuan / TokenHub API | chat_completions | bearer | [API 文档](https://cloud.tencent.com/document/product/1823/130078) | [`hy3`](https://cloud.tencent.com/document/product/1823/132252) |
+| Tencent Token Plan (CN) | chat_completions | bearer | [API 文档](https://cloud.tencent.com/document/product/1823/130119) | [`tc-code-latest`](https://cloud.tencent.com/document/product/1823/130119) |
+| Tencent Token Plan (Global) | chat_completions | bearer | [API 文档](https://www.tencentcloud.com/document/product/1300/81037) | [`auto`](https://www.tencentcloud.com/document/product/1300/81037) |
+| Tencent Token Plan Enterprise Pro (CN) | chat_completions | bearer | [API 文档](https://cloud.tencent.com/document/product/1823/130659) | [`auto`](https://cloud.tencent.com/document/product/1823/130659) |
+| Tencent Token Plan Enterprise Pro (Global) | chat_completions | bearer | [API 文档](https://www.tencentcloud.com/document/product/1300/81489) | [`auto`](https://www.tencentcloud.com/document/product/1300/81489) |
+| Tencent Token Plan Enterprise Lite (CN) | chat_completions | bearer | [API 文档](https://cloud.tencent.com/document/product/1823/131173) | [`auto`](https://cloud.tencent.com/document/product/1823/131173) |
+| Tencent Token Plan Enterprise Lite (Global) | chat_completions | bearer | [API 文档](https://www.tencentcloud.com/document/product/1300/81490) | [`auto`](https://www.tencentcloud.com/document/product/1300/81490) |
+| Alibaba Bailian API (CN) | chat_completions | bearer | [API 文档](https://help.aliyun.com/zh/model-studio/base-url) | [`qwen3.8-flash`](https://help.aliyun.com/zh/model-studio/text-generation-model) |
+| Alibaba Bailian Coding Plan (CN) | chat_completions | bearer | [API 文档](https://help.aliyun.com/zh/model-studio/coding-plan) | [`qwen3.7-plus`](https://help.aliyun.com/zh/model-studio/coding-plan) |
+| QwenCloud API (Global) | chat_completions | bearer | [API 文档](https://www.alibabacloud.com/help/en/model-studio/base-url) | [`qwen3.8-flash`](https://www.alibabacloud.com/help/en/model-studio/qwen3-8-flash) |
+| QwenCloud Coding Plan (Global) | chat_completions | bearer | [API 文档](https://www.alibabacloud.com/help/en/model-studio/coding-plan) | [`qwen3.7-plus`](https://www.alibabacloud.com/help/en/model-studio/coding-plan) |
+| QwenCloud Token Plan (Global) | chat_completions | bearer | [API 文档](https://www.alibabacloud.com/help/en/model-studio/base-url) | [`qwen3.6-flash`](https://www.alibabacloud.com/help/en/model-studio/token-plan-team-overview) |
+| Volcengine Ark / Doubao API | chat_completions | bearer | [API 文档](https://www.volcengine.com/docs/ark/chat-api) | [`doubao-seed-2-1-pro-260628`](https://www.volcengine.com/docs/ark/chat-api) |
+| Volcengine Agent Plan | chat_completions | bearer | [API 文档](https://www.volcengine.com/docs/82379/2160841) | [`doubao-seed-1.6`](https://www.volcengine.com/docs/82379/2160841) |
+| Volcengine Coding Plan | chat_completions | bearer | [API 文档](https://www.volcengine.com/docs/82379/1928261) | [`ark-code-latest`](https://www.volcengine.com/docs/82379/1928261) |
+| BytePlus Coding Plan | chat_completions | bearer | [API 文档](https://docs.byteplus.com/en/docs/ModelArk/1928261) | [`ark-code-latest`](https://docs.byteplus.com/en/docs/ModelArk/1928261) |
+| Baidu Qianfan API | chat_completions | bearer | [API 文档](https://cloud.baidu.com/doc/qianfan/s/Hmh4suq26) | [`ernie-5.0`](https://cloud.baidu.com/doc/qianfan/s/Hmh4suq26) |
+| Baidu Qianfan Coding Plan | chat_completions | bearer | [API 文档](https://cloud.baidu.com/doc/qianfan/s/imlg0beiu) | [`qianfan-code-latest`](https://cloud.baidu.com/doc/qianfan/s/imlg0beiu) |
+| Baidu Qianfan Token Plan (Team) | chat_completions | bearer | [API 文档](https://cloud.baidu.com/doc/qianfan/s/smqeup7hm) | [`glm-5.2`](https://cloud.baidu.com/doc/qianfan/s/smqeup7hm) |
+| StepFun API (CN) | chat_completions | bearer | [API 文档](https://platform.stepfun.com/docs/zh/api-reference/chat/chat-completion-create) | [`step-3.5-flash`](https://platform.stepfun.com/docs/zh/api-reference/chat/chat-completion-create) |
+| StepFun Step Plan (CN) | chat_completions | bearer | [API 文档](https://platform.stepfun.com/docs/zh/step-plan/integrations/reasoning-api) | [`step-router-v1`](https://platform.stepfun.com/docs/zh/step-plan/integrations/reasoning-api) |
+| StepFun API (Global) | chat_completions | bearer | [API 文档](https://platform.stepfun.ai/docs/en/api-reference/chat/chat-completion-create) | [`step-3.5-flash`](https://platform.stepfun.ai/docs/en/api-reference/chat/chat-completion-create) |
+| StepFun Step Plan (Global) | chat_completions | bearer | [API 文档](https://platform.stepfun.ai/docs/en/step-plan/integrations/reasoning-api) | [`step-3.5-flash`](https://platform.stepfun.ai/docs/en/step-plan/integrations/reasoning-api) |
+| Xiaomi MiMo API | chat_completions | bearer | [API 文档](https://mimo.mi.com/docs/zh-CN/quick-start/faq/api-integration) | [`mimo-v2.5`](https://mimo.mi.com/docs/zh-CN/quick-start/faq/api-integration) |
+| Xiaomi MiMo Token Plan (CN) | chat_completions | bearer | [API 文档](https://mimo.mi.com/docs/zh-CN/tokenplan/integration/tools-overview) | [`mimo-v2.5`](https://mimo.mi.com/docs/zh-CN/tokenplan/integration/tools-overview) |
+| BaiLing / Ant Ling API | chat_completions | bearer | [API 文档](https://developer.ant-ling.com/zh-CN/docs/api-reference/openai/) | [`Ling-3.0-flash`](https://developer.ant-ling.com/zh-CN/docs/api-reference/openai/) |
+| KAT-Coder / StreamLake API | chat_completions | bearer | [API 文档](https://www.streamlake.ai/document/DOC/mg6k6nlp8j6qxicx4c9) | [`kat-coder-pro-v2.5`](https://www.streamlake.ai/document/DOC/mg6k6nlp8j6qxicx4c9) |
+| KAT-Coder / StreamLake Coding Plan | chat_completions | bearer | [API 文档](https://www.streamlake.ai/document/DOC/mg6k6nlp8j6qxicx4c9) | [`kat-coder-pro-v2.5`](https://www.streamlake.ai/document/DOC/mg6k6nlp8j6qxicx4c9) |
+| OpenRouter | chat_completions | bearer | [API 文档](https://openrouter.ai/docs/quickstart) | [`~openai/gpt-latest`](https://openrouter.ai/docs/quickstart) |
+| SiliconFlow (CN) | chat_completions | bearer | [API 文档](https://docs.siliconflow.cn/docs/userguide/quickstart) | [`deepseek-ai/DeepSeek-V4-Flash`](https://docs.siliconflow.cn/docs/api/models-get) |
+| SiliconFlow (Global) | chat_completions | bearer | [API 文档](https://docs.siliconflow.com/en/userguide/quickstart) | [`deepseek-ai/DeepSeek-V4-Flash`](https://docs.siliconflow.com/en/api-reference/chat-completions/chat-completions) |
+| NVIDIA API Catalog | chat_completions | bearer | [API 文档](https://docs.api.nvidia.com/nim/reference/llm-apis) | [`deepseek-ai/deepseek-v4-flash`](https://docs.api.nvidia.com/nim/reference/llm-apis) |
+| ModelScope API Inference | chat_completions | bearer | [API 文档](https://modelscope.cn/docs/model-service/API-Inference/intro) | [`Qwen/Qwen3.5-35B-A3B`](https://modelscope.cn/docs/model-service/API-Inference/intro) |
+| PPIO | chat_completions | bearer | [API 文档](https://ppio.com/docs/models/reference-llm-create-chat-completion) | [`deepseek/deepseek-r1`](https://ppio.com/docs/model/llm) |
+| Qiniu AI | chat_completions | bearer | [API 文档](https://developer.qiniu.com/aitokenapi/13379/real-time-ai-interface-api) | [`deepseek-v3`](https://developer.qiniu.com/aitokenapi/13379/real-time-ai-interface-api) |
+| Novita AI | chat_completions | bearer | [API 文档](https://docs.novita.ai/api-reference/model-apis-llm-create-chat-completion) | [`meta-llama/llama-3.1-8b-instruct`](https://docs.novita.ai/guides/llm-recommended) |
+| Compshare ModelVerse | chat_completions | bearer | [API 文档](https://compshare.cn/docs/modelverse/models/text_api/openai_compatible) | [`deepseek-ai/DeepSeek-R1`](https://www.compshare.cn/docs/modelverse/models/quick-start) |
+| Compshare Coding Plan | chat_completions | bearer | [API 文档](https://compshare.cn/docs/modelverse/codingfaq) | [`deepseek-v4-pro`](https://compshare.cn/docs/modelverse/codingfaq) |
+| AtlasCloud Coding Plan | chat_completions | bearer | [API 文档](https://www.atlascloud.ai/docs/coding-plan/api) | [`zai-org/glm-5.1`](https://www.atlascloud.ai/docs/coding-plan/api) |
 
 KAT-Coder 的完整 Chat 地址与 Bearer 鉴权，根据官方 OpenAI 兼容客户端配置推导：Base URL 加标准 `/chat/completions` 后缀。百灵采用当前官方 `api.ant-ling.com` 域名，不使用 CC-Switch 中较旧的 `api.tbox.cn` 地址。
 
@@ -99,7 +101,7 @@ KAT-Coder 的完整 Chat 地址与 Bearer 鉴权，根据官方 OpenAI 兼容客
 - 本次选择了有独立服务文档的聚合或推理平台：OpenRouter、SiliconFlow、NVIDIA、ModelScope、PPIO、七牛、Novita、优云智算和 AtlasCloud；没有整批导入 CC-Switch 的中转目录。
 - 浏览器订阅登录、GitHub Copilot OAuth、Codex OAuth、Grok OAuth 不属于 API Key 预设；已有 CPA 集成保持独立。
 
-模型不会固定为复制来的 CC-Switch 快照。请使用供应商当前目录或控制台中的模型，并保留上游 ID 原始拼写。即使没有模型列表接口，也可以填写明确的模型映射后保存。
+初始模型 ID 依据运营方文档复核，不直接复制 CC-Switch 快照。你可按当前目录或控制台更换、补充模型，并保留上游 ID 原始拼写。即使没有模型列表接口，也可以填写明确的模型映射后保存。
 
 ---
 

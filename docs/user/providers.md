@@ -12,9 +12,9 @@ Official presets initialize new Providers from documented defaults. Manual confi
 
 **Test model** sends a minimal request using the selected model's effective configuration. It does not guess alternate URLs, enable protocols or change preference. Draft tests need an explicit temporary Key; account tests use that account's saved Key. Model discovery is separate and does not certify inference support.
 
-Defaults reviewed on **2026-09-08**: xAI uses [Responses](https://docs.x.ai/developers/model-capabilities/text/comparison); MiniMax uses [Messages with Bearer auth](https://platform.minimax.io/docs/api-reference/text-chat-anthropic). Other presets retain documented compatible defaults. Built-in model profiles and manual disabled states remain in effect.
+Defaults reviewed on **2026-09-09**: xAI uses [Responses](https://docs.x.ai/developers/model-capabilities/text/comparison); MiniMax uses [Messages with Bearer auth](https://platform.minimax.io/docs/api-reference/text-chat-anthropic). Other presets retain documented compatible defaults. Built-in model profiles and manual disabled states remain in effect.
 
-**New Provider** includes reviewed [official API presets](provider-presets.md), with separate regional/plan endpoints and selected established aggregation platforms. Select a preset, enter its Key and models, then save.
+The supplier list groups searchable [channel presets](provider-presets.md) under **Plan** above **API**, with separate regional and plan endpoints. **Custom API** is the first API entry and opens its Add account form directly. Fixed presets supply protocol, authentication, address and an initial chat model; enter the Key in the main pane and optionally adjust names or models. Azure and Bedrock retain required resource/regional address and model fields. Saving creates the Provider and its first account together. Saved Providers remain separate entries, and templates never rewrite existing configurations. **New Provider** retains manual configuration.
 
 Want to connect another upstream or contribute a built-in integration? Start with [Add a Provider](add-provider.md), which includes user-defined Providers, Custom API, and the sealed Adapter Registry path.
 

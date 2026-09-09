@@ -4,7 +4,7 @@
 
 **New API** and **Sub2API** are platform types, not singleton suppliers. Add a separate named instance for each site or user account: multiple New API instances and multiple Sub2API instances can coexist. Each instance has its own identity, site URL, credentials, linked Keys and observations. Refreshing, editing or deleting one instance does not act on every instance of that type.
 
-On **Accounts**, add a New API or Sub2API parent account with its site URL and a name. A parent groups your existing Custom API Keys; each Key keeps its model mappings, protocol, enablement, cooldown, and position in the global route order. Grouping does not create a new Provider or change fallback priority.
+On **Accounts**, open **Add account**, choose **New API** or **Sub2API** under **Platform accounts**, then enter the site URL and a name. The platform accounts section appears after an account is created. A parent groups your existing Custom API Keys; each Key keeps its model mappings, protocol, enablement, cooldown, and position in the global route order. Grouping does not create a new Provider or change fallback priority.
 
 Use the site's root URL, including any installation path. The platform and URL are fixed after creation. Link an existing Custom API Key explicitly, or add a Custom API account with the Key you paste and then link it. OCG does not fetch remote Key secrets. A manual association is not proof of remote ownership or model permission.
 

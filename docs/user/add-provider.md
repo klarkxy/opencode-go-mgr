@@ -12,10 +12,14 @@ Use this guide when you want Open Console Gateway to route to another upstream s
 
 The **Adapter Registry** stays static and sealed. User-defined Providers are typed persisted definitions; every one binds the code-owned Configurable HTTP adapter. OCG never loads user scripts, plugins, or binaries. Unknown `provider_id` values fail closed unless they match a saved definition. Custom API remains a distinct account-owned path: it keeps Endpoint, protocol, and model mappings on the account card.
 
-## Create a user-defined Provider
+## Create from a preset
+
+Choose a [Plan or API preset](provider-presets.md) directly in **Providers** or **Accounts → Add account**. Fixed-address presets need only a Key; protocol, authentication, endpoint and a default chat model are already set. Optional settings expose names and models. Azure and Bedrock also need their customer-specific address and model/deployment information. Switching presets clears the previous Key and mappings, then supplies the new preset's default model.
+
+## Create a user-defined Provider manually
 
 1. Open **Providers** and choose **New Provider**.
-   Select an [official API preset](provider-presets.md) to fill the connection fields, or continue with manual configuration. Changing presets clears the draft Key and model mappings.
+   Keep manual configuration selected for the following steps.
 2. Enter a name, one API Endpoint, one upstream protocol (Chat Completions, Responses, or Messages), and one auth kind (Bearer, `x-api-key`, or none).
 3. Add at least one public-model → exact-upstream-ID mapping. **Fetch models** is optional and does not save.
 4. If auth requires a Key, enter the first account name and a write-only Key. A no-auth Provider creates one singleton account without a Key.
