@@ -54,6 +54,21 @@ fn official_presets_resolve_to_their_exact_inference_endpoints() {
     }
 }
 
+#[test]
+fn preset_offerings_mirror_matches_shipped_presets() {
+    // ocg-domain freezes a point-in-time mirror of the JSON `offering` field
+    // for the v42 seed and create paths. A plan preset missing from the mirror
+    // would silently persist as "api", so pin every shipped id here.
+    let presets: Vec<serde_json::Value> =
+        serde_json::from_str(include_str!("../../../../resources/provider-presets.json")).unwrap();
+    assert!(!presets.is_empty());
+    for preset in &presets {
+        let id = preset["id"].as_str().unwrap();
+        let expected = preset["offering"].as_str().unwrap_or("api");
+        assert_eq!(ocg_domain::provider::preset_offering(id), expected, "{id}");
+    }
+}
+
 fn test_config(mode: ProxyMode, proxy_url: &str) -> AppConfig {
     AppConfig {
         proxy_mode: mode,
