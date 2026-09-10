@@ -17,12 +17,27 @@ catalog, protocol, key, and failure contract.
    `ocg-gateway::alias`. The request path uses the saved contract.
 3. Implement `resolve_route` in `ocg-core` so it returns an `AttemptSpec`
    only. Adapters cannot own DB, `CoreState`, or a raw reqwest client.
-4. Fail closed until control-plane and routing semantics exist, then test the
+4. Register the sealed adapter in the schema v42 builtin seed so the unified
+   `providers` table exposes it as a `builtin` row in the V3 Provider
+   catalog. The row's `endpoint_url` / `upstream_protocol` / `auth_kind` /
+   `offering` / `endpoint_per_account` columns are display mirrors of the
+   sealed registry — traffic and routing still flow through the sealed
+   adapter code constants, never through the seeded row. Add the new id to
+   the `builtin_offering` map in `ocg-domain::provider` (`plan` for paid
+   families, `api` for free or account-owned surfaces). CPA is the static
+   external integration and is **not** seeded: do not add it here.
+5. Fail closed until control-plane and routing semantics exist, then test the
    domain, gateway, and core boundaries.
 
 The Provider registry remains static and sealed.
 Each static Provider owns its catalog, evidence, and override state under its
 single `provider_id` identity.
+
+A new **preset** (the user-defined Provider template list in
+`resources/provider-presets.json`) needs only the JSON entry plus, if the
+preset advertises a `plan` offering, an entry in the `PRESET_OFFERINGS` map
+in `ocg-domain::provider` so `preset_offering(preset_id)` returns `"plan"`.
+Other presets keep the default `"api"` value.
 
 ## 2. Legacy application connectors: retired
 

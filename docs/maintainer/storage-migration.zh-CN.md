@@ -33,15 +33,44 @@ GUI 或 CLI 启动时会原地执行 SQLite 迁移。打开新版二进制前：
 
 ## Schema v27 与 pre-v3 快照
 
-`CURRENT_SCHEMA_VERSION = 41`（`crates/ocg-core/src/db.rs`）。打开历史库会先规范迁移到 v26，再由 v27 重写把主 Key 与全部 `sub_gateway_keys` 行复制进一张 `access_keys` 表（主 Key 固定 id `00000000-0000-0000-0000-000000000001`），删除 `sub_gateway_keys`，并删除 `accounts` 上遗留的五列 `usage_sync_*`（用量同步元数据在 `provider_usage_sync_state`）。v33 新增 Custom 精确上游模型身份；v34 新增 CPA 单例配置表，但不会导入或导出 CPA 状态。v35 把 Provider/Plan 身份收成只有 `provider_id`：先预检每一个已知的 v34 provider/offering 对，未知对与会丢数据的复合键冲突在写入前失败，再重建受影响的表，使 offering 列不存在。v36 增量创建过 `ollama_cloud_usage_state`（未发布的 Cookie 用量抓取）。v37 删除该表且不动账号 Key 与日志，并创建 `ollama_cloud_billing`。账号 `key_cipher` / `password_cipher` 用 Host cipher 就地校验，**不会重新加密**。
+`CURRENT_SCHEMA_VERSION = 42`（`crates/ocg-core/src/db.rs`）。打开历史库会先规范迁移到 v26，再由 v27 重写把主 Key 与全部 `sub_gateway_keys` 行复制进一张 `access_keys` 表（主 Key 固定 id `00000000-0000-0000-0000-000000000001`），删除 `sub_gateway_keys`，并删除 `accounts` 上遗留的五列 `usage_sync_*`（用量同步元数据在 `provider_usage_sync_state`）。v33 新增 Custom 精确上游模型身份；v34 新增 CPA 单例配置表，但不会导入或导出 CPA 状态。v35 把 Provider/Plan 身份收成只有 `provider_id`：先预检每一个已知的 v34 provider/offering 对，未知对与会丢数据的复合键冲突在写入前失败，再重建受影响的表，使 offering 列不存在。v36 增量创建过 `ollama_cloud_usage_state`（未发布的 Cookie 用量抓取）。v37 删除该表且不动账号 Key 与日志，并创建 `ollama_cloud_billing`。v42 把类型化用户定义 Provider 表与密封 Adapter 种子目录统一：把 `dynamic_providers` / `dynamic_provider_models` 重命名为 `providers` / `provider_models`，新增 `origin`（`builtin` | `preset` | `custom`）、`adapter_kind`、`offering`（`plan` | `api`）与 `endpoint_per_account` 列，把七个密封 builtin 适配器（OpenCode Go、Zen Free、Command Code GOAT、MiniMax CN、Kimi CN、Ollama Cloud、Custom API——但不含静态外部接入 CPA）以 `builtin` 行种入表中，这些行的属性列只是展示镜像，并在 dynamic 读路径上加 `origin` 过滤。v41 的 `provider_model_protocol_preferences` 表上 `provider_id` CHECK 已被去掉（`protocol ∈ ('chat_completions', 'messages')` 的 CHECK 保留）。账号 `key_cipher` / `password_cipher` 用 Host cipher 就地校验，**不会重新加密**。
+
+## Schema v42 — 统一的供应商表
+
+v42 把 `dynamic_providers` / `dynamic_provider_models` 重命名为 `providers` / `provider_models`，并为 `providers` 新增四列：
+
+- `origin` —— `builtin` | `preset` | `custom`。builtin 行是七个密封 Adapter 种子（OpenCode Go、Zen Free、Command Code GOAT、MiniMax CN、Kimi CN、Ollama Cloud、Custom API）的展示镜像；CPA 是静态外部接入，**不**进表。preset 行跟随 preset 派生的 dynamic 供应商，custom 行跟随手工创建的 dynamic 供应商。
+- `adapter_kind` —— builtin 行镜像密封 `ProviderAdapterKind`；每条 dynamic 行的值都是 `configurable_http`。
+- `offering` —— `plan` | `api`。builtin 行从 `ocg_domain::provider::builtin_offering(provider_id)` 取；dynamic 行通过 `ocg_domain::provider::preset_offering(preset_id)` 从 `preset_id` 推导（仅 custom 的行默认为 `api`）。
+- `endpoint_per_account` —— builtin 行除 Custom API（值为 `1`）外都为 `0`；dynamic 行一律 `0`。
+
+v41 的 `provider_model_protocol_preferences` 表被重建，去掉了它原本的 `provider_id` CHECK（现在 `origin` 可查，row 可以属于 builtin 或 dynamic id）；`protocol ∈ ('chat_completions', 'messages')` 的 CHECK 保留。该 CHECK 是 v41 schema 中唯一引用 origin 概念的 provider_id 约束，因此不需要改其他表。
+
+v42 **不**改 v35 的 Provider 单一身份契约：builtin 适配器路由、CPA 接入、Custom API 与 dynamic Configurable HTTP 绑定行为都保持原样。dynamic 读路径都加 `origin IN ('preset', 'custom')`，使 builtin 种子不会进入路由。V5 节点迁移负载仍只携带 dynamic 定义；builtin 行从注册表推导，导入时从 `preset_id` 推导 `origin` / `offering`，以保持跨版本兼容。
+
+在非空 v41 库做 v42 重写前，进程会写入一份唯一、不覆盖的同目录快照：
+
+```text
+data.sqlite.pre-v42.<timestamp>.bak
+data.sqlite.pre-v42.<timestamp>.bak.sha256
+```
+
+快照是独立的 v41 SQLite 文件（`VACUUM INTO`，两侧都做 `quick_check`）；sidecar 第一个字段是 `.bak` 的小写 SHA-256。全新空目录直接创建到当前 schema，不写这份副本。恢复前在数据目录内校验 sidecar：
+
+```bash
+sha256sum -c data.sqlite.pre-v42.<timestamp>.bak.sha256      # Linux
+shasum -a 256 -c data.sqlite.pre-v42.<timestamp>.bak.sha256  # macOS
+```
+
+降级走既有的整目录恢复，没有向下迁移路径。
 
 ## Schema v41 — 模型协议选择
 
-v41 为密封的 MiniMax CN 与 Kimi CN 范围添加 provider_model_protocol_preferences，独立保存 Chat/Messages 选择，不与按协议启停覆盖混用。迁移只新增表，不改变既有路由、Key 或账号日期。协议选择和覆盖在同一事务写入，恢复静态基线时清除选择。V5 迁移合约可携带可选 preferences 集合，未携带该字段的旧包仍可导入。回滚需恢复升级前的整个数据目录。
+v41 为密封的 MiniMax CN 与 Kimi CN 范围添加 provider_model_protocol_preferences，独立保存 Chat/Messages 选择，不与按协议启停覆盖混用。迁移只新增表，不改变既有路由、Key 或账号日期。协议选择和覆盖在同一事务写入，恢复静态基线时清除选择。V5 迁移合约可携带可选 preferences 集合，未携带该字段的旧包仍可导入。回滚需恢复升级前的整个数据目录。（v42 重写会去掉该表上 `provider_id` 的 CHECK，`protocol` 的 CHECK 保留。）
 
 ## Schema v40 — 模型路由覆盖
 
-Schema v40 为 `dynamic_provider_models` 增加可空的 `upstream_override` JSON，保存模型显式协议与地址。空值继承原供应商默认配置，不改写账号凭据或现有路由。供应商替换与节点导入原子保存完整模型列表。V5 节点备份携带可选 `upstreamOverride`；没有该字段的旧备份继续继承默认值。旧读取器会拒绝未知字段，不会静默丢弃模型路由设置。降级应恢复升级前的完整数据目录备份。
+Schema v40 为 `provider_models` 增加可空的 `upstream_override` JSON，保存模型显式协议与地址。空值继承原供应商默认配置，不改写账号凭据或现有路由。供应商替换与节点导入原子保存完整模型列表。V5 节点备份携带可选 `upstreamOverride`；没有该字段的旧备份继续继承默认值。旧读取器会拒绝未知字段，不会静默丢弃模型路由设置。降级应恢复升级前的完整数据目录备份。（v42 的重命名把表名改为 `provider_models`，列与语义不变。）
 
 ## Schema v31 — 按模型/按协议覆盖
 
@@ -53,7 +82,7 @@ v32 用 `endpoint_url` 与单值 `upstream_protocol` 替换 `account_custom_conf
 
 ## Schema v35 — Provider 单一身份
 
-v35 去掉 offering 维度。Provider 与 Plan 是同一产品身份，只按 `provider_id` 识别。已知 v34 对映射为 `opencode/go`、`opencode-zen-free/anonymous-free`、`command-code/goat`、`minimax/cn`、`kimi/cn`、`custom/api` 与 `cpa/local`。未知对与复合键冲突在任何写入前 fail closed。重建保留账号、密文字节、日志、定价/目录行、合约、Custom 配置/能力、设置与 access keys。同一 schema 版本还把类型化用户定义供应商存在 `dynamic_providers` 与 `dynamic_provider_models`。节点备份导出只含 `providerId` 的 payload V4，并带一份可选/默认空的用户定义供应商定义集合。payload V1–V3 会被明确的不支持版本错误拒绝。
+v35 去掉 offering 维度。Provider 与 Plan 是同一产品身份，只按 `provider_id` 识别。已知 v34 对映射为 `opencode/go`、`opencode-zen-free/anonymous-free`、`command-code/goat`、`minimax/cn`、`kimi/cn`、`custom/api` 与 `cpa/local`。未知对与复合键冲突在任何写入前 fail closed。重建保留账号、密文字节、日志、定价/目录行、合约、Custom 配置/能力、设置与 access keys。同一 schema 版本还把类型化用户定义供应商存在 `dynamic_providers` 与 `dynamic_provider_models`（两者都在 v42 中改名为 `providers` / `provider_models`）。节点备份导出只含 `providerId` 的 payload V4，并带一份可选/默认空的用户定义供应商定义集合。payload V1–V3 会被明确的不支持版本错误拒绝。
 
 在非空 v34 库做破坏性 v35 重建之前，进程会写入一份唯一、不覆盖的同目录快照：
 

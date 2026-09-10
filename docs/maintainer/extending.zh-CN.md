@@ -11,10 +11,13 @@
 1. 在 `ocg-domain`（`ids.rs`、`provider.rs`）加入身份与目录事实，穷尽扩展 `ProviderAdapterKind`，并保持每个静态 Provider 的合约范围稳定。Provider 与 Plan 是同一个 `provider_id` 身份。Custom 保持 `ConfigurableHttp`。
 2. 在 `ocg-domain::protocol` 加所需协议行，在 `ocg-gateway::alias` 加 Alias mapping。请求路径使用已保存的合约。
 3. 在 `ocg-core` 实现只返回 `AttemptSpec` 的 `resolve_route`。适配器不能持有 DB、`CoreState` 或原始 reqwest client。
-4. 控制面与路由语义未完成前保持 fail closed，完成后测试 domain、gateway 与 core 边界。
+4. 在 schema v42 的 builtin 种子中登记该密封适配器，使统一 `providers` 表以 `builtin` 行的形式在 V3 Provider 目录中暴露。行的 `endpoint_url` / `upstream_protocol` / `auth_kind` / `offering` / `endpoint_per_account` 列是密封注册表的展示镜像——流量与路由仍然只走密封适配器代码常量，绝不读取已种子化的行。同时把新 id 加入 `ocg-domain::provider` 的 `builtin_offering` 映射（付费家族为 `plan`，免费或账号所有为 `api`）。CPA 是静态外部接入，**不**进种子表：不要在这里登记。
+5. 控制面与路由语义未完成前保持 fail closed，完成后测试 domain、gateway 与 core 边界。
 
 Provider 注册表始终静态、密封。
 每个静态 Provider 在自己的单一 `provider_id` 身份下拥有目录、证据与覆盖状态。
+
+新增 **preset**（`resources/provider-presets.json` 中的用户定义供应商模板）只需在 JSON 中加入条目；若该 preset 声明 `plan` offering，还需在 `ocg-domain::provider` 的 `PRESET_OFFERINGS` 映射中加入一条，使 `preset_offering(preset_id)` 返回 `"plan"`。其他 preset 保持默认 `"api"`。
 
 ## 2. 旧应用连接器：已退役
 

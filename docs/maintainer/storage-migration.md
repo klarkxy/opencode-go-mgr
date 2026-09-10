@@ -33,15 +33,44 @@ Downgrades are not supported: never point an older binary at a migrated database
 
 ## Schema v27 and the pre-v3 snapshot
 
-`CURRENT_SCHEMA_VERSION = 41` (`crates/ocg-core/src/db.rs`). Opening a historical database first migrates canonically to v26, then the v27 rewrite copies the primary Key and every `sub_gateway_keys` row into one `access_keys` table (live primary id `00000000-0000-0000-0000-000000000001`), drops `sub_gateway_keys`, and drops the five legacy `accounts.usage_sync_*` columns (usage-sync metadata lives in `provider_usage_sync_state`). v33 adds the exact Custom upstream model identity; v34 adds the singleton CPA configuration table without importing or exporting CPA state. v35 collapses Provider/Plan identity to `provider_id` only: it preflights every known v34 provider/offering pair, refuses unknown pairs and lossy composite-key collisions before mutation, then rebuilds affected tables so offering columns are absent. v36 additively created `ollama_cloud_usage_state` for the unreleased Cookie-usage scrape. v37 drops that table without touching account Keys or logs, and creates `ollama_cloud_billing`. Account `key_cipher` / `password_cipher` bytes are validated with the Host cipher and never re-encrypted.
+`CURRENT_SCHEMA_VERSION = 42` (`crates/ocg-core/src/db.rs`). Opening a historical database first migrates canonically to v26, then the v27 rewrite copies the primary Key and every `sub_gateway_keys` row into one `access_keys` table (live primary id `00000000-0000-0000-0000-000000000001`), drops `sub_gateway_keys`, and drops the five legacy `accounts.usage_sync_*` columns (usage-sync metadata lives in `provider_usage_sync_state`). v33 adds the exact Custom upstream model identity; v34 adds the singleton CPA configuration table without importing or exporting CPA state. v35 collapses Provider/Plan identity to `provider_id` only: it preflights every known v34 provider/offering pair, refuses unknown pairs and lossy composite-key collisions before mutation, then rebuilds affected tables so offering columns are absent. v36 additively created `ollama_cloud_usage_state` for the unreleased Cookie-usage scrape. v37 drops that table without touching account Keys or logs, and creates `ollama_cloud_billing`. v42 unifies the typed user-defined Provider table with a sealed-Adapter seed catalog by renaming `dynamic_providers` / `dynamic_provider_models` to `providers` / `provider_models`, adding `origin` (`builtin` | `preset` | `custom`), `adapter_kind`, `offering` (`plan` | `api`), and `endpoint_per_account` columns, seeding the seven sealed builtin adapters (OpenCode Go, Zen Free, Command Code GOAT, MiniMax CN, Kimi CN, Ollama Cloud, Custom API — but not CPA, the static external integration) as `builtin` rows whose attribute columns are display mirrors, and filtering dynamic read paths on `origin`. The v41 `provider_model_protocol_preferences` `provider_id` CHECK is dropped (the protocol CHECK on `(chat_completions | messages)` is kept). Account `key_cipher` / `password_cipher` bytes are validated with the Host cipher and never re-encrypted.
+
+## Schema v42 — unified provider table
+
+v42 replaces `dynamic_providers` and `dynamic_provider_models` with `providers` and `provider_models`, and adds four new columns to `providers`:
+
+- `origin` — `builtin` | `preset` | `custom`. Builtin rows are display mirrors of the seven sealed Adapter seeds (OpenCode Go, Zen Free, Command Code GOAT, MiniMax CN, Kimi CN, Ollama Cloud, Custom API); CPA is the static external integration and is **not** seeded. Preset rows track preset-derived dynamic Providers; custom rows track manually authored dynamic Providers.
+- `adapter_kind` — mirrors the sealed `ProviderAdapterKind` for builtin rows, `configurable_http` for every dynamic row.
+- `offering` — `plan` | `api`. Builtin rows are seeded from `ocg_domain::provider::builtin_offering(provider_id)`; dynamic rows are derived from `preset_id` via `ocg_domain::provider::preset_offering(preset_id)` (custom-only rows default to `api`).
+- `endpoint_per_account` — `0` for builtin rows except Custom API (which is `1`); always `0` for dynamic rows.
+
+The v41 `provider_model_protocol_preferences` table is rebuilt without its `provider_id` CHECK now that `origin` is queryable; the `protocol ∈ ('chat_completions', 'messages')` CHECK is kept. The CHECK on `provider_id` was the only provider-id constraint that referenced origin, so no other table needed changes.
+
+v42 does **not** change the v35 Provider single-identity contract: builtin adapter routing, CPA integration, Custom API, and dynamic Configurable HTTP bindings all behave as before. Dynamic read paths add `origin IN ('preset', 'custom')` so builtin seeds never feed routing. V5 transfer payloads still carry dynamic definitions only; builtin rows are derived from the registry, and the import derives `origin` / `offering` from `preset_id` to keep cross-version compatibility.
+
+Before any v42 rewrite on a non-empty v41 database, the process writes a unique never-overwritten sibling snapshot:
+
+```text
+data.sqlite.pre-v42.<timestamp>.bak
+data.sqlite.pre-v42.<timestamp>.bak.sha256
+```
+
+The snapshot is a standalone v41 SQLite file (`VACUUM INTO`, `quick_check` on both sides); the sidecar's first field is the lowercase SHA-256 of the `.bak`. A brand-new empty directory creates the current schema directly and does not write this copy. Verify the sidecar from the data directory before any restore:
+
+```bash
+sha256sum -c data.sqlite.pre-v42.<timestamp>.bak.sha256      # Linux
+shasum -a 256 -c data.sqlite.pre-v42.<timestamp>.bak.sha256  # macOS
+```
+
+Downgrade is the existing whole-directory restore; there is no down-migration path.
 
 ## Schema v41 — selected model protocol
 
-v41 adds provider_model_protocol_preferences for the sealed MiniMax CN and Kimi CN scopes. It stores the chosen Chat/Messages protocol independently of per-protocol enable overrides. Migration is additive and does not change existing routes, Keys or account dates. Preference and override writes share one transaction. Static-baseline reset clears the choice. V5 transfer contracts carry an optional preferences collection; older packages without it remain importable. Roll back by restoring the whole pre-upgrade data directory.
+v41 adds provider_model_protocol_preferences for the sealed MiniMax CN and Kimi CN scopes. It stores the chosen Chat/Messages protocol independently of per-protocol enable overrides. Migration is additive and does not change existing routes, Keys or account dates. Preference and override writes share one transaction. Static-baseline reset clears the choice. V5 transfer contracts carry an optional preferences collection; older packages without it remain importable. Roll back by restoring the whole pre-upgrade data directory. (The v42 rebuild drops the table's `provider_id` CHECK so rows may also belong to builtin or dynamic ids; the `protocol` CHECK is preserved.)
 
 ## Schema v40 — model route overrides
 
-Schema v40 adds nullable `dynamic_provider_models.upstream_override` JSON containing an explicit model protocol and endpoint. Null inherits the unchanged Provider defaults; no account credentials or existing routes are rewritten. Provider replacement and node import persist the full model list atomically. V5 node packages carry the optional `upstreamOverride`; older packages without it retain inheritance. Older readers reject the unknown field rather than silently dropping model routing settings. Downgrade by restoring the pre-upgrade data-directory backup.
+Schema v40 adds nullable `provider_models.upstream_override` JSON containing an explicit model protocol and endpoint. Null inherits the unchanged Provider defaults; no account credentials or existing routes are rewritten. Provider replacement and node import persist the full model list atomically. V5 node packages carry the optional `upstreamOverride`; older packages without it retain inheritance. Older readers reject the unknown field rather than silently dropping model routing settings. Downgrade by restoring the pre-upgrade data-directory backup. (The v42 rename above also renames the table to `provider_models`; the column and its semantics are unchanged.)
 
 ## Schema v31 — per-model/per-protocol overrides
 
@@ -53,7 +82,7 @@ v32 replaces `account_custom_configs.base_url`, JSON `upstream_protocols`, and `
 
 ## Schema v35 — Provider single identity
 
-v35 removes the offering dimension. Provider and Plan are one product identity keyed by `provider_id`. Known v34 pairs map as `opencode/go`, `opencode-zen-free/anonymous-free`, `command-code/goat`, `minimax/cn`, `kimi/cn`, `custom/api`, and `cpa/local`. Unknown pairs and composite-key collisions fail closed before any write. The rebuild preserves accounts, ciphertext bytes, logs, pricing/catalog rows, contracts, Custom configs/capabilities, settings, and access keys. The same schema version also stores typed user-defined Providers in `dynamic_providers` and `dynamic_provider_models`. Node backups export payload V4 with `providerId` only, plus an optional/defaulted user-defined Provider definition collection. Payload V1–V3 are rejected with an explicit unsupported-version error.
+v35 removes the offering dimension. Provider and Plan are one product identity keyed by `provider_id`. Known v34 pairs map as `opencode/go`, `opencode-zen-free/anonymous-free`, `command-code/goat`, `minimax/cn`, `kimi/cn`, `custom/api`, and `cpa/local`. Unknown pairs and composite-key collisions fail closed before any write. The rebuild preserves accounts, ciphertext bytes, logs, pricing/catalog rows, contracts, Custom configs/capabilities, settings, and access keys. The same schema version also stores typed user-defined Providers in `dynamic_providers` and `dynamic_provider_models` (both renamed to `providers` / `provider_models` in v42). Node backups export payload V4 with `providerId` only, plus an optional/defaulted user-defined Provider definition collection. Payload V1–V3 are rejected with an explicit unsupported-version error.
 
 Before any destructive v35 rebuild on a non-empty v34 database, the process writes a unique never-overwritten sibling snapshot:
 
