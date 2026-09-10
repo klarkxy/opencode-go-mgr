@@ -864,6 +864,18 @@ fn rejects_structurally_valid_but_empty_catalog() {
 }
 
 #[test]
+fn official_parser_accepts_current_limit_and_pricing_header_variants() {
+    let fixture = include_str!("../../tests/fixtures/opencode-go.html")
+        .replace("5 hour limit", "5-hour limit")
+        .replace("<th>Usage</th>", "<th>Monthly limit</th>");
+    let snapshot = parse_official_html(&fixture).unwrap();
+    assert_eq!(snapshot.limits.window_5h, 12.0);
+    assert_eq!(snapshot.limits.window_week, 30.0);
+    assert_eq!(snapshot.limits.window_month, 60.0);
+    assert_eq!(snapshot.models.len(), 25);
+}
+
+#[test]
 fn parsed_limit_and_price_changes_drive_dynamic_multiplier() {
     let fixture = include_str!("../../tests/fixtures/opencode-go.html")
         .replace(
