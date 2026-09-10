@@ -96,7 +96,10 @@
         <p v-if="fixedSeeded" class="fixed-models-summary">
           {{ t("默认模型：{models}", { models: fixedSeededModels.join(", ") }) }}
         </p>
-        <n-form-item v-if="!isEdit && (!fixedPreset || settingsOpen)" :label="t('第一个账号名称')">
+        <p v-if="!isEdit && props.context !== 'account' && dynamicAuthRequiresKey(draft.auth_kind)" class="field-hint full-width-field">
+          {{ t("保存供应商后，请到账号页添加 Key。") }}
+        </p>
+        <n-form-item v-if="!isEdit && props.context === 'account' && (!fixedPreset || settingsOpen)" :label="t('第一个账号名称')">
           <n-input
             v-model:value="draft.account_name"
             :input-props="{ 'aria-label': t('第一个账号名称') }"
@@ -119,7 +122,7 @@
             {{ t("此 Key 仅临时用于获取模型和测试模型，保存不会更新它；更换已保存的 Key 请到账号页。") }}
           </p>
         </n-form-item>
-        <n-form-item v-if="!isEdit && (!fixedPreset || settingsOpen)" :label="t('备注')" class="full-width-field">
+        <n-form-item v-if="!isEdit && props.context === 'account' && (!fixedPreset || settingsOpen)" :label="t('备注')" class="full-width-field">
           <n-input
             v-model:value="draft.notes"
             type="textarea"
@@ -135,7 +138,7 @@
                 size="small"
                 secondary
                 :loading="discovering"
-                :disabled="busy || discoveryUnavailable"
+                :disabled="busy || discoveryUnavailable || probeKeyMissing"
                 @click="discover"
               >
                 {{ t("获取模型") }}
@@ -147,6 +150,9 @@
             <p class="field-hint">{{ t("对外模型名不区分大小写且必须唯一；上游模型 ID 可复用。") }}</p>
             <p class="field-hint">
               {{ t("模型默认跟随供应商的协议与地址；仅当某个模型需要不同上游时才覆盖，鉴权始终使用供应商的 Key。") }}
+            </p>
+            <p v-if="probeKeyMissing" class="field-hint">
+              {{ t("获取模型和测试模型需要 Key；请保存后到账号页添加。") }}
             </p>
             <p v-if="discoveryUnavailable" class="field-hint">
               {{ t("此预设未配置模型发现，请手动填写准确的模型 ID。") }}
@@ -257,7 +263,7 @@
           @positive-click="runTest"
         >
           <template #trigger>
-            <n-button attr-type="button" secondary :loading="testing" :disabled="busy">
+            <n-button attr-type="button" secondary :loading="testing" :disabled="busy || probeKeyMissing">
               {{ t("测试模型") }}
             </n-button>
           </template>
@@ -459,8 +465,17 @@ const testTargetOptions = computed(() => testTargets.value.map((target, index) =
   value: index,
   label: `${target.public_model} → ${target.upstream_model}`,
 })));
-const showKeyField = computed(() => (
-  dynamicAuthRequiresKey(draft.value.auth_kind) || (isEdit.value && props.provider?.auth_kind === "none")
+const showKeyField = computed(() => {
+  if (!isEdit.value) {
+    return props.context === "account" && dynamicAuthRequiresKey(draft.value.auth_kind);
+  }
+  return dynamicAuthRequiresKey(draft.value.auth_kind) || props.provider?.auth_kind === "none";
+});
+const probeKeyMissing = computed(() => (
+  !isEdit.value
+  && props.context !== "account"
+  && dynamicAuthRequiresKey(draft.value.auth_kind)
+  && !draft.value.key.trim()
 ));
 // Update bodies only carry a Key when a none-auth Provider gains keyed auth;
 // otherwise stored Keys belong to Accounts and this field only feeds
@@ -621,7 +636,7 @@ function importDiscovered(): void {
 }
 
 async function discover(): Promise<void> {
-  if (busy.value || discoveryUnavailable.value) return;
+  if (busy.value || discoveryUnavailable.value || probeKeyMissing.value) return;
   discoveryError.value = "";
   discoveryInfo.value = "";
   discovering.value = true;
@@ -649,7 +664,7 @@ async function discover(): Promise<void> {
 }
 
 async function runTest(): Promise<void> {
-  if (busy.value) return;
+  if (busy.value || probeKeyMissing.value) return;
   const mapping = testTarget.value;
   if (!mapping) {
     formError.value = t("请至少添加一个完整模型映射");
@@ -710,6 +725,7 @@ async function save(): Promise<void> {
   const error = validateProviderDefinitionDraft(draft.value, {
     mode: isEdit.value ? "edit" : "create",
     previousAuthKind: props.provider?.auth_kind ?? "",
+    requireKey: !isEdit.value && props.context === "account",
   });
   if (error) {
     formError.value = t(DYNAMIC_PROVIDER_DRAFT_ERROR_KEYS[error] as MessageKey);

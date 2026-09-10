@@ -3,6 +3,7 @@ import test from "node:test";
 import type { ProviderCatalogEntry } from "../api/providers.ts";
 import {
   MANUAL_PRESET_QUERY_VALUE,
+  catalogEntriesWithAccounts,
   catalogEntryFamily,
   filterCatalogEntries,
   groupCatalogEntriesByOffering,
@@ -55,6 +56,25 @@ test("catalog entries group by offering and preserve catalog order within a grou
   const groups = groupCatalogEntriesByOffering(entries);
   assert.deepEqual(groups.plan.map((entry) => entry.provider_id), ["opencode", "minimax", "acme"]);
   assert.deepEqual(groups.api.map((entry) => entry.provider_id), ["ollama", "custom"]);
+});
+
+test("rail lists only providers that already have an account, builtin and preset alike", () => {
+  const entries = [
+    catalogEntry("opencode", { display_name: "OpenCode Go", offering: "plan" }),
+    catalogEntry("kimi", { display_name: "Kimi Code CN", offering: "plan" }),
+    catalogEntry("tencent", { origin: "preset", display_name: "Tencent Token Plan", offering: "plan" }),
+    catalogEntry("lab", { origin: "custom", display_name: "Lab HTTP" }),
+  ];
+  assert.deepEqual(
+    catalogEntriesWithAccounts(entries, ["opencode"]).map((entry) => entry.provider_id),
+    ["opencode"],
+  );
+  assert.deepEqual(
+    catalogEntriesWithAccounts(entries, ["OPENCODE", "tencent"]).map((entry) => entry.provider_id),
+    ["opencode", "tencent"],
+  );
+  assert.deepEqual(catalogEntriesWithAccounts(entries, ["lab"]).map((entry) => entry.provider_id), ["lab"]);
+  assert.deepEqual(catalogEntriesWithAccounts(entries, []), []);
 });
 
 test("rail filtering matches display name and provider id case-insensitively", () => {

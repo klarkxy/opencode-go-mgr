@@ -24,11 +24,6 @@
       </n-button>
     </n-alert>
 
-    <n-empty
-      v-else-if="!loading && catalogEntries.length === 0"
-      :description="t('暂无供应商范围')"
-    />
-
     <div v-else class="providers-layout">
       <aside class="providers-rail">
         <div class="providers-rail-search">
@@ -52,6 +47,9 @@
           </section>
           <p v-if="railFilteredOut" class="providers-rail-empty">
             {{ t("无匹配供应商") }}
+          </p>
+          <p v-else-if="railPanes.length === 0" class="providers-rail-empty">
+            {{ t("暂无已接入的供应商") }}
           </p>
         </div>
         <div class="providers-rail-footer">
@@ -158,6 +156,17 @@
               </n-popconfirm>
             </n-space>
           </div>
+
+          <n-alert
+            v-if="selectedHasNoAccount"
+            type="info"
+            class="providers-definition-error"
+            :title="t('此供应商还没有账号。请到账号页添加 Key。')"
+          >
+            <n-button size="small" secondary @click="openAccounts">
+              {{ t("打开账号页") }}
+            </n-button>
+          </n-alert>
 
           <n-alert
             v-if="definitionError"
@@ -307,6 +316,22 @@
             </n-tab-pane>
           </n-tabs>
         </section>
+
+        <section v-else class="providers-section" :aria-label="t('暂无已接入的供应商')">
+          <n-empty :description="t('暂无已接入的供应商')">
+            <template #extra>
+              <p class="providers-note">{{ t("供应商在添加账号后才会出现在这里。") }}</p>
+              <n-space>
+                <n-button type="primary" size="small" @click="openAccounts">
+                  {{ t("打开账号页") }}
+                </n-button>
+                <n-button secondary size="small" :disabled="inlineFormBusy" @click="openAddFlow">
+                  {{ t("添加供应商") }}
+                </n-button>
+              </n-space>
+            </template>
+          </n-empty>
+        </section>
       </div>
     </div>
 
@@ -340,6 +365,7 @@ import {
 import type { MenuOption, SelectOption } from "naive-ui";
 import { DashboardRequestError } from "../api/dashboard";
 import { isRevisionConflict, providerApi } from "../api/providers.ts";
+import { useAccountsStore } from "../stores/accounts.ts";
 import { useProvidersStore } from "../stores/providers.ts";
 import type {
   ProviderDefinitionView,
@@ -376,6 +402,7 @@ import {
   protocolDisplayName,
 } from "../domain/provider-contracts.ts";
 import {
+  catalogEntriesWithAccounts,
   catalogEntryFamily,
   filterCatalogEntries,
   groupCatalogEntriesByOffering,
@@ -397,6 +424,7 @@ import {
 } from "../domain/provider-contracts.ts";
 
 const message = useMessage();
+const accountsStore = useAccountsStore();
 const providersStore = useProvidersStore();
 const contracts = ref<ProviderContractsResponse | null>(null);
 const catalog = ref<ProviderCatalogEntry[] | null>(null);
@@ -433,7 +461,16 @@ const latestOverrideSequence = new Map<string, number>();
 const RAIL_BRAND_SIZE = 18;
 const ADD_SELECT_VALUE = "__add__";
 
-const catalogEntries = computed(() => catalog.value ?? []);
+const allCatalogEntries = computed(() => catalog.value ?? []);
+const accountProviderIds = computed(() => (
+  accountsStore.accounts.map((account) => account.provider_id)
+));
+function railCatalogEntries(): ProviderCatalogEntry[] {
+  const all = allCatalogEntries.value;
+  if (!accountsStore.loaded) return all;
+  return catalogEntriesWithAccounts(all, accountProviderIds.value);
+}
+const catalogEntries = computed(() => railCatalogEntries());
 const scopes = computed(() => (
   contracts.value
     ? flattenProviderScopes(contracts.value, catalog.value)
@@ -443,6 +480,14 @@ const scopes = computed(() => (
 const selectedEntry = computed(() => (
   catalogEntries.value.find((entry) => entry.provider_id === selectedProviderId.value) ?? null
 ));
+const selectedHasNoAccount = computed(() => {
+  const entry = selectedEntry.value;
+  if (!accountsStore.loaded || !entry) return false;
+  const id = entry.provider_id.trim().toLocaleLowerCase();
+  return !accountProviderIds.value.some((providerId) => (
+    providerId.trim().toLocaleLowerCase() === id
+  ));
+});
 const selectedEntryFamily = computed(() => (
   selectedEntry.value
     ? catalogEntryFamily(selectedEntry.value)
@@ -497,8 +542,9 @@ const railPanes = computed<Array<{ id: "plan" | "api"; label: "Plan" | "API"; op
   );
   const panes: Array<{ id: "plan" | "api"; label: "Plan" | "API"; options: MenuOption[] }> = [];
   const planOptions = toOptions(groups.plan);
+  const apiOptions = toOptions(groups.api);
   if (planOptions.length) panes.push({ id: "plan", label: "Plan", options: planOptions });
-  panes.push({ id: "api", label: "API", options: toOptions(groups.api) });
+  if (apiOptions.length) panes.push({ id: "api", label: "API", options: apiOptions });
   return panes;
 });
 const railFilteredOut = computed(() => (
@@ -576,12 +622,13 @@ function writeUrl() {
 function applyFromQuery(fellBackNotice = false, preferProviderId?: string) {
   const query = readProviderPageQuery(window.location.search);
   addStage.value = providerAddStageFromQuery(query.add, query.preset);
-  const entries = catalogEntries.value;
+  const wanted = preferProviderId ?? query.provider ?? selectedProviderId.value;
+  const entries = railCatalogEntries();
   if (entries.length === 0) {
     selectedProviderId.value = null;
+    writeUrl();
     return;
   }
-  const wanted = preferProviderId ?? query.provider ?? selectedProviderId.value;
   const entry = entries.find((item) => item.provider_id === wanted) ?? entries[0]!;
   if (fellBackNotice && wanted && entry.provider_id !== wanted) {
     actionLive.value = t("已选择过期范围，已回到第一个供应商");
@@ -680,6 +727,7 @@ async function loadAll(options: { retain?: boolean; preferProviderId?: string } 
     const [contractsResult, catalogResult] = await Promise.allSettled([
       providersStore.loadContracts(),
       providersStore.loadCatalog(),
+      accountsStore.loadPresented(),
     ]);
     if (catalogResult.status === "fulfilled") {
       catalog.value = catalogResult.value;
@@ -713,7 +761,15 @@ async function onDynamicSaved(providerId: string): Promise<void> {
   next.delete(providerId);
   definitions.value = next;
   await loadAll({ retain: true, preferProviderId: providerId });
-  message.success(created ? t("供应商已创建") : t("供应商已更新"));
+  const createdId = providerId.trim().toLocaleLowerCase();
+  const createdHasAccount = accountsStore.loaded && accountProviderIds.value.some((id) => (
+    id.trim().toLocaleLowerCase() === createdId
+  ));
+  if (created && !createdHasAccount) {
+    message.success(t("供应商已创建。请到账号页添加 Key。"));
+  } else {
+    message.success(created ? t("供应商已创建") : t("供应商已更新"));
+  }
 }
 
 async function onDynamicConflict(): Promise<void> {
@@ -1011,9 +1067,14 @@ onUnmounted(() => {
 
 <style scoped>
 .providers-page {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
+  min-height: 0;
+  height: 100%;
   max-width: 1440px;
   margin: 0 auto;
+  overflow: hidden;
 }
 .providers-header {
   display: flex;
@@ -1033,15 +1094,18 @@ onUnmounted(() => {
   font-size: var(--ocg-font-sm);
 }
 .providers-state {
+  flex: 1 1 auto;
   min-height: 160px;
   display: grid;
   place-items: center;
 }
 .providers-layout {
   display: grid;
+  flex: 1 1 auto;
   grid-template-columns: 208px minmax(0, 1fr);
   gap: 16px;
   min-width: 0;
+  min-height: 0;
 }
 .providers-probe-summary {
   margin: 12px 0;
@@ -1063,7 +1127,8 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  max-height: calc(100vh - 140px);
+  min-height: 0;
+  height: 100%;
   padding: 8px 0;
   overflow: hidden;
   border: 1px solid var(--ocg-border);
@@ -1117,6 +1182,8 @@ onUnmounted(() => {
   grid-template-columns: minmax(0, 1fr);
   gap: 16px;
   min-width: 0;
+  min-height: 0;
+  overflow: auto;
   align-content: start;
 }
 .providers-tabs {
@@ -1183,11 +1250,19 @@ onUnmounted(() => {
 }
 
 @media (max-width: 720px) {
+  .providers-page {
+    height: auto;
+    overflow: visible;
+  }
   .providers-layout {
     grid-template-columns: minmax(0, 1fr);
+    flex: none;
   }
   .providers-rail {
     display: none;
+  }
+  .providers-main {
+    overflow: visible;
   }
   .providers-mobile-nav {
     display: block;

@@ -3,9 +3,10 @@ import { PROVIDER_FAMILIES, type ProviderFamily } from "./provider-families.ts";
 import { PROVIDER_PRESETS } from "./provider-presets.ts";
 
 /**
- * Presentation logic for the Providers page: the rail lists catalog entries
- * (built-in seeds plus every created dynamic Provider) grouped by offering,
- * and the add flow is a small browse → form state machine mirrored in the URL.
+ * Presentation logic for the Providers page: the rail lists connected catalog
+ * entries (those with at least one account) grouped by offering. Built-in
+ * and preset rows without an account stay off the rail the same way.
+ * The add flow is a small browse → form state machine mirrored in the URL.
  */
 
 const FAMILIES_BY_ID: ReadonlyMap<string, ProviderFamily> = new Map(
@@ -49,6 +50,22 @@ export function groupCatalogEntriesByOffering(
     plan: entries.filter((entry) => entry.offering === "plan"),
     api: entries.filter((entry) => entry.offering !== "plan"),
   };
+}
+
+/**
+ * Rail rows: every Provider that already has an account. Built-in seeds and
+ * saved preset/custom definitions are treated the same: no account, no row.
+ */
+export function catalogEntriesWithAccounts(
+  entries: readonly ProviderCatalogEntry[],
+  accountProviderIds: readonly string[],
+): ProviderCatalogEntry[] {
+  const connected = new Set(
+    accountProviderIds.map((id) => id.trim().toLocaleLowerCase()).filter(Boolean),
+  );
+  return entries.filter((entry) => (
+    connected.has(entry.provider_id.trim().toLocaleLowerCase())
+  ));
 }
 
 /** Case-insensitive rail filter over the display name and the provider id. */
