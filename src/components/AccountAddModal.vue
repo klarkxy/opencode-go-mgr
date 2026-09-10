@@ -15,6 +15,17 @@
 
     <div v-else class="account-add-layout">
       <div class="account-add-mobile">
+        <n-radio-group
+          :value="mode"
+          size="small"
+          type="button"
+          :disabled="interactionLocked"
+          :aria-label="t('账号来源')"
+          @update:value="(value: string) => setMode(value as ChooserMode)"
+        >
+          <n-radio-button value="connections">{{ t("已有连接") }}</n-radio-button>
+          <n-radio-button value="services">{{ t("添加新服务") }}</n-radio-button>
+        </n-radio-group>
         <n-select
           :value="selectedOptionId || null"
           :options="selectOptions"
@@ -31,6 +42,19 @@
         :aria-label="t('选择要添加的方案')"
         @keydown="onRailKeydown"
       >
+        <div class="account-add-mode">
+          <n-radio-group
+            :value="mode"
+            size="small"
+            type="button"
+            :disabled="interactionLocked"
+            :aria-label="t('账号来源')"
+            @update:value="(value: string) => setMode(value as ChooserMode)"
+          >
+            <n-radio-button value="connections">{{ t("已有连接") }}</n-radio-button>
+            <n-radio-button value="services">{{ t("添加新服务") }}</n-radio-button>
+          </n-radio-group>
+        </div>
         <div class="account-add-search">
           <n-input
             v-model:value="presetQuery"
@@ -57,8 +81,23 @@
               :aria-current="option.optionId === selectedOptionId ? 'true' : undefined"
               @click="selectOption(option.optionId)"
             >
-              <n-icon :component="iconFor(chooserOptionIconKey(option))" size="16" aria-hidden="true" />
+              <ProviderBrandMark
+                v-if="brandFamilyFor(optionIconKey(option))"
+                :family="brandFamilyFor(optionIconKey(option))!"
+                :size="18"
+              />
+              <n-icon
+                v-else
+                :component="iconFor(optionIconKey(option))"
+                size="16"
+                aria-hidden="true"
+              />
               <span class="account-add-item__label">{{ option.label }}</span>
+              <span
+                v-if="isFamilyOption(option) && option.presets.length > 1"
+                class="account-add-item__count"
+                aria-hidden="true"
+              >{{ option.presets.length }}</span>
             </button>
           </section>
           <p v-if="presetSearchMiss" class="account-add-empty" role="status">{{ t("无匹配选项") }}</p>
@@ -67,7 +106,17 @@
 
       <div v-if="selected && detail" class="account-add-detail">
         <header class="account-add-detail__header">
-          <n-icon :component="iconFor(detail.iconKey)" size="22" aria-hidden="true" />
+          <ProviderBrandMark
+            v-if="brandFamilyFor(detailIconKey)"
+            :family="brandFamilyFor(detailIconKey)!"
+            :size="22"
+          />
+          <n-icon
+            v-else
+            :component="iconFor(detailIconKey)"
+            size="22"
+            aria-hidden="true"
+          />
           <div class="account-add-detail__titles">
             <h2>{{ detail.title }}</h2>
             <n-tag
@@ -84,6 +133,28 @@
             </span>
           </div>
         </header>
+
+        <p v-if="detail.kind === 'family' || detail.kind === 'preset'" class="account-add-outcome">
+          {{ t("选择预设将创建一个新供应商，并同时添加它的第一个账号。") }}
+        </p>
+
+        <div
+          v-if="selectedFamilyOption && selectedFamilyOption.presets.length > 1"
+          class="variant-picker"
+        >
+          <n-select
+            :value="selectedVariantId || null"
+            :options="variantOptions"
+            size="small"
+            :disabled="interactionLocked"
+            :consistent-menu-width="false"
+            :aria-label="t('选择服务版本')"
+            @update:value="(value: string) => selectVariant(value)"
+          />
+          <p v-if="currentVariantHost" class="variant-picker__summary">
+            <span class="mono">{{ currentVariantHost }}</span>
+          </p>
+        </div>
 
         <template v-if="selectedPlanOption">
           <n-alert
@@ -136,11 +207,12 @@
         </template>
 
         <DynamicProviderModal
-          v-else-if="selectedPresetOption && show"
+          v-else-if="currentPreset && show"
+          :key="`dynamic:${currentPreset.id}`"
           embedded
           :show="true"
           :provider="null"
-          :initial-preset-id="selectedPresetOption.preset.id"
+          :initial-preset-id="currentPreset.id"
           preset-selection-locked
           context="account"
           @saved="(providerId) => emit('presetSaved', providerId)"
@@ -171,6 +243,8 @@ import {
   NIcon,
   NInput,
   NModal,
+  NRadioButton,
+  NRadioGroup,
   NSelect,
   NSpin,
   NTag,
@@ -188,6 +262,7 @@ import { useLocalizedModalCloseLabel } from "../utils/modal-close-label.ts";
 import { dashboardErrorDetail } from "../utils/errors.ts";
 import {
   buildChooserGroups,
+  chooserModeForOptionId,
   chooserOptionIconKey,
   chooserSelectOptions,
   chooserUniverse,
@@ -195,8 +270,14 @@ import {
   describeChooserSelection,
   isChooserOptionDisabled,
   isValidChooserOption,
+  resolveChooserSelection,
   visibleChooserOptions,
+  type ChooserMode,
+  type ChooserOption,
+  type PresetFamilyOption,
 } from "../domain/account-add-chooser.ts";
+import { PROVIDER_FAMILIES, familyOf, type ProviderFamily } from "../domain/provider-families.ts";
+import { PROVIDER_PRESETS, type ProviderPreset } from "../domain/provider-presets.ts";
 import { isDynamicCatalogEntry } from "../domain/dynamic-provider.ts";
 import { providerApi } from "../api/providers.ts";
 import type { AccountInput } from "../api/dashboard.ts";
@@ -206,6 +287,7 @@ import DynamicProviderModal from "./DynamicProviderModal.vue";
 import PlatformAccountFormModal, {
   type PlatformAccountFormPayload,
 } from "./PlatformAccountFormModal.vue";
+import ProviderBrandMark from "./ProviderBrandMark.vue";
 
 const props = defineProps<{
   show: boolean;
@@ -242,7 +324,10 @@ const emit = defineEmits<{
 useLocalizedModalCloseLabel(toRef(props, "show"), "account-add-modal");
 
 const selectedOptionId = ref<string>("");
+const selectedVariantId = ref<string>("");
 const presetQuery = ref("");
+/** Existing connections are the default; preset/platform browsing is explicit. */
+const mode = ref<ChooserMode>("connections");
 /**
  * provider_id → persisted preset_id for saved user-defined Providers, loaded
  * once per catalog revision so their preset offering can group them. Entries
@@ -299,30 +384,90 @@ watch(
 );
 
 const chooserGroups = computed(() => (
-  buildChooserGroups(props.catalog, dynamicPresetIds.value, presetQuery.value)
+  buildChooserGroups(props.catalog, dynamicPresetIds.value, presetQuery.value, mode.value)
 ));
-const universe = computed(() => chooserUniverse(props.catalog, dynamicPresetIds.value));
+const universe = computed(() => chooserUniverse(props.catalog, dynamicPresetIds.value, mode.value));
 const navOptions = computed(() => visibleChooserOptions(chooserGroups.value));
-const selectOptions = computed(() => chooserSelectOptions(chooserGroups.value, t("用户定义")));
+// The phone selector owns its filter, so it always lists the full option
+// universe of the active mode — never the hidden desktop search query.
+const selectOptions = computed(() => chooserSelectOptions(
+  buildChooserGroups(props.catalog, dynamicPresetIds.value, "", mode.value),
+  t("用户定义"),
+));
 const presetSearchMiss = computed(() => Boolean(presetQuery.value.trim()) && navOptions.value.length === 0);
 
 const selected = computed(() => (
   universe.value.find((option) => option.optionId === selectedOptionId.value) ?? null
 ));
-const detail = computed(() => (
-  selected.value ? describeChooserSelection(selected.value) : null
-));
 const selectedPlanOption = computed(() => (
   selected.value && "plan" in selected.value ? selected.value : null
 ));
-const selectedPresetOption = computed(() => (
-  selected.value && "preset" in selected.value ? selected.value : null
+const selectedFamilyOption = computed(() => (
+  selected.value && "family" in selected.value ? selected.value as PresetFamilyOption : null
 ));
 const selectedPlatformOption = computed(() => (
-  selected.value && !("plan" in selected.value) && !("preset" in selected.value)
+  selected.value
+    && !("plan" in selected.value)
+    && !("family" in selected.value)
+    && !("preset" in selected.value)
     ? selected.value
     : null
 ));
+/**
+ * Preset actually fed to the embedded dynamic-provider form. Family options
+ * track the variant explicitly (so a search-flattened pick can also resolve);
+ * single-variant families and platform options just pass through.
+ */
+const currentPreset = computed<ProviderPreset | null>(() => {
+  if (selectedFamilyOption.value) {
+    if (selectedVariantId.value) {
+      const match = selectedFamilyOption.value.presets.find((preset) => preset.id === selectedVariantId.value);
+      if (match) return match;
+    }
+    return selectedFamilyOption.value.presets[0] ?? null;
+  }
+  if (selected.value && "preset" in selected.value) {
+    return selected.value.preset;
+  }
+  return null;
+});
+const detail = computed(() => {
+  if (!selected.value) return null;
+  return describeChooserSelection(selected.value, currentPreset.value ?? undefined);
+});
+
+/**
+ * Brand provenance for a saved user-defined Provider comes from its persisted
+ * preset id (loaded with the catalog), never from its display name or URL;
+ * without provenance it keeps the generic key glyph.
+ */
+function optionIconKey(option: ChooserOption): string {
+  if ("plan" in option && option.source === "user-defined") {
+    const presetId = dynamicPresetIds.value.get(option.optionId);
+    const preset = presetId
+      ? PROVIDER_PRESETS.find((entry) => entry.id === presetId) ?? null
+      : null;
+    if (preset) return `family:${familyOf(preset).id}`;
+  }
+  return chooserOptionIconKey(option);
+}
+
+const detailIconKey = computed(() => (
+  selected.value ? optionIconKey(selected.value) : ""
+));
+
+const variantOptions = computed(() => (
+  (selectedFamilyOption.value?.presets ?? []).map((preset) => ({
+    value: preset.id,
+    label: preset.variant ?? preset.name,
+  }))
+));
+
+const currentVariantHost = computed(() => {
+  const preset = currentPreset.value;
+  if (!preset || !selectedFamilyOption.value) return "";
+  return variantHost(preset);
+});
 
 /**
  * Any in-flight create (parent account save, platform save, or embedded
@@ -333,16 +478,50 @@ const interactionLocked = computed(() => (
   props.createBusy || props.platformBusy || embeddedFormBusy.value
 ));
 
+function setMode(next: ChooserMode): void {
+  if (interactionLocked.value || next === mode.value) return;
+  mode.value = next;
+  selectedVariantId.value = "";
+}
+
 function selectOption(value: string): void {
   if (interactionLocked.value) return;
-  if (isValidChooserOption(universe.value, value)) {
-    selectedOptionId.value = value;
+  // The visible (possibly search-flattened) options resolve first so a
+  // flattened preset row maps to its parent family plus the exact variant;
+  // the family-shaped universe alone would reject it.
+  const resolved = resolveChooserSelection(navOptions.value, universe.value, value);
+  if (!resolved) return;
+  selectedOptionId.value = resolved.optionId;
+  if (resolved.variantId) {
+    selectedVariantId.value = resolved.variantId;
+    return;
   }
+  const target = universe.value.find((option) => option.optionId === resolved.optionId);
+  if (target && "family" in target) {
+    // Re-picking the family keeps the current variant while it still belongs.
+    if (!target.presets.some((preset) => preset.id === selectedVariantId.value)) {
+      selectedVariantId.value = target.presets[0]?.id ?? "";
+    }
+  } else {
+    selectedVariantId.value = "";
+  }
+}
+
+function selectVariant(presetId: string): void {
+  if (interactionLocked.value) return;
+  if (!selectedFamilyOption.value) return;
+  if (!selectedFamilyOption.value.presets.some((preset) => preset.id === presetId)) return;
+  selectedVariantId.value = presetId;
 }
 
 watch(selectedOptionId, () => {
   // A selection swap unmounts the previous embedded form; its in-flight flags
   // die with it, so the close guard must not outlive the form.
+  embeddedFormBusy.value = false;
+});
+watch(selectedVariantId, () => {
+  // Variant switching inside a family remounts the embedded form (the
+  // `key="dynamic:..."` on the embed above); its in-flight flags die with it.
   embeddedFormBusy.value = false;
 });
 
@@ -360,13 +539,22 @@ watch(
     // preset-id reload must not clear what the user is typing.
     if (justOpened) {
       presetQuery.value = "";
-      if (initialOptionId && isValidChooserOption(options, initialOptionId)) {
+      selectedVariantId.value = "";
+      // Existing connections are the default view; a deep link into a preset
+      // or platform option opens the new-service browsing mode directly.
+      const nextMode = initialOptionId ? chooserModeForOptionId(initialOptionId) : "connections";
+      mode.value = nextMode;
+      const nextOptions = chooserUniverse(props.catalog, dynamicPresetIds.value, nextMode);
+      if (initialOptionId && isValidChooserOption(nextOptions, initialOptionId)) {
         selectedOptionId.value = initialOptionId;
         return;
       }
+      selectedOptionId.value = defaultChooserOptionId(nextOptions);
+      return;
     }
     if (!isValidChooserOption(options, selectedOptionId.value)) {
       selectedOptionId.value = defaultChooserOptionId(options);
+      selectedVariantId.value = "";
     }
   },
   { immediate: true },
@@ -397,6 +585,10 @@ function onOuterUpdateShow(value: boolean): void {
   emit("update:show", false);
 }
 
+const FAMILY_BY_ID: ReadonlyMap<string, ProviderFamily> = new Map(
+  PROVIDER_FAMILIES.map((family) => [family.id, family]),
+);
+
 const ICONS: Record<string, Component> = {
   "opencode-go": CloudOutlined,
   "command-code-goat": ApiOutlined,
@@ -409,6 +601,25 @@ const ICONS: Record<string, Component> = {
 
 function iconFor(iconKey: string): Component {
   return ICONS[iconKey] ?? KeyOutlined;
+}
+
+function brandFamilyFor(iconKey: string): ProviderFamily | null {
+  if (!iconKey.startsWith("family:")) return null;
+  return FAMILY_BY_ID.get(iconKey.slice("family:".length)) ?? null;
+}
+
+function isFamilyOption(option: ChooserOption): option is PresetFamilyOption {
+  return "family" in option;
+}
+
+function variantHost(preset: ProviderPreset): string {
+  const raw = preset.endpointUrl || preset.endpointPlaceholder || "";
+  if (!raw) return "";
+  try {
+    return new URL(raw).host;
+  } catch {
+    return raw;
+  }
 }
 </script>
 
@@ -449,6 +660,29 @@ function iconFor(iconKey: string): Component {
   flex: none;
   padding: 8px 12px;
   background: var(--ocg-canvas);
+}
+
+.account-add-mode {
+  flex: none;
+  display: flex;
+  padding: 8px 12px 0;
+  background: var(--ocg-canvas);
+}
+
+.account-add-mode :deep(.n-radio-group) {
+  width: 100%;
+}
+
+.account-add-mode :deep(.n-radio-button) {
+  flex: 1;
+  text-align: center;
+}
+
+.account-add-outcome {
+  flex: none;
+  margin: 0;
+  color: var(--ocg-muted);
+  font-size: var(--ocg-font-xs);
 }
 
 /* One list scrolls; the Plan / API group labels stick to its top edge. */
@@ -512,6 +746,14 @@ function iconFor(iconKey: string): Component {
   white-space: nowrap;
 }
 
+.account-add-item__count {
+  margin-left: auto;
+  padding: 0 6px;
+  color: var(--ocg-muted);
+  font-size: var(--ocg-font-xs);
+  font-variant-numeric: tabular-nums;
+}
+
 .account-add-item:hover,
 .account-add-item:focus-visible {
   background: var(--ocg-primary-soft);
@@ -538,7 +780,7 @@ function iconFor(iconKey: string): Component {
   min-width: 0;
   min-height: 0;
   padding: 16px 20px;
-  overflow: hidden;
+  overflow: auto;
 }
 
 .account-add-detail__header {
@@ -592,6 +834,20 @@ function iconFor(iconKey: string): Component {
   gap: 8px;
 }
 
+.variant-picker {
+  display: grid;
+  flex: none;
+  gap: 6px;
+  max-width: 360px;
+}
+
+.variant-picker__summary {
+  margin: 0;
+  color: var(--ocg-muted);
+  font-size: var(--ocg-font-xs);
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 640px) {
   .account-add-layout {
     grid-template-columns: minmax(0, 1fr);
@@ -603,7 +859,8 @@ function iconFor(iconKey: string): Component {
   }
 
   .account-add-mobile {
-    display: block;
+    display: grid;
+    gap: 8px;
     padding: 12px 12px 0;
   }
 

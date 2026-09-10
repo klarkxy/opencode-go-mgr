@@ -6,6 +6,7 @@ import {
 } from "./account-plan-options.ts";
 import {
   buildPlatformKindOptions,
+  PLATFORM_KIND_OPTION_ID_PREFIX,
   type PlatformKindOption,
 } from "./platform-accounts.ts";
 import {
@@ -13,7 +14,9 @@ import {
   filterProviderPresets,
   groupProviderPresetsByOffering,
   type ProviderPreset,
+  type ProviderPresetOffering,
 } from "./provider-presets.ts";
+import { familyOf, groupPresetsByFamily, type ProviderFamily } from "./provider-families.ts";
 
 /**
  * Presentation logic for the Add Account chooser. Pure helpers only; the
@@ -31,9 +34,22 @@ export interface PresetChooserOption {
   optionId: string;
   preset: ProviderPreset;
   label: string;
+  /** Family option this preset row flattens back to when the search clears. */
+  familyOptionId: string;
 }
 
-export type ChooserOption = PlanOption | PresetChooserOption | PlatformKindOption;
+/**
+ * Family-grouped preset option. One per vendor family per Plan/API group;
+ * single-preset families still surface as one option (no picker rendered).
+ */
+export interface PresetFamilyOption {
+  optionId: string;
+  family: ProviderFamily;
+  presets: ProviderPreset[];
+  label: string;
+}
+
+export type ChooserOption = PlanOption | PresetFamilyOption | PresetChooserOption | PlatformKindOption;
 
 /** Exactly two user-visible groups, Plan above API. */
 export interface ChooserGroup {
@@ -42,65 +58,182 @@ export interface ChooserGroup {
   options: ChooserOption[];
 }
 
-export function toPresetChooserOption(preset: ProviderPreset): PresetChooserOption {
-  return { optionId: `preset:${preset.id}`, preset, label: preset.name };
+/**
+ * User-visible chooser mode. "connections" lists existing connections the
+ * user can add an account to (built-in families, saved user-defined
+ * Providers, and the explicit Custom API entry); "services" browses new
+ * services to create (vendor preset families plus platform kinds).
+ */
+export type ChooserMode = "connections" | "services";
+
+/**
+ * Mode an option id belongs to. Preset and platform options are always new
+ * services; plan-family options (built-in or saved user-defined Providers)
+ * are existing connections.
+ */
+export function chooserModeForOptionId(optionId: string): ChooserMode {
+  return optionId.startsWith("family:")
+    || optionId.startsWith("preset:")
+    || optionId.startsWith(PLATFORM_KIND_OPTION_ID_PREFIX)
+    ? "services"
+    : "connections";
 }
 
-export function chooserOptionKind(option: ChooserOption): "plan" | "preset" | "platform" {
+/**
+ * Family option ids carry the offering so the same vendor family can appear
+ * once in the Plan group and once in the API group without an id collision.
+ */
+export function presetFamilyOptionId(
+  family: ProviderFamily,
+  offering: ProviderPresetOffering,
+): string {
+  return `family:${offering}:${family.id}`;
+}
+
+export function toPresetChooserOption(
+  preset: ProviderPreset,
+  offering: ProviderPresetOffering,
+  family: ProviderFamily = familyOf(preset),
+): PresetChooserOption {
+  return {
+    optionId: `preset:${preset.id}`,
+    preset,
+    familyOptionId: presetFamilyOptionId(family, offering),
+    label: `${family.label} · ${preset.variant ?? preset.name}`,
+  };
+}
+
+function toPresetFamilyOption(
+  family: ProviderFamily,
+  presets: ProviderPreset[],
+  offering: ProviderPresetOffering,
+): PresetFamilyOption {
+  return {
+    optionId: presetFamilyOptionId(family, offering),
+    family,
+    presets,
+    label: family.label,
+  };
+}
+
+/** Plan options whose rail/detail icon is the vendor brand mark, not a generic glyph. */
+const PLAN_BRAND_FAMILY_ID: ReadonlyMap<string, string> = new Map([
+  ["kimi-cn", "moonshot"],
+  ["minimax-cn", "minimax"],
+  ["ollama-cloud", "ollama"],
+]);
+
+function planBrandIconKey(planId: string): string | null {
+  const familyId = PLAN_BRAND_FAMILY_ID.get(planId);
+  return familyId ? `family:${familyId}` : null;
+}
+
+export function chooserOptionKind(option: ChooserOption): "plan" | "family" | "preset" | "platform" {
   if ("plan" in option) return "plan";
+  if ("family" in option) return "family";
   if ("preset" in option) return "preset";
   return "platform";
 }
 
 /**
- * Visible groups for the rail: Custom API heads the API group, account-owned
- * user-defined Providers follow their persisted preset's offering via
- * `dynamicPresetIds`, API presets and platform kinds trail. The preset search
- * query filters every visible option, including plans and platform kinds.
+ * Visible groups for the rail in the given mode. "connections": saved
+ * connections only — built-in Plan families head the Plan group, Custom API
+ * heads the API group, and account-owned user-defined Providers follow their
+ * persisted preset's offering via `dynamicPresetIds`. "services": new-service
+ * browsing — vendor preset families grouped by offering, with platform kinds
+ * trailing the API group. The preset search query filters every visible
+ * option in the active mode, including plans and platform kinds. When the
+ * query is empty, presets in each offering group are collapsed into
+ * per-family options so the rail shows vendors instead of every variant;
+ * when the query is non-empty, presets flatten to variant-level rows so a
+ * matching endpoint host is reachable in one click. Preset matching is the
+ * single `filterProviderPresets` pass (family label, name, id, variant, and
+ * endpoint host) — never a second filter that could drop family/host hits.
  */
 export function buildChooserGroups(
   catalog: readonly ProviderCatalogEntry[] | null | undefined,
   dynamicPresetIds: ReadonlyMap<string, string | null> | null | undefined,
   query: string,
+  mode: ChooserMode,
 ): ChooserGroup[] {
   const split = splitPlanOptionsByOffering(catalog, dynamicPresetIds);
-  const presets = groupProviderPresetsByOffering(filterProviderPresets(PROVIDER_PRESETS, query));
   const normalized = query.trim().toLocaleLowerCase();
-  const matches = (option: ChooserOption) => option.label.toLocaleLowerCase().includes(normalized);
+  const matches = (label: string) => label.toLocaleLowerCase().includes(normalized);
+
+  if (mode === "connections") {
+    return [
+      {
+        id: "plan",
+        label: "Plan",
+        options: split.plan.filter((option) => matches(option.label)),
+      },
+      {
+        id: "api",
+        label: "API",
+        options: split.api.filter((option) => matches(option.label)),
+      },
+    ];
+  }
+
+  let planPresetOptions: ChooserOption[];
+  let apiPresetOptions: ChooserOption[];
+  if (normalized) {
+    const offeringPresets = groupProviderPresetsByOffering(
+      filterProviderPresets(PROVIDER_PRESETS, query),
+    );
+    planPresetOptions = offeringPresets.plan
+      .map((preset) => toPresetChooserOption(preset, "plan"));
+    apiPresetOptions = offeringPresets.api
+      .map((preset) => toPresetChooserOption(preset, "api"));
+  } else {
+    const offeringPresets = groupProviderPresetsByOffering(PROVIDER_PRESETS);
+    planPresetOptions = groupPresetsByFamily(offeringPresets.plan)
+      .map((group) => toPresetFamilyOption(group.family, group.presets, "plan"));
+    apiPresetOptions = groupPresetsByFamily(offeringPresets.api)
+      .map((group) => toPresetFamilyOption(group.family, group.presets, "api"));
+  }
+
   return [
     {
       id: "plan",
       label: "Plan",
-      options: [...split.plan.filter(matches), ...presets.plan.map(toPresetChooserOption)],
+      options: planPresetOptions,
     },
     {
       id: "api",
       label: "API",
       options: [
-        ...split.api.filter(matches),
-        ...presets.api.map(toPresetChooserOption),
-        ...buildPlatformKindOptions().filter(matches),
+        ...apiPresetOptions,
+        ...buildPlatformKindOptions().filter((option) => matches(option.label)),
       ],
     },
   ];
 }
 
 /**
- * The unfiltered option universe. Selection validity and the default
- * selection use this full list so typing in the preset search never blanks
- * the selected detail.
+ * The unfiltered option universe for one mode. Selection validity and the
+ * default selection use this full list so typing in the preset search never
+ * blanks the selected detail. The services universe holds the query-empty
+ * shape (family options), so picking a flattened search row resolves back to
+ * its parent family and stays valid when the query is cleared.
  */
 export function chooserUniverse(
   catalog: readonly ProviderCatalogEntry[] | null | undefined,
   dynamicPresetIds: ReadonlyMap<string, string | null> | null | undefined,
+  mode: ChooserMode,
 ): ChooserOption[] {
   const split = splitPlanOptionsByOffering(catalog, dynamicPresetIds);
-  return [
-    ...split.plan,
-    ...split.api,
-    ...PROVIDER_PRESETS.map(toPresetChooserOption),
-    ...buildPlatformKindOptions(),
+  if (mode === "connections") {
+    return [...split.plan, ...split.api];
+  }
+  const offeringPresets = groupProviderPresetsByOffering(PROVIDER_PRESETS);
+  const familyOptions: ChooserOption[] = [
+    ...groupPresetsByFamily(offeringPresets.plan)
+      .map((group) => toPresetFamilyOption(group.family, group.presets, "plan")),
+    ...groupPresetsByFamily(offeringPresets.api)
+      .map((group) => toPresetFamilyOption(group.family, group.presets, "api")),
   ];
+  return [...familyOptions, ...buildPlatformKindOptions()];
 }
 
 /** Visible (filtered) options in rail order; arrow-key navigation follows it. */
@@ -117,6 +250,37 @@ export function isValidChooserOption(
   optionId: string,
 ): boolean {
   return options.some((option) => option.optionId === optionId);
+}
+
+export interface ChooserSelectionResolution {
+  /** Rail option that owns the selection (family id for preset rows). */
+  optionId: string;
+  /** Exact preset variant, or "" when the selection is not a preset. */
+  variantId: string;
+}
+
+/**
+ * Resolve a picked option id — from the rail, arrow-key navigation, or the
+ * phone selector — to the rail selection plus exact preset variant. The
+ * visible (possibly search-flattened) options are consulted first so a
+ * flattened preset row resolves to its parent family and variant instead of
+ * being rejected by the family-shaped universe; the universe is the fallback
+ * for family-shaped values the filter no longer shows.
+ */
+export function resolveChooserSelection(
+  visible: readonly ChooserOption[],
+  universe: readonly ChooserOption[],
+  value: string,
+): ChooserSelectionResolution | null {
+  const target = visible.find((option) => option.optionId === value)
+    ?? universe.find((option) => option.optionId === value);
+  if (!target) return null;
+  if ("preset" in target) {
+    return { optionId: target.familyOptionId, variantId: target.preset.id };
+  }
+  // A family pick never forces a variant: the caller keeps the current one
+  // while it still belongs to the family.
+  return { optionId: target.optionId, variantId: "" };
 }
 
 /** First selectable option, or the first option when every one is disabled. */
@@ -151,36 +315,60 @@ export function chooserSelectOptions(
     type: "group" as const,
     key: group.id,
     label: group.label,
-    children: group.options.map((option) => ({
-      label: "source" in option && option.source === "user-defined"
-        ? `${option.label} · ${userDefinedLabel}`
-        : option.label,
-      value: option.optionId,
-    })),
+    children: group.options.map((option) => {
+      let label = option.label;
+      if ("source" in option && option.source === "user-defined") {
+        label = `${label} · ${userDefinedLabel}`;
+      } else if ("family" in option && option.presets.length > 1) {
+        label = `${label} · ${option.presets.length}`;
+      }
+      return { label, value: option.optionId };
+    }),
   }));
 }
 
 /** Component-side icon map key; the component owns the actual components. */
 export function chooserOptionIconKey(option: ChooserOption): string {
-  if ("plan" in option) return option.plan.id;
-  if ("preset" in option) return "api";
+  if ("plan" in option) {
+    return planBrandIconKey(option.plan.id) ?? option.plan.id;
+  }
+  if ("family" in option) return `family:${option.family.id}`;
+  if ("preset" in option) return `family:${familyOf(option.preset).id}`;
   return "database";
 }
 
 export interface ChooserDetail {
-  kind: "plan" | "preset" | "platform";
+  kind: "plan" | "family" | "preset" | "platform";
   iconKey: string;
   title: string;
   tag: { label: MessageKey; type: "warning" | "default" } | null;
   links: { docsUrl: string; websiteUrl: string } | null;
 }
 
-/** Unified detail-header description for whichever option is selected. */
-export function describeChooserSelection(option: ChooserOption): ChooserDetail {
+/**
+ * Unified detail-header description for whichever option is selected. For
+ * family options the second arg is the variant currently picked in the
+ * detail pane; defaulting to the family's first preset keeps call sites that
+ * only have the family honest without forcing a second parameter.
+ */
+export function describeChooserSelection(
+  option: ChooserOption,
+  selectedPreset?: ProviderPreset,
+): ChooserDetail {
+  if ("family" in option) {
+    const preset = selectedPreset ?? option.presets[0]!;
+    return {
+      kind: "family",
+      iconKey: `family:${option.family.id}`,
+      title: option.family.label,
+      tag: { label: "供应商预设", type: "default" },
+      links: { docsUrl: preset.docsUrl, websiteUrl: preset.websiteUrl },
+    };
+  }
   if ("preset" in option) {
     return {
       kind: "preset",
-      iconKey: "api",
+      iconKey: `family:${familyOf(option.preset).id}`,
       title: option.preset.name,
       tag: { label: "供应商预设", type: "default" },
       links: { docsUrl: option.preset.docsUrl, websiteUrl: option.preset.websiteUrl },
@@ -193,5 +381,11 @@ export function describeChooserSelection(option: ChooserOption): ChooserDetail {
   if (option.source === "user-defined") tag = { label: "用户定义", type: "default" };
   else if (option.plan.kind === "custom") tag = { label: "自定义端点", type: "default" };
   else if (option.plan.id === "dynamic-http") tag = { label: "用户定义", type: "default" };
-  return { kind: "plan", iconKey: option.plan.id, title: option.label, tag, links: null };
+  return {
+    kind: "plan",
+    iconKey: planBrandIconKey(option.plan.id) ?? option.plan.id,
+    title: option.label,
+    tag,
+    links: null,
+  };
 }

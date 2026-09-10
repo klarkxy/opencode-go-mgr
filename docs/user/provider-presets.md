@@ -2,7 +2,7 @@
 
 # Plan and API presets
 
-Select a channel from **Accounts → Add account** or **Providers**: **Plan** is above **API**, with **Custom API** first under API. General APIs, aggregators and platform accounts all belong to API. The form appears beside the list. Fixed presets lock the protocol, authentication and full inference URL and supply a documented chat model, so only the service's **Key** is required. Expand optional settings to adjust names, notes or models. Azure and Bedrock still need a resource or regional address and model/deployment information. Saving creates the Provider and its first account together. Custom API and manual configuration retain the full connection settings.
+Browse Plan/API presets from Accounts → Add account → Add new service, or Providers → New Provider. Existing connections remain separate from these creation templates. Presets group by vendor, with a compact selector for regional or plan variants. Search includes vendor and variant names, preset IDs and endpoint hosts. The form displays a read-only connection summary before the Key field. Fixed presets supply the address, protocol, authentication and an editable default model; Azure and Bedrock still require resource/regional addresses and deployment/model information. Saving creates the Provider and its first account together. Custom API and manual configuration retain their full settings.
 
 Presets create ordinary user-defined Providers through the existing atomic Dashboard V3 workflow. The saved Provider participates in account ordering, fallback, model routing and request logs. Its configuration stays editable. It does not add a separate adapter or automatically create an account before saving.
 
@@ -31,6 +31,8 @@ The selected preset is retained when saving and reopening, including resource-sp
 Compared on **2026-09-08** against CC-Switch's Claude, Codex, Gemini, OpenCode, OpenClaw and Hermes [preset sources at `f3b18df`](https://github.com/farion1231/cc-switch/tree/f3b18df12007d0fd79fd8ad8d310880664015197/src/config). CC-Switch categories are discovery hints, not a trust decision: for example, Azure and xAI appear under third-party categories. The endpoint and authentication choices below were checked against operator documentation.
 
 Each row is a ready configuration template, not a claim of authenticated live testing or account entitlement. New Providers remain unpriced: official quota, balance and pricing are not synchronized. Coding/Token Plan Keys and regional API Keys must match the selected endpoint; the upstream's supported-use restrictions still apply.
+
+The rows below are grouped by vendor family — one row per preset variant, with multi-variant families (Tencent, Zhipu, Alibaba Cloud, Volcengine/BytePlus, Baidu Qianfan, StepFun, Xiaomi, MiniMax, StreamLake, SiliconFlow, Compshare) listed together under their shared brand mark. Vendor families that map to a CC0 brand asset under `src/assets/provider-logos/` (Anthropic, Google, DeepSeek, Ollama, NVIDIA, OpenRouter, Alibaba Cloud, ByteDance, Baidu) render that logo in the chooser; the rest use a tinted monogram block carrying the vendor's initial. The built-in plans Kimi Code CN, MiniMax CN, and Ollama Cloud also show their vendor brand marks even though they live outside the chooser.
 
 | Preset | Upstream | Authentication | Operator documentation | Default model |
 | --- | --- | --- | --- | --- |

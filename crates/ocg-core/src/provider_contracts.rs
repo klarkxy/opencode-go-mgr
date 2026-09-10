@@ -353,6 +353,16 @@ pub struct PersistedContracts {
     pub scopes: HashMap<ContractScope, PersistedScopeRow>,
     pub evidence: HashMap<ContractScope, Vec<PersistedModelProtocol>>,
     pub overrides: HashMap<ContractScope, Vec<PersistedModelProtocolOverride>>,
+    /// Selected CN protocol, independent of whether the model is enabled.
+    pub preferences: HashMap<ContractScope, Vec<(String, UpstreamProtocolKind)>>,
+}
+
+pub fn selectable_model_protocol(provider_id: &str, protocol: UpstreamProtocolKind) -> bool {
+    matches!(provider_id, MINIMAX_PROVIDER_ID | KIMI_PROVIDER_ID)
+        && matches!(
+            protocol,
+            UpstreamProtocolKind::ChatCompletions | UpstreamProtocolKind::Messages
+        )
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -784,13 +794,24 @@ pub fn build_effective_contracts(
         let persisted_scope = persisted.scopes.get(&scope);
         let evidence = persisted.evidence.get(&scope).cloned().unwrap_or_default();
         let overrides = persisted.overrides.get(&scope).cloned().unwrap_or_default();
-        let contract = merge_provider_scope(
+        let mut contract = merge_provider_scope(
             descriptor,
             zen_catalog,
             persisted_scope,
             &evidence,
             &overrides,
         );
+        for (model_id, protocol) in persisted.preferences.get(&scope).into_iter().flatten() {
+            if selectable_model_protocol(scope_id, *protocol)
+                && let Some(model) = contract
+                    .models
+                    .values_mut()
+                    .find(|model| custom_or_case_match(&model.model_id, model_id))
+                && model.protocols.contains_key(protocol.as_str())
+            {
+                model.preferred_protocol = *protocol;
+            }
+        }
         set.providers.insert(scope_id.to_string(), contract);
     }
     for runtime in custom_runtimes {
@@ -1132,6 +1153,31 @@ fn preferred_protocol(
     }
 }
 
+/// Provider-level official default upstream protocol, applied to
+/// refresh-discovered models the static preset table does not know. Without
+/// this a refreshed-but-unknown model would materialize with no available
+/// protocol at all, leaving the row permanently uncontrollable. Only Go/Zen
+/// need it: the other sealed adapters already answer every model id through
+/// their static tables or family rules, and Configurable HTTP binds user
+/// declarations instead of a preset.
+fn provider_default_protocol(
+    adapter: ProviderAdapterKind,
+    model_id: &str,
+) -> Option<UpstreamProtocolKind> {
+    // An explicit empty profile is a known unsupported model, not a newly
+    // discovered model whose upstream protocol has yet to be declared.
+    if opencode_profile(model_id).is_some() {
+        return None;
+    }
+    match adapter {
+        ProviderAdapterKind::OpenCodeGo => Some(UpstreamProtocolKind::ChatCompletions),
+        ProviderAdapterKind::ZenFree if crate::kernel::ids::is_free_model(model_id) => {
+            Some(UpstreamProtocolKind::ChatCompletions)
+        }
+        _ => None,
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn merge_model_contract(
     adapter: ProviderAdapterKind,
@@ -1158,12 +1204,10 @@ fn merge_model_contract(
         safety_ceiling_protocols(probe, model_id)
     };
     let mut static_verified = static_verified_protocols(adapter, model_id, declared);
-    if probe.unknown_zen_free_defaults_to_chat
-        && crate::kernel::ids::is_free_model(model_id)
-        && opencode_profile(model_id).is_none()
-        && !static_verified.contains(&UpstreamProtocolKind::ChatCompletions)
+    if static_verified.is_empty()
+        && let Some(default) = provider_default_protocol(adapter, model_id)
     {
-        static_verified.push(UpstreamProtocolKind::ChatCompletions);
+        static_verified.push(default);
     }
     let mut protocols = BTreeMap::new();
     for protocol in UpstreamProtocolKind::ALL {

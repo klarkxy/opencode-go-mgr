@@ -867,6 +867,11 @@ export interface ModelProtocolOverridesUpdate {
  */
 export interface ModelProtocolOverride {
   modelId: string;
+  /**
+   * Remember this CN protocol for the model, even while disabled.
+   * Omitted or false preserves the saved choice; static reset clears it.
+   */
+  preferred?: boolean;
   protocol: AccountUpstreamProtocol;
   state: ProtocolOverrideState;
 }

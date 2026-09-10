@@ -2,6 +2,8 @@
 
 # New API and Sub2API accounts
 
+Each site offers **Add Key** and **Link existing Key**. Add Key opens a Custom API form with the site's inference address; the selected protocol determines its path. Saving creates the Key and then associates that exact account with the site. If association fails after creation, the form shows that the Key already exists and retries only association. Reloading keeps the standalone Key available under Link existing Key. An uncertain creation result must be reconciled against the account list before creating again.
+
 **New API** and **Sub2API** are platform types, not singleton suppliers. Add a separate named instance for each site or user account: multiple New API instances and multiple Sub2API instances can coexist. Each instance has its own identity, site URL, credentials, linked Keys and observations. Refreshing, editing or deleting one instance does not act on every instance of that type.
 
 On **Accounts**, open **Add account**, choose **New API** or **Sub2API** under **Platform accounts**, then enter the site URL and a name. The platform accounts section appears after an account is created. A parent groups your existing Custom API Keys; each Key keeps its model mappings, protocol, enablement, cooldown, and position in the global route order. Grouping does not create a new Provider or change fallback priority.

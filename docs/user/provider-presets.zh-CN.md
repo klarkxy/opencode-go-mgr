@@ -6,7 +6,7 @@
 
 MiniMax 官方 Chat 与 Messages 地址分别使用 `/v1`、`/anthropic/v1` 前缀。覆盖模型协议时明确填写对应地址，面板不猜测其他路径。[当前 MiniMax Messages 鉴权](https://platform.minimax.io/docs/api-reference/text-chat-anthropic)为 Bearer，不能仅因协议格式兼容 Anthropic 就推断为 x-api-key。选择规则见[协议默认值](providers.zh-CN.md#协议默认值与连接测试)。
 
-在 **账号 → 新增账号** 或**供应商**列表选择渠道：上方是 **Plan**，下方是 **API**，**Custom API** 固定在 API 第一项。普通 API、聚合服务和平台账号统一归入 API。右侧直接填写表单，不再弹出第二层窗口。固定预设锁定协议、鉴权和完整推理地址，并填入一个文档中的对话模型，填写对应服务的 **Key** 即可保存。展开可选设置可调整名称、备注和模型；Azure、Bedrock 仍须提供资源或区域地址和模型／部署信息。保存同时创建供应商和首个账号。Custom API 和手动配置保留完整连接设置。
+从账号 → 新增账号 → 添加新服务，或供应商 → 新建供应商浏览 Plan/API 预设。已有连接与创建模板分开展示。预设按厂商分组，地区或套餐变体使用紧凑选择器；搜索包含厂商、变体、预设名称与 ID，以及端点主机。Key 字段之前显示只读连接摘要。固定预设提供地址、协议、鉴权与可修改的默认模型；Azure、Bedrock 仍需填写资源或地区地址，以及部署或模型信息。保存同时创建供应商和首个账号。Custom API 与手动配置仍保留完整设置。
 
 预设通过已有 Dashboard V3 原子创建流程保存为普通用户定义供应商，参与账号排序、故障回退、模型路由和请求日志，保存后仍可编辑。它不会新增独立适配器，也不会在保存前自动创建账号。
 
@@ -31,6 +31,8 @@ MiniMax 官方 Chat 与 Messages 地址分别使用 `/v1`、`/anthropic/v1` 前�
 于 **2026-09-08** 对照 CC-Switch 的 Claude、Codex、Gemini、OpenCode、OpenClaw 与 Hermes [预设源码 `f3b18df`](https://github.com/farion1231/cc-switch/tree/f3b18df12007d0fd79fd8ad8d310880664015197/src/config)。CC-Switch 的分类只用于发现候选，不能直接作为可信判断，例如 Azure、xAI 也可能被标为 third_party。下表的端点与鉴权选择均以运营方文档核对。
 
 每一行是可用的配置模板，不代表已使用真实 Key 完成在线推理，也不代表账号已经获得模型权限。新增供应商仍为未定价：不同步官方额度、余额和价格。Coding/Token Plan Key、不同地区 API Key 必须与所选端点匹配，并遵循上游套餐允许的使用范围。
+
+下表按厂商族分组，每个预设变体各占一行；多变体厂商（腾讯、智谱、阿里云、Volcengine/BytePlus、百度千帆、StepFun、小米、MiniMax、StreamLake、SiliconFlow、Compshare）的所有变体集中在同一品牌标识下。`src/assets/provider-logos/` 下有 CC0 资源（Anthropic、Google、DeepSeek、Ollama、NVIDIA、OpenRouter、阿里云、字节跳动、百度）的厂商族会在选择器中显示该品牌 SVG，其他厂商使用带首字母的染色 monogram 块。内置 Plan Kimi Code CN、MiniMax CN 与 Ollama Cloud 虽不在选择器内，也同样展示厂商品牌标识。
 
 | 预设 | 上游协议 | 鉴权 | 运营方文档 | 默认模型 |
 | --- | --- | --- | --- | --- |

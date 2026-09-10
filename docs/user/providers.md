@@ -2,6 +2,10 @@
 
 # Providers
 
+The default rail manages built-in and saved connections. **New Provider** opens the preset/manual creation flow, keeping available templates separate from configured Providers; existing preset bookmarks remain supported. Saved connections retain their preset brand where provenance is known, without certifying an edited address as official. The model catalog has its own model search and enabled-state filter; searching the Provider list does not search models. Mapping tables keep both public and upstream names accessible on narrow screens.
+
+Enabling a model explicitly enables its selected supported protocol; it does not merely restore `auto`. MiniMax CN and Kimi Code CN remember the selected protocol independently of enablement. Changing that choice while disabled keeps the model disabled; disabling, reopening and enabling retains the choice. The preference is saved atomically with overrides and travels in node migration packages. Restoring the official baseline clears it. Model and connection tests never enable a model or change its protocol choice.
+
 ## Protocol defaults and connection tests
 
 Each user-defined Provider supplies the default endpoint, protocol and authentication. A model inherits them unless its mapping has an explicit protocol and endpoint override. Clearing the override restores inheritance. Authentication remains Provider-owned. Different public aliases for one upstream model must resolve to the same route.
@@ -14,7 +18,7 @@ Official presets initialize new Providers from documented defaults. Manual confi
 
 Defaults reviewed on **2026-09-09**: xAI uses [Responses](https://docs.x.ai/developers/model-capabilities/text/comparison); MiniMax uses [Messages with Bearer auth](https://platform.minimax.io/docs/api-reference/text-chat-anthropic). Other presets retain documented compatible defaults. Built-in model profiles and manual disabled states remain in effect.
 
-The supplier list groups searchable [channel presets](provider-presets.md) under **Plan** above **API**, with separate regional and plan endpoints. **Custom API** is the first API entry and opens its Add account form directly. Fixed presets supply protocol, authentication, address and an initial chat model; enter the Key in the main pane and optionally adjust names or models. Azure and Bedrock retain required resource/regional address and model fields. Saving creates the Provider and its first account together. Saved Providers remain separate entries, and templates never rewrite existing configurations. **New Provider** retains manual configuration.
+Preset creation groups searchable [channel presets](provider-presets.md) under Plan and API, then vendor and regional variant. These templates stay separate from the default list of configured connections. Fixed presets show the exact connection summary and seed an editable chat model. Azure and Bedrock still require their resource/regional address and deployment/model information. Saving creates the Provider and its first account together; saved configurations are never rewritten by template changes.
 
 Want to connect another upstream or contribute a built-in integration? Start with [Add a Provider](add-provider.md), which includes user-defined Providers, Custom API, and the sealed Adapter Registry path.
 
@@ -51,18 +55,9 @@ a request will succeed. Overlapping public names and upstream IDs are flagged
 for inspection. Search by public name, upstream ID, or Provider; **Edit mappings**
 opens the relevant Custom account editor on **Accounts**.
 
-**Model catalog** is local. The matrix has one row per current catalog model and
-three columns — Chat Completions, Responses, and Messages. Each cell is a binary
-switch for the effective model/protocol state: turning it on writes `force_on`,
-and turning it off writes `force_off`. Column menus can turn a whole protocol
-column on or off. The switch updates immediately while the CAS-protected save
-runs in the background; only affected cells show saving progress.
+**Model catalog** is local. Each scope renders one row per current catalog model with columns: model (alias plus raw upstream ID), upstream protocol, enable, and a row action. For single-protocol scopes — OpenCode Go, Zen Free, Command Code GOAT, Ollama Cloud, and every user-defined or custom-endpoint scope — the upstream protocol column is a static label showing the model's one target protocol. For the two multi-protocol built-in scopes (MiniMax CN and Kimi Code CN) the column is a two-option selector between Chat Completions and Messages; neither scope advertises Responses. The enable switch turns the model on or off for routing: on restores the effective preferred protocol, off removes the model from routing and from `GET /v1/models`. The switch updates immediately while the CAS-protected save runs in the background; only the affected row shows saving progress. Batch actions move out of per-column controls into a single scope-level toolbar with **Enable all** and **Disable all** that apply to every model in the scope.
 
-Underlying static, preset, and probe evidence remains in the contract, but is
-not shown as a separate badge in this compact matrix. `auto` remains the stored
-default until an explicit switch writes an override. Connection tests record observations only. Failed account attempts are
-reported and retained as evidence, but never pin the shared protocol
-`force_off`; only an explicit switch can do that.
+Underlying static, preset, and probe evidence remains in the contract, but is not surfaced as a separate badge in the per-model list. `auto` remains the stored default until an explicit switch writes an override. Connection tests record observations only. Failed account attempts are reported and retained as evidence, but never pin the shared protocol `force_off`; only an explicit switch can do that.
 
 For the built-in **OpenCode Go**, **Zen Free**, **Command Code GOAT**,
 **MiniMax CN**, and **Kimi Code CN** scopes, the catalog header offers
@@ -73,11 +68,10 @@ Go and known Zen rows default to the one upstream endpoint documented for each
 model. GOAT uses Messages for Anthropic model IDs and Chat Completions for the
 other Provider families, with newly discovered non-preset models still off by
 default. MiniMax CN and Kimi Code CN both default to Chat Completions and
-Messages; neither advertises Responses. Protocols absent from the official
-baseline remain off until an administrator explicitly enables a constructible
-path through a manual setting.
+Messages; neither advertises Responses. The current effective target protocol
+stays in effect until an explicit row change rewrites it.
 
-The compact source line, refresh action, and matrix share one content panel.
+The compact source line, refresh action, and model list share one content panel.
 Every refreshable scope uses the same action. OpenCode Go refreshes from the
 official authenticated model endpoint with a backend-selected eligible Go
 account, Zen Free uses the fixed keyless directory
@@ -96,13 +90,16 @@ and `k3-256k` → `kimi-k3-256k`. Forwarding retains every exact upstream ID.
 
 Before the first successful refresh, the built-in static catalog is the initial
 preset. After success, the saved official snapshot is authoritative and
-replaces that preset. Models newly added by a refresh are visible in the matrix.
-For OpenCode Go and Command Code, new protocol cells remain disabled until you
-explicitly turn one on. MiniMax CN and Kimi Code CN rows
-enable their sealed Chat Completions and Messages contracts; Responses stays
-unsupported. Existing overrides and probe results for
-surviving models are preserved. A failed or empty refresh keeps the previous
-snapshot.
+replaces that preset. Models newly added by a refresh appear in the list. For
+OpenCode Go, Zen Free, and Command Code, the new rows default to off (the
+upstream protocol is the documented default and the enable switch is off) until
+you explicitly turn one on. A refreshed model the checked-in preset does not
+know still falls back to the provider's official default protocol — Chat
+Completions for OpenCode Go and Zen Free — so the row stays operable instead of
+showing "No protocol available". MiniMax CN and Kimi Code CN new rows default to
+their sealed target protocol; Responses stays unsupported. Existing overrides
+and probe results for surviving models are preserved. A failed or empty refresh
+keeps the previous snapshot.
 
 Custom API continues to use account-owned public-name → upstream-ID mappings;
 discovery never silently replaces them. The account form **Fetch models** action
@@ -110,7 +107,7 @@ is an unsaved-form helper that returns upstream IDs only. Selecting one imports
 an exact `public name = upstream ID` row. Command Code uses its public official
 `/models` directory: the GOAT preset starts enabled, while additional models
 discovered later start disabled until you enable their supported protocol in
-the matrix.
+the list.
 
 Local catalogs feed resolution without another request-time upstream call.
 Built-in Alias authority is static and code-owned: the original OpenCode Go
@@ -127,10 +124,7 @@ the original `-free` ID remains an exact raw pin,
 as described under
 [Zen Free models](routing.md#zen-free-models).
 
-If every model/protocol cell for a Provider is off, that Provider contributes
-no route. Authenticated downstream `GET /v1/models` publishes only routeable
-public names. It omits raw-only identities and raw-name conflicts; an ambiguous
-raw identity fails as `ambiguous_model_id` without an upstream request.
+If every model's enable switch is off, that Provider contributes no route. Authenticated downstream `GET /v1/models` publishes only routeable public names. It omits raw-only identities and raw-name conflicts; an ambiguous raw identity fails as `ambiguous_model_id` without an upstream request.
 
 Built-in Provider rows whose adapter exposes connection testing have a **Test** button. The dashboard tests the effective configured protocol.
 For the configured protocol the provider automatically tries its eligible
@@ -141,7 +135,7 @@ CN and Kimi Code CN test their sealed Chat Completions and Messages paths.
 Custom endpoint tests remain account-owned. Models must belong to the current provider
 catalog, including newly fetched models not yet in the static table. A
 Popconfirm warns that these real minimal requests may consume quota. Each protocol
-result is shown above the matrix with its success, failure, or skipped state,
+result is shown above the list with its success, failure, or skipped state,
 HTTP status, readable upstream message, and a safe upstream help/billing link
 when one is supplied. Every actual account attempt is recorded as a
 redacted request log; probe traffic never enters Runtime Logs. One account

@@ -131,15 +131,43 @@
               <span class="platform-block-title">
                 {{ t("已关联 Key（{count}）", { count: linksFor(parent).length }) }}
               </span>
-              <n-button
-                size="tiny"
-                secondary
-                :disabled="mutating"
-                @click="openLink(parent)"
-              >{{ t("关联 Key") }}</n-button>
+              <n-space size="small">
+                <n-button
+                  size="tiny"
+                  secondary
+                  :disabled="mutating"
+                  @click="openAddKey(parent)"
+                >{{ t("添加 Key") }}</n-button>
+                <n-button
+                  size="tiny"
+                  secondary
+                  :disabled="mutating"
+                  @click="openLink(parent)"
+                >{{ t("关联已有 Key") }}</n-button>
+              </n-space>
             </div>
-            <div v-if="linksFor(parent).length === 0" class="platform-hint">
-              {{ t("关联为手动操作：在新增账号流程中粘贴 Key 创建 Custom API 账号后，再回到这里关联。") }}
+            <n-alert
+              v-if="pendingLink && pendingLink.parentId === parent.id"
+              type="warning"
+              :show-icon="false"
+              class="platform-block"
+            >
+              <div class="platform-pending-link">
+                <span>{{ t("Key 已创建，关联尚未完成。") }}</span>
+                <n-button
+                  size="tiny"
+                  secondary
+                  :loading="mutating"
+                  :disabled="mutating"
+                  @click="retryPendingLink"
+                >{{ t("重试关联") }}</n-button>
+              </div>
+            </n-alert>
+            <div
+              v-if="linksFor(parent).length === 0 && pendingLink?.parentId !== parent.id"
+              class="platform-hint"
+            >
+              {{ t("可直接添加 Key，或关联本地已有的 Custom API 账号。") }}
             </div>
             <div
               v-for="link in linksFor(parent)"
@@ -263,6 +291,19 @@
     :busy="mutating"
     @update:show="showLink = $event"
     @submit="onLinkSubmit"
+    @add-key="onLinkModalAddKey"
+  />
+  <AccountFormModal
+    :show="!!addKeyParent"
+    :account="null"
+    :plan="customApiPlan"
+    :catalog="props.catalog"
+    :busy="mutating"
+    :platform-parent="addKeyParent ? { name: addKeyParent.name, baseUrl: addKeyParent.baseUrl } : null"
+    :title-override="t('添加 Key')"
+    :external-error="addKeyError"
+    @update:show="onAddKeyVisible"
+    @save="onAddKeySave"
   />
   <PlatformModelImportModal
     :show="!!importTarget"
@@ -289,7 +330,7 @@ import {
   useDialog,
   useMessage,
 } from "naive-ui";
-import { dashboardApi, type Account } from "../api/dashboard.ts";
+import { dashboardApi, DashboardRequestError, type Account, type AccountInput } from "../api/dashboard.ts";
 import { isRevisionConflict } from "../api/dashboard-v3.ts";
 import {
   platformAccountsApi,
@@ -302,6 +343,7 @@ import {
   type PlatformQuotaKind,
   type PlatformSnapshot,
 } from "../api/platform-accounts.ts";
+import type { ProviderCatalogEntry } from "../api/providers.ts";
 import {
   PLATFORM_KIND_LABELS,
   PLATFORM_QUOTA_KIND_KEYS,
@@ -313,8 +355,10 @@ import {
   platformModelCandidates,
 } from "../domain/platform-accounts.ts";
 import { isCustomApiAccount } from "../domain/custom-account.ts";
+import { PLAN_DEFINITIONS } from "../domain/plans.ts";
 import { locale, t, type MessageKey } from "../i18n/index.ts";
 import { dashboardErrorDetail } from "../utils/errors.ts";
+import AccountFormModal, { type AccountFormPayload } from "./AccountFormModal.vue";
 import PlatformAccountFormModal, {
   type PlatformAccountFormPayload,
 } from "./PlatformAccountFormModal.vue";
@@ -324,6 +368,8 @@ import PlatformPriceTable from "./PlatformPriceTable.vue";
 
 const props = defineProps<{
   accounts: Account[];
+  /** Provider catalog; the embedded Custom Key form resolves its fields from it. */
+  catalog: readonly ProviderCatalogEntry[] | null;
 }>();
 
 const emit = defineEmits<{
@@ -357,6 +403,20 @@ const presetKind = ref<PlatformKind>("new_api");
 const showLink = ref(false);
 const linkParent = ref<PlatformAccount | null>(null);
 
+/**
+ * Direct Add Key flow: the chosen parent instance is fixed for the whole
+ * operation. After a known create success, `pendingLink` retains the returned
+ * account id so a failed association retries ONLY the link — the create is
+ * never repeated and the standalone Key survives.
+ */
+const addKeyParent = ref<PlatformAccount | null>(null);
+const addKeyError = ref("");
+const pendingLink = ref<{ accountId: string; parentId: string } | null>(null);
+
+const customApiPlan = computed(() => (
+  PLAN_DEFINITIONS.find((plan) => plan.id === "custom-endpoint") ?? null
+));
+
 const importTarget = ref<{ account: Account; link: PlatformLink } | null>(null);
 
 const quotaKindKeys = PLATFORM_QUOTA_KIND_KEYS;
@@ -383,6 +443,11 @@ watch(() => view.value?.links, (links) => {
     links ?? [],
     (view.value?.accounts ?? []).map((parent) => ({ id: parent.id, name: parent.name })),
   );
+  // A reloaded view that already contains the pending account's link settles
+  // the retry state without another write.
+  if (pendingLink.value && (links ?? []).some((link) => link.accountId === pendingLink.value!.accountId)) {
+    pendingLink.value = null;
+  }
 });
 
 function kindLabel(kind: PlatformKind): string {
@@ -503,6 +568,7 @@ async function persistPlatform(
   if (mutating.value) return "error";
   mutating.value = true;
   try {
+    const knownIds = new Set((view.value?.accounts ?? []).map((parent) => parent.id));
     acceptView(editing
       ? await platformAccountsApi.update(editing.id, {
         name: payload.name,
@@ -514,6 +580,14 @@ async function persistPlatform(
         baseUrl: payload.baseUrl,
         ...(payload.userCredential !== undefined ? { userCredential: payload.userCredential } : {}),
       }));
+    if (!editing) {
+      // Expand the freshly created card so the Add Key action is immediately
+      // visible as the obvious next step.
+      const created = (view.value?.accounts ?? []).find((parent) => !knownIds.has(parent.id));
+      if (created && !expanded.value.includes(created.id)) {
+        expanded.value = [...expanded.value, created.id];
+      }
+    }
     message.success(editing ? t("平台账号已更新") : t("平台账号已创建"));
     return "saved";
   } catch (error) {
@@ -597,6 +671,131 @@ async function refreshChild(parent: PlatformAccount, link: PlatformLink): Promis
 function openLink(parent: PlatformAccount): void {
   linkParent.value = parent;
   showLink.value = true;
+}
+
+function openAddKey(parent: PlatformAccount): void {
+  if (mutating.value) return;
+  if (!props.catalog) {
+    // The Custom Key form resolves its fields from the catalog; without it
+    // the form would fail closed, so block with a clear error instead of
+    // opening a guessed or degraded form.
+    message.error(t("服务商目录加载失败"));
+    return;
+  }
+  addKeyError.value = "";
+  addKeyParent.value = parent;
+}
+
+function onLinkModalAddKey(): void {
+  const parent = linkParent.value;
+  showLink.value = false;
+  if (parent) openAddKey(parent);
+}
+
+function onAddKeyVisible(show: boolean): void {
+  // In-flight create/link keeps the modal open and the parent instance fixed.
+  if (!show && mutating.value) return;
+  if (!show) {
+    addKeyParent.value = null;
+    addKeyError.value = "";
+  }
+}
+
+/**
+ * Two-step lifecycle: create the Custom API account, then associate it. The
+ * returned account id is persisted BEFORE any link attempt, so every link
+ * failure — CAS conflicts included — transitions to association-only
+ * recovery with the same parent and never repeats the create. An ambiguous
+ * create outcome (transport failure, 5xx) closes the form and requires an
+ * account-list reconciliation before any further attempt: no repeat create
+ * can be triggered from the uncertain attempt.
+ */
+async function onAddKeySave(payload: AccountInput | AccountFormPayload): Promise<void> {
+  const parent = addKeyParent.value;
+  if (!parent || mutating.value) return;
+  mutating.value = true;
+  addKeyError.value = "";
+  try {
+    const created = await dashboardApi.createAccount({
+      ...(payload as AccountInput),
+      key: payload.key || "",
+    });
+    // Known create success: retain the returned id before ANY link attempt.
+    pendingLink.value = { accountId: created.id, parentId: parent.id };
+    addKeyParent.value = null;
+    try {
+      acceptView(await platformAccountsApi.link(
+        created.id,
+        parent.id,
+        platformGroupWrite({ id: null, platform: null }),
+      ));
+      pendingLink.value = null;
+      message.success(t("Key 已创建并关联"));
+      emit("changed");
+    } catch (linkError) {
+      if (isRevisionConflict(linkError)) {
+        // Tokens refresh and the view reloads; the link watch settles the
+        // pending id if the association actually landed. It is never lost.
+        await recoverConflict();
+        if (pendingLink.value) message.warning(t("Key 已创建，关联尚未完成。"));
+        return;
+      }
+      message.warning(t("Key 已创建，关联尚未完成。"));
+      // Refresh the account list so the created standalone Key is visible.
+      emit("changed");
+    }
+  } catch (createError) {
+    if (isRevisionConflict(createError)) {
+      await recoverConflict();
+      addKeyParent.value = null;
+      return;
+    }
+    if (createError instanceof DashboardRequestError
+      && createError.status >= 400
+      && createError.status < 500) {
+      // A definite rejection: safe to fix the draft and resubmit.
+      addKeyError.value = dashboardErrorDetail(createError);
+      return;
+    }
+    // Ambiguous outcome: the account may exist. Block any repeat create by
+    // closing the form; reconciliation (account-list reload) is the only
+    // continuation offered.
+    addKeyParent.value = null;
+    dialog.warning({
+      title: t("创建结果未知"),
+      content: t("账号可能已创建；直接重复提交可能产生重复 Key。请重新加载账号列表确认后再继续。"),
+      positiveText: t("重新加载"),
+      closable: false,
+      maskClosable: false,
+      onPositiveClick: () => {
+        emit("changed");
+      },
+    });
+  } finally {
+    mutating.value = false;
+  }
+}
+
+/** Retry ONLY the association of an already-created Key; never re-creates. */
+async function retryPendingLink(): Promise<void> {
+  const pending = pendingLink.value;
+  if (!pending || mutating.value) return;
+  mutating.value = true;
+  try {
+    acceptView(await platformAccountsApi.link(
+      pending.accountId,
+      pending.parentId,
+      platformGroupWrite({ id: null, platform: null }),
+    ));
+    pendingLink.value = null;
+    message.success(t("已关联"));
+    emit("changed");
+  } catch (error) {
+    if (isRevisionConflict(error)) await recoverConflict();
+    else mutationError(error, "操作失败: {error}");
+  } finally {
+    mutating.value = false;
+  }
 }
 
 async function onLinkSubmit(
@@ -786,6 +985,14 @@ defineExpose({ reload: load, openCreate, createPlatform, mutating });
 
 .platform-children-head {
   display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.platform-pending-link {
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 8px;

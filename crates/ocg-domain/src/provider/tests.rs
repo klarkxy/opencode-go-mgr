@@ -455,7 +455,6 @@ fn adapter_descriptors_preserve_current_capability_decisions() {
     assert!(zen.inference.follow_redirects);
     assert_eq!(zen.inference.origin, InferenceOriginKind::OfficialFixed);
     assert!(zen.model_catalog.admin_explicit_refresh);
-    assert!(zen.protocol_probe.unknown_zen_free_defaults_to_chat);
     assert!(zen.protocol_probe.explicit_probe);
     assert_eq!(
         zen.protocol_probe.structural_ceiling,

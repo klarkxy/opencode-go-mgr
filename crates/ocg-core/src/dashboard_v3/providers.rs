@@ -821,8 +821,22 @@ fn commit_model_protocol_overrides(
         ));
     }
     let mut rows = Vec::with_capacity(overrides.len());
+    let mut preferences = Vec::new();
+    let mut preferred_models = std::collections::HashSet::new();
     for item in overrides {
         let protocol = crate::provider::UpstreamProtocolKind::from(item.protocol);
+        if item.preferred == Some(true) {
+            if scope.kind_str() != "provider"
+                || !provider_contracts::selectable_model_protocol(scope.id(), protocol)
+                || !preferred_models.insert(item.model_id.trim().to_ascii_lowercase())
+            {
+                return Err(V3ApiError::invalid_request_at(
+                    state,
+                    "one supported CN protocol preference per model is allowed",
+                ));
+            }
+            preferences.push((item.model_id.trim().to_ascii_lowercase(), protocol));
+        }
         rows.push((
             item.model_id,
             protocol,
@@ -832,7 +846,7 @@ fn commit_model_protocol_overrides(
     let now = Utc::now();
     {
         let db = state.db.lock();
-        db.set_model_protocol_overrides(scope, &rows, now)
+        db.set_model_protocol_settings(scope, &rows, &preferences, now)
             .map_err(V3ApiError::internal)?;
         state
             .reload_provider_contracts_locked(&db)

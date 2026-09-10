@@ -6,6 +6,7 @@ import type {
   CustomEndpointContract,
   EffectiveCatalog,
   EffectiveModelContract,
+  ModelProtocolOverrideUpdate,
   ProviderAccountChoice,
   ProviderCatalogEntry,
   ProviderContractsResponse,
@@ -103,6 +104,246 @@ export function findAccountScopeView(
     scope.scope_kind === "provider"
     && scope.provider_id === account.provider_id
   ));
+}
+
+export const CN_PROTOCOL_CHOICES: readonly ProviderProtocol[] = [
+  "chat_completions",
+  "messages",
+];
+
+/**
+ * Provider ids of the official CN plans whose models are published with two
+ * selectable upstream protocols (Chat Completions + Messages). The frontend
+ * uses this to decide whether to render a single static protocol label or a
+ * two-way radio group per row.
+ */
+const TWO_PROTOCOL_SCOPE_PROVIDER_IDS: ReadonlySet<string> = new Set([
+  "minimax",
+  "kimi",
+]);
+
+/**
+ * The set of upstream protocols a scope allows an operator to choose from.
+ * - CN two-protocol scopes (MiniMax CN / Kimi CN) → `[chat_completions, messages]`
+ * - Custom endpoints → the union of protocols any model in the scope has
+ *   evidence of being available for (matches the old column-filter behavior)
+ * - All other built-in scopes → a single-element marker meaning "no protocol
+ *   choice"; each model's target protocol is then derived per model by
+ *   {@link modelTargetProtocol} (OpenCode Go mixes Chat/Responses/Messages
+ *   rows, so a scope-level answer would be wrong)
+ * Returns `[chat_completions]` as a last-resort fallback when the scope has
+ * no model evidence at all.
+ */
+export function scopeProtocolChoices(scope: ProviderScopeView): ProviderProtocol[] {
+  if (TWO_PROTOCOL_SCOPE_PROVIDER_IDS.has(scope.provider_id)) {
+    return [...CN_PROTOCOL_CHOICES];
+  }
+  if (scope.scope_kind === "custom_endpoint") {
+    return PROVIDER_PROTOCOLS.filter((protocol) => (
+      scope.models.some((model) => model.protocols[protocol]?.available === true)
+    ));
+  }
+  for (const model of scope.models) {
+    for (const protocol of PROVIDER_PROTOCOLS) {
+      if (model.protocols[protocol]) {
+        return [protocol];
+      }
+    }
+  }
+  return ["chat_completions"];
+}
+
+/**
+ * The single protocol a model row advertises under this scope. Used to render
+ * the static badge (single-protocol scope) or seed the radio group (two-protocol
+ * scope). Returns null when the model has no protocol evidence under the
+ * scope (e.g. a Custom endpoint row whose declared capabilities carry no
+ * protocol evidence). Built-in refresh-discovered models unknown to the
+ * static preset materialize with the provider-level default protocol on the
+ * backend, so they still resolve a target here.
+ */
+/**
+ * The protocol whose row switch should read ON: the enabled preferred
+ * protocol, then the first enabled fallback. When any protocol is actually
+ * enabled the UI must never present the row as off, so this always wins over
+ * available-but-disabled evidence.
+ */
+function modelEnabledTarget(model: ProviderModelContract): ProviderProtocol | null {
+  const preferred = model.preferred_protocol;
+  if (preferred && model.protocols[preferred]?.enabled) return preferred;
+  for (const protocol of PROVIDER_PROTOCOLS) {
+    if (model.protocols[protocol]?.enabled) return protocol;
+  }
+  return null;
+}
+
+/**
+ * The protocol shown while the row is off: the available preferred protocol,
+ * then the first available fallback. Null when the model has no protocol
+ * evidence at all (the row stays disabled).
+ */
+function modelAvailableTarget(model: ProviderModelContract): ProviderProtocol | null {
+  const preferred = model.preferred_protocol;
+  if (preferred && model.protocols[preferred]?.available) return preferred;
+  for (const protocol of PROVIDER_PROTOCOLS) {
+    if (model.protocols[protocol]?.available) return protocol;
+  }
+  return null;
+}
+
+export function modelTargetProtocol(
+  model: ProviderModelContract,
+  scope: ProviderScopeView,
+): ProviderProtocol | null {
+  const choices = scopeProtocolChoices(scope);
+  if (choices.length === 0) return null;
+  if (choices.length === 1) {
+    // Single-protocol scopes still mix per-model static protocols (OpenCode
+    // Go has Chat, Responses and Messages rows), so the target comes from
+    // the model's own evidence: an enabled protocol always wins so the row
+    // can never display off while an alternate is actually enabled;
+    // otherwise the available preferred protocol, then the first available
+    // one. Models with nothing available (e.g. `NO_PROTOCOLS` rows) have no
+    // operable target.
+    return modelEnabledTarget(model) ?? modelAvailableTarget(model);
+  }
+  // Two-protocol scope: preferred wins when enabled, otherwise the other
+  // enabled one, otherwise preferred (so the UI always reflects intent).
+  if (choices.includes(model.preferred_protocol)
+    && model.protocols[model.preferred_protocol]?.enabled) {
+    return model.preferred_protocol;
+  }
+  for (const choice of choices) {
+    if (model.protocols[choice]?.enabled) return choice;
+  }
+  return model.preferred_protocol && choices.includes(model.preferred_protocol)
+    ? model.preferred_protocol
+    : choices[0]!;
+}
+
+/**
+ * Whether the row's current target protocol is enabled by the contract.
+ * The "启用" column of the matrix is bound to this.
+ */
+export function modelEffectiveOn(
+  model: ProviderModelContract,
+  scope: ProviderScopeView,
+): boolean {
+  const target = modelTargetProtocol(model, scope);
+  if (target === null) return false;
+  return model.protocols[target]?.enabled === true;
+}
+
+/**
+ * The protocols an override batch may legally write for one model. Built-in
+ * provider scopes accept exactly the model's non-null protocol evidence rows
+ * (a CN model's Responses slot is null and absent, so it is never written);
+ * Custom endpoint contracts retain all three rows but only the declared
+ * (available) ones are writable. The backend validator rejects anything
+ * outside this ceiling — even `force_off` — so batches must never exceed it.
+ * Filtering is by writability, never by enabled state, so a fully disabled
+ * row stays re-enableable.
+ */
+function modelWritableProtocols(
+  model: ProviderModelContract,
+  scope: ProviderScopeView,
+): ProviderProtocol[] {
+  return PROVIDER_PROTOCOLS.filter((protocol) => (
+    scope.scope_kind === "custom_endpoint"
+      ? model.protocols[protocol]?.available === true
+      : model.protocols[protocol] !== undefined
+  ));
+}
+
+/**
+ * Build the override batch that toggles each model in `modelIds` fully on or
+ * fully off, touching only the model's legal writable protocols (see
+ * {@link modelWritableProtocols}).
+ *
+ * Design choice (documented for reviewers): on=true explicitly force-enables
+ * the model's chosen available target protocol and force-disables every other
+ * writable protocol — never `auto`, because under `auto` the static default
+ * keeps extra models (e.g. GOAT's) off and the operator's "on" would be a
+ * no-op. The target is the persisted preferred protocol when it is available,
+ * otherwise the first available fallback; models with no available protocol
+ * are skipped so the write never exceeds the model's evidence ceiling.
+ * on=false force-disables every writable protocol. In a two-protocol (CN)
+ * scope the off batch also marks the row's current active choice with
+ * `preferred: true` so the saved selection survives the full-off write and a
+ * later enable returns to it; non-CN scopes omit the flag. A model with no
+ * writable protocol at all is skipped as a no-op since there is nothing to
+ * enable or disable.
+ */
+export function buildModelToggleOverrides(
+  scope: ProviderScopeView,
+  modelIds: readonly string[],
+  on: boolean,
+): ModelProtocolOverrideUpdate[] {
+  const overrides: ModelProtocolOverrideUpdate[] = [];
+  const choices = scopeProtocolChoices(scope);
+  const isTwoProtocol = choices.length === 2;
+  for (const modelId of modelIds) {
+    const model = scope.models.find((entry) => entry.model_id === modelId);
+    if (!model) continue;
+    const writable = modelWritableProtocols(model, scope);
+    if (writable.length === 0) continue;
+    if (!on) {
+      const active = isTwoProtocol ? modelTargetProtocol(model, scope) : null;
+      for (const protocol of writable) {
+        overrides.push({
+          model_id: modelId,
+          protocol,
+          state: "force_off",
+          ...(active === protocol ? { preferred: true } : {}),
+        });
+      }
+      continue;
+    }
+    const target = isTwoProtocol
+      ? (model.protocols[model.preferred_protocol]?.available
+        ? model.preferred_protocol
+        : choices.find((choice) => model.protocols[choice]?.available) ?? null)
+      : modelAvailableTarget(model);
+    if (!target || !writable.includes(target)) continue;
+    for (const protocol of writable) {
+      overrides.push({
+        model_id: modelId,
+        protocol,
+        state: protocol === target ? "force_on" : "force_off",
+      });
+    }
+  }
+  return overrides;
+}
+
+/**
+ * Build the override batch that switches a single model between the two
+ * protocols a two-protocol scope offers. The chosen item always carries
+ * `preferred: true` so the selection is persisted as the saved choice
+ * regardless of the row's on/off state: switching while the row is enabled
+ * enables only the chosen protocol; switching while it is disabled keeps
+ * every protocol off and stores just the choice. Returns an empty array when
+ * the scope isn't a two-protocol scope, the model is unknown, or the
+ * requested protocol isn't one of its choices (so the call is safe to wire
+ * into a single, unconditional emit).
+ */
+export function buildModelProtocolSwitchOverrides(
+  scope: ProviderScopeView,
+  modelId: string,
+  protocol: ProviderProtocol,
+): ModelProtocolOverrideUpdate[] {
+  const choices = scopeProtocolChoices(scope);
+  if (choices.length !== 2) return [];
+  if (!choices.includes(protocol)) return [];
+  const model = scope.models.find((entry) => entry.model_id === modelId);
+  if (!model) return [];
+  const rowOn = modelEffectiveOn(model, scope);
+  return choices.map((choice) => ({
+    model_id: modelId,
+    protocol: choice,
+    state: rowOn && choice === protocol ? "force_on" : "force_off",
+    ...(choice === protocol ? { preferred: true } : {}),
+  }));
 }
 
 export function protocolDisplayName(protocol: ProviderProtocol): string {

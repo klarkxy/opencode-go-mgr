@@ -2,6 +2,10 @@
 
 # Accounts
 
+**Add account** first distinguishes an existing connection from a new service. Choose an existing Provider to add another Key using its saved address, protocol and models. Choose a new service to browse Plan/API presets or add a platform site; saving a preset creates a Provider and its first account together. Connection summaries remain visible before entering a Key. Regional variants use a compact picker.
+
+**Enabled** describes configuration, not a successful upstream authentication or model test. Test results stay in the test dialog. User-defined Providers have no modeled subscription period, including those created from Plan presets: their accounts do not show an inferred purchase date, expiry countdown, or expiry alert. Existing stored purchase anchors are preserved for compatibility, but are not presented as confirmed billing facts.
+
 Accounts is the tenant list. A Provider and a Plan are the same product
 identity (`provider_id` only), and every card belongs to one Provider with one
 credential when that Provider requires it. Quota authority is Provider-specific:
@@ -155,10 +159,7 @@ unpriced: logs record `cost_state=unknown` with no quota debit, and Custom has
 no provider usage refresh. `MODEL_PROTOCOLS` remains Go-specific; Custom
 converts the client protocol to the account's single upstream protocol.
 
-**Add account** has **Plan** above **API** on the left and the form on the right. **Custom API** is the first API entry and remains available when searching. General APIs, aggregators and platform accounts all belong to API. Fixed presets supply the protocol, authentication, endpoint and a documented default chat model, so entering the service's **Key** is enough; optional settings let you adjust names and models. Azure and Bedrock still require their resource or regional address and model/deployment information. Saving a preset creates the Provider and its first account together. To add another account to an existing Provider, select that saved Provider instead. Zen Free is a backend-owned singleton and
-is not listed there; enable or disable it on the account list.
-Selecting OpenCode Go shows the existing-Key form directly and retains the separate **Register new
-account (Beta)** workflow:
+Use the existing-connection choices to add another Key without creating a second Provider. New-service choices contain Plan/API presets, Custom API and platform types. Search matches vendor, variant, preset name and endpoint host. Selecting a result retains its exact variant when the search clears. Zen Free is a backend-owned singleton, managed only from the account list; OpenCode Go retains its optional managed-registration action where the host supports it.
 
 - A **Key account** stores one officially distributable OpenCode Go API key.
 - A **managed account** immediately creates a disabled, recoverable draft, then

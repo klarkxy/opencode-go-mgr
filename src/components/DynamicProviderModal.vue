@@ -5,7 +5,8 @@
     :embedded="embedded"
     modal-class="dynamic-provider-modal"
     modal-style="width: 720px; max-width: calc(100vw - 32px)"
-    @update:show="$emit('update:show', $event)"
+    :close-on-esc="!busy"
+    @update:show="onSurfaceUpdateShow"
   >
     <n-form label-placement="top" @submit.prevent="save">
       <n-alert v-if="formError" type="error" class="form-error" role="alert">
@@ -22,6 +23,25 @@
       </n-alert>
 
       <div class="modal-grid">
+        <dl v-if="fixedPreset" class="connection-summary full-width-field" :aria-label="t('连接信息')">
+          <div class="connection-summary__row">
+            <dt>{{ t("API 地址") }}</dt>
+            <dd v-if="fixedPreset.endpointUrl"><code>{{ fixedPreset.endpointUrl }}</code></dd>
+            <dd v-else class="connection-summary__pending">{{ t("需在下方填写") }}</dd>
+          </div>
+          <div class="connection-summary__row">
+            <dt>{{ t("上游协议") }}</dt>
+            <dd>{{ protocolDisplayName(fixedPreset.protocol) }}</dd>
+          </div>
+          <div class="connection-summary__row">
+            <dt>{{ t("鉴权方式") }}</dt>
+            <dd>{{ fixedPreset.authKind === "bearer" ? "Bearer" : "x-api-key" }}</dd>
+          </div>
+          <div v-if="fixedSeeded" class="connection-summary__row">
+            <dt>{{ t("默认模型") }}</dt>
+            <dd>{{ t("{count} 个", { count: fixedSeededModels.length }) }}</dd>
+          </div>
+        </dl>
         <n-form-item v-if="!isEdit && !presetSelectionLocked" :label="t('供应商预设')" class="full-width-field">
           <div class="preset-picker">
             <n-select
@@ -677,7 +697,16 @@ async function runTest(): Promise<void> {
   }
 }
 
+function onSurfaceUpdateShow(visible: boolean): void {
+  // The standalone modal applies the same busy dismissal guard embedded
+  // hosts enforce: in-flight save/test/discovery keeps the form open.
+  if (!visible && busy.value) return;
+  emit("update:show", visible);
+}
+
 async function save(): Promise<void> {
+  // Re-entrant submits (Enter key, double click) must not duplicate the write.
+  if (busy.value) return;
   const error = validateDynamicProviderDraft(draft.value, {
     mode: isEdit.value ? "edit" : "create",
     previousAuthKind: props.provider?.auth_kind ?? "",
@@ -757,6 +786,34 @@ async function save(): Promise<void> {
   margin: 0;
   color: var(--ocg-muted);
   font-size: var(--ocg-font-xs);
+}
+.connection-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px 16px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--ocg-border);
+  border-radius: 10px;
+  background: var(--ocg-canvas);
+}
+.connection-summary__row {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.connection-summary dt {
+  color: var(--ocg-muted);
+  font-size: var(--ocg-font-xs);
+}
+.connection-summary dd {
+  margin: 0;
+  color: var(--ocg-ink);
+  font-size: var(--ocg-font-sm);
+  overflow-wrap: anywhere;
+}
+.connection-summary__pending {
+  color: var(--ocg-muted);
 }
 .fixed-settings-toggle { grid-column: 1 / -1; }
 </style>

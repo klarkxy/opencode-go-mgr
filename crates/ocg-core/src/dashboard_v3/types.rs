@@ -1615,6 +1615,11 @@ pub struct ModelProtocolOverride {
     pub model_id: String,
     pub protocol: AccountUpstreamProtocol,
     pub state: ProtocolOverrideState,
+    /// Remember this CN protocol for the model, even while disabled.
+    /// Omitted or false preserves the saved choice; static reset clears it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub preferred: Option<bool>,
 }
 
 /// PUT a batch of per-model/per-protocol overrides for one contract scope.

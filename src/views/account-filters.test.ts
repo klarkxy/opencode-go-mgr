@@ -88,6 +88,19 @@ test("Custom API ignores legacy lifecycle dates", () => {
   assert.deepEqual(buildNeedsAttention([custom], NOW), []);
 });
 
+test("user-defined (dynamic) Provider accounts never raise expiry attention", () => {
+  // No built-in plan owns this provider id and no billing cadence is modeled
+  // for user-defined Providers; even a synthetic stored date is ignored.
+  const dynamic = account({
+    id: "dyn",
+    name: "Lab",
+    provider_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    purchase_date: "2026-07-01",
+    expires_on: "2026-08-01",
+  });
+  assert.deepEqual(buildNeedsAttention([dynamic], NOW), []);
+});
+
 test("zen free cooling is reported through the shared free lane", () => {
   const zen = account({
     id: "zen",

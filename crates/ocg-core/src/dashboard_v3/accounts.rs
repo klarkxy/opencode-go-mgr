@@ -911,6 +911,10 @@ fn account_from_state(state: &CoreState, account: ModelAccount) -> Result<Accoun
         })
     };
     let plan = crate::provider::builtin_provider(&account.provider_id);
+    // A stored legacy purchase anchor is not evidence of a dynamic Provider's
+    // billing cadence or credential expiry. Keep storage intact, but do not
+    // publish invented subscription dates for these account-owned Keys.
+    let has_builtin_lifecycle = plan.is_some();
     Ok(Account {
         id: account.id.clone(),
         provider_id: account.provider_id.clone(),
@@ -922,8 +926,16 @@ fn account_from_state(state: &CoreState, account: ModelAccount) -> Result<Accoun
         enabled: account.enabled,
         account_type: account.account_type.into(),
         setup_step: account.setup_step.into(),
-        purchase_date: account.purchase_date,
-        expires_on: account.expires_on,
+        purchase_date: if has_builtin_lifecycle {
+            account.purchase_date
+        } else {
+            String::new()
+        },
+        expires_on: if has_builtin_lifecycle {
+            account.expires_on
+        } else {
+            String::new()
+        },
         cooldown_until: account.cooldown_until.map(|t| t.to_rfc3339()),
         cooldown_generic_until: account.cooldown_generic_until.map(|t| t.to_rfc3339()),
         cooldown_5h_until: account.cooldown_5h_until.map(|t| t.to_rfc3339()),

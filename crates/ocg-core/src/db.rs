@@ -199,7 +199,7 @@ pub const PRE_V3_BACKUP_FILE_PREFIX: &str = "data.sqlite.pre-v3.";
 /// database is rewritten to provider-only identity in v35.
 pub const PRE_V35_BACKUP_FILE_PREFIX: &str = "data.sqlite.pre-v35.";
 /// Highest schema this binary can open or migrate. Newer databases fail closed.
-pub const CURRENT_SCHEMA_VERSION: i32 = 40;
+pub const CURRENT_SCHEMA_VERSION: i32 = 41;
 /// Canonical source schema for the v35 provider-identity rewrite.
 pub const V34_SCHEMA_VERSION: i32 = 34;
 /// Historical v34 offering IDs. Used only by v1–v34 SQL and the v35 preflight
@@ -611,6 +611,30 @@ fn load_scope_on(conn: &Connection, scope: &ContractScope) -> Result<Option<Pers
     )
     .optional()
     .map_err(Into::into)
+}
+
+fn set_model_protocol_preferences_on(
+    conn: &Connection,
+    scope: &ContractScope,
+    preferences: &[(String, UpstreamProtocolKind)],
+) -> Result<()> {
+    let mut seen = HashSet::new();
+    for (model_id, protocol) in preferences {
+        let model_key = model_id.trim().to_ascii_lowercase();
+        anyhow::ensure!(
+            scope.kind_str() == "provider"
+                && crate::provider_contracts::selectable_model_protocol(scope.id(), *protocol)
+                && !model_key.is_empty()
+                && seen.insert(model_key.clone()),
+            "invalid or duplicate model protocol preference"
+        );
+        conn.execute(
+            "INSERT INTO provider_model_protocol_preferences(provider_id,model_id,protocol)
+             VALUES(?1,?2,?3) ON CONFLICT(provider_id,model_id) DO UPDATE SET protocol=excluded.protocol",
+            params![scope.id(), model_key, protocol.as_str()],
+        )?;
+    }
+    Ok(())
 }
 
 fn ensure_contract_scope_row(
@@ -2388,6 +2412,30 @@ fn migrate_to_v40(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// Model enablement and the selected CN protocol have independent lifetimes.
+fn migrate_to_v41(conn: &Connection) -> Result<()> {
+    if schema_version_on(conn)? >= 41 {
+        return Ok(());
+    }
+    let tx = Transaction::new_unchecked(conn, TransactionBehavior::Immediate)?;
+    let version = schema_version_on(&tx)?;
+    if version >= 41 {
+        return Ok(());
+    }
+    anyhow::ensure!(version == 40, "v41 requires schema v40");
+    tx.execute_batch(
+        "CREATE TABLE IF NOT EXISTS provider_model_protocol_preferences (
+            provider_id TEXT NOT NULL CHECK(provider_id IN ('minimax', 'kimi')),
+            model_id TEXT NOT NULL,
+            protocol TEXT NOT NULL CHECK(protocol IN ('chat_completions', 'messages')),
+            PRIMARY KEY(provider_id, model_id)
+         );
+         INSERT OR REPLACE INTO schema_version(version) VALUES(41);",
+    )?;
+    tx.commit()?;
+    Ok(())
+}
+
 /// v39 preserves template provenance independently of routing configuration.
 fn migrate_to_v39(conn: &Connection) -> Result<()> {
     if schema_version_on(conn)? >= 39 {
@@ -3298,6 +3346,7 @@ impl Database {
         ensure_dynamic_provider_tables(&db.conn)?;
         migrate_to_v39(&db.conn)?;
         migrate_to_v40(&db.conn)?;
+        migrate_to_v41(&db.conn)?;
         Ok(db)
     }
 
@@ -4704,6 +4753,27 @@ impl Database {
         let mut persisted = PersistedContracts::default();
         {
             let mut stmt = self.conn.prepare(
+                "SELECT provider_id, model_id, protocol FROM provider_model_protocol_preferences ORDER BY provider_id, model_id",
+            )?;
+            let rows = stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })?;
+            for row in rows {
+                let (provider_id, model_id, protocol) = row?;
+                let protocol = UpstreamProtocolKind::try_from(protocol.as_str())?;
+                persisted
+                    .preferences
+                    .entry(ContractScope::provider(&provider_id))
+                    .or_default()
+                    .push((model_id, protocol));
+            }
+        }
+        {
+            let mut stmt = self.conn.prepare(
                 "SELECT scope_kind, scope_id, catalog_models_json, catalog_refreshed_at,
                         catalog_source, catalog_source_url, revision, updated_at
                  FROM provider_contract_scopes",
@@ -4811,6 +4881,19 @@ impl Database {
         rows: &[(String, UpstreamProtocolKind, ProtocolOverrideState)],
         now: DateTime<Utc>,
     ) -> Result<PersistedScopeRow> {
+        self.set_model_protocol_settings(scope, rows, &[], now)
+    }
+
+    /// `preferences` is merged into the saved CN protocol choices; an empty
+    /// slice leaves existing preferences untouched. Only
+    /// `reset_provider_static_model_protocols` clears them.
+    pub fn set_model_protocol_settings(
+        &self,
+        scope: &ContractScope,
+        rows: &[(String, UpstreamProtocolKind, ProtocolOverrideState)],
+        preferences: &[(String, UpstreamProtocolKind)],
+        now: DateTime<Utc>,
+    ) -> Result<PersistedScopeRow> {
         anyhow::ensure!(
             !rows.is_empty(),
             "model protocol override batch must be nonempty"
@@ -4820,6 +4903,7 @@ impl Database {
         for (model_id, protocol, state) in rows {
             set_model_protocol_override_on(&tx, scope, model_id, *protocol, *state, now)?;
         }
+        set_model_protocol_preferences_on(&tx, scope, preferences)?;
         bump_scope_revision_on(&tx, scope, now)?;
         let scope = load_scope_on(&tx, scope)?
             .ok_or_else(|| anyhow::anyhow!("contract scope was not persisted"))?;
@@ -4845,6 +4929,10 @@ impl Database {
         );
         let tx = self.conn.unchecked_transaction()?;
         ensure_contract_scope_row(&tx, scope, now)?;
+        tx.execute(
+            "DELETE FROM provider_model_protocol_preferences WHERE provider_id=?1",
+            [scope.id()],
+        )?;
         tx.execute(
             "DELETE FROM provider_contract_model_protocols
              WHERE scope_kind = ?1 AND scope_id = ?2",
@@ -5515,6 +5603,20 @@ impl Database {
                     override_row.updated_at,
                 )?;
             }
+            tx.execute(
+                "DELETE FROM provider_model_protocol_preferences WHERE provider_id=?1",
+                [scope.id()],
+            )?;
+            set_model_protocol_preferences_on(
+                &tx,
+                scope,
+                record
+                    .provider_contracts
+                    .preferences
+                    .get(scope)
+                    .map(Vec::as_slice)
+                    .unwrap_or(&[]),
+            )?;
         }
 
         ensure_dynamic_singleton_accounts_on(&tx)?;

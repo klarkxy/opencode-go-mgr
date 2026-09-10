@@ -10,6 +10,7 @@ import {
   linkedAccountIdSet,
   linksForPlatform,
   platformGroupLabel,
+  platformInferenceEndpoint,
   platformModelCandidates,
   platformManualGroup,
   platformPriceFlags,
@@ -17,6 +18,35 @@ import {
   platformPriceRows,
   platformUnavailableReasonKey,
 } from "./platform-accounts.ts";
+
+test("platform inference endpoint mirrors the backend derivation per protocol", () => {
+  assert.equal(
+    platformInferenceEndpoint("https://newapi.example.com", "chat_completions"),
+    "https://newapi.example.com/v1/chat/completions",
+  );
+  assert.equal(
+    platformInferenceEndpoint("https://newapi.example.com", "responses"),
+    "https://newapi.example.com/v1/responses",
+  );
+  assert.equal(
+    platformInferenceEndpoint("https://newapi.example.com", "messages"),
+    "https://newapi.example.com/v1/messages",
+  );
+  // A saved base carrying /v1 or a trailing slash normalizes to the site root.
+  assert.equal(
+    platformInferenceEndpoint("https://newapi.example.com/v1", "chat_completions"),
+    "https://newapi.example.com/v1/chat/completions",
+  );
+  assert.equal(
+    platformInferenceEndpoint("https://newapi.example.com/", "messages"),
+    "https://newapi.example.com/v1/messages",
+  );
+  // Non-URLs, non-http(s) schemes, and credentialed URLs are never derived.
+  assert.equal(platformInferenceEndpoint("not a url", "chat_completions"), null);
+  assert.equal(platformInferenceEndpoint("ftp://example.com", "chat_completions"), null);
+  assert.equal(platformInferenceEndpoint("https://user:pass@example.com", "chat_completions"), null);
+  assert.equal(platformInferenceEndpoint("  ", "chat_completions"), null);
+});
 
 function price(overrides: Partial<PlatformPrice> = {}): PlatformPrice {
   return {

@@ -15,7 +15,12 @@
       :show-icon="false"
       style="margin-bottom: 12px"
     >
-      {{ t("没有可关联的 Custom API 账号；请先在新增账号中粘贴 Key 创建。") }}
+      <div class="platform-link-empty">
+        <span>{{ t("没有可关联的 Custom API 账号。") }}</span>
+        <n-button size="small" secondary :disabled="busy" @click="emit('addKey')">
+          {{ t("添加 Key") }}
+        </n-button>
+      </div>
     </n-alert>
     <n-form v-else label-placement="top" @submit.prevent="submit">
       <n-form-item :label="t('Custom API 账号')" required>
@@ -90,6 +95,7 @@ import { platformGroupLabel, platformManualGroup } from "../domain/platform-acco
 import { t } from "../i18n/index.ts";
 import { useLocalizedModalCloseLabel } from "../utils/modal-close-label.ts";
 
+
 const props = defineProps<{
   show: boolean;
   parent: PlatformAccount | null;
@@ -101,6 +107,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   "update:show": [show: boolean];
   submit: [selection: { accountId: string; group: { id: string | null; platform: string | null } }];
+  /** Empty-state escape hatch: create a Key for this parent directly. */
+  addKey: [];
 }>();
 
 useLocalizedModalCloseLabel(computed(() => props.show), "platform-link-modal");
@@ -163,3 +171,13 @@ function submit(): void {
   emit("submit", { accountId: selectedAccountId.value, group: picked });
 }
 </script>
+
+<style scoped>
+.platform-link-empty {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+</style>

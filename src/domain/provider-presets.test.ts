@@ -22,6 +22,7 @@ import {
   resolveProviderPreset,
   type ProviderPreset,
 } from "./provider-presets.ts";
+import { PROVIDER_FAMILIES } from "./provider-families.ts";
 import { emptyDynamicProviderDraft, buildDynamicProviderCreateBody, buildDynamicProviderUpdateBody, validateDynamicProviderDraft, type DynamicProviderDraft } from "./dynamic-provider.ts";
 
 function samplePreset(extra: Partial<ProviderPreset> = {}): ProviderPreset {
@@ -45,6 +46,53 @@ test("shipped preset data satisfies the frozen contract", () => {
   const parsed = parseProviderPresets(rawPresets);
   assert.equal(parsed.length, rawPresets.length);
   assert.equal(new Set(parsed.map((preset) => preset.id)).size, parsed.length);
+});
+
+test("every shipped preset's family resolves to a known PROVIDER_FAMILIES entry", () => {
+  const familyIds = new Set(PROVIDER_FAMILIES.map((family) => family.id));
+  const seenVariantsByFamily = new Map<string, Set<string>>();
+  const multiPresetFamilies = new Set<string>();
+  for (const preset of PROVIDER_PRESETS) {
+    assert.ok(preset.family, `${preset.id} is missing a family id`);
+    assert.ok(
+      familyIds.has(preset.family),
+      `${preset.id} references unknown family ${preset.family}`,
+    );
+    const groupSize = PROVIDER_PRESETS.filter((other) => other.family === preset.family).length;
+    if (groupSize > 1) {
+      multiPresetFamilies.add(preset.family);
+      assert.ok(preset.variant, `${preset.id} is in a multi-preset family but has no variant`);
+      const seen = seenVariantsByFamily.get(preset.family) ?? new Set();
+      assert.ok(
+        !seen.has(preset.variant!),
+        `duplicate variant ${preset.variant} in family ${preset.family}`,
+      );
+      seen.add(preset.variant!);
+      seenVariantsByFamily.set(preset.family, seen);
+    } else {
+      assert.equal(preset.variant, undefined, `${preset.id} is a singleton but carries a variant`);
+    }
+  }
+  // Sanity: at least the well-known multi-preset vendors are grouped.
+  for (const expected of ["tencent", "zhipu", "alibaba", "bytedance"]) {
+    assert.ok(multiPresetFamilies.has(expected), `${expected} must be a multi-preset family`);
+  }
+});
+
+test("shape issues flag malformed family and variant fields", () => {
+  // Non-empty trimmed string is accepted; absent stays accepted.
+  assert.deepEqual(providerPresetShapeIssues(samplePreset({ family: "anthropic" })), []);
+  assert.deepEqual(providerPresetShapeIssues(samplePreset({ family: "anthropic", variant: "X" })), []);
+  // Empty or whitespace-only family / variant is rejected.
+  assert.ok(providerPresetShapeIssues(samplePreset({ family: "" })).length > 0);
+  assert.ok(providerPresetShapeIssues(samplePreset({ family: "  " })).length > 0);
+  assert.ok(providerPresetShapeIssues(samplePreset({ family: "anthropic", variant: "" })).length > 0);
+  assert.ok(providerPresetShapeIssues(samplePreset({ family: "anthropic", variant: "  " })).length > 0);
+  // Non-string family / variant is rejected.
+  assert.ok(providerPresetShapeIssues(samplePreset({ family: 0 as never })).length > 0);
+  assert.ok(providerPresetShapeIssues(samplePreset({ family: "anthropic", variant: 1 as never })).length > 0);
+  // A variant without a family is a shape issue: it has nothing to scope to.
+  assert.ok(providerPresetShapeIssues(samplePreset({ variant: "X" })).length > 0);
 });
 
 test("shape issues flag bad rows and the parser skips them", () => {
@@ -129,6 +177,20 @@ test("grouping and search split official presets from aggregators", () => {
   assert.ok(hits.some((preset) => preset.id === "anthropic"));
   assert.ok(!hits.some((preset) => preset.id === "openrouter"));
   assert.equal(filterProviderPresets(PROVIDER_PRESETS, "  ").length, PROVIDER_PRESETS.length);
+});
+
+test("preset search matches family labels, variants, and endpoint hosts", () => {
+  // Family label reaches every variant of the family.
+  const tencentHits = filterProviderPresets(PROVIDER_PRESETS, "tencent");
+  assert.ok(tencentHits.length > 1);
+  assert.ok(tencentHits.some((preset) => preset.id === "tencent-hunyuan"));
+  // Variant label reaches one exact preset.
+  const variantHits = filterProviderPresets(PROVIDER_PRESETS, "enterprise lite");
+  assert.ok(variantHits.some((preset) => preset.id === "tencent-enterprise-lite"));
+  // Endpoint host reaches the preset whose endpoint uses it.
+  const deepseek = PROVIDER_PRESETS.find((preset) => preset.id === "deepseek")!;
+  const hostHits = filterProviderPresets(PROVIDER_PRESETS, new URL(deepseek.endpointUrl).host);
+  assert.ok(hostHits.some((preset) => preset.id === "deepseek"));
 });
 
 test("defaultModels validate as a non-empty array of trimmed unique IDs", () => {

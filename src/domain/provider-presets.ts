@@ -1,4 +1,5 @@
 import presetsJson from "../../resources/provider-presets.json" with { type: "json" };
+import { familyOf } from "./provider-families.ts";
 import {
   emptyDynamicProviderDraft,
   type DynamicAuthKind,
@@ -20,6 +21,19 @@ export interface ProviderPreset {
    * rows keep their behavior; the UI never infers this from names.
    */
   offering?: ProviderPresetOffering;
+  /**
+   * Vendor family id used to group presets in the chooser. Absent or unknown
+   * ids fall back to a synthesized single-preset family so legacy rows still
+   * render. Multi-preset families carry a `variant`; single-preset families
+   * omit it.
+   */
+  family?: string;
+  /**
+   * Short label within a vendor family (e.g. "Token Plan (CN)").
+   * Present only when `family` is set; a variant without a family is a shape
+   * issue. Variants are unique within a family.
+   */
+  variant?: string;
   /**
    * Vetted default model IDs seeded verbatim on create: exact upstream IDs,
    * never auto-discovered and never typed from a raw /models listing.
@@ -94,6 +108,17 @@ export function providerPresetShapeIssues(raw: unknown, index = 0): string[] {
   if (row.offering !== undefined
     && !PRESET_OFFERINGS.includes(row.offering as ProviderPresetOffering)) {
     issues.push(`${where}: offering must be plan or api when present`);
+  }
+  if (row.family !== undefined
+    && (typeof row.family !== "string" || !row.family.trim())) {
+    issues.push(`${where}: family must be a non-empty string when present`);
+  }
+  if (row.variant !== undefined) {
+    if (typeof row.variant !== "string" || !row.variant.trim()) {
+      issues.push(`${where}: variant must be a non-empty string when present`);
+    } else if (row.family === undefined) {
+      issues.push(`${where}: variant requires family to be set`);
+    }
   }
   if (row.endpointPlaceholder !== undefined
     && (typeof row.endpointPlaceholder !== "string" || !row.endpointPlaceholder.trim())) {
@@ -181,16 +206,34 @@ export function providerPresetOfferingForId(
   return preset ? providerPresetOffering(preset) : "api";
 }
 
+/**
+ * Case-insensitive substring match over everything the chooser and the
+ * Providers rail show for a preset: its name and id, the vendor family label,
+ * the variant label, and the endpoint host. This is the single predicate —
+ * callers must not chain a second filter on top, or family/host matches
+ * would be filtered away.
+ */
 export function filterProviderPresets(
   presets: readonly ProviderPreset[],
   query: string,
 ): ProviderPreset[] {
   const needle = query.trim().toLocaleLowerCase();
   if (!needle) return [...presets];
-  return presets.filter((preset) => (
-    preset.name.toLocaleLowerCase().includes(needle)
-    || preset.id.toLocaleLowerCase().includes(needle)
-  ));
+  return presets.filter((preset) => {
+    if (preset.name.toLocaleLowerCase().includes(needle)) return true;
+    if (preset.id.toLocaleLowerCase().includes(needle)) return true;
+    if (preset.variant?.toLocaleLowerCase().includes(needle)) return true;
+    if (familyOf(preset).label.toLocaleLowerCase().includes(needle)) return true;
+    const raw = preset.endpointUrl || preset.endpointPlaceholder || "";
+    if (!raw) return false;
+    let host = raw;
+    try {
+      host = new URL(raw).host;
+    } catch {
+      // Placeholder hosts that are not full URLs match as typed.
+    }
+    return host.toLocaleLowerCase().includes(needle);
+  });
 }
 
 /**

@@ -16,14 +16,44 @@
       <n-alert v-if="formError" type="error" class="form-error" role="alert">
         {{ formError }}
       </n-alert>
-      <n-alert
-        v-if="isDynamicPlan"
-        type="default"
-        :show-icon="false"
-        class="form-error"
-      >
-        {{ t("账号不拥有 Endpoint、协议或模型映射。") }}
+      <n-alert v-if="externalError" type="error" class="form-error" role="alert">
+        {{ externalError }}
       </n-alert>
+      <p v-if="platformParent && !isDynamicPlan" class="connection-summary__note form-error">
+        {{ t("Endpoint 与协议路径由平台账号 {name} 托管；账号只保存名称、Key 与模型映射。", { name: platformParent.name }) }}
+      </p>
+      <dl
+        v-if="isDynamicPlan"
+        class="connection-summary form-error"
+        :aria-label="t('连接信息')"
+      >
+        <template v-if="dynamicDetail">
+          <div class="connection-summary__row">
+            <dt>{{ t("目标供应商") }}</dt>
+            <dd>{{ dynamicDetail.name }}</dd>
+          </div>
+          <div class="connection-summary__row">
+            <dt>{{ t("API 地址") }}</dt>
+            <dd><code>{{ dynamicDetail.endpoint_url }}</code></dd>
+          </div>
+          <div class="connection-summary__row">
+            <dt>{{ t("上游协议") }}</dt>
+            <dd>{{ protocolDisplayName(dynamicDetail.upstream_protocol) }}</dd>
+          </div>
+          <div class="connection-summary__row">
+            <dt>{{ t("模型映射") }}</dt>
+            <dd>{{ t("{count} 个", { count: dynamicDetail.models.length }) }}</dd>
+          </div>
+          <p class="connection-summary__note">
+            {{ t("账号只保存名称与 Key；连接始终使用以上供应商配置。") }}
+          </p>
+        </template>
+        <p v-else class="connection-summary__note">
+          {{ dynamicDetailLoading
+            ? t("正在加载连接信息…")
+            : t("连接信息由该供应商统一管理；账号只保存名称与 Key。") }}
+        </p>
+      </dl>
       <div class="modal-grid">
         <n-form-item path="name" :label="t('名称')">
           <n-input
@@ -112,11 +142,14 @@
           <div class="endpoint-field">
             <n-input
               v-model:value="form.endpointUrl"
-              :disabled="endpointLocked"
+              :disabled="endpointLocked || !!platformParent"
               :input-props="{ 'aria-label': t('API 地址') }"
               :placeholder="endpointPlaceholder"
             />
-            <p v-if="endpointLocked" class="field-hint">{{ endpointLockHint }}</p>
+            <p v-if="platformParent" class="field-hint">
+              {{ t("Endpoint 由平台账号 {name} 托管，随上游协议自动推导。", { name: platformParent.name }) }}
+            </p>
+            <p v-else-if="endpointLocked" class="field-hint">{{ endpointLockHint }}</p>
             <p v-else class="field-hint">
               {{ t("推荐填写不带 /v1 的 API 根地址；OCG 会自动补全 /v1 和协议路径。已带 /v1 时不会重复添加。") }}
             </p>
@@ -135,7 +168,9 @@
               :placeholder="t('上游协议')"
               :aria-label="t('上游协议')"
             />
-            <p class="field-hint">{{ t("所选协议对该账号下全部模型统一生效。") }}</p>
+            <p class="field-hint">{{ platformParent
+              ? t("协议仅用于从平台账号推导 Endpoint，对账号下全部模型统一生效。")
+              : t("所选协议对该账号下全部模型统一生效。") }}</p>
           </div>
         </n-form-item>
 
@@ -270,11 +305,13 @@ import {
   NSpace,
 } from "naive-ui";
 import { dashboardApi, type Account, type AccountInput, type AccountProtocol } from "../api/dashboard";
+import { providerApi, type DynamicProviderView } from "../api/providers.ts";
 import type { ProviderCatalogEntry, ProviderCatalogFormField } from "../api/providers.ts";
 import { t } from "../i18n/index.ts";
 import { localDateString } from "../domain/account-lifecycle.ts";
 import { findCatalogEntry, planFamilyLabel, planForAccount } from "../domain/plans.ts";
 import type { PlanDefinition } from "../domain/plans.ts";
+import { platformInferenceEndpoint } from "../domain/platform-accounts.ts";
 import { resolveAccountFormFields } from "../domain/account-form-fields.ts";
 import {
   accountCreatePayloadErrorKey,
@@ -348,6 +385,16 @@ const props = withDefaults(defineProps<{
   endpointLocked?: boolean;
   /** Concise parent-owned hint shown in place of the endpoint guidance. */
   endpointLockHint?: string;
+  /**
+   * Platform "Add Key" create context: the endpoint is prefilled from the
+   * parent-owned derivation and recalculates when the single editable
+   * protocol changes; the field itself stays read-only.
+   */
+  platformParent?: { name: string; baseUrl: string } | null;
+  /** Create-flow title override (e.g. the platform Add Key flow). */
+  titleOverride?: string;
+  /** Host-owned error (e.g. a failed platform create) shown above the form. */
+  externalError?: string;
   /** Inline rendering inside the Add Account chooser instead of a modal. */
   embedded?: boolean;
 }>(), {
@@ -358,6 +405,9 @@ const props = withDefaults(defineProps<{
   catalog: null,
   endpointLocked: false,
   endpointLockHint: "",
+  platformParent: null,
+  titleOverride: "",
+  externalError: "",
   embedded: false,
 });
 
@@ -382,6 +432,7 @@ let nextModelMappingRowId = 1;
 
 const isEdit = computed(() => !!props.account);
 const title = computed(() => {
+  if (props.titleOverride) return props.titleOverride;
   if (isEdit.value) return t("编辑账号");
   const plan = effectivePlan.value;
   return plan
@@ -552,6 +603,14 @@ const watchedPlanKey = computed(() => (
 watch(() => [props.show, watchedAccountId.value, watchedPlanKey.value], ([show]) => {
   if (show) {
     form.value = props.account ? formFromAccount(props.account) : blankForm();
+    // Platform Add Key prefill: the parent-owned derivation seeds the
+    // read-only endpoint for the default protocol.
+    if (!props.account && props.platformParent) {
+      form.value.endpointUrl = platformInferenceEndpoint(
+        props.platformParent.baseUrl,
+        form.value.upstreamProtocol ?? "chat_completions",
+      ) ?? "";
+    }
     nameWasEdited.value = isEdit.value;
     formRef.value?.restoreValidation();
     formError.value = "";
@@ -561,6 +620,44 @@ watch(() => [props.show, watchedAccountId.value, watchedPlanKey.value], ([show])
     selectedDiscoveredModels.value = [];
   }
 });
+
+// The single editable protocol recalculates the parent-owned endpoint.
+watch(() => form.value.upstreamProtocol, (protocol) => {
+  if (!props.platformParent || !protocol) return;
+  form.value.endpointUrl = platformInferenceEndpoint(props.platformParent.baseUrl, protocol) ?? "";
+});
+
+/**
+ * Read-only connection summary for accounts of a saved user-defined Provider:
+ * the exact endpoint/protocol and model count load from the existing details
+ * API — never inferred from the display name, and never carrying the Key.
+ * The generation guard keeps a slow or stale load from overwriting a newer
+ * selection; the draft itself is untouched either way.
+ */
+const dynamicDetail = ref<DynamicProviderView | null>(null);
+const dynamicDetailLoading = ref(false);
+let dynamicDetailGeneration = 0;
+watch(
+  () => [props.show, isDynamicPlan.value, effectivePlan.value?.provider_id ?? ""] as const,
+  ([visible, dynamic, providerId]) => {
+    const generation = ++dynamicDetailGeneration;
+    dynamicDetail.value = null;
+    dynamicDetailLoading.value = false;
+    if (!visible || !dynamic || !providerId) return;
+    dynamicDetailLoading.value = true;
+    providerApi.getDynamicProvider(providerId)
+      .then((detail) => {
+        if (generation === dynamicDetailGeneration) dynamicDetail.value = detail;
+      })
+      .catch(() => {
+        // Neutral fallback copy stays; the form itself is fully usable.
+      })
+      .finally(() => {
+        if (generation === dynamicDetailGeneration) dynamicDetailLoading.value = false;
+      });
+  },
+  { immediate: true },
+);
 
 function currentModelDiscoveryContext(): ModelDiscoveryContext {
   return {
@@ -721,6 +818,8 @@ async function discoverModels() {
 }
 
 async function handleSave() {
+  // The parent's mutation owns `busy`; never submit twice for one intent.
+  if (props.busy) return;
   try {
     await formRef.value?.validate();
   } catch {
@@ -822,6 +921,42 @@ async function handleSave() {
 
 .field-hint {
   margin: 6px 0 0;
+  color: var(--ocg-muted);
+  font-size: var(--ocg-font-xs);
+}
+
+.connection-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px 16px;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--ocg-border);
+  border-radius: 10px;
+  background: var(--ocg-canvas);
+}
+
+.connection-summary__row {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.connection-summary dt {
+  color: var(--ocg-muted);
+  font-size: var(--ocg-font-xs);
+}
+
+.connection-summary dd {
+  margin: 0;
+  color: var(--ocg-ink);
+  font-size: var(--ocg-font-sm);
+  overflow-wrap: anywhere;
+}
+
+.connection-summary__note {
+  grid-column: 1 / -1;
+  margin: 0;
   color: var(--ocg-muted);
   font-size: var(--ocg-font-xs);
 }

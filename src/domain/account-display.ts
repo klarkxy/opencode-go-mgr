@@ -81,7 +81,7 @@ export function accountStatusLabel(account: Account, now = Date.now()): string {
         time: formatCooldownRemainingUntil(account.cooldown_free_until, now),
       });
     }
-    return t("可用");
+    return t("已启用");
   }
   if (!accountIsReady(account)) return t("注册中");
   const draftLabel = accountRoutingDraftLabel(account);
@@ -93,13 +93,15 @@ export function accountStatusLabel(account: Account, now = Date.now()): string {
   }
   if (!account.enabled) return t("已禁用");
   if (isCooling(account, now)) return t("冷却中·剩 {time}", { time: formatCooldownRemaining(account, now) });
-  return t("可用");
+  // Ready + enabled is a configuration state, not a verified-availability
+  // claim: no connection test evidence is implied.
+  return t("已启用");
 }
 
 export function accountStatusTagType(account: Account, now = Date.now()): AccountStatusTagType {
   if (isZenFreeAccount(account)) {
     if (!account.enabled) return "default";
-    return isFreeCooling(account, now) ? "warning" : "success";
+    return isFreeCooling(account, now) ? "warning" : "default";
   }
   if (!accountIsReady(account)) return "warning";
   const draftLabel = accountRoutingDraftLabel(account);
@@ -107,7 +109,7 @@ export function accountStatusTagType(account: Account, now = Date.now()): Accoun
   if (account.auth_error) return "error";
   if (!account.enabled) return "default";
   if (isCooling(account, now)) return "warning";
-  return "success";
+  return "default";
 }
 
 function accountExpiryDays(account: Pick<Account, "expires_on">, now = Date.now()): number {

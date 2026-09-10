@@ -387,7 +387,7 @@ import {
 } from "../domain/account-providers.ts";
 import { isCustomApiAccount } from "../domain/custom-account.ts";
 import { localDateString } from "../domain/account-lifecycle.ts";
-import { planLabel } from "../domain/plans.ts";
+import { planForAccount, planLabel } from "../domain/plans.ts";
 import type { AccountUsageEdits, UsageLimitView } from "../domain/useAccountUsage.ts";
 import { t } from "../i18n/index.ts";
 import AccountUsageEditor from "./AccountUsageEditor.vue";
@@ -436,9 +436,14 @@ const isCustom = computed(() => isCustomApiAccount(props.account));
 const isOfficialCn = computed(() => isOfficialCnPlanAccount(props.account));
 const isOllamaCloud = computed(() => isOllamaCloudAccount(props.account));
 const ollamaNeedsBilling = computed(() => !props.account.ollama_billing_tier);
+const lifecyclePlan = computed(() => planForAccount(props.account, props.catalog));
+// Purchase/expiry UI is only for built-in billed families: Custom API, Zen
+// Free, and user-defined (dynamic) Providers model no billing cadence, so
+// their (possibly synthetic or blanked) dates stay hidden.
 const hasValidityPeriod = computed(() => (
   accountIsReady(props.account)
-  && !isCustom.value
+  && !!lifecyclePlan.value
+  && lifecyclePlan.value.id !== "custom-endpoint"
   && !isZen.value
   && !!props.account.purchase_date
   && !!props.account.expires_on

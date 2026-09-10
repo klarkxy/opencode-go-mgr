@@ -7,6 +7,102 @@ use std::sync::Arc;
 const TEST_HOST_SECRET: &str = "ocg-db-v27-test-host";
 
 #[test]
+fn v41_concurrent_migration_rechecks_version_under_the_writer_lock() {
+    let dir = temp_data_dir("v41-concurrent");
+    let path = dir.join("data.sqlite");
+    let conn = Connection::open(&path).unwrap();
+    conn.execute_batch("CREATE TABLE schema_version(version INTEGER PRIMARY KEY); INSERT INTO schema_version VALUES(40);").unwrap();
+    drop(conn);
+    let barrier = Arc::new(std::sync::Barrier::new(2));
+    let mut workers = Vec::new();
+    for _ in 0..2 {
+        let path = path.clone();
+        let barrier = barrier.clone();
+        workers.push(std::thread::spawn(move || {
+            let conn = Connection::open(path).unwrap();
+            conn.busy_timeout(std::time::Duration::from_secs(5))
+                .unwrap();
+            barrier.wait();
+            migrate_to_v41(&conn).unwrap();
+            assert_eq!(schema_version_on(&conn).unwrap(), 41);
+        }));
+    }
+    for worker in workers {
+        worker.join().unwrap();
+    }
+    let conn = Connection::open(&path).unwrap();
+    assert_eq!(
+        conn.query_row(
+            "SELECT COUNT(*) FROM provider_model_protocol_preferences",
+            [],
+            |r| r.get::<_, i64>(0)
+        )
+        .unwrap(),
+        0
+    );
+    drop(conn);
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn v41_model_preferences_migrate_and_survive_reopen_without_enabling_models() {
+    let dir = temp_data_dir("model-preferences");
+    let db = Database::open(dir.clone()).unwrap();
+    let scope = ContractScope::provider(MINIMAX_PROVIDER_ID);
+    let now = Utc::now();
+    let rows = vec![(
+        "MiniMax-M3".to_string(),
+        UpstreamProtocolKind::ChatCompletions,
+        ProtocolOverrideState::ForceOff,
+    )];
+    db.set_model_protocol_overrides(&scope, &rows, now).unwrap();
+    db.conn.execute_batch("DROP TABLE provider_model_protocol_preferences; DELETE FROM schema_version WHERE version=41;").unwrap();
+    drop(db);
+    let db = Database::open(dir.clone()).unwrap();
+    assert_eq!(schema_version_on(&db.conn).unwrap(), 41);
+    let before = db.load_persisted_contracts().unwrap();
+    assert!(before.preferences.is_empty());
+    assert_eq!(
+        before.overrides[&scope][0].state,
+        ProtocolOverrideState::ForceOff
+    );
+    assert!(
+        db.set_model_protocol_settings(
+            &scope,
+            &[(
+                "MiniMax-M3".into(),
+                UpstreamProtocolKind::ChatCompletions,
+                ProtocolOverrideState::ForceOn
+            )],
+            &[("MiniMax-M3".into(), UpstreamProtocolKind::Responses)],
+            now
+        )
+        .is_err()
+    );
+    assert_eq!(db.load_persisted_contracts().unwrap(), before);
+    db.set_model_protocol_settings(
+        &scope,
+        &rows,
+        &[("MiniMax-M3".into(), UpstreamProtocolKind::ChatCompletions)],
+        now,
+    )
+    .unwrap();
+    drop(db);
+    let reopened = Database::open(dir.clone()).unwrap();
+    let saved = reopened.load_persisted_contracts().unwrap();
+    assert_eq!(
+        saved.preferences[&scope],
+        vec![("minimax-m3".into(), UpstreamProtocolKind::ChatCompletions)]
+    );
+    assert_eq!(
+        saved.overrides[&scope][0].state,
+        ProtocolOverrideState::ForceOff
+    );
+    drop(reopened);
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn v39_preserves_existing_provider_configuration_and_adds_optional_provenance() {
     let conn = Connection::open_in_memory().unwrap();
     conn.execute_batch("CREATE TABLE schema_version(version INTEGER PRIMARY KEY); INSERT INTO schema_version VALUES(38);").unwrap();

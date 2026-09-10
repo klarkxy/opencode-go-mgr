@@ -173,6 +173,15 @@ struct PortableProviderContract {
     catalog_source_url: String,
     evidence: Vec<PortableProtocolEvidence>,
     overrides: Vec<PortableProtocolOverride>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    preferences: Vec<PortableProtocolPreference>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PortableProtocolPreference {
+    model_id: String,
+    protocol: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -322,6 +331,7 @@ impl Zeroize for PortableProviderContract {
         self.catalog_source_url.zeroize();
         self.evidence.zeroize();
         self.overrides.zeroize();
+        self.preferences.zeroize();
     }
 }
 
@@ -340,6 +350,13 @@ impl Zeroize for PortableProtocolOverride {
         self.model_id.zeroize();
         self.protocol.zeroize();
         self.state.zeroize();
+    }
+}
+
+impl Zeroize for PortableProtocolPreference {
+    fn zeroize(&mut self) {
+        self.model_id.zeroize();
+        self.protocol.zeroize();
     }
 }
 
@@ -953,6 +970,16 @@ fn export_payload(state: &CoreState) -> Result<(PortablePayload, u64, u64), Tran
                 catalog_source_url: row.catalog_source_url.clone(),
                 evidence,
                 overrides,
+                preferences: persisted_contracts
+                    .preferences
+                    .get(&row.scope)
+                    .into_iter()
+                    .flatten()
+                    .map(|(model_id, protocol)| PortableProtocolPreference {
+                        model_id: model_id.clone(),
+                        protocol: protocol.as_str().to_string(),
+                    })
+                    .collect(),
             }
         })
         .collect::<Vec<_>>();
@@ -1835,7 +1862,25 @@ fn persisted_contracts_from_portable(
                 updated_at: default_time,
             });
         }
-        persisted.overrides.insert(scope, override_rows);
+        persisted.overrides.insert(scope.clone(), override_rows);
+        let mut preference_rows = Vec::new();
+        let mut preference_keys = HashSet::new();
+        for preference in &contract.preferences {
+            let model_id = preference.model_id.trim().to_ascii_lowercase();
+            let protocol = UpstreamProtocolKind::try_from(preference.protocol.as_str())
+                .map_err(|_| "node migration contains an invalid preferred protocol".to_string())?;
+            if model_id.is_empty()
+                || !crate::provider_contracts::selectable_model_protocol(scope_id, protocol)
+                || !preference_keys.insert(model_id.clone())
+            {
+                return Err(
+                    "node migration contains an invalid or duplicate model protocol preference"
+                        .to_string(),
+                );
+            }
+            preference_rows.push((model_id, protocol));
+        }
+        persisted.preferences.insert(scope, preference_rows);
     }
     Ok(persisted)
 }

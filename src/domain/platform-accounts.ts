@@ -34,6 +34,36 @@ export interface PlatformKindOption {
 
 export const PLATFORM_KIND_OPTION_ID_PREFIX = "platform:";
 
+/**
+ * Parent-owned inference URL for a linked (or to-be-linked) Key, mirroring
+ * the backend's `platform::inference_endpoint`: the site root with any `/v1`
+ * suffix stripped, then `/v1/chat/completions`, `/v1/responses`, or
+ * `/v1/messages` by protocol. Returns null for values that are not absolute
+ * http(s) URLs or carry credentials; nothing is guessed from names.
+ */
+export function platformInferenceEndpoint(
+  baseUrl: string,
+  protocol: AccountProtocol,
+): string | null {
+  const trimmed = baseUrl.trim();
+  if (!trimmed) return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+  if (parsed.username || parsed.password) return null;
+  const suffix = protocol === "responses"
+    ? "responses"
+    : protocol === "messages"
+      ? "messages"
+      : "chat/completions";
+  const root = trimmed.replace(/\/+$/u, "").replace(/\/v1$/iu, "");
+  return `${root}/v1/${suffix}`;
+}
+
 export function buildPlatformKindOptions(): PlatformKindOption[] {
   return (Object.entries(PLATFORM_KIND_LABELS) as [PlatformKind, string][]).map(([kind, label]) => ({
     optionId: `${PLATFORM_KIND_OPTION_ID_PREFIX}${kind}`,

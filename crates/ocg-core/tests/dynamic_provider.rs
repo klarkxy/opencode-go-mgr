@@ -271,6 +271,27 @@ async fn preset_provenance_survives_save_edit_and_can_be_cleared() {
     assert_eq!(status, StatusCode::OK, "{created}");
     assert_eq!(created["provider"]["presetId"], "azure-openai");
     let id = created["provider"]["id"].as_str().unwrap();
+    let (_, accounts) = send_json(&harness, Method::GET, "/accounts", &Value::Null).await;
+    let account = accounts["accounts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|account| account["providerId"] == id)
+        .unwrap();
+    assert_eq!(account["purchaseDate"], "");
+    assert_eq!(account["expiresOn"], "");
+    let (_, second) = send_json(
+        &harness,
+        Method::POST,
+        "/accounts",
+        &cas(
+            &harness,
+            json!({"providerId":id,"name":"Second Azure Key","key":"sk-second"}),
+        ),
+    )
+    .await;
+    assert_eq!(second["account"]["purchaseDate"], "");
+    assert_eq!(second["account"]["expiresOn"], "");
     let path = format!("/providers/{id}");
     let (status, loaded) = send_json(&harness, Method::GET, &path, &Value::Null).await;
     assert_eq!(status, StatusCode::OK, "{loaded}");

@@ -286,6 +286,11 @@ export interface ModelProtocolOverrideUpdate {
   model_id: string;
   protocol: ProviderProtocol;
   state: ProtocolOverrideState;
+  /**
+   * Persist this item's protocol as the model's saved selection, atomically
+   * with the override write. Omitted/false preserves the current choice.
+   */
+  preferred?: boolean;
 }
 
 export interface ProtocolProbeResult {
@@ -658,7 +663,7 @@ export const providerApi = {
   updateModelProtocolOverrides: async (
     scopeKind: ContractScopeKind,
     scopeId: string,
-    overrides: { model_id: string; protocol: ProviderProtocol; state: ProtocolOverrideState }[],
+    overrides: ModelProtocolOverrideUpdate[],
   ): Promise<ProviderContractsResponse> => {
     const control = useControlPlaneStore();
     if (!control.hasTokens()) await control.refresh();
@@ -671,6 +676,7 @@ export const providerApi = {
             modelId: item.model_id,
             protocol: item.protocol,
             state: item.state,
+            ...(item.preferred !== undefined ? { preferred: item.preferred } : {}),
           })) } satisfies WithoutExpectation<ModelProtocolOverridesUpdate>,
           expectation,
         )));

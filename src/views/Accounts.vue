@@ -81,6 +81,7 @@
       <PlatformAccountsSection
         ref="platformSectionRef"
         :accounts="accounts"
+        :catalog="providerCatalog"
         @changed="loadAccounts"
         @account-updated="replaceAccount"
         @links-change="onPlatformLinksChange"
@@ -491,7 +492,7 @@ const planFilterOptions = computed(() => [
 
 const statusFilterOptions = computed(() => [
   { value: "all", label: t("全部状态") },
-  { value: "available", label: t("可用") },
+  { value: "available", label: t("已启用") },
   { value: "cooling", label: t("冷却中") },
   { value: "auth-error", label: t("不可用") },
   { value: "disabled", label: t("已禁用") },

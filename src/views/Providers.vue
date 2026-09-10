@@ -39,24 +39,36 @@
             v-model:value="presetQuery"
             size="small"
             clearable
-            :placeholder="t('搜索预设')"
-            :input-props="{ 'aria-label': t('搜索预设') }"
+            :placeholder="browsingPresets ? t('搜索预设') : t('搜索供应商')"
+            :input-props="{ 'aria-label': browsingPresets ? t('搜索预设') : t('搜索供应商') }"
           />
         </div>
-        <div class="providers-rail-panes">
+        <div class="providers-rail-list">
           <section v-for="pane in scopeMenuPanes" :key="pane.id" class="providers-rail-pane">
             <h3 class="providers-rail-pane__label">{{ pane.label }}</h3>
-            <div class="providers-rail-pane__items">
-              <n-menu
-                :value="selectedKey"
-                :options="pane.options"
-                :aria-label="`${t('选择供应商范围')} · ${pane.label}`"
-                @update:value="selectScopeKey"
-              />
-            </div>
+            <n-menu
+              :value="selectedKey"
+              :options="pane.options"
+              :default-expanded-keys="railDefaultExpandedKeys"
+              :aria-label="`${t('选择供应商范围')} · ${pane.label}`"
+              @update:value="selectScopeKey"
+            />
           </section>
+          <p v-if="railFilteredOut" class="providers-rail-empty">
+            {{ browsingPresets ? t("无匹配预设") : t("无匹配供应商") }}
+          </p>
         </div>
-        <p v-if="presetFilteredOut" class="providers-rail-empty">{{ t("无匹配预设") }}</p>
+        <div class="providers-rail-footer">
+          <n-button
+            secondary
+            size="small"
+            block
+            :disabled="inlineFormBusy"
+            @click="togglePresetBrowsing"
+          >
+            {{ browsingPresets ? t("已有连接") : t("添加新服务") }}
+          </n-button>
+        </div>
       </aside>
 
       <div class="providers-main">
@@ -110,20 +122,22 @@
             <div><dt>{{ t("上游协议") }}</dt><dd>{{ protocolDisplayName(selectedDynamic.upstream_protocol) }}</dd></div>
             <div><dt>{{ t("鉴权方式") }}</dt><dd>{{ authDisplayName(selectedDynamic.auth_kind) }}</dd></div>
           </dl>
-          <table class="providers-alias-table">
-            <thead>
-              <tr>
-                <th>{{ t("对外模型名") }}</th>
-                <th>{{ t("上游模型 ID") }}</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="model in selectedDynamic.models" :key="model.public_model">
-                <td><code>{{ model.public_model }}</code></td>
-                <td><code>{{ model.upstream_model }}</code></td>
-              </tr>
-            </tbody>
-          </table>
+          <div class="providers-alias-table-wrap">
+            <table class="providers-alias-table">
+              <thead>
+                <tr>
+                  <th>{{ t("对外模型名") }}</th>
+                  <th>{{ t("上游模型 ID") }}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="model in selectedDynamic.models" :key="model.public_model">
+                  <td><code>{{ model.public_model }}</code></td>
+                  <td><code>{{ model.upstream_model }}</code></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </section>
 
         <section v-else-if="selectedPreset" class="providers-section" aria-labelledby="preset-provider-title">
@@ -276,7 +290,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onActivated, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, h, onActivated, onMounted, onUnmounted, ref, watch } from "vue";
+import type { VNodeChild } from "vue";
 import {
   NAlert,
   NButton,
@@ -308,6 +323,7 @@ import ProviderModelMatrix from "../components/ProviderModelMatrix.vue";
 import PricingCatalog from "../components/PricingCatalog.vue";
 import DynamicProviderModal from "../components/DynamicProviderModal.vue";
 import OpenCodeInviteUrlField from "../components/OpenCodeInviteUrlField.vue";
+import ProviderBrandMark from "../components/ProviderBrandMark.vue";
 import { locale, t } from "../i18n/index.ts";
 import { dashboardErrorDetail } from "../utils/errors.ts";
 import { applyAppViewSearchParams, PROVIDER_OTHER_TAB, readProviderScopeQuery, resolveAppViewKey } from "./app-navigation.ts";
@@ -331,8 +347,14 @@ import {
   groupProviderPresetsByOffering,
   providerPresetOffering,
   providerPresetOfferingForId,
+  type ProviderPreset,
 } from "../domain/provider-presets.ts";
 import { providerScopeOffering } from "../domain/plans.ts";
+import {
+  familyOf,
+  groupPresetsByFamily,
+  type ProviderFamily,
+} from "../domain/provider-families.ts";
 import {
   CATALOG_SOURCE_CUSTOM_DISCOVERY,
   CATALOG_SOURCE_DECLARED,
@@ -352,6 +374,12 @@ const editingDynamic = ref<DynamicProviderView | null>(null);
 const createPresetId = ref<string | null>(null);
 /** In-flight save/test/discovery inside the inline preset create form. */
 const inlineFormBusy = ref(false);
+/**
+ * Rail mode: saved configured scopes (default) vs local preset browsing.
+ * Browsing is a pure UI mode — preset entries never hit the backend and
+ * never imply a configured Provider.
+ */
+const browsingPresets = ref(false);
 const presetQuery = ref("");
 const loading = ref(false);
 const loadError = ref("");
@@ -385,15 +413,18 @@ const selectedDynamic = computed(() => {
   return dynamicDetails.value.find((item) => item.id === id) ?? null;
 });
 // Preset entries are a local UI scope only (scope_kind=preset): they never hit
-// the backend and never imply a configured Provider.
+// the backend and never imply a configured Provider. Matching is the single
+// filterProviderPresets pass (family label, name, id, variant, endpoint host).
 const presetGroups = computed(() => (
   groupProviderPresetsByOffering(filterProviderPresets(PROVIDER_PRESETS, presetQuery.value))
 ));
-const presetFilteredOut = computed(() => (
-  Boolean(presetQuery.value.trim())
-  && presetGroups.value.plan.length === 0
-  && presetGroups.value.api.length === 0
-));
+const railFilteredOut = computed(() => {
+  if (!presetQuery.value.trim()) return false;
+  if (browsingPresets.value) {
+    return presetGroups.value.plan.length === 0 && presetGroups.value.api.length === 0;
+  }
+  return scopeMenuPanes.value.every((pane) => pane.options.length === 0);
+});
 const selectedPreset = computed(() => {
   if (!selectedKey.value?.startsWith("preset:")) return null;
   const id = selectedKey.value.slice("preset:".length);
@@ -450,32 +481,124 @@ const dynamicApiEntries = computed(() => (
 const planScopes = computed(() => scopes.value.filter((scope) => scopeOffering(scope) === "plan"));
 const apiScopes = computed(() => scopes.value.filter((scope) => scopeOffering(scope) === "api"));
 
+const RAIL_BRAND_SIZE = 18;
+
+function presetVariantHost(preset: ProviderPreset): string {
+  const raw = preset.endpointUrl || preset.endpointPlaceholder || "";
+  if (!raw) return "";
+  try {
+    return new URL(raw).host;
+  } catch {
+    return raw;
+  }
+}
+
+function brandIcon(family: ProviderFamily): () => VNodeChild {
+  return () => h(ProviderBrandMark, { family, size: RAIL_BRAND_SIZE });
+}
+
+/**
+ * Brand for a saved user-defined Provider, resolved only from its persisted
+ * preset id (already loaded in dynamicDetails). A manual Provider or an
+ * unknown preset id gets no brand — identity is never inferred from the
+ * display name or a custom endpoint URL.
+ */
+function dynamicBrandIcon(providerId: string): (() => VNodeChild) | undefined {
+  const detail = dynamicDetails.value.find((item) => item.id === providerId);
+  const preset = detail?.preset_id
+    ? PROVIDER_PRESETS.find((entry) => entry.id === detail.preset_id) ?? null
+    : null;
+  return preset ? brandIcon(familyOf(preset)) : undefined;
+}
+
+function presetFamilyMenuOptions(
+  presets: readonly ProviderPreset[],
+  offering: "plan" | "api",
+): MenuOption[] {
+  return groupPresetsByFamily(presets).map(({ family, presets: familyPresets }) => {
+    if (familyPresets.length === 1) {
+      const preset = familyPresets[0]!;
+      return {
+        key: `preset:${preset.id}`,
+        label: family.label,
+        icon: brandIcon(family),
+      };
+    }
+    return {
+      // Family ids carry the offering so the same vendor can appear once per
+      // group without a key collision.
+      key: `family:${offering}:${family.id}`,
+      label: family.label,
+      icon: brandIcon(family),
+      extra: String(familyPresets.length),
+      children: familyPresets.map((preset) => ({
+        key: `preset:${preset.id}`,
+        label: () => h("span", { class: "providers-rail-preset" }, [
+          h("span", { class: "providers-rail-preset__variant" }, preset.variant ?? preset.name),
+          presetVariantHost(preset)
+            ? h("span", { class: "providers-rail-preset__host mono" }, presetVariantHost(preset))
+            : null,
+        ]),
+        icon: brandIcon(family),
+      })),
+    };
+  });
+}
+
 const scopeMenuPanes = computed<Array<{ id: "plan" | "api"; label: "Plan" | "API"; options: MenuOption[] }>>(() => {
-  const presetItems = (presets: readonly (typeof PROVIDER_PRESETS)[number][]) => (
-    presets.map((preset) => ({ key: `preset:${preset.id}`, label: preset.name }))
-  );
+  const query = presetQuery.value.trim().toLocaleLowerCase();
+  const matches = (label: string) => !query || label.toLocaleLowerCase().includes(query);
+  const panes: Array<{ id: "plan" | "api"; label: "Plan" | "API"; options: MenuOption[] }> = [];
+  if (browsingPresets.value) {
+    const planOptions = presetFamilyMenuOptions(presetGroups.value.plan, "plan");
+    const apiOptions = presetFamilyMenuOptions(presetGroups.value.api, "api");
+    if (planOptions.length) panes.push({ id: "plan", label: "Plan", options: planOptions });
+    panes.push({ id: "api", label: "API", options: apiOptions });
+    return panes;
+  }
+  // Default rail: built-in and saved configured scopes only. Preset browsing
+  // is a deliberate local mode entered from the rail footer.
   const scopeItems = (list: readonly ProviderScopeView[]) => (
-    list.map((scope) => ({ key: scope.key, label: `${scope.label}` }))
+    list
+      .filter((scope) => matches(scope.label))
+      .map((scope) => ({ key: scope.key, label: `${scope.label}` }))
   );
   const dynamicItems = (list: readonly ProviderCatalogEntry[]) => (
-    list.map((entry) => ({ key: `dynamic:${entry.provider_id}`, label: entry.display_name }))
+    list
+      .filter((entry) => matches(entry.display_name))
+      .map((entry) => ({
+        key: `dynamic:${entry.provider_id}`,
+        label: entry.display_name,
+        icon: dynamicBrandIcon(entry.provider_id),
+      }))
   );
   const planOptions: MenuOption[] = [
     ...scopeItems(planScopes.value),
     ...dynamicItems(dynamicPlanEntries.value),
-    ...presetItems(presetGroups.value.plan),
   ];
   const apiOptions: MenuOption[] = [
-    { key: CUSTOM_API_MENU_KEY, label: "Custom API" },
+    ...(matches("custom api") ? [{ key: CUSTOM_API_MENU_KEY, label: "Custom API" }] : []),
     ...scopeItems(apiScopes.value),
     ...dynamicItems(dynamicApiEntries.value),
-    ...presetItems(presetGroups.value.api),
   ];
-  const panes: Array<{ id: "plan" | "api"; label: "Plan" | "API"; options: MenuOption[] }> = [];
   if (planOptions.length) panes.push({ id: "plan", label: "Plan", options: planOptions });
   panes.push({ id: "api", label: "API", options: apiOptions });
   return panes;
 });
+
+/**
+ * Pre-expand every multi-variant family so the variant picker rows are
+ * visible without an extra click. Single-variant families stay flat and
+ * need no expansion. The rail menu is uncontrolled after the first render;
+ * once the user collapses a family it stays collapsed across navigations.
+ */
+const railDefaultExpandedKeys = computed<string[]>(() => (
+  scopeMenuPanes.value.flatMap((pane) => (
+    pane.options.flatMap((option) => (
+      option.children && option.key ? [String(option.key)] : []
+    ))
+  ))
+));
 const scopeSelectOptions = computed<SelectOption[]>(() => {
   // The mobile selector has its own built-in filter; the rail search query
   // must not shrink these options when the rail itself is hidden.
@@ -584,9 +707,17 @@ function selectDynamicProvider(providerId: string): boolean {
 
 function selectPresetScope(presetId: string): boolean {
   if (!PROVIDER_PRESETS.some((preset) => preset.id === presetId)) return false;
+  // A preset selection only exists inside the local browsing mode.
+  browsingPresets.value = true;
   selectedKey.value = `preset:${presetId}`;
   writeScopeToUrl("preset", presetId);
   return true;
+}
+
+function togglePresetBrowsing(): void {
+  // A preset form with in-flight save/test/discovery must not be swapped out.
+  if (inlineFormBusy.value) return;
+  browsingPresets.value = !browsingPresets.value;
 }
 
 function applyScopeFromQuery(fellBackNotice = false, preferDynamicId?: string) {
@@ -641,6 +772,12 @@ function selectScopeKey(key: string | number) {
   }
   if (value.startsWith("dynamic:")) {
     selectDynamicProvider(value.slice("dynamic:".length));
+    return;
+  }
+  if (value.startsWith("family:")) {
+    // Family rows are submenu parents: their native click toggles expansion,
+    // they do not select. Treat any stray selection event as a no-op so the
+    // rail never blanks the active scope on a parent click.
     return;
   }
   if (value.startsWith("preset:")) {
@@ -800,7 +937,11 @@ function showOptimisticOverrides(payload: OverridePayload, sequence: number) {
   for (const item of payload.overrides) {
     const key = overrideKey(payload, item);
     latestOverrideSequence.set(key, sequence);
-    nextOptimistic.set(key, item.state === "force_on");
+    // Map the override state to the cell the operator will see before the
+    // response lands: `force_on` flips the cell on, `force_off` flips it off.
+    // The override builders only emit these two states.
+    const optimisticValue = item.state === "force_on";
+    nextOptimistic.set(key, optimisticValue);
     nextPending.add(key);
   }
   optimisticOverrides.value = nextOptimistic;
@@ -1037,6 +1178,9 @@ onUnmounted(() => {
 .dynamic-provider-facts dd {
   margin: 0;
 }
+.dynamic-provider-facts dd code {
+  overflow-wrap: anywhere;
+}
 
 .providers-alias-hint {
   margin: 4px 0 0;
@@ -1114,35 +1258,32 @@ onUnmounted(() => {
   flex: none;
   padding: 0 8px 8px;
 }
-/* Plan and API panes share the rail height and scroll independently, so both
-   headings and the first API row (Custom API) stay visible without scrolling. */
-.providers-rail-panes {
+/* One list scrolls; the Plan / API group labels stick to its top edge instead
+   of splitting the rail into two independently scrolling half-height panes. */
+.providers-rail-list {
   flex: 1;
-  display: grid;
-  grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
   min-height: 0;
-}
-.providers-rail-pane {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
+  overflow: auto;
 }
 .providers-rail-pane + .providers-rail-pane {
   border-top: 1px solid var(--ocg-border);
 }
 .providers-rail-pane__label {
-  flex: none;
+  position: sticky;
+  top: 0;
+  z-index: 1;
   margin: 0;
   padding: 4px 12px;
   color: var(--ocg-subtle);
   font-size: var(--ocg-font-xs);
   font-weight: 600;
   line-height: 1.3;
+  background: var(--ocg-surface);
 }
-.providers-rail-pane__items {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
+.providers-rail-footer {
+  flex: none;
+  padding: 8px;
+  border-top: 1px solid var(--ocg-border);
 }
 .providers-rail-empty {
   margin: 0;
@@ -1200,6 +1341,37 @@ onUnmounted(() => {
   margin-top: 4px;
   color: var(--ocg-subtle);
   font-size: var(--ocg-font-sm);
+}
+
+/* Vendor family row label (parent) and variant row label (child). The
+   family label keeps the same single-line look as the flat preset row did
+   so single-variant families blend in. The child variant stacks a short
+   label and a muted monospaced endpoint host, matching the Accounts dialog
+   variant picker. */
+.providers-rail-preset {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  line-height: 1.25;
+}
+.providers-rail-preset__variant {
+  color: var(--ocg-ink);
+  font-size: var(--ocg-font-sm);
+  font-weight: 500;
+}
+.providers-rail-preset__host {
+  color: var(--ocg-muted);
+  font-size: var(--ocg-font-xs);
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+  word-break: break-all;
+}
+/* n-menu's own item content sets an inherited color; the deep selector
+   wins over the n-menu color when both apply so the host stays muted. */
+.providers-rail-list :deep(.n-menu-item-content .providers-rail-preset__host) {
+  color: var(--ocg-muted);
 }
 
 @media (max-width: 720px) {

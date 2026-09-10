@@ -950,7 +950,6 @@ pub enum StructuralProbeCeiling {
 pub struct ProtocolProbeDescriptor {
     pub request_path_may_trial: bool,
     pub matrix: ProtocolMatrixKind,
-    pub unknown_zen_free_defaults_to_chat: bool,
     pub fallback_priority: &'static [UpstreamProtocolKind],
     /// Dedicated admin probe surface. Request paths must stay false.
     pub explicit_probe: bool,
@@ -1064,7 +1063,6 @@ fn open_code_go_capabilities(plan: BuiltinProvider) -> ProviderCapabilities {
         protocol_probe: ProtocolProbeDescriptor {
             request_path_may_trial: false,
             matrix: ProtocolMatrixKind::OpenCodeModelProtocols,
-            unknown_zen_free_defaults_to_chat: false,
             fallback_priority: PROTOCOL_FALLBACK_CHAT_RESPONSES_MESSAGES,
             explicit_probe: true,
             structural_ceiling: StructuralProbeCeiling::OpenCodeConstructable,
@@ -1129,7 +1127,6 @@ fn zen_free_capabilities(plan: BuiltinProvider) -> ProviderCapabilities {
         protocol_probe: ProtocolProbeDescriptor {
             request_path_may_trial: false,
             matrix: ProtocolMatrixKind::OpenCodeModelProtocols,
-            unknown_zen_free_defaults_to_chat: true,
             fallback_priority: PROTOCOL_FALLBACK_CHAT_RESPONSES_MESSAGES,
             explicit_probe: true,
             structural_ceiling: StructuralProbeCeiling::ZenFreeConstructable,
@@ -1194,7 +1191,6 @@ fn command_code_goat_capabilities(plan: BuiltinProvider) -> ProviderCapabilities
         protocol_probe: ProtocolProbeDescriptor {
             request_path_may_trial: false,
             matrix: ProtocolMatrixKind::CommandCodeNative,
-            unknown_zen_free_defaults_to_chat: false,
             fallback_priority: PROTOCOL_FALLBACK_CHAT_MESSAGES,
             explicit_probe: true,
             structural_ceiling: StructuralProbeCeiling::CommandCodeConstructable,
@@ -1259,7 +1255,6 @@ fn minimax_cn_capabilities(plan: BuiltinProvider) -> ProviderCapabilities {
         protocol_probe: ProtocolProbeDescriptor {
             request_path_may_trial: false,
             matrix: ProtocolMatrixKind::FixedProviderProtocols,
-            unknown_zen_free_defaults_to_chat: false,
             fallback_priority: &CHAT_MESSAGES_PROTOCOLS,
             explicit_probe: true,
             structural_ceiling: StructuralProbeCeiling::Fixed(&CHAT_MESSAGES_PROTOCOLS),
@@ -1324,7 +1319,6 @@ fn ollama_cloud_capabilities(plan: BuiltinProvider) -> ProviderCapabilities {
         protocol_probe: ProtocolProbeDescriptor {
             request_path_may_trial: false,
             matrix: ProtocolMatrixKind::FixedProviderProtocols,
-            unknown_zen_free_defaults_to_chat: false,
             fallback_priority: &CHAT_PROTOCOLS,
             explicit_probe: false,
             structural_ceiling: StructuralProbeCeiling::Unavailable,
@@ -1389,7 +1383,6 @@ fn kimi_cn_capabilities(plan: BuiltinProvider) -> ProviderCapabilities {
         protocol_probe: ProtocolProbeDescriptor {
             request_path_may_trial: false,
             matrix: ProtocolMatrixKind::FixedProviderProtocols,
-            unknown_zen_free_defaults_to_chat: false,
             fallback_priority: &CHAT_MESSAGES_PROTOCOLS,
             explicit_probe: true,
             structural_ceiling: StructuralProbeCeiling::Fixed(&CHAT_MESSAGES_PROTOCOLS),
@@ -1454,7 +1447,6 @@ fn configurable_http_capabilities(plan: BuiltinProvider) -> ProviderCapabilities
         protocol_probe: ProtocolProbeDescriptor {
             request_path_may_trial: false,
             matrix: ProtocolMatrixKind::AccountDeclaredProtocol,
-            unknown_zen_free_defaults_to_chat: false,
             fallback_priority: PROTOCOL_FALLBACK_CHAT_RESPONSES_MESSAGES,
             explicit_probe: false,
             structural_ceiling: StructuralProbeCeiling::Unavailable,
@@ -1521,7 +1513,6 @@ fn cpa_capabilities(plan: BuiltinProvider) -> ProviderCapabilities {
         protocol_probe: ProtocolProbeDescriptor {
             request_path_may_trial: false,
             matrix: ProtocolMatrixKind::FixedStandardProtocols,
-            unknown_zen_free_defaults_to_chat: false,
             fallback_priority: PROTOCOL_FALLBACK_CHAT_RESPONSES_MESSAGES,
             explicit_probe: false,
             structural_ceiling: StructuralProbeCeiling::Unavailable,

@@ -168,7 +168,9 @@ test("GOAT account states are live without a verification phase", () => {
   });
 
   assert.equal(accountStatusLabel(goat()), "已禁用");
-  assert.equal(accountStatusLabel(goat({ enabled: true })), "可用");
+  // Ready + enabled is the neutral configuration state, not an availability claim.
+  assert.equal(accountStatusLabel(goat({ enabled: true })), "已启用");
+  assert.equal(accountStatusTagType(goat({ enabled: true })), "default");
   assert.equal(accountStatusLabel(goat({ plan_routable: false })), "等待支持");
 });
 

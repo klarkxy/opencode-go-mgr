@@ -208,6 +208,106 @@ fn unknown_zen_free_catalog_row_defaults_to_chat_and_honors_force_off() {
 }
 
 #[test]
+fn known_unsupported_profiles_do_not_inherit_a_provider_default() {
+    let go = go_contract();
+    for id in ["minimax-m2.7-highspeed", "minimax-m2.5-highspeed"] {
+        let model = go.model(id).unwrap();
+        assert!(!model.routable, "{id}");
+        assert!(
+            model
+                .protocols
+                .values()
+                .all(|row| !row.available && !row.enabled)
+        );
+        assert!(select_upstream_protocol(&go, ApiFormat::ChatCompletions, id).is_err());
+    }
+    let zen_catalog = ZenFreeModelCatalog {
+        models: vec!["deepseek-v4-flash-free".into(), "unknown-paid-model".into()],
+        refreshed_at: None,
+        source_url: String::new(),
+    };
+    let set = build_effective_contracts(&zen_catalog, &[], empty_persisted());
+    let zen = set.providers.get(OPENCODE_ZEN_FREE_PROVIDER_ID).unwrap();
+    for id in &zen_catalog.models {
+        let model = zen.model(id).unwrap();
+        assert!(!model.routable, "{id}");
+        assert!(
+            model
+                .protocols
+                .values()
+                .all(|row| !row.available && !row.enabled)
+        );
+    }
+}
+
+#[test]
+fn refresh_discovered_go_model_outside_preset_uses_provider_default_protocol() {
+    let now = Utc::now();
+    let scope = ContractScope::provider(OPENCODE_PROVIDER_ID);
+    let mut persisted = empty_persisted();
+    persisted.scopes.insert(
+        scope.clone(),
+        PersistedScopeRow {
+            scope: scope.clone(),
+            catalog_models: vec!["omen-alpha".to_string()],
+            catalog_refreshed_at: Some(now),
+            catalog_source: CATALOG_SOURCE_OPENCODE_MODELS.to_string(),
+            catalog_source_url: "https://example.test/models".to_string(),
+            revision: 2,
+            updated_at: now,
+        },
+    );
+    // The refresh writer marks every newly discovered model default-off on
+    // all three protocols, like mark_new_catalog_models_default_off_on does.
+    persisted.overrides.insert(
+        scope.clone(),
+        [
+            UpstreamProtocolKind::ChatCompletions,
+            UpstreamProtocolKind::Responses,
+            UpstreamProtocolKind::Messages,
+        ]
+        .iter()
+        .map(|protocol| PersistedModelProtocolOverride {
+            scope: scope.clone(),
+            model_id: "omen-alpha".to_string(),
+            protocol: *protocol,
+            state: ProtocolOverrideState::ForceOff,
+            updated_at: now,
+        })
+        .collect(),
+    );
+
+    let set = build_effective_contracts(&zen_seed(), &[], persisted.clone());
+    let go = set.providers.get(OPENCODE_PROVIDER_ID).unwrap();
+    let model = go.model("omen-alpha").unwrap();
+    let chat = model.protocols.get("chat_completions").unwrap();
+    assert_eq!(
+        model.preferred_protocol,
+        UpstreamProtocolKind::ChatCompletions
+    );
+    assert!(chat.available);
+    assert!(!chat.enabled);
+    assert_eq!(chat.r#override, ProtocolOverrideState::ForceOff);
+    assert!(!model.routable);
+
+    // Clearing the refresh-written force_off rows (the matrix "开启" writes
+    // auto) enables the provider default protocol and makes the row routable.
+    let mut reenabled = persisted;
+    reenabled.overrides.clear();
+    let set = build_effective_contracts(&zen_seed(), &[], reenabled);
+    let go = set.providers.get(OPENCODE_PROVIDER_ID).unwrap();
+    let model = go.model("omen-alpha").unwrap();
+    let chat = model.protocols.get("chat_completions").unwrap();
+    assert!(chat.available);
+    assert!(chat.enabled);
+    assert!(model.routable);
+    assert_eq!(
+        select_upstream_protocol(go, ApiFormat::ChatCompletions, "omen-alpha").unwrap(),
+        ApiFormat::ChatCompletions
+    );
+}
+
+#[test]
 fn probe_confirmed_opencode_extra_protocol_becomes_effective() {
     let mut persisted = empty_persisted();
     let now = Utc::now();
