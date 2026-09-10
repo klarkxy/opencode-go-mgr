@@ -716,3 +716,87 @@ fn zen_free_key_validation_skips_empty_secret() {
         Err(ProviderBindingError::KeyRequired)
     ));
 }
+
+#[test]
+fn provider_origin_round_trips_strings_and_rejects_unknowns() {
+    for (origin, text) in [
+        (ProviderOrigin::Builtin, "builtin"),
+        (ProviderOrigin::Preset, "preset"),
+        (ProviderOrigin::Custom, "custom"),
+    ] {
+        assert_eq!(origin.as_str(), text);
+        assert_eq!(origin.to_string(), text);
+        assert_eq!(ProviderOrigin::try_from(text).unwrap(), origin);
+    }
+    assert!(matches!(
+        ProviderOrigin::try_from("unknown"),
+        Err(ProviderBindingError::UnknownUpstreamProtocol(value)) if value == "unknown"
+    ));
+    assert_eq!(ProviderOrigin::ALL.len(), 3);
+}
+
+#[test]
+fn preset_offering_resolves_plan_presets_and_falls_back_to_api() {
+    for plan_id in [
+        "zhipu-coding",
+        "zai-coding",
+        "tencent-token",
+        "tencent-enterprise-pro",
+        "bailian-coding",
+        "qwencloud-coding",
+        "qwencloud-token",
+        "volcengine-agent",
+        "volcengine-coding",
+        "byteplus-coding",
+        "qianfan-coding",
+        "qianfan-token-team",
+        "stepfun-plan",
+        "stepfun-plan-intl",
+        "xiaomi-mimo-token",
+        "streamlake-coding",
+        "compshare-coding",
+        "atlascloud",
+    ] {
+        assert_eq!(preset_offering(plan_id), "plan", "{plan_id}");
+    }
+    for api_id in [
+        "openai",
+        "anthropic",
+        "gemini",
+        "xai",
+        "azure-openai",
+        "bedrock",
+        "deepseek",
+        "moonshot",
+        "zhipu",
+        "zai",
+        "minimax-api-cn",
+        "minimax-api-intl",
+        "longcat",
+        "tencent-hunyuan",
+        "tencent-token-unknown",
+        "bailian",
+        "qwencloud",
+        "volcengine",
+        "qianfan",
+        "stepfun-api",
+        "stepfun-api-intl",
+        "xiaomi-mimo",
+        "ant-ling",
+        "streamlake",
+        "openrouter",
+        "siliconflow-cn",
+        "siliconflow-intl",
+        "nvidia",
+        "modelscope",
+        "ppio",
+        "qiniu",
+        "novita",
+        "compshare",
+    ] {
+        assert_eq!(preset_offering(api_id), "api", "{api_id}");
+    }
+    assert_eq!(preset_offering(""), "api");
+    assert_eq!(preset_offering("  "), "api");
+    assert_eq!(preset_offering("definitely-not-a-real-preset"), "api");
+}

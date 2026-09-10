@@ -198,8 +198,11 @@ pub const PRE_V3_BACKUP_FILE_PREFIX: &str = "data.sqlite.pre-v3.";
 /// Unique never-overwritten SQLite snapshot taken before a non-empty v34
 /// database is rewritten to provider-only identity in v35.
 pub const PRE_V35_BACKUP_FILE_PREFIX: &str = "data.sqlite.pre-v35.";
+/// Unique never-overwritten SQLite snapshot taken before a non-empty v41
+/// database is rewritten to the unified providers/provider_models tables.
+pub const PRE_V42_BACKUP_FILE_PREFIX: &str = "data.sqlite.pre-v42.";
 /// Highest schema this binary can open or migrate. Newer databases fail closed.
-pub const CURRENT_SCHEMA_VERSION: i32 = 41;
+pub const CURRENT_SCHEMA_VERSION: i32 = 42;
 /// Canonical source schema for the v35 provider-identity rewrite.
 pub const V34_SCHEMA_VERSION: i32 = 34;
 /// Historical v34 offering IDs. Used only by v1–v34 SQL and the v35 preflight
@@ -223,6 +226,8 @@ pub const V27_SCHEMA_VERSION: i32 = 27;
 /// Schema the v27 rewrite expects as its committed source. Historical databases
 /// always migrate through this version first.
 pub const V26_SCHEMA_VERSION: i32 = 26;
+/// Canonical source schema for the v42 unified providers rewrite.
+pub const V41_SCHEMA_VERSION: i32 = 41;
 /// Bounded retries of the whole v27 preflight/backup when a writer races the
 /// captured `PRAGMA data_version`.
 const V27_WRITER_RACE_RETRIES: u32 = 8;
@@ -1971,20 +1976,36 @@ fn preflight_v35_identity(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-fn verify_pre_v35_backup(path: &Path) -> Result<()> {
-    sqlite_quick_check(&Connection::open_with_flags(
-        path,
-        OpenFlags::SQLITE_OPEN_READ_ONLY,
-    )?)?;
-    verify_schema_backup(path, PRE_V35_BACKUP_FILE_PREFIX, V34_SCHEMA_VERSION)?;
-    Ok(())
+fn create_pre_v35_backup(conn: &Connection, db_path: &Path) -> Result<PathBuf> {
+    create_pre_version_backup(
+        conn,
+        db_path,
+        PRE_V35_BACKUP_FILE_PREFIX,
+        V34_SCHEMA_VERSION,
+    )
 }
 
-fn create_pre_v35_backup(conn: &Connection, db_path: &Path) -> Result<PathBuf> {
+/// v42: same online snapshot pattern as v35, but the v41 source already
+/// hosts the `dynamic_providers` / `dynamic_provider_models` pair that v42
+/// renames.
+fn create_pre_v42_backup(conn: &Connection, db_path: &Path) -> Result<PathBuf> {
+    create_pre_version_backup(
+        conn,
+        db_path,
+        PRE_V42_BACKUP_FILE_PREFIX,
+        V41_SCHEMA_VERSION,
+    )
+}
+
+fn create_pre_version_backup(
+    conn: &Connection,
+    db_path: &Path,
+    prefix: &str,
+    source_version: i32,
+) -> Result<PathBuf> {
     for _ in 0..8 {
         let timestamp = Utc::now().format("%Y%m%dT%H%M%S%9fZ");
-        let backup_path =
-            db_path.with_file_name(format!("{PRE_V35_BACKUP_FILE_PREFIX}{timestamp}.bak"));
+        let backup_path = db_path.with_file_name(format!("{prefix}{timestamp}.bak"));
         if backup_path.exists() {
             std::thread::sleep(std::time::Duration::from_millis(1));
             continue;
@@ -1993,15 +2014,15 @@ fn create_pre_v35_backup(conn: &Connection, db_path: &Path) -> Result<PathBuf> {
         conn.execute("VACUUM main INTO ?1", [&backup_value])
             .with_context(|| {
                 format!(
-                    "failed to create pre-v35 database backup {}",
+                    "failed to create {prefix} database backup {}",
                     backup_path.display()
                 )
             })?;
-        verify_pre_v35_backup(&backup_path)?;
+        verify_schema_backup(&backup_path, prefix, source_version)?;
         write_backup_sha256_evidence(&backup_path)?;
         return Ok(backup_path);
     }
-    anyhow::bail!("failed to allocate a unique pre-v35 backup filename")
+    anyhow::bail!("failed to allocate a unique {prefix} backup filename")
 }
 
 fn migrate_v35_body(tx: &Transaction<'_>) -> Result<()> {
@@ -2098,7 +2119,8 @@ fn dynamic_tx_fault(point: &'static str) -> Result<()> {
 fn list_dynamic_providers_on(conn: &Connection) -> Result<Vec<DynamicProviderRuntime>> {
     let mut stmt = conn.prepare(
         "SELECT id, name, endpoint_url, upstream_protocol, auth_kind, created_at, updated_at, preset_id
-         FROM dynamic_providers
+         FROM providers
+         WHERE origin IN ('preset', 'custom')
          ORDER BY created_at ASC, id ASC",
     )?;
     let rows = stmt.query_map([], |row| {
@@ -2140,8 +2162,8 @@ fn get_dynamic_provider_on(
     let row = conn
         .query_row(
             "SELECT id, name, endpoint_url, upstream_protocol, auth_kind, created_at, updated_at, preset_id
-             FROM dynamic_providers
-             WHERE lower(id) = lower(?1)",
+             FROM providers
+             WHERE lower(id) = lower(?1) AND origin IN ('preset', 'custom')",
             [provider_id],
             |row| {
                 Ok((
@@ -2199,7 +2221,7 @@ fn load_dynamic_provider_runtime(
         .map_err(|error| anyhow::anyhow!(error.to_string()))?;
     let mut stmt = conn.prepare(
         "SELECT public_model, upstream_model, upstream_override
-         FROM dynamic_provider_models
+         FROM provider_models
          WHERE provider_id = ?1
          ORDER BY public_model_key ASC",
     )?;
@@ -2255,19 +2277,30 @@ fn load_dynamic_provider_runtime(
 }
 
 fn insert_dynamic_provider_on(conn: &Connection, runtime: &DynamicProviderRuntime) -> Result<()> {
+    let origin = if runtime.preset_id.is_some() {
+        "preset"
+    } else {
+        "custom"
+    };
+    let offering =
+        ocg_domain::provider::preset_offering(runtime.preset_id.as_deref().unwrap_or(""));
     conn.execute(
-        "INSERT INTO dynamic_providers
-         (id, name, endpoint_url, upstream_protocol, auth_kind, created_at, updated_at, preset_id)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        "INSERT INTO providers
+         (id, origin, adapter_kind, name, endpoint_url, upstream_protocol,
+          auth_kind, preset_id, offering, display_family, endpoint_per_account,
+          created_at, updated_at)
+         VALUES (?1, ?2, 'configurable_http', ?3, ?4, ?5, ?6, ?7, ?8, NULL, 0, ?9, ?10)",
         params![
             runtime.id,
+            origin,
             runtime.name,
             runtime.endpoint_url,
             runtime.upstream_protocol.as_str(),
             runtime.auth_kind.as_str(),
+            runtime.preset_id,
+            offering,
             runtime.created_at.to_rfc3339(),
             runtime.updated_at.to_rfc3339(),
-            runtime.preset_id,
         ],
     )?;
     insert_dynamic_provider_models_on(conn, &runtime.id, &runtime.mappings)
@@ -2306,8 +2339,9 @@ fn upsert_imported_dynamic_provider_on(
             }
         }
         conn.execute(
-            "UPDATE dynamic_providers
-             SET name = ?1, endpoint_url = ?2, upstream_protocol = ?3, auth_kind = ?4, updated_at = ?5, preset_id = ?7
+            "UPDATE providers
+             SET name = ?1, endpoint_url = ?2, upstream_protocol = ?3, auth_kind = ?4,
+                 updated_at = ?5, preset_id = ?7, offering = ?8
              WHERE id = ?6",
             params![
                 runtime.name,
@@ -2317,10 +2351,11 @@ fn upsert_imported_dynamic_provider_on(
                 runtime.updated_at.to_rfc3339(),
                 existing.id,
                 runtime.preset_id,
+                ocg_domain::provider::preset_offering(runtime.preset_id.as_deref().unwrap_or(""),),
             ],
         )?;
         conn.execute(
-            "DELETE FROM dynamic_provider_models WHERE provider_id = ?1",
+            "DELETE FROM provider_models WHERE provider_id = ?1",
             [&existing.id],
         )?;
         insert_dynamic_provider_models_on(conn, &existing.id, &runtime.mappings)
@@ -2350,7 +2385,7 @@ fn insert_dynamic_provider_models_on(
     mappings: &[DynamicModelMapping],
 ) -> Result<()> {
     let mut stmt = conn.prepare(
-        "INSERT INTO dynamic_provider_models
+        "INSERT INTO provider_models
          (provider_id, public_model, public_model_key, upstream_model, upstream_override)
          VALUES (?1, ?2, ?3, ?4, ?5)",
     )?;
@@ -2433,6 +2468,350 @@ fn migrate_to_v41(conn: &Connection) -> Result<()> {
          INSERT OR REPLACE INTO schema_version(version) VALUES(41);",
     )?;
     tx.commit()?;
+    Ok(())
+}
+
+/// v42: unify the dynamic Provider table with the sealed builtin catalog.
+/// The v41 source still carries `dynamic_providers` / `dynamic_provider_models`;
+/// the rewrite creates `providers` / `provider_models` with `origin` and
+/// `offering` columns and seeds the seven sealed adapters as `builtin` rows.
+/// The data mirror for builtin rows never feeds routing — traffic keeps using
+/// the sealed adapter code constants.
+fn migrate_to_v42(conn: &Connection, db_path: &Path, is_fresh: bool) -> Result<()> {
+    // Read once before the writer lock: a concurrent migration can commit
+    // between two reads, so checking `>= 42` and `== 41` separately is racy.
+    let source_version = schema_version_on(conn)?;
+    if source_version >= 42 {
+        return Ok(());
+    }
+    anyhow::ensure!(
+        source_version == V41_SCHEMA_VERSION,
+        "v42 requires a canonical schema v41 source"
+    );
+    if !is_fresh {
+        create_pre_v42_backup(conn, db_path)?;
+    }
+    sqlite_quick_check(conn)?;
+    with_foreign_keys_off(conn, || {
+        let tx = Transaction::new_unchecked(conn, TransactionBehavior::Immediate)?;
+        let version_locked = schema_version_on(&tx)?;
+        if version_locked >= 42 {
+            tx.rollback()?;
+            return Ok(());
+        }
+        anyhow::ensure!(
+            version_locked == V41_SCHEMA_VERSION,
+            "v42 writer lock observed schema {version_locked}, expected {V41_SCHEMA_VERSION}"
+        );
+        migrate_v42_body(&tx)?;
+        tx.execute_batch("INSERT OR REPLACE INTO schema_version (version) VALUES (42);")?;
+        sqlite_quick_check(&tx)?;
+        sqlite_foreign_key_check(&tx)?;
+        tx.commit()?;
+        Ok(())
+    })
+}
+
+fn migrate_v42_body(tx: &Transaction<'_>) -> Result<()> {
+    let now = Utc::now().to_rfc3339();
+    let v41_dynamic_providers_exists = table_exists(tx, "dynamic_providers")?;
+    let v41_dynamic_models_exists = table_exists(tx, "dynamic_provider_models")?;
+    let v41_preferences_exists = table_exists(tx, "provider_model_protocol_preferences")?;
+
+    // v22-v40 sources never had the v42-renamed tables; the reverse helpers
+    // in the test suite leave them behind so the v22-v40 fixtures can be
+    // re-migrated. Drop those leftovers before the rename so it does not
+    // collide. The preferences table is rebuilt by the body below, so it
+    // must not be dropped here.
+    if table_exists(tx, "providers")? {
+        tx.execute_batch("DROP TABLE providers;")?;
+    }
+    if table_exists(tx, "provider_models")? {
+        tx.execute_batch("DROP TABLE provider_models;")?;
+    }
+    if table_exists(tx, "provider_model_protocol_preferences_v42")? {
+        tx.execute_batch("DROP TABLE provider_model_protocol_preferences_v42;")?;
+    }
+
+    tx.execute_batch(
+        "CREATE TABLE providers_new (
+            id TEXT PRIMARY KEY,
+            origin TEXT NOT NULL CHECK(origin IN ('builtin','preset','custom')),
+            adapter_kind TEXT NOT NULL,
+            name TEXT NOT NULL,
+            endpoint_url TEXT,
+            upstream_protocol TEXT,
+            auth_kind TEXT,
+            preset_id TEXT,
+            offering TEXT NOT NULL DEFAULT 'api' CHECK(offering IN ('plan','api')),
+            display_family TEXT,
+            endpoint_per_account INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+         );
+         CREATE TABLE provider_models_new (
+            provider_id TEXT NOT NULL,
+            public_model TEXT NOT NULL,
+            public_model_key TEXT NOT NULL,
+            upstream_model TEXT NOT NULL,
+            upstream_override TEXT,
+            PRIMARY KEY (provider_id, public_model_key),
+            FOREIGN KEY (provider_id) REFERENCES providers(id) ON DELETE CASCADE
+         );",
+    )?;
+
+    if v41_dynamic_providers_exists {
+        copy_dynamic_providers_to_providers_new_v42(tx)?;
+    }
+
+    seed_builtin_providers_v42(tx, &now)?;
+
+    if v41_dynamic_providers_exists {
+        tx.execute_batch("DROP TABLE dynamic_providers;")?;
+    }
+    tx.execute_batch("ALTER TABLE providers_new RENAME TO providers;")?;
+
+    if v41_dynamic_models_exists {
+        tx.execute(
+            "INSERT INTO provider_models_new
+                (provider_id, public_model, public_model_key, upstream_model, upstream_override)
+             SELECT provider_id, public_model, public_model_key, upstream_model, upstream_override
+               FROM dynamic_provider_models",
+            [],
+        )?;
+    }
+    if v41_dynamic_models_exists {
+        tx.execute_batch("DROP TABLE dynamic_provider_models;")?;
+    }
+    tx.execute_batch(
+        "ALTER TABLE provider_models_new RENAME TO provider_models;
+         CREATE INDEX IF NOT EXISTS idx_provider_models_provider
+            ON provider_models(provider_id);",
+    )?;
+
+    if v41_preferences_exists {
+        tx.execute_batch(
+            "CREATE TABLE provider_model_protocol_preferences_v42 AS
+                 SELECT provider_id, model_id, protocol
+                   FROM provider_model_protocol_preferences;
+             DROP TABLE provider_model_protocol_preferences;",
+        )?;
+        tx.execute_batch(
+            "CREATE TABLE provider_model_protocol_preferences (
+                provider_id TEXT NOT NULL,
+                model_id TEXT NOT NULL,
+                protocol TEXT NOT NULL CHECK(protocol IN ('chat_completions', 'messages')),
+                PRIMARY KEY(provider_id, model_id)
+             );
+             INSERT INTO provider_model_protocol_preferences (provider_id, model_id, protocol)
+             SELECT provider_id, model_id, protocol FROM provider_model_protocol_preferences_v42;
+             DROP TABLE provider_model_protocol_preferences_v42;",
+        )?;
+    } else {
+        tx.execute_batch(
+            "CREATE TABLE provider_model_protocol_preferences (
+                provider_id TEXT NOT NULL,
+                model_id TEXT NOT NULL,
+                protocol TEXT NOT NULL CHECK(protocol IN ('chat_completions', 'messages')),
+                PRIMARY KEY(provider_id, model_id)
+             );",
+        )?;
+    }
+
+    Ok(())
+}
+
+fn copy_dynamic_providers_to_providers_new_v42(tx: &Transaction<'_>) -> Result<()> {
+    let mut stmt = tx.prepare(
+        "SELECT id, name, endpoint_url, upstream_protocol, auth_kind,
+                preset_id, created_at, updated_at
+           FROM dynamic_providers",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
+            row.get::<_, String>(4)?,
+            row.get::<_, Option<String>>(5)?,
+            row.get::<_, String>(6)?,
+            row.get::<_, String>(7)?,
+        ))
+    })?;
+    let mut collected = Vec::new();
+    for row in rows {
+        collected.push(row?);
+    }
+    drop(stmt);
+    for (id, name, endpoint_url, upstream_protocol, auth_kind, preset_id, created_at, updated_at) in
+        collected
+    {
+        let origin = if preset_id.is_some() {
+            "preset"
+        } else {
+            "custom"
+        };
+        let offering = preset_id
+            .as_deref()
+            .map(ocg_domain::provider::preset_offering)
+            .unwrap_or("api");
+        tx.execute(
+            "INSERT INTO providers_new
+                (id, origin, adapter_kind, name, endpoint_url, upstream_protocol,
+                 auth_kind, preset_id, offering, display_family, endpoint_per_account,
+                 created_at, updated_at)
+             VALUES (?1, ?2, 'configurable_http', ?3, ?4, ?5, ?6, ?7, ?8, NULL, 0, ?9, ?10)",
+            params![
+                id,
+                origin,
+                name,
+                endpoint_url,
+                upstream_protocol,
+                auth_kind,
+                preset_id,
+                offering,
+                created_at,
+                updated_at,
+            ],
+        )?;
+    }
+    Ok(())
+}
+
+fn seed_builtin_providers_v42(tx: &Transaction<'_>, now: &str) -> Result<()> {
+    use ocg_domain::provider::ProviderAdapterKind;
+    let seeds: [(
+        &str,
+        ProviderAdapterKind,
+        &str,
+        &str,
+        &str,
+        &str,
+        &str,
+        &str,
+        i32,
+    ); 7] = [
+        (
+            OPENCODE_PROVIDER_ID,
+            ProviderAdapterKind::OpenCodeGo,
+            "OpenCode Go",
+            OPENCODE_GO_BASE_URL,
+            "chat_completions",
+            "bearer",
+            "plan",
+            "OpenCode",
+            0,
+        ),
+        (
+            OPENCODE_ZEN_FREE_PROVIDER_ID,
+            ProviderAdapterKind::ZenFree,
+            "OpenCode Zen Free",
+            OPENCODE_ZEN_BASE_URL,
+            "chat_completions",
+            "none",
+            "api",
+            "OpenCode",
+            0,
+        ),
+        (
+            COMMAND_CODE_PROVIDER_ID,
+            ProviderAdapterKind::CommandCodeGoat,
+            "Command Code GOAT",
+            COMMAND_CODE_GOAT_BASE_URL,
+            "chat_completions",
+            "bearer",
+            "plan",
+            "Command Code",
+            0,
+        ),
+        (
+            MINIMAX_PROVIDER_ID,
+            ProviderAdapterKind::MiniMaxCn,
+            "MiniMax CN Token Plan",
+            MINIMAX_CN_BASE_URL,
+            "chat_completions",
+            "bearer",
+            "plan",
+            "MiniMax",
+            0,
+        ),
+        (
+            KIMI_PROVIDER_ID,
+            ProviderAdapterKind::KimiCn,
+            "Kimi Code CN",
+            KIMI_CN_BASE_URL,
+            "chat_completions",
+            "bearer",
+            "plan",
+            "Kimi",
+            0,
+        ),
+        (
+            OLLAMA_PROVIDER_ID,
+            ProviderAdapterKind::OllamaCloud,
+            "Ollama Cloud",
+            OLLAMA_CLOUD_BASE_URL,
+            "chat_completions",
+            "bearer",
+            "plan",
+            "Ollama",
+            0,
+        ),
+        (
+            CUSTOM_PROVIDER_ID,
+            ProviderAdapterKind::ConfigurableHttp,
+            "Custom API",
+            "",
+            "",
+            "bearer",
+            "api",
+            "Custom",
+            1,
+        ),
+    ];
+    for (
+        id,
+        kind,
+        name,
+        endpoint_url,
+        upstream_protocol,
+        auth_kind,
+        offering,
+        display_family,
+        endpoint_per_account,
+    ) in seeds
+    {
+        let endpoint_url = if endpoint_url.is_empty() {
+            None
+        } else {
+            Some(endpoint_url)
+        };
+        let upstream_protocol = if upstream_protocol.is_empty() {
+            None
+        } else {
+            Some(upstream_protocol)
+        };
+        tx.execute(
+            "INSERT INTO providers_new
+                (id, origin, adapter_kind, name, endpoint_url, upstream_protocol,
+                 auth_kind, preset_id, offering, display_family, endpoint_per_account,
+                 created_at, updated_at)
+             VALUES (?1, 'builtin', ?2, ?3, ?4, ?5, ?6, NULL, ?7, ?8, ?9, ?10, ?10)",
+            params![
+                id,
+                kind.as_str(),
+                name,
+                endpoint_url,
+                upstream_protocol,
+                auth_kind,
+                offering,
+                display_family,
+                endpoint_per_account,
+                now,
+            ],
+        )?;
+    }
     Ok(())
 }
 
@@ -3347,6 +3726,7 @@ impl Database {
         migrate_to_v39(&db.conn)?;
         migrate_to_v40(&db.conn)?;
         migrate_to_v41(&db.conn)?;
+        migrate_to_v42(&db.conn, &db_path, is_fresh)?;
         Ok(db)
     }
 
@@ -5290,8 +5670,9 @@ impl Database {
         let existing = get_dynamic_provider_on(&tx, &runtime.id)?
             .ok_or_else(|| anyhow::anyhow!("unknown provider `{}`", runtime.id))?;
         tx.execute(
-            "UPDATE dynamic_providers
-             SET name = ?1, endpoint_url = ?2, upstream_protocol = ?3, auth_kind = ?4, updated_at = ?5, preset_id = ?7
+            "UPDATE providers
+             SET name = ?1, endpoint_url = ?2, upstream_protocol = ?3, auth_kind = ?4,
+                 updated_at = ?5, preset_id = ?7, offering = ?8
              WHERE id = ?6",
             params![
                 runtime.name,
@@ -5301,10 +5682,11 @@ impl Database {
                 runtime.updated_at.to_rfc3339(),
                 existing.id,
                 runtime.preset_id,
+                ocg_domain::provider::preset_offering(runtime.preset_id.as_deref().unwrap_or(""),),
             ],
         )?;
         tx.execute(
-            "DELETE FROM dynamic_provider_models WHERE provider_id = ?1",
+            "DELETE FROM provider_models WHERE provider_id = ?1",
             [&existing.id],
         )?;
         insert_dynamic_provider_models_on(&tx, &existing.id, &runtime.mappings)?;
@@ -5387,13 +5769,10 @@ impl Database {
             "dynamic provider still has {count} referencing account(s)"
         );
         tx.execute(
-            "DELETE FROM dynamic_provider_models WHERE provider_id = ?1",
+            "DELETE FROM provider_models WHERE provider_id = ?1",
             [&existing.id],
         )?;
-        tx.execute(
-            "DELETE FROM dynamic_providers WHERE id = ?1",
-            [&existing.id],
-        )?;
+        tx.execute("DELETE FROM providers WHERE id = ?1", [&existing.id])?;
         let snapshot = list_dynamic_providers_on(&tx)?;
         tx.commit()?;
         Ok(snapshot)

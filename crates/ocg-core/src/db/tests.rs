@@ -56,10 +56,10 @@ fn v41_model_preferences_migrate_and_survive_reopen_without_enabling_models() {
         ProtocolOverrideState::ForceOff,
     )];
     db.set_model_protocol_overrides(&scope, &rows, now).unwrap();
-    db.conn.execute_batch("DROP TABLE provider_model_protocol_preferences; DELETE FROM schema_version WHERE version=41;").unwrap();
+    db.conn.execute_batch("DROP TABLE provider_model_protocol_preferences; DELETE FROM schema_version; INSERT INTO schema_version (version) VALUES (38);").unwrap();
     drop(db);
     let db = Database::open(dir.clone()).unwrap();
-    assert_eq!(schema_version_on(&db.conn).unwrap(), 41);
+    assert_eq!(schema_version_on(&db.conn).unwrap(), 42);
     let before = db.load_persisted_contracts().unwrap();
     assert!(before.preferences.is_empty());
     assert_eq!(
@@ -103,6 +103,530 @@ fn v41_model_preferences_migrate_and_survive_reopen_without_enabling_models() {
 }
 
 #[test]
+fn v42_concurrent_migration_rechecks_version_under_the_writer_lock() {
+    let dir = temp_data_dir("v42-concurrent");
+    let path = dir.join("data.sqlite");
+    let conn = Connection::open(&path).unwrap();
+    conn.execute_batch("CREATE TABLE schema_version(version INTEGER PRIMARY KEY); INSERT INTO schema_version VALUES(41);")
+        .unwrap();
+    drop(conn);
+    let barrier = Arc::new(std::sync::Barrier::new(2));
+    let mut workers = Vec::new();
+    for _ in 0..2 {
+        let path = path.clone();
+        let barrier = barrier.clone();
+        workers.push(std::thread::spawn(move || {
+            let path_for_migration = path.clone();
+            let conn = Connection::open(path).unwrap();
+            conn.busy_timeout(std::time::Duration::from_secs(5))
+                .unwrap();
+            barrier.wait();
+            migrate_to_v42(&conn, &path_for_migration, true).unwrap();
+            assert_eq!(schema_version_on(&conn).unwrap(), 42);
+        }));
+    }
+    for worker in workers {
+        worker.join().unwrap();
+    }
+    let conn = Connection::open(&path).unwrap();
+    assert_eq!(schema_version_on(&conn).unwrap(), 42);
+    assert!(table_exists(&conn, "providers").unwrap());
+    assert!(!table_exists(&conn, "dynamic_providers").unwrap());
+    assert!(!table_exists(&conn, "dynamic_provider_models").unwrap());
+    drop(conn);
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn v42_fresh_database_includes_seven_sealed_builtin_rows() {
+    let dir = temp_data_dir("v42-fresh-seeds");
+    let db = open_with_host_cipher(dir.clone()).unwrap();
+    assert_eq!(schema_version_on(&db.conn).unwrap(), 42);
+    let count: i64 = db
+        .conn
+        .query_row(
+            "SELECT COUNT(*) FROM providers WHERE origin = 'builtin'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(count, 7);
+
+    let opencode: (String, String, String, String, String, String) = db
+        .conn
+        .query_row(
+            "SELECT adapter_kind, name, endpoint_url, upstream_protocol, auth_kind, offering
+             FROM providers WHERE id = 'opencode'",
+            [],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                ))
+            },
+        )
+        .unwrap();
+    assert_eq!(opencode.0, "opencode_go");
+    assert_eq!(opencode.1, "OpenCode Go");
+    assert_eq!(opencode.2, OPENCODE_GO_BASE_URL);
+    assert_eq!(opencode.3, "chat_completions");
+    assert_eq!(opencode.4, "bearer");
+    assert_eq!(opencode.5, "plan");
+
+    let zen_free: (String, String, String) = db
+        .conn
+        .query_row(
+            "SELECT adapter_kind, auth_kind, offering
+             FROM providers WHERE id = 'opencode-zen-free'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(zen_free.0, "zen_free");
+    assert_eq!(zen_free.1, "none");
+    assert_eq!(zen_free.2, "api");
+
+    let custom: (Option<String>, Option<String>, i64) = db
+        .conn
+        .query_row(
+            "SELECT endpoint_url, upstream_protocol, endpoint_per_account
+             FROM providers WHERE id = 'custom'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert!(custom.0.is_none());
+    assert!(custom.1.is_none());
+    assert_eq!(custom.2, 1);
+
+    for builtin_id in [
+        OPENCODE_PROVIDER_ID,
+        OPENCODE_ZEN_FREE_PROVIDER_ID,
+        COMMAND_CODE_PROVIDER_ID,
+        MINIMAX_PROVIDER_ID,
+        KIMI_PROVIDER_ID,
+        OLLAMA_PROVIDER_ID,
+        CUSTOM_PROVIDER_ID,
+    ] {
+        let family: Option<String> = db
+            .conn
+            .query_row(
+                "SELECT display_family FROM providers WHERE id = ?1",
+                [builtin_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(family.is_some(), "{builtin_id}");
+    }
+
+    drop(db);
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn v42_unifies_existing_dynamic_providers_and_preserves_models_and_preferences() {
+    let dir = temp_data_dir("v42-unify");
+    // Create a fresh v42 DB so the v42 schema is in place, then reverse the
+    // migration to a v41 source carrying two dynamic Providers, one with a
+    // plan preset and one without. Reopening triggers v42.
+    let db = open_with_host_cipher(dir.clone()).unwrap();
+    let now = Utc::now().to_rfc3339();
+    db.conn
+        .execute_batch(&format!(
+            "PRAGMA foreign_keys=OFF;
+             DROP TABLE providers;
+             DROP TABLE provider_models;
+             CREATE TABLE dynamic_providers (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                endpoint_url TEXT NOT NULL,
+                upstream_protocol TEXT NOT NULL,
+                auth_kind TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                preset_id TEXT
+             );
+             CREATE TABLE dynamic_provider_models (
+                provider_id TEXT NOT NULL,
+                public_model TEXT NOT NULL,
+                public_model_key TEXT NOT NULL,
+                upstream_model TEXT NOT NULL,
+                upstream_override TEXT,
+                PRIMARY KEY (provider_id, public_model_key),
+                FOREIGN KEY (provider_id) REFERENCES dynamic_providers(id)
+             );
+             INSERT INTO dynamic_providers
+                 (id, name, endpoint_url, upstream_protocol, auth_kind, created_at, updated_at, preset_id)
+             VALUES
+                 ('plan-lab', 'Plan Lab', 'https://plan.example/v1', 'chat_completions', 'bearer',
+                  '{now}', '{now}', 'zhipu-coding'),
+                 ('free-lab', 'Free Lab', 'https://free.example/v1', 'chat_completions', 'bearer',
+                  '{now}', '{now}', NULL);
+             INSERT INTO dynamic_provider_models
+                 (provider_id, public_model, public_model_key, upstream_model, upstream_override)
+             VALUES
+                 ('plan-lab', 'lab-plan', 'lab-plan', 'plan/model', NULL),
+                 ('free-lab', 'lab-free', 'lab-free', 'free/model', NULL);
+             INSERT INTO provider_model_protocol_preferences
+                 (provider_id, model_id, protocol)
+             VALUES ('minimax', 'MiniMax-M2.5', 'chat_completions');
+             DELETE FROM schema_version;
+             INSERT INTO schema_version (version) VALUES (41);
+             PRAGMA foreign_keys=ON;"
+        ))
+        .unwrap();
+    drop(db);
+
+    let db = open_with_host_cipher(dir.clone()).unwrap();
+    assert_eq!(schema_version_on(&db.conn).unwrap(), 42);
+    assert!(!table_exists(&db.conn, "dynamic_providers").unwrap());
+    assert!(!table_exists(&db.conn, "dynamic_provider_models").unwrap());
+    assert!(table_exists(&db.conn, "providers").unwrap());
+    assert!(table_exists(&db.conn, "provider_models").unwrap());
+
+    let plan_lab: (String, String, String, Option<String>, String) = db
+        .conn
+        .query_row(
+            "SELECT origin, adapter_kind, name, preset_id, offering
+             FROM providers WHERE id = 'plan-lab'",
+            [],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            },
+        )
+        .unwrap();
+    assert_eq!(plan_lab.0, "preset");
+    assert_eq!(plan_lab.1, "configurable_http");
+    assert_eq!(plan_lab.2, "Plan Lab");
+    assert_eq!(plan_lab.3.as_deref(), Some("zhipu-coding"));
+    assert_eq!(plan_lab.4, "plan");
+
+    let free_lab: (String, Option<String>, String) = db
+        .conn
+        .query_row(
+            "SELECT origin, preset_id, offering FROM providers WHERE id = 'free-lab'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(free_lab.0, "custom");
+    assert!(free_lab.1.is_none());
+    assert_eq!(free_lab.2, "api");
+
+    let plan_models: i64 = db
+        .conn
+        .query_row(
+            "SELECT COUNT(*) FROM provider_models WHERE provider_id = 'plan-lab'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(plan_models, 1);
+    let free_models: i64 = db
+        .conn
+        .query_row(
+            "SELECT COUNT(*) FROM provider_models WHERE provider_id = 'free-lab'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(free_models, 1);
+
+    let pref_protocol: String = db
+        .conn
+        .query_row(
+            "SELECT protocol FROM provider_model_protocol_preferences
+             WHERE provider_id = 'minimax' AND model_id = 'MiniMax-M2.5'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(pref_protocol, "chat_completions");
+
+    // The provider_id CHECK on preferences was removed; a non-minimax/kimi
+    // provider_id must be insertable.
+    db.conn
+        .execute(
+            "INSERT INTO provider_model_protocol_preferences (provider_id, model_id, protocol)
+             VALUES ('opencode', 'some-model', 'chat_completions')",
+            [],
+        )
+        .unwrap();
+
+    drop(db);
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn v42_dynamic_read_paths_hide_builtin_rows() {
+    let dir = temp_data_dir("v42-filter-builtins");
+    let db = open_with_host_cipher(dir.clone()).unwrap();
+    let listed = db.list_dynamic_providers().unwrap();
+    for runtime in &listed {
+        assert_ne!(
+            runtime.id, OPENCODE_PROVIDER_ID,
+            "builtin OpenCode row must not appear in dynamic list"
+        );
+        assert_ne!(
+            runtime.id, OPENCODE_ZEN_FREE_PROVIDER_ID,
+            "builtin Zen Free row must not appear in dynamic list"
+        );
+        assert_ne!(
+            runtime.id, MINIMAX_PROVIDER_ID,
+            "builtin MiniMax row must not appear in dynamic list"
+        );
+        assert_ne!(
+            runtime.id, KIMI_PROVIDER_ID,
+            "builtin Kimi row must not appear in dynamic list"
+        );
+        assert_ne!(
+            runtime.id, COMMAND_CODE_PROVIDER_ID,
+            "builtin Command Code row must not appear in dynamic list"
+        );
+        assert_ne!(
+            runtime.id, OLLAMA_PROVIDER_ID,
+            "builtin Ollama row must not appear in dynamic list"
+        );
+        assert_ne!(
+            runtime.id, CUSTOM_PROVIDER_ID,
+            "builtin Custom row must not appear in dynamic list"
+        );
+    }
+    for builtin_id in [
+        OPENCODE_PROVIDER_ID,
+        OPENCODE_ZEN_FREE_PROVIDER_ID,
+        COMMAND_CODE_PROVIDER_ID,
+        MINIMAX_PROVIDER_ID,
+        KIMI_PROVIDER_ID,
+        OLLAMA_PROVIDER_ID,
+        CUSTOM_PROVIDER_ID,
+    ] {
+        assert!(
+            db.get_dynamic_provider(builtin_id).unwrap().is_none(),
+            "get_dynamic_provider({builtin_id}) must return None"
+        );
+    }
+    drop(db);
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn v42_create_dynamic_provider_persists_origin_and_offering() {
+    let dir = temp_data_dir("v42-create-origin");
+    let db = open_with_host_cipher(dir.clone()).unwrap();
+    let now = Utc::now();
+    let preset_provider = uuid::Uuid::new_v4().to_string();
+    let custom_provider = uuid::Uuid::new_v4().to_string();
+    let mut preset_first = account("preset-acct");
+    preset_first.provider_id = preset_provider.clone();
+    preset_first.key_cipher = fixture_account_key_cipher();
+    let mut custom_first = account("custom-acct");
+    custom_first.provider_id = custom_provider.clone();
+    custom_first.key_cipher = fixture_account_key_cipher();
+    let preset_runtime = crate::dynamic::DynamicProviderRuntime {
+        preset_id: Some("zhipu-coding".into()),
+        id: preset_provider.clone(),
+        name: "Preset Lab".into(),
+        endpoint_url: "http://127.0.0.1:9".into(),
+        upstream_protocol: crate::provider::UpstreamProtocolKind::ChatCompletions,
+        auth_kind: ocg_domain::dynamic::DynamicAuthKind::Bearer,
+        mappings: vec![ocg_domain::dynamic::DynamicModelMapping {
+            public_model: "preset-model".into(),
+            upstream_model: "preset/upstream".into(),
+            upstream_override: None,
+        }],
+        created_at: now,
+        updated_at: now,
+    };
+    let custom_runtime = crate::dynamic::DynamicProviderRuntime {
+        preset_id: None,
+        id: custom_provider.clone(),
+        name: "Custom Lab".into(),
+        endpoint_url: "http://127.0.0.1:10".into(),
+        upstream_protocol: crate::provider::UpstreamProtocolKind::ChatCompletions,
+        auth_kind: ocg_domain::dynamic::DynamicAuthKind::Bearer,
+        mappings: vec![ocg_domain::dynamic::DynamicModelMapping {
+            public_model: "custom-model".into(),
+            upstream_model: "custom/upstream".into(),
+            upstream_override: None,
+        }],
+        created_at: now,
+        updated_at: now,
+    };
+    db.create_dynamic_provider(&preset_runtime, &preset_first)
+        .unwrap();
+    db.create_dynamic_provider(&custom_runtime, &custom_first)
+        .unwrap();
+
+    let preset_row: (String, String, Option<String>, String) = db
+        .conn
+        .query_row(
+            "SELECT origin, adapter_kind, preset_id, offering
+             FROM providers WHERE id = ?1",
+            [&preset_provider],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .unwrap();
+    assert_eq!(preset_row.0, "preset");
+    assert_eq!(preset_row.1, "configurable_http");
+    assert_eq!(preset_row.2.as_deref(), Some("zhipu-coding"));
+    assert_eq!(preset_row.3, "plan");
+
+    let custom_row: (String, String, Option<String>, String) = db
+        .conn
+        .query_row(
+            "SELECT origin, adapter_kind, preset_id, offering
+             FROM providers WHERE id = ?1",
+            [&custom_provider],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .unwrap();
+    assert_eq!(custom_row.0, "custom");
+    assert_eq!(custom_row.1, "configurable_http");
+    assert!(custom_row.2.is_none());
+    assert_eq!(custom_row.3, "api");
+
+    // create_dynamic_provider on a builtin id must fail because get_dynamic_provider
+    // already returns None for builtin rows.
+    let mut builtin_first = account("builtin-attempt");
+    builtin_first.provider_id = OPENCODE_PROVIDER_ID.into();
+    builtin_first.key_cipher = fixture_account_key_cipher();
+    let builtin_attempt = crate::dynamic::DynamicProviderRuntime {
+        preset_id: None,
+        id: OPENCODE_PROVIDER_ID.into(),
+        name: "Builtin Collision".into(),
+        endpoint_url: "http://127.0.0.1:11".into(),
+        upstream_protocol: crate::provider::UpstreamProtocolKind::ChatCompletions,
+        auth_kind: ocg_domain::dynamic::DynamicAuthKind::Bearer,
+        mappings: vec![ocg_domain::dynamic::DynamicModelMapping {
+            public_model: "model".into(),
+            upstream_model: "model".into(),
+            upstream_override: None,
+        }],
+        created_at: now,
+        updated_at: now,
+    };
+    let error = db
+        .create_dynamic_provider(&builtin_attempt, &builtin_first)
+        .expect_err("creating a dynamic provider with a builtin id must fail");
+    let message = format!("{error:#}");
+    assert!(
+        message.contains("UNIQUE constraint failed") || message.contains("UNIQUE"),
+        "create on builtin id must surface uniqueness conflict, got: {message}"
+    );
+
+    drop(db);
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn v42_delete_dynamic_provider_rejects_builtin_id() {
+    let dir = temp_data_dir("v42-delete-builtin");
+    let db = open_with_host_cipher(dir.clone()).unwrap();
+    for builtin_id in [
+        OPENCODE_PROVIDER_ID,
+        OPENCODE_ZEN_FREE_PROVIDER_ID,
+        COMMAND_CODE_PROVIDER_ID,
+        MINIMAX_PROVIDER_ID,
+        KIMI_PROVIDER_ID,
+        OLLAMA_PROVIDER_ID,
+        CUSTOM_PROVIDER_ID,
+    ] {
+        let error = db
+            .delete_dynamic_provider(builtin_id)
+            .expect_err("delete must reject builtin id");
+        let message = format!("{error:#}");
+        assert!(
+            message.contains("unknown provider"),
+            "delete on builtin `{builtin_id}` must fail with unknown provider, got: {message}"
+        );
+    }
+    drop(db);
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn v42_writes_pre_v42_backup_for_non_fresh_v41_source() {
+    let dir = temp_data_dir("v42-pre-v42-backup");
+    let db = open_with_host_cipher(dir.clone()).unwrap();
+    let now = Utc::now().to_rfc3339();
+    db.conn
+        .execute_batch(&format!(
+            "PRAGMA foreign_keys=OFF;
+             DROP TABLE providers;
+             DROP TABLE provider_models;
+             CREATE TABLE dynamic_providers (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                endpoint_url TEXT NOT NULL,
+                upstream_protocol TEXT NOT NULL,
+                auth_kind TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                preset_id TEXT
+             );
+             INSERT INTO dynamic_providers
+                 (id, name, endpoint_url, upstream_protocol, auth_kind, created_at, updated_at, preset_id)
+             VALUES ('legacy-lab', 'Legacy Lab', 'https://legacy.example/v1', 'chat_completions', 'bearer', '{now}', '{now}', NULL);
+             DELETE FROM schema_version;
+             INSERT INTO schema_version (version) VALUES (39);
+             PRAGMA foreign_keys=ON;"
+        ))
+        .unwrap();
+    drop(db);
+
+    assert!(pre_v42_backup_paths(&dir).is_empty());
+    let db = open_with_host_cipher(dir.clone()).unwrap();
+    drop(db);
+
+    let backups = pre_v42_backup_paths(&dir);
+    assert_eq!(backups.len(), 1, "expected exactly one pre-v42 backup");
+    let backup = &backups[0];
+    let verified = Connection::open_with_flags(backup, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+    let backup_version = schema_version_on(&verified).unwrap();
+    assert_eq!(backup_version, V41_SCHEMA_VERSION);
+    let legacy_count: i64 = verified
+        .query_row(
+            "SELECT COUNT(*) FROM dynamic_providers WHERE id = 'legacy-lab'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(legacy_count, 1);
+    drop(verified);
+    let hash_path = backup.with_file_name(format!(
+        "{}.sha256",
+        backup.file_name().unwrap().to_str().unwrap()
+    ));
+    assert!(hash_path.exists(), "sha256 sidecar must be written");
+    fs::remove_dir_all(dir).unwrap();
+}
+
+fn pre_v42_backup_paths(dir: &Path) -> Vec<PathBuf> {
+    backup_paths_with_prefix(dir, PRE_V42_BACKUP_FILE_PREFIX)
+}
+
+#[test]
+fn v42_fresh_database_skips_pre_v42_snapshot() {
+    let dir = temp_data_dir("v42-fresh-no-backup");
+    let db = open_with_host_cipher(dir.clone()).unwrap();
+    assert_eq!(schema_version_on(&db.conn).unwrap(), 42);
+    assert!(pre_v42_backup_paths(&dir).is_empty());
+    drop(db);
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn v39_preserves_existing_provider_configuration_and_adds_optional_provenance() {
     let conn = Connection::open_in_memory().unwrap();
     conn.execute_batch("CREATE TABLE schema_version(version INTEGER PRIMARY KEY); INSERT INTO schema_version VALUES(38);").unwrap();
@@ -115,24 +639,37 @@ fn v39_preserves_existing_provider_configuration_and_adds_optional_provenance() 
     migrate_to_v40(&conn).unwrap();
     migrate_to_v40(&conn).unwrap();
     assert_eq!(schema_version_on(&conn).unwrap(), 40);
-    let old = get_dynamic_provider_on(&conn, "old").unwrap().unwrap();
-    assert_eq!(old.preset_id, None);
-    assert_eq!(old.endpoint_url, "https://example.test/v1");
-    assert_eq!(old.mappings[0].upstream_model, "exact/ID");
-    assert!(old.mappings[0].upstream_override.is_none());
+    let (preset_id, endpoint_url): (Option<String>, String) = conn
+        .query_row(
+            "SELECT preset_id, endpoint_url FROM dynamic_providers WHERE id = 'old'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(preset_id, None);
+    assert_eq!(endpoint_url, "https://example.test/v1");
+    let (upstream_model, upstream_override): (String, Option<String>) = conn
+        .query_row(
+            "SELECT upstream_model, upstream_override FROM dynamic_provider_models WHERE provider_id = 'old'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(upstream_model, "exact/ID");
+    assert!(upstream_override.is_none());
     conn.execute(
         "UPDATE dynamic_providers SET preset_id = 'azure-openai' WHERE id = 'old'",
         [],
     )
     .unwrap();
-    assert_eq!(
-        get_dynamic_provider_on(&conn, "old")
-            .unwrap()
-            .unwrap()
-            .preset_id
-            .as_deref(),
-        Some("azure-openai")
-    );
+    let updated_preset: Option<String> = conn
+        .query_row(
+            "SELECT preset_id FROM dynamic_providers WHERE id = 'old'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(updated_preset.as_deref(), Some("azure-openai"));
 }
 
 #[test]
@@ -7886,7 +8423,7 @@ fn v35_catalog_collision_rolls_back_without_mutation() {
 fn v35_dynamic_provider_tables_round_trip_and_reject_duplicate_public_models() {
     let dir = temp_data_dir("v35-dynamic-providers");
     let db = open_with_host_cipher(dir.clone()).unwrap();
-    let columns = v35_column_names(&db.conn, "dynamic_providers");
+    let columns = v35_column_names(&db.conn, "providers");
     for required in [
         "id",
         "name",
@@ -7898,7 +8435,7 @@ fn v35_dynamic_provider_tables_round_trip_and_reject_duplicate_public_models() {
     ] {
         assert!(columns.iter().any(|name| name == required), "{required}");
     }
-    let model_columns = v35_column_names(&db.conn, "dynamic_provider_models");
+    let model_columns = v35_column_names(&db.conn, "provider_models");
     assert!(model_columns.iter().any(|name| name == "public_model_key"));
     assert!(!columns.iter().any(|name| name == "offering_id"));
 
@@ -7955,7 +8492,7 @@ fn v35_dynamic_provider_tables_round_trip_and_reject_duplicate_public_models() {
     );
 
     let duplicate = db.conn.execute(
-        "INSERT INTO dynamic_provider_models
+        "INSERT INTO provider_models
          (provider_id, public_model, public_model_key, upstream_model)
          VALUES (?1, 'LAB-OPUS', 'lab-opus', 'other')",
         [&provider_id],
