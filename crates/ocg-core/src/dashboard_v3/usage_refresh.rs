@@ -1,11 +1,11 @@
-//! Official OpenCode Go usage refresh.
+//! Official account-usage refresh dispatcher.
 //!
 //! `POST /accounts/{id}/usage/refresh` is a persistent operational mutation.
 //! It requires `expectedRevision` and `processGeneration`, validates those
 //! tokens before any outbound work, and rechecks them before caller-owned
-//! side effects. Calibration, throttle, dedupe, last-known-good preservation,
-//! and official-failure classification stay in the shared usage coordinator
-//! and do not bump `settings_revision`.
+//! side effects. OpenCode Go stays on its shared automatic/manual coordinator;
+//! Command Code GOAT dispatches to a separate manual-only implementation. Both
+//! calibrate existing windows without bumping `settings_revision`.
 
 use axum::Json;
 use axum::body::Bytes;
@@ -67,9 +67,22 @@ pub(super) async fn refresh_account_usage(
     body: Bytes,
 ) -> Result<Json<UsageRefresh>, RefreshApiError> {
     let input = parse_mutation_json::<UsageRefreshUpdate>(&body)?;
-    {
+    let provider_id = {
         let _settings_update = state.settings_update.lock();
         check_expectation(&state, &input.expectation)?;
+        state
+            .db
+            .lock()
+            .get_account(&id)
+            .map_err(V3ApiError::internal)?
+            .ok_or_else(|| V3ApiError::not_found(&state))?
+            .provider_id
+    };
+
+    if provider_id == crate::provider::COMMAND_CODE_PROVIDER_ID {
+        return super::command_code_usage_refresh::refresh(&state, &id, &input.expectation)
+            .await
+            .map(Json);
     }
 
     let authorization = UsageSyncCommitAuthorization::control_revision(
@@ -112,7 +125,7 @@ fn usage_refresh_from_success(
     }
 }
 
-fn usage_window_from_model(
+pub(super) fn usage_window_from_model(
     state: &CoreState,
     usage: ModelUsageWindow,
     pricing_revision: Option<String>,
@@ -174,5 +187,28 @@ fn map_refresh_error(state: &CoreState, error: OfficialUsageRefreshError) -> Ref
             V3ApiError::outbound_failed(state, upstream.to_string()).into()
         }
         OfficialUsageRefreshError::Internal(message) => V3ApiError::internal(message).into(),
+    }
+}
+
+impl RefreshApiError {
+    pub(super) fn throttled(
+        state: &CoreState,
+        next_allowed_at: DateTime<Utc>,
+        retry_after_secs: u64,
+        operation: &str,
+    ) -> Self {
+        let retry_after_secs = retry_after_secs.max(1);
+        Self::Throttled {
+            body: UsageRefreshThrottleError {
+                code: ERROR_THROTTLED.to_string(),
+                message: format!(
+                    "{operation} is temporarily throttled; retry after {retry_after_secs}s"
+                ),
+                current_revision: Some(state.settings_revision()),
+                process_generation: Some(state.process_generation()),
+                next_allowed_at: next_allowed_at.to_rfc3339(),
+            },
+            retry_after_secs,
+        }
     }
 }

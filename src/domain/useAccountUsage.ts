@@ -39,10 +39,11 @@ export type UsageLimitView = { key: UsageKey; label: string; limit: number };
 /**
  * Quota window state for the account list: OpenCode Go pricing limits,
  * per-account usage snapshots, the manual calibration drafts, and the
- * official-usage refresh flow (including 429 throttle handling). GOAT and
- * paid Ollama Cloud have no machine-readable usage endpoint, so their
- * windows project locally priced OCG request logs and allow an explicit
- * manual correction. Ollama accounts without a billing row skip the meter.
+ * official-usage refresh flow (including 429 throttle handling). GOAT can
+ * explicitly calibrate from Command Code's first-party account endpoint;
+ * between snapshots its windows still project locally priced OCG requests.
+ * Paid Ollama Cloud remains manual-only, and accounts without a billing row
+ * skip the meter.
  */
 export function useAccountUsage(accounts: Ref<Account[]>, now: Ref<number>) {
   const message = useMessage();
@@ -285,7 +286,9 @@ export function useAccountUsage(accounts: Ref<Account[]>, now: Ref<number>) {
         usage_sync_last_success_at: result.last_success_at,
         usage_sync_next_allowed_at: result.next_allowed_at,
       });
-      message.success(t("额度已从 OpenCode 官方用量刷新"));
+      message.success(isCommandCodeGoatAccount(account)
+        ? t("额度已从 Command Code 官方用量刷新")
+        : t("额度已从 OpenCode 官方用量刷新"));
     } catch (error) {
       if (error instanceof DashboardRequestError && error.status === 429) {
         const nextAllowed = error.nextAllowedAt;

@@ -128,7 +128,7 @@
     </template>
 
     <template #header-extra>
-      <div class="account-actions">
+      <div class="account-actions" :class="{ 'account-actions--goat': isGoat }">
         <div v-if="accountIsReady(account)" class="account-action account-action--enabled">
           <n-tooltip trigger="hover">
             <template #trigger>
@@ -145,7 +145,7 @@
           </n-tooltip>
         </div>
 
-        <div v-if="(isGo || isOfficialCn) && accountIsReady(account)" class="account-action account-action--secondary">
+        <div v-if="(isGo || isGoat || isOfficialCn) && accountIsReady(account)" class="account-action account-action--secondary">
           <n-tooltip trigger="hover">
             <template #trigger>
               <n-button
@@ -166,7 +166,7 @@
 
         <div
           v-if="manualUsageCalibration && accountIsReady(account) && edits"
-          class="account-action account-action--secondary"
+          class="account-action account-action--calibration"
         >
           <n-popover
             trigger="click"
@@ -286,6 +286,9 @@
         :limits="limits"
         :editing="!!edits"
       />
+      <p v-if="isGoat && !usageLoadError" class="usage-sync-meta">
+        {{ usageSyncCaption(account, now) }}
+      </p>
     </div>
     <div v-else-if="isCustom" class="custom-endpoint">
       <div class="custom-endpoint__meta">
@@ -380,6 +383,7 @@ import {
 } from "../domain/account-display.ts";
 import type { AccountMenuOption } from "../domain/account-display.ts";
 import {
+  isCommandCodeGoatAccount,
   isCpaIntegrationAccount,
   isOllamaCloudAccount,
   isOfficialCnPlanAccount,
@@ -432,6 +436,7 @@ const emit = defineEmits<{
 const isZen = computed(() => isZenFreeAccount(props.account));
 const isCpa = computed(() => isCpaIntegrationAccount(props.account));
 const isGo = computed(() => props.account.provider_id === "opencode");
+const isGoat = computed(() => isCommandCodeGoatAccount(props.account));
 const isCustom = computed(() => isCustomApiAccount(props.account));
 const isOfficialCn = computed(() => isOfficialCnPlanAccount(props.account));
 const isOllamaCloud = computed(() => isOllamaCloudAccount(props.account));
@@ -550,6 +555,10 @@ watch(() => props.account.purchase_date, (value) => {
   column-gap: 8px;
 }
 
+.account-actions--goat {
+  grid-template-columns: repeat(5, 40px);
+}
+
 .account-action {
   display: flex;
   align-items: center;
@@ -561,8 +570,21 @@ watch(() => props.account.purchase_date, (value) => {
   grid-column: 1;
 }
 
-.account-action--secondary {
+.account-action--secondary,
+.account-action--calibration {
   grid-column: 2;
+}
+
+.account-actions--goat .account-action--calibration {
+  grid-column: 3;
+}
+
+.account-actions--goat .account-action--test {
+  grid-column: 4;
+}
+
+.account-actions--goat .account-action--menu {
+  grid-column: 5;
 }
 
 .account-action--test {

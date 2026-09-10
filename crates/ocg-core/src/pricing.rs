@@ -1406,7 +1406,7 @@ fn same_source_redirect(attempt: Attempt<'_>) -> reqwest::redirect::Action {
 pub fn parse_official_html(html: &str) -> Result<PricingSnapshot> {
     let plain = collapse_whitespace(&strip_tags(html));
     let limits = PricingLimits {
-        window_5h: parse_limit(&plain, "5 hour limit")?,
+        window_5h: parse_limit_aliases(&plain, &["5-hour limit", "5 hour limit"], "5-hour limit")?,
         window_week: parse_limit(&plain, "Weekly limit")?,
         window_month: parse_limit(&plain, "Monthly limit")?,
     };
@@ -1416,19 +1416,7 @@ pub fn parse_official_html(html: &str) -> Result<PricingSnapshot> {
     let tables = extract_tables(html)?;
     let pricing_table = tables
         .iter()
-        .find(|table| {
-            has_headers(
-                table,
-                &[
-                    "model",
-                    "input",
-                    "output",
-                    "cached read",
-                    "cached write",
-                    "usage",
-                ],
-            )
-        })
+        .find(|table| has_official_pricing_headers(table))
         .ok_or_else(|| anyhow!("OpenCode Go pricing table was not found"))?;
     let endpoint_table = tables
         .iter()
@@ -1937,6 +1925,15 @@ fn parse_limit(plain: &str, marker: &str) -> Result<f64> {
     .ok_or_else(|| anyhow!("OpenCode Go page is missing USD value after {marker}"))
 }
 
+fn parse_limit_aliases(plain: &str, markers: &[&str], label: &str) -> Result<f64> {
+    let marker = markers
+        .iter()
+        .copied()
+        .find(|marker| plain.contains(marker))
+        .ok_or_else(|| anyhow!("OpenCode Go page is missing {label}"))?;
+    parse_limit(plain, marker)
+}
+
 fn parse_document_updated_at(html: &str) -> Result<String> {
     let marker = "title=\"Last updated:\"";
     let start = html
@@ -1970,6 +1967,18 @@ fn has_headers(table: &[Vec<String>], expected: &[&str]) -> bool {
             })
             .collect::<Vec<_>>();
         actual == expected
+    })
+}
+
+fn has_official_pricing_headers(table: &[Vec<String>]) -> bool {
+    const PREFIX: [&str; 5] = ["model", "input", "output", "cached read", "cached write"];
+    ["usage", "monthly limit"].iter().any(|last| {
+        let expected = PREFIX
+            .iter()
+            .copied()
+            .chain(std::iter::once(*last))
+            .collect::<Vec<_>>();
+        has_headers(table, &expected)
     })
 }
 

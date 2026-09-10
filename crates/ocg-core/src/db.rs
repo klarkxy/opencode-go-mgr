@@ -294,7 +294,7 @@ pub struct ForwardLogDiagnosticUpdate<'a> {
 }
 
 /// Official or test-provided values used to atomically calibrate all three
-/// Go usage windows. Monthly remaining minutes stay derived from purchase date.
+/// fixed account usage windows. The monthly reset stays derived from purchase date.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AccountUsageCalibrationSnapshot {
     pub rolling_percent: f64,
@@ -7975,7 +7975,7 @@ impl Database {
 
     /// Project locally priced request logs plus manual calibration into the
     /// provider-neutral quota window shape. This is the single read authority
-    /// for plans such as GOAT that have no machine-readable upstream usage API.
+    /// for locally projected plans and between explicit GOAT official snapshots.
     pub fn live_local_quota_windows(
         &self,
         account_id: &str,

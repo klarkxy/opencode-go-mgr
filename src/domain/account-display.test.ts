@@ -9,6 +9,7 @@ import {
   accountStatusLabel,
   accountStatusTagType,
   isUsageRefreshBlocked,
+  usageRefreshTooltip,
   usageSyncCaption,
 } from "./account-display.ts";
 
@@ -205,4 +206,16 @@ test("usage sync captions distinguish never-synced, last success, and refresh co
   assert.equal(isUsageRefreshBlocked(cooling, now), true);
   assert.match(usageSyncCaption(cooling, now), /上次官方同步:/);
   assert.match(usageSyncCaption(cooling, now), /刷新额度冷却中，请于 .+ 后重试/);
+});
+
+test("usage refresh tooltip names the selected official source", () => {
+  const account = draftAccount({
+    plan_routable: true,
+    verification_status: "verified",
+  });
+  assert.equal(usageRefreshTooltip(account), "从 OpenCode 官方用量刷新额度");
+  assert.equal(
+    usageRefreshTooltip({ ...account, provider_id: "command-code" }),
+    "从 Command Code 官方用量刷新额度",
+  );
 });

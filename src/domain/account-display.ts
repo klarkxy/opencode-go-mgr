@@ -3,7 +3,12 @@ import { isCooling, isFreeCooling, isWindowCooling } from "./accounts-usage.ts";
 import type { UsageKey } from "./accounts-usage.ts";
 import { daysUntilDate, expiryTagType } from "./account-lifecycle.ts";
 import type { ExpiryTagType } from "./account-lifecycle.ts";
-import { isCpaIntegrationAccount, isOllamaCloudAccount, isZenFreeAccount } from "./account-providers.ts";
+import {
+  isCommandCodeGoatAccount,
+  isCpaIntegrationAccount,
+  isOllamaCloudAccount,
+  isZenFreeAccount,
+} from "./account-providers.ts";
 import { isCustomApiAccount } from "./custom-account.ts";
 import { t } from "../i18n/index.ts";
 import type { MessageKey } from "../i18n/index.ts";
@@ -188,7 +193,9 @@ export function usageRefreshTooltip(account: Account, now = Date.now()): string 
       time: formatUsageSyncTime(account.usage_sync_next_allowed_at),
     });
   }
-  return t("从 OpenCode 官方用量刷新额度");
+  return isCommandCodeGoatAccount(account)
+    ? t("从 Command Code 官方用量刷新额度")
+    : t("从 OpenCode 官方用量刷新额度");
 }
 
 export function accountMenuOptions(account: Account, now = Date.now()): AccountMenuOption[] {

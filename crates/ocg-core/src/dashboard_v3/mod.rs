@@ -27,6 +27,7 @@ mod application_connectors;
 mod auth;
 mod browser;
 mod claude_desktop;
+mod command_code_usage_refresh;
 mod connection;
 mod cpa;
 mod custom_discovery;
@@ -116,6 +117,10 @@ pub use types::{
 };
 pub use updater::{GITHUB_LATEST_RELEASE_API, GITHUB_LATEST_RELEASE_URL};
 
+#[cfg(debug_assertions)]
+pub use crate::command_code_usage::{
+    CommandCodeUsageTargetGuard, install_command_code_usage_target_for_tests,
+};
 #[cfg(debug_assertions)]
 pub use account_verify::{CustomVerifyProbeGuard, install_custom_verify_probe_for_tests};
 #[cfg(debug_assertions)]
