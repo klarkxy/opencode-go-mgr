@@ -60,6 +60,8 @@ fn effective_route_prefers_mapping_override_over_runtime_defaults() {
         mappings: vec![inherited.clone(), overridden.clone()],
         created_at: Utc::now(),
         updated_at: Utc::now(),
+        origin: ocg_domain::provider::ProviderOrigin::Custom,
+        offering: "api".to_string(),
     };
     assert_eq!(
         runtime.effective_route(&inherited),

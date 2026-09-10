@@ -11,6 +11,9 @@ function catalogEntry(
 ): ProviderCatalogEntry {
   return {
     provider_id,
+    origin: "preset",
+    editable: true,
+    deletable: true,
     display_name: provider_id,
     display_family: provider_id,
     credential_kind: "api_key",

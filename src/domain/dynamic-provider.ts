@@ -16,19 +16,19 @@ export interface DynamicMappingOverride {
   endpoint_url: string;
 }
 
-export interface DynamicProviderMapping {
+export interface ProviderDefinitionMapping {
   public_model: string;
   upstream_model: string;
   /** Null/undefined inherits the supplier default protocol and endpoint. */
   upstream_override?: DynamicMappingOverride | null;
 }
 
-export interface DynamicProviderDraft {
+export interface ProviderDefinitionDraft {
   name: string;
   endpoint_url: string;
   upstream_protocol: DynamicUpstreamProtocol | "";
   auth_kind: DynamicAuthKind | "";
-  models: DynamicProviderMapping[];
+  models: ProviderDefinitionMapping[];
   account_name: string;
   notes: string;
   key: string;
@@ -39,7 +39,7 @@ export interface DynamicProviderDraft {
   preset_id?: string;
 }
 
-export type DynamicProviderDraftError =
+export type ProviderDefinitionDraftError =
   | "missing_name"
   | "missing_endpoint_url"
   | "invalid_endpoint_url"
@@ -84,7 +84,7 @@ export const DYNAMIC_PROVIDER_DRAFT_ERROR_KEYS = {
   override_endpoint_with_credentials: "覆盖的上游地址不能包含用户名或密码",
   missing_key: "请填写 API Key",
   missing_replacement_key: "从无鉴权改为需要 Key 时必须填写替换 Key",
-} as const satisfies Record<DynamicProviderDraftError, string>;
+} as const satisfies Record<ProviderDefinitionDraftError, string>;
 
 export const DYNAMIC_AUTH_KINDS: readonly DynamicAuthKind[] = ["bearer", "x-api-key", "none"];
 export const DYNAMIC_PROTOCOLS: readonly DynamicUpstreamProtocol[] = [
@@ -103,7 +103,7 @@ export function dynamicAuthRequiresKey(authKind: DynamicAuthKind | ""): boolean 
   return authKind === "bearer" || authKind === "x-api-key";
 }
 
-export function emptyDynamicProviderDraft(): DynamicProviderDraft {
+export function emptyProviderDefinitionDraft(): ProviderDefinitionDraft {
   return {
     name: "",
     endpoint_url: "",
@@ -117,7 +117,7 @@ export function emptyDynamicProviderDraft(): DynamicProviderDraft {
   };
 }
 
-export function sanitizeDynamicProviderDraft(draft: DynamicProviderDraft): DynamicProviderDraft {
+export function sanitizeProviderDefinitionDraft(draft: ProviderDefinitionDraft): ProviderDefinitionDraft {
   return {
     ...draft,
     key: "",
@@ -133,7 +133,7 @@ function hasControlCharacter(value: string): boolean {
 
 function normalizeDynamicOverride(
   override: DynamicMappingOverride | null | undefined,
-): DynamicMappingOverride | null | DynamicProviderDraftError {
+): DynamicMappingOverride | null | ProviderDefinitionDraftError {
   if (!override) return null;
   if (override.protocol !== "chat_completions"
     && override.protocol !== "responses"
@@ -150,9 +150,9 @@ function normalizeDynamicOverride(
 }
 
 export function normalizeDynamicMappings(
-  mappings: readonly DynamicProviderMapping[],
-): DynamicProviderMapping[] | DynamicProviderDraftError {
-  const normalized: DynamicProviderMapping[] = [];
+  mappings: readonly ProviderDefinitionMapping[],
+): ProviderDefinitionMapping[] | ProviderDefinitionDraftError {
+  const normalized: ProviderDefinitionMapping[] = [];
   const seen = new Set<string>();
   for (const mapping of mappings) {
     const publicModel = mapping.public_model.trim();
@@ -181,8 +181,8 @@ export function normalizeDynamicMappings(
 
 /** Only fully filled mapping rows can be tested; the picker never silently selects a partial row. */
 export function completeDynamicTestTargets(
-  models: readonly DynamicProviderMapping[],
-): DynamicProviderMapping[] {
+  models: readonly ProviderDefinitionMapping[],
+): ProviderDefinitionMapping[] {
   return models
     .map((mapping) => ({
       public_model: mapping.public_model.trim(),
@@ -205,7 +205,7 @@ export function completeDynamicTestTargets(
  */
 export function resolveDynamicMappingRoute(
   supplier: { endpoint_url: string; upstream_protocol: DynamicUpstreamProtocol | "" },
-  mapping: Pick<DynamicProviderMapping, "upstream_override">,
+  mapping: Pick<ProviderDefinitionMapping, "upstream_override">,
 ): { endpoint_url: string; upstream_protocol: DynamicUpstreamProtocol | "" } {
   const override = mapping.upstream_override;
   if (override) {
@@ -223,16 +223,16 @@ export function resolveDynamicMappingRoute(
  * override satisfies the same endpoint rules as Save.
  */
 export function dynamicMappingOverrideError(
-  mapping: Pick<DynamicProviderMapping, "upstream_override">,
-): DynamicProviderDraftError | null {
+  mapping: Pick<ProviderDefinitionMapping, "upstream_override">,
+): ProviderDefinitionDraftError | null {
   const result = normalizeDynamicOverride(mapping.upstream_override);
   return typeof result === "string" ? result : null;
 }
 
-export function validateDynamicProviderDraft(
-  draft: DynamicProviderDraft,
+export function validateProviderDefinitionDraft(
+  draft: ProviderDefinitionDraft,
   options: { mode: "create" | "edit"; previousAuthKind?: DynamicAuthKind | "" } = { mode: "create" },
-): DynamicProviderDraftError | null {
+): ProviderDefinitionDraftError | null {
   if (!draft.name.trim()) return "missing_name";
   if (!draft.endpoint_url.trim()) return "missing_endpoint_url";
   const endpointIssue = customEndpointUrlIssue(draft.endpoint_url);
@@ -263,7 +263,7 @@ export function validateDynamicProviderDraft(
   return null;
 }
 
-export function buildDynamicProviderCreateBody(draft: DynamicProviderDraft): {
+export function buildProviderDefinitionCreateBody(draft: ProviderDefinitionDraft): {
   name: string;
   endpointUrl: string;
   upstreamProtocol: DynamicUpstreamProtocol;
@@ -279,11 +279,11 @@ export function buildDynamicProviderCreateBody(draft: DynamicProviderDraft): {
   key?: string;
   presetId?: string;
 } {
-  const error = validateDynamicProviderDraft(draft, { mode: "create" });
+  const error = validateProviderDefinitionDraft(draft, { mode: "create" });
   if (error) throw new Error(error);
   const models = normalizeDynamicMappings(draft.models);
   if (typeof models === "string") throw new Error(models);
-  const body: ReturnType<typeof buildDynamicProviderCreateBody> = {
+  const body: ReturnType<typeof buildProviderDefinitionCreateBody> = {
     name: draft.name.trim(),
     endpointUrl: draft.endpoint_url.trim(),
     upstreamProtocol: draft.upstream_protocol as DynamicUpstreamProtocol,
@@ -306,8 +306,8 @@ export function buildDynamicProviderCreateBody(draft: DynamicProviderDraft): {
   return body;
 }
 
-export function buildDynamicProviderUpdateBody(
-  draft: DynamicProviderDraft,
+export function buildProviderDefinitionUpdateBody(
+  draft: ProviderDefinitionDraft,
   previousAuthKind: DynamicAuthKind | "",
 ): {
   name: string;
@@ -322,11 +322,11 @@ export function buildDynamicProviderUpdateBody(
   key?: string;
   presetId?: string;
 } {
-  const error = validateDynamicProviderDraft(draft, { mode: "edit", previousAuthKind });
+  const error = validateProviderDefinitionDraft(draft, { mode: "edit", previousAuthKind });
   if (error) throw new Error(error);
   const models = normalizeDynamicMappings(draft.models);
   if (typeof models === "string") throw new Error(models);
-  const body: ReturnType<typeof buildDynamicProviderUpdateBody> = {
+  const body: ReturnType<typeof buildProviderDefinitionUpdateBody> = {
     name: draft.name.trim(),
     endpointUrl: draft.endpoint_url.trim(),
     upstreamProtocol: draft.upstream_protocol as DynamicUpstreamProtocol,
@@ -351,8 +351,8 @@ export function buildDynamicProviderUpdateBody(
 
 export const DYNAMIC_PAID_TEST_WARNING_KEY = "真实测试会消耗上游额度或产生费用。确定继续？" as const;
 
-export type DynamicProviderUiAction = "save" | "discover" | "test" | "delete";
+export type ProviderDefinitionUiAction = "save" | "discover" | "test" | "delete";
 
-export function dynamicProviderActionNeedsConfirm(action: DynamicProviderUiAction): boolean {
+export function dynamicProviderActionNeedsConfirm(action: ProviderDefinitionUiAction): boolean {
   return action === "test" || action === "delete";
 }

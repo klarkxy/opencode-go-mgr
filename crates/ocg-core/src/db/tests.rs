@@ -447,6 +447,8 @@ fn v42_create_dynamic_provider_persists_origin_and_offering() {
         }],
         created_at: now,
         updated_at: now,
+        origin: ocg_domain::provider::ProviderOrigin::Preset,
+        offering: ocg_domain::provider::preset_offering("zhipu-coding").to_string(),
     };
     let custom_runtime = crate::dynamic::DynamicProviderRuntime {
         preset_id: None,
@@ -462,6 +464,8 @@ fn v42_create_dynamic_provider_persists_origin_and_offering() {
         }],
         created_at: now,
         updated_at: now,
+        origin: ocg_domain::provider::ProviderOrigin::Custom,
+        offering: "api".to_string(),
     };
     db.create_dynamic_provider(&preset_runtime, &preset_first)
         .unwrap();
@@ -515,6 +519,8 @@ fn v42_create_dynamic_provider_persists_origin_and_offering() {
         }],
         created_at: now,
         updated_at: now,
+        origin: ocg_domain::provider::ProviderOrigin::Custom,
+        offering: "api".to_string(),
     };
     let error = db
         .create_dynamic_provider(&builtin_attempt, &builtin_first)
@@ -8455,6 +8461,8 @@ fn v35_dynamic_provider_tables_round_trip_and_reject_duplicate_public_models() {
         }],
         created_at: now,
         updated_at: now,
+        origin: ocg_domain::provider::ProviderOrigin::Custom,
+        offering: "api".to_string(),
     };
     let mut first = account("dyn-acct");
     first.provider_id = provider_id.clone();
@@ -8522,6 +8530,8 @@ fn dynamic_provider_create_fault_rolls_back_provider_and_account() {
         }],
         created_at: now,
         updated_at: now,
+        origin: ocg_domain::provider::ProviderOrigin::Custom,
+        offering: "api".to_string(),
     };
     let mut first = account("dyn-none");
     first.provider_id = provider_id.clone();
@@ -8561,6 +8571,8 @@ fn dynamic_provider_patch_fault_rolls_back_mappings_and_runtime_state() {
         }],
         created_at: now,
         updated_at: now,
+        origin: ocg_domain::provider::ProviderOrigin::Custom,
+        offering: "api".to_string(),
     };
     let mut first = account("dyn-patch");
     first.provider_id = provider_id.clone();
@@ -8619,6 +8631,8 @@ fn replace_dynamic_provider_refuses_to_fan_out_a_replacement_key() {
         }],
         created_at: now,
         updated_at: now,
+        origin: ocg_domain::provider::ProviderOrigin::Custom,
+        offering: "api".to_string(),
     };
     let mut first = account("dyn-fanout-1");
     first.provider_id = provider_id.clone();
@@ -8666,6 +8680,8 @@ fn imported_dynamic_auth_change_rejects_destination_only_accounts() {
         }],
         created_at: now,
         updated_at: now,
+        origin: ocg_domain::provider::ProviderOrigin::Custom,
+        offering: "api".to_string(),
     };
     let mut destination_only = account("dyn-destination-only");
     destination_only.provider_id = provider_id.clone();

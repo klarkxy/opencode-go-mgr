@@ -1,9 +1,9 @@
 //! Dynamic Provider persistence, V3 control plane, and routing snapshot tests.
 
 use chrono::Utc;
-use ocg_core::dashboard_v3::ERROR_INVALID_REQUEST;
+use ocg_core::dashboard_v3::{ERROR_BUILTIN_PROVIDER_IMMUTABLE, ERROR_INVALID_REQUEST};
 use ocg_core::models::ProxyMode;
-use ocg_core::provider::{CUSTOM_PROVIDER_ID, OPENCODE_PROVIDER_ID};
+use ocg_core::provider::{COMMAND_CODE_PROVIDER_ID, CUSTOM_PROVIDER_ID, OPENCODE_PROVIDER_ID};
 use reqwest::{Method, StatusCode};
 use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -1821,5 +1821,278 @@ async fn inherited_chat_and_overridden_messages_use_effective_routes() {
         loaded["models"][1].get("upstreamOverride").is_none(),
         "{loaded}"
     );
+    harness.stop();
+}
+
+#[tokio::test]
+async fn get_builtin_provider_unifies_under_provider_definition_shape() {
+    let harness = start_loopback("dyn-builtin-get").await;
+    let (status, body) = send_json(
+        &harness,
+        Method::GET,
+        &format!("/providers/{OPENCODE_PROVIDER_ID}"),
+        &Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["origin"], "builtin");
+    assert_eq!(body["editable"], false);
+    assert_eq!(body["deletable"], false);
+    assert!(body["endpointUrl"].is_null(), "{body}");
+    assert!(body["upstreamProtocol"].is_null(), "{body}");
+    assert!(body["authKind"].is_null(), "{body}");
+    assert!(body["models"].as_array().unwrap().is_empty(), "{body}");
+    assert!(body["presetId"].is_null(), "{body}");
+    assert_eq!(body["id"], OPENCODE_PROVIDER_ID);
+    let (status, second) = send_json(
+        &harness,
+        Method::GET,
+        &format!("/providers/{COMMAND_CODE_PROVIDER_ID}"),
+        &Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{second}");
+    assert_eq!(second["origin"], "builtin");
+    assert_eq!(second["editable"], false);
+    assert_eq!(second["deletable"], false);
+    assert!(second["endpointUrl"].is_null(), "{second}");
+    harness.stop();
+}
+
+#[tokio::test]
+async fn get_dynamic_provider_distinguishes_preset_and_custom_origins() {
+    let harness = start_loopback("dyn-origin-get").await;
+    let (status, preset) = send_json(
+        &harness,
+        Method::POST,
+        "/providers",
+        &cas(
+            &harness,
+            json!({
+                "name": "Bailian Plan",
+                "presetId": "bailian-coding",
+                "endpointUrl": "https://example.com/v1",
+                "upstreamProtocol": "chat_completions",
+                "authKind": "bearer",
+                "key": "sk-bailian",
+                "models": [{"publicModel": "lab-opus", "upstreamModel": "vendor/opus"}]
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{preset}");
+    let preset_id = preset["provider"]["id"].as_str().unwrap().to_string();
+
+    let (status, custom) = send_json(
+        &harness,
+        Method::POST,
+        "/providers",
+        &cas(
+            &harness,
+            create_body(
+                "Custom Raw",
+                "https://example.com/v1",
+                "chat_completions",
+                "bearer",
+                Some("sk-custom"),
+            ),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{custom}");
+    let custom_id = custom["provider"]["id"].as_str().unwrap().to_string();
+
+    let (status, preset_loaded) = send_json(
+        &harness,
+        Method::GET,
+        &format!("/providers/{preset_id}"),
+        &Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{preset_loaded}");
+    assert_eq!(preset_loaded["origin"], "preset");
+    assert_eq!(preset_loaded["editable"], true);
+    assert_eq!(preset_loaded["deletable"], true);
+    assert_eq!(preset_loaded["offering"], "plan");
+    assert_eq!(preset_loaded["presetId"], "bailian-coding");
+    assert_eq!(preset_loaded["endpointUrl"], "https://example.com/v1");
+    assert_eq!(preset_loaded["upstreamProtocol"], "chat_completions");
+    assert_eq!(preset_loaded["authKind"], "bearer");
+
+    let (status, custom_loaded) = send_json(
+        &harness,
+        Method::GET,
+        &format!("/providers/{custom_id}"),
+        &Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{custom_loaded}");
+    assert_eq!(custom_loaded["origin"], "custom");
+    assert_eq!(custom_loaded["editable"], true);
+    assert_eq!(custom_loaded["deletable"], true);
+    assert_eq!(custom_loaded["offering"], "api");
+    assert!(custom_loaded["presetId"].is_null(), "{custom_loaded}");
+    harness.stop();
+}
+
+#[tokio::test]
+async fn patch_and_delete_builtin_provider_returns_immutable_error() {
+    let harness = start_loopback("dyn-builtin-immutable").await;
+    let (status, patch) = send_json(
+        &harness,
+        Method::PATCH,
+        &format!("/providers/{OPENCODE_PROVIDER_ID}"),
+        &cas(
+            &harness,
+            json!({
+                "name": "Renamed",
+                "endpointUrl": "https://example.com/v1",
+                "upstreamProtocol": "chat_completions",
+                "authKind": "bearer",
+                "models": [{"publicModel": "lab-opus", "upstreamModel": "vendor/opus"}]
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{patch}");
+    assert_eq!(patch["code"], ERROR_BUILTIN_PROVIDER_IMMUTABLE, "{patch}");
+    assert!(patch["message"].is_string(), "{patch}");
+    assert!(patch["currentRevision"].is_u64(), "{patch}");
+    assert!(patch["processGeneration"].is_u64(), "{patch}");
+
+    let (status, delete) = send_json(
+        &harness,
+        Method::DELETE,
+        &format!("/providers/{OPENCODE_PROVIDER_ID}"),
+        &cas(&harness, json!({})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{delete}");
+    assert_eq!(delete["code"], ERROR_BUILTIN_PROVIDER_IMMUTABLE, "{delete}");
+    harness.stop();
+}
+
+#[tokio::test]
+async fn catalog_entries_advertise_origin_and_mutability_flags_for_every_provider() {
+    let harness = start_loopback("dyn-catalog-origin").await;
+    let (status, _created) = send_json(
+        &harness,
+        Method::POST,
+        "/providers",
+        &cas(
+            &harness,
+            json!({
+                "name": "Custom Lab",
+                "endpointUrl": "https://example.com/v1",
+                "upstreamProtocol": "chat_completions",
+                "authKind": "bearer",
+                "key": "sk-lab",
+                "models": [{"publicModel": "lab-opus", "upstreamModel": "vendor/opus"}]
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{_created}");
+
+    let (status, body) = send_json(&harness, Method::GET, "/providers", &Value::Null).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let entries = body["entries"].as_array().expect("entries array");
+    assert!(!entries.is_empty(), "{body}");
+
+    let mut seen_builtin = false;
+    let mut seen_custom = false;
+    for entry in entries {
+        let origin = entry["origin"].as_str().expect("origin");
+        let editable = entry["editable"].as_bool().expect("editable");
+        let deletable = entry["deletable"].as_bool().expect("deletable");
+        match origin {
+            "builtin" => {
+                seen_builtin = true;
+                assert!(!editable, "builtin entry must not be editable: {entry}");
+                assert!(!deletable, "builtin entry must not be deletable: {entry}");
+            }
+            "custom" | "preset" => {
+                seen_custom = true;
+                assert!(editable, "dynamic entry must be editable: {entry}");
+                assert!(deletable, "dynamic entry must be deletable: {entry}");
+            }
+            other => panic!("unexpected origin {other} in {entry}"),
+        }
+    }
+    assert!(seen_builtin, "no builtin entries found in {body}");
+    assert!(seen_custom, "no custom entries found in {body}");
+    harness.stop();
+}
+
+#[tokio::test]
+async fn dynamic_provider_offering_round_trips_for_preset_and_custom() {
+    let harness = start_loopback("dyn-offering-roundtrip").await;
+    let (status, plan_row) = send_json(
+        &harness,
+        Method::POST,
+        "/providers",
+        &cas(
+            &harness,
+            json!({
+                "name": "Bailian Plan",
+                "presetId": "bailian-coding",
+                "endpointUrl": "https://example.com/v1",
+                "upstreamProtocol": "chat_completions",
+                "authKind": "bearer",
+                "key": "sk-bailian",
+                "models": [{"publicModel": "lab-opus", "upstreamModel": "vendor/opus"}]
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{plan_row}");
+    let plan_id = plan_row["provider"]["id"].as_str().unwrap().to_string();
+    assert_eq!(plan_row["provider"]["offering"], "plan");
+    assert_eq!(plan_row["provider"]["origin"], "preset");
+
+    let (status, api_row) = send_json(
+        &harness,
+        Method::POST,
+        "/providers",
+        &cas(
+            &harness,
+            create_body(
+                "API Lab",
+                "https://example.com/v1",
+                "chat_completions",
+                "bearer",
+                Some("sk-api"),
+            ),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{api_row}");
+    let api_id = api_row["provider"]["id"].as_str().unwrap().to_string();
+    assert_eq!(api_row["provider"]["offering"], "api");
+    assert_eq!(api_row["provider"]["origin"], "custom");
+
+    let (status, plan_loaded) = send_json(
+        &harness,
+        Method::GET,
+        &format!("/providers/{plan_id}"),
+        &Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{plan_loaded}");
+    assert_eq!(plan_loaded["offering"], "plan");
+    assert_eq!(plan_loaded["origin"], "preset");
+    assert_eq!(plan_loaded["presetId"], "bailian-coding");
+
+    let (status, api_loaded) = send_json(
+        &harness,
+        Method::GET,
+        &format!("/providers/{api_id}"),
+        &Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{api_loaded}");
+    assert_eq!(api_loaded["offering"], "api");
+    assert_eq!(api_loaded["origin"], "custom");
+    assert!(api_loaded["presetId"].is_null(), "{api_loaded}");
     harness.stop();
 }

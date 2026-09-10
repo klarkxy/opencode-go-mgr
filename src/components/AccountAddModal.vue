@@ -371,7 +371,7 @@ watch(
       dynamicPresetIds.value = new Map();
       return;
     }
-    void Promise.allSettled(ids.map((id) => providerApi.getDynamicProvider(id))).then((results) => {
+    void Promise.allSettled(ids.map((id) => providerApi.getProviderDefinition(id))).then((results) => {
       if (generation !== dynamicPresetGeneration) return;
       const next = new Map<string, string | null>();
       results.forEach((result, index) => {

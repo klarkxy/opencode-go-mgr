@@ -3078,396 +3078,6 @@
       ],
       "type": "string"
     },
-    "DynamicModelUpstreamOverride": {
-      "additionalProperties": false,
-      "description": "One public-to-upstream mapping owned by a dynamic Provider.",
-      "properties": {
-        "endpointUrl": {
-          "type": "string"
-        },
-        "protocol": {
-          "$ref": "#/$defs/AccountUpstreamProtocol"
-        }
-      },
-      "required": [
-        "protocol",
-        "endpointUrl"
-      ],
-      "type": "object"
-    },
-    "DynamicProvider": {
-      "additionalProperties": false,
-      "description": "Secret-free dynamic Provider definition.",
-      "properties": {
-        "authKind": {
-          "$ref": "#/$defs/DynamicProviderAuthKind"
-        },
-        "createdAt": {
-          "type": "string"
-        },
-        "endpointUrl": {
-          "type": "string"
-        },
-        "id": {
-          "type": "string"
-        },
-        "models": {
-          "items": {
-            "$ref": "#/$defs/DynamicProviderModel"
-          },
-          "type": "array"
-        },
-        "name": {
-          "type": "string"
-        },
-        "presetId": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "processGeneration": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "revision": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "updatedAt": {
-          "type": "string"
-        },
-        "upstreamProtocol": {
-          "$ref": "#/$defs/AccountUpstreamProtocol"
-        }
-      },
-      "required": [
-        "id",
-        "name",
-        "endpointUrl",
-        "upstreamProtocol",
-        "authKind",
-        "models",
-        "createdAt",
-        "updatedAt",
-        "revision",
-        "processGeneration"
-      ],
-      "type": "object"
-    },
-    "DynamicProviderAuthKind": {
-      "description": "Auth kind owned by a dynamic Provider. Independent of protocol.",
-      "enum": [
-        "bearer",
-        "x-api-key",
-        "none"
-      ],
-      "type": "string"
-    },
-    "DynamicProviderCreate": {
-      "additionalProperties": false,
-      "description": "POST `/providers` body. Creates the definition, mappings, and first account.",
-      "properties": {
-        "accountName": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "authKind": {
-          "$ref": "#/$defs/DynamicProviderAuthKind"
-        },
-        "endpointUrl": {
-          "type": "string"
-        },
-        "expectedRevision": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "key": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "models": {
-          "items": {
-            "$ref": "#/$defs/DynamicProviderModel"
-          },
-          "type": "array"
-        },
-        "name": {
-          "type": "string"
-        },
-        "notes": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "presetId": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "processGeneration": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "upstreamProtocol": {
-          "$ref": "#/$defs/AccountUpstreamProtocol"
-        }
-      },
-      "required": [
-        "expectedRevision",
-        "processGeneration",
-        "name",
-        "endpointUrl",
-        "upstreamProtocol",
-        "authKind",
-        "models"
-      ],
-      "type": "object"
-    },
-    "DynamicProviderDiscoverRequest": {
-      "additionalProperties": false,
-      "description": "POST `/providers/models/discover` body. Operational probe; no CAS bump.",
-      "properties": {
-        "authKind": {
-          "$ref": "#/$defs/DynamicProviderAuthKind"
-        },
-        "endpointUrl": {
-          "type": "string"
-        },
-        "key": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "upstreamProtocol": {
-          "$ref": "#/$defs/AccountUpstreamProtocol"
-        }
-      },
-      "required": [
-        "endpointUrl",
-        "upstreamProtocol",
-        "authKind"
-      ],
-      "type": "object"
-    },
-    "DynamicProviderDiscoverResponse": {
-      "additionalProperties": false,
-      "description": "Discovery result. Never includes the submitted Key.",
-      "properties": {
-        "models": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "processGeneration": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "revision": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "truncated": {
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "models",
-        "truncated",
-        "revision",
-        "processGeneration"
-      ],
-      "type": "object"
-    },
-    "DynamicProviderModel": {
-      "additionalProperties": false,
-      "properties": {
-        "publicModel": {
-          "type": "string"
-        },
-        "upstreamModel": {
-          "type": "string"
-        },
-        "upstreamOverride": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/DynamicModelUpstreamOverride"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      },
-      "required": [
-        "publicModel",
-        "upstreamModel"
-      ],
-      "type": "object"
-    },
-    "DynamicProviderMutation": {
-      "additionalProperties": false,
-      "description": "Mutation result for a dynamic Provider write.",
-      "properties": {
-        "processGeneration": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "provider": {
-          "$ref": "#/$defs/DynamicProvider"
-        },
-        "revision": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        }
-      },
-      "required": [
-        "provider",
-        "revision",
-        "processGeneration"
-      ],
-      "type": "object"
-    },
-    "DynamicProviderTestRequest": {
-      "additionalProperties": false,
-      "description": "POST `/providers/test` body. Operational probe; no CAS bump.",
-      "properties": {
-        "authKind": {
-          "$ref": "#/$defs/DynamicProviderAuthKind"
-        },
-        "endpointUrl": {
-          "type": "string"
-        },
-        "key": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "publicModel": {
-          "type": "string"
-        },
-        "upstreamModel": {
-          "type": "string"
-        },
-        "upstreamProtocol": {
-          "$ref": "#/$defs/AccountUpstreamProtocol"
-        }
-      },
-      "required": [
-        "endpointUrl",
-        "upstreamProtocol",
-        "authKind",
-        "publicModel",
-        "upstreamModel"
-      ],
-      "type": "object"
-    },
-    "DynamicProviderTestResponse": {
-      "additionalProperties": false,
-      "description": "Model-test result. Never includes the submitted Key.",
-      "properties": {
-        "error": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "ok": {
-          "type": "boolean"
-        },
-        "processGeneration": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "revision": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        }
-      },
-      "required": [
-        "ok",
-        "error",
-        "revision",
-        "processGeneration"
-      ],
-      "type": "object"
-    },
-    "DynamicProviderUpdate": {
-      "additionalProperties": false,
-      "description": "PATCH `/providers/{providerId}` body. Full replacement of mutable config.",
-      "properties": {
-        "authKind": {
-          "$ref": "#/$defs/DynamicProviderAuthKind"
-        },
-        "endpointUrl": {
-          "type": "string"
-        },
-        "expectedRevision": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "key": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "models": {
-          "items": {
-            "$ref": "#/$defs/DynamicProviderModel"
-          },
-          "type": "array"
-        },
-        "name": {
-          "type": "string"
-        },
-        "presetId": {
-          "description": "Omitted/null preserves provenance; an empty string clears it.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "processGeneration": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "upstreamProtocol": {
-          "$ref": "#/$defs/AccountUpstreamProtocol"
-        }
-      },
-      "required": [
-        "expectedRevision",
-        "processGeneration",
-        "name",
-        "endpointUrl",
-        "upstreamProtocol",
-        "authKind",
-        "models"
-      ],
-      "type": "object"
-    },
     "EffectiveCatalog": {
       "additionalProperties": false,
       "description": "Merged model-id catalog for one contract scope.",
@@ -5636,11 +5246,19 @@
         "credentialKind": {
           "$ref": "#/$defs/AccountCredentialKind"
         },
+        "deletable": {
+          "description": "Whether the dashboard may DELETE this entry. Same rules as `editable`.",
+          "type": "boolean"
+        },
         "displayFamily": {
           "type": "string"
         },
         "displayName": {
           "type": "string"
+        },
+        "editable": {
+          "description": "Whether the dashboard may PATCH this entry. Always `false` for\n`builtin` rows; `true` for `preset`/`custom`.",
+          "type": "boolean"
         },
         "formFields": {
           "items": {
@@ -5668,6 +5286,10 @@
         },
         "modelSource": {
           "type": "string"
+        },
+        "origin": {
+          "$ref": "#/$defs/ProviderOrigin",
+          "description": "Row provenance in the unified `providers` table. Wire values:\n`builtin` (sealed adapter), `preset` (preset-derived dynamic row),\n`custom` (manual dynamic row)."
         },
         "pricingAvailability": {
           "type": "string"
@@ -5705,6 +5327,9 @@
       },
       "required": [
         "providerId",
+        "origin",
+        "editable",
+        "deletable",
         "displayName",
         "displayFamily",
         "credentialKind",
@@ -5874,6 +5499,417 @@
       ],
       "type": "object"
     },
+    "ProviderDefinition": {
+      "additionalProperties": false,
+      "description": "Secret-free Provider definition. Surfaces both builtin and dynamic rows\nthrough the same wire shape. `endpointUrl` / `upstreamProtocol` /\n`authKind` are nullable because builtin rows leave them empty (the sealed\nadapter drives those at call time).",
+      "properties": {
+        "authKind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProviderDefinitionAuthKind"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Nullable: builtin rows leave the field empty."
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "deletable": {
+          "description": "Whether the dashboard may DELETE this row. Always `false` for builtin.",
+          "type": "boolean"
+        },
+        "editable": {
+          "description": "Whether the dashboard may PATCH this row. Always `false` for builtin.",
+          "type": "boolean"
+        },
+        "endpointUrl": {
+          "description": "Nullable: builtin rows leave the field empty.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "models": {
+          "description": "Empty for builtin rows; builtin catalogs feed the contract projection.",
+          "items": {
+            "$ref": "#/$defs/ProviderDefinitionModel"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        },
+        "offering": {
+          "description": "Plan/api offering label persisted alongside the row.",
+          "type": "string"
+        },
+        "origin": {
+          "$ref": "#/$defs/ProviderOrigin",
+          "description": "Row provenance: `builtin` | `preset` | `custom`."
+        },
+        "presetId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "processGeneration": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "updatedAt": {
+          "type": "string"
+        },
+        "upstreamProtocol": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AccountUpstreamProtocol"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Nullable: builtin rows leave the field empty."
+        }
+      },
+      "required": [
+        "origin",
+        "editable",
+        "deletable",
+        "offering",
+        "id",
+        "name",
+        "models",
+        "createdAt",
+        "updatedAt",
+        "revision",
+        "processGeneration"
+      ],
+      "type": "object"
+    },
+    "ProviderDefinitionAuthKind": {
+      "description": "Auth kind owned by a Provider definition. Independent of protocol.\nNullable on the wire because builtin rows leave the field empty.",
+      "enum": [
+        "bearer",
+        "x-api-key",
+        "none"
+      ],
+      "type": "string"
+    },
+    "ProviderDefinitionCreate": {
+      "additionalProperties": false,
+      "description": "POST `/providers` body. Creates the definition, mappings, and first account.",
+      "properties": {
+        "accountName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "authKind": {
+          "$ref": "#/$defs/ProviderDefinitionAuthKind"
+        },
+        "endpointUrl": {
+          "type": "string"
+        },
+        "expectedRevision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "key": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "models": {
+          "items": {
+            "$ref": "#/$defs/ProviderDefinitionModel"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        },
+        "notes": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "presetId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "processGeneration": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "upstreamProtocol": {
+          "$ref": "#/$defs/AccountUpstreamProtocol"
+        }
+      },
+      "required": [
+        "expectedRevision",
+        "processGeneration",
+        "name",
+        "endpointUrl",
+        "upstreamProtocol",
+        "authKind",
+        "models"
+      ],
+      "type": "object"
+    },
+    "ProviderDefinitionDiscoverRequest": {
+      "additionalProperties": false,
+      "description": "POST `/providers/models/discover` body. Operational probe; no CAS bump.",
+      "properties": {
+        "authKind": {
+          "$ref": "#/$defs/ProviderDefinitionAuthKind"
+        },
+        "endpointUrl": {
+          "type": "string"
+        },
+        "key": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "upstreamProtocol": {
+          "$ref": "#/$defs/AccountUpstreamProtocol"
+        }
+      },
+      "required": [
+        "endpointUrl",
+        "upstreamProtocol",
+        "authKind"
+      ],
+      "type": "object"
+    },
+    "ProviderDefinitionDiscoverResponse": {
+      "additionalProperties": false,
+      "description": "Discovery result. Never includes the submitted Key.",
+      "properties": {
+        "models": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "processGeneration": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "models",
+        "truncated",
+        "revision",
+        "processGeneration"
+      ],
+      "type": "object"
+    },
+    "ProviderDefinitionModel": {
+      "additionalProperties": false,
+      "properties": {
+        "publicModel": {
+          "type": "string"
+        },
+        "upstreamModel": {
+          "type": "string"
+        },
+        "upstreamOverride": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProviderModelUpstreamOverride"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "publicModel",
+        "upstreamModel"
+      ],
+      "type": "object"
+    },
+    "ProviderDefinitionMutation": {
+      "additionalProperties": false,
+      "description": "Mutation result for a Provider definition write.",
+      "properties": {
+        "processGeneration": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "provider": {
+          "$ref": "#/$defs/ProviderDefinition"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "provider",
+        "revision",
+        "processGeneration"
+      ],
+      "type": "object"
+    },
+    "ProviderDefinitionTestRequest": {
+      "additionalProperties": false,
+      "description": "POST `/providers/test` body. Operational probe; no CAS bump.",
+      "properties": {
+        "authKind": {
+          "$ref": "#/$defs/ProviderDefinitionAuthKind"
+        },
+        "endpointUrl": {
+          "type": "string"
+        },
+        "key": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "publicModel": {
+          "type": "string"
+        },
+        "upstreamModel": {
+          "type": "string"
+        },
+        "upstreamProtocol": {
+          "$ref": "#/$defs/AccountUpstreamProtocol"
+        }
+      },
+      "required": [
+        "endpointUrl",
+        "upstreamProtocol",
+        "authKind",
+        "publicModel",
+        "upstreamModel"
+      ],
+      "type": "object"
+    },
+    "ProviderDefinitionTestResponse": {
+      "additionalProperties": false,
+      "description": "Model-test result. Never includes the submitted Key.",
+      "properties": {
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "processGeneration": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "ok",
+        "error",
+        "revision",
+        "processGeneration"
+      ],
+      "type": "object"
+    },
+    "ProviderDefinitionUpdate": {
+      "additionalProperties": false,
+      "description": "PATCH `/providers/{providerId}` body. Full replacement of mutable config.",
+      "properties": {
+        "authKind": {
+          "$ref": "#/$defs/ProviderDefinitionAuthKind"
+        },
+        "endpointUrl": {
+          "type": "string"
+        },
+        "expectedRevision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "key": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "models": {
+          "items": {
+            "$ref": "#/$defs/ProviderDefinitionModel"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        },
+        "presetId": {
+          "description": "Omitted/null preserves provenance; an empty string clears it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "processGeneration": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "upstreamProtocol": {
+          "$ref": "#/$defs/AccountUpstreamProtocol"
+        }
+      },
+      "required": [
+        "expectedRevision",
+        "processGeneration",
+        "name",
+        "endpointUrl",
+        "upstreamProtocol",
+        "authKind",
+        "models"
+      ],
+      "type": "object"
+    },
     "ProviderModelCapability": {
       "additionalProperties": false,
       "description": "One Go protocol-table capability. GOAT must not reuse these rows.",
@@ -5899,6 +5935,23 @@
         "providerId",
         "preferredProtocol",
         "supportedProtocols"
+      ],
+      "type": "object"
+    },
+    "ProviderModelUpstreamOverride": {
+      "additionalProperties": false,
+      "description": "One public-to-upstream mapping owned by a Provider definition.",
+      "properties": {
+        "endpointUrl": {
+          "type": "string"
+        },
+        "protocol": {
+          "$ref": "#/$defs/AccountUpstreamProtocol"
+        }
+      },
+      "required": [
+        "protocol",
+        "endpointUrl"
       ],
       "type": "object"
     },
@@ -5978,6 +6031,15 @@
         "processGeneration"
       ],
       "type": "object"
+    },
+    "ProviderOrigin": {
+      "description": "Provenance of a row in the unified `providers` table. The column is\nadditive in v42 and never feeds routing decisions: builtin adapters stay\nsealed, and dynamic rows keep their `ConfigurableHttp` adapter path.",
+      "enum": [
+        "builtin",
+        "preset",
+        "custom"
+      ],
+      "type": "string"
     },
     "ProviderPricing": {
       "additionalProperties": false,
@@ -7714,34 +7776,34 @@
       "$ref": "#/$defs/CpaRuntimeKeyCreated"
     },
     {
-      "$ref": "#/$defs/DynamicProviderAuthKind"
+      "$ref": "#/$defs/ProviderDefinitionAuthKind"
     },
     {
-      "$ref": "#/$defs/DynamicProviderModel"
+      "$ref": "#/$defs/ProviderDefinitionModel"
     },
     {
-      "$ref": "#/$defs/DynamicProvider"
+      "$ref": "#/$defs/ProviderDefinition"
     },
     {
-      "$ref": "#/$defs/DynamicProviderCreate"
+      "$ref": "#/$defs/ProviderDefinitionCreate"
     },
     {
-      "$ref": "#/$defs/DynamicProviderUpdate"
+      "$ref": "#/$defs/ProviderDefinitionUpdate"
     },
     {
-      "$ref": "#/$defs/DynamicProviderMutation"
+      "$ref": "#/$defs/ProviderDefinitionMutation"
     },
     {
-      "$ref": "#/$defs/DynamicProviderDiscoverRequest"
+      "$ref": "#/$defs/ProviderDefinitionDiscoverRequest"
     },
     {
-      "$ref": "#/$defs/DynamicProviderDiscoverResponse"
+      "$ref": "#/$defs/ProviderDefinitionDiscoverResponse"
     },
     {
-      "$ref": "#/$defs/DynamicProviderTestRequest"
+      "$ref": "#/$defs/ProviderDefinitionTestRequest"
     },
     {
-      "$ref": "#/$defs/DynamicProviderTestResponse"
+      "$ref": "#/$defs/ProviderDefinitionTestResponse"
     },
     {
       "$ref": "#/$defs/OllamaBillingTier"

@@ -160,16 +160,16 @@ export type DashboardApiV3 =
   | CpaRuntimeKey
   | CpaRuntimeKeys
   | CpaRuntimeKeyCreated
-  | DynamicProviderAuthKind
-  | DynamicProviderModel
-  | DynamicProvider
-  | DynamicProviderCreate
-  | DynamicProviderUpdate
-  | DynamicProviderMutation
-  | DynamicProviderDiscoverRequest
-  | DynamicProviderDiscoverResponse
-  | DynamicProviderTestRequest
-  | DynamicProviderTestResponse
+  | ProviderDefinitionAuthKind
+  | ProviderDefinitionModel
+  | ProviderDefinition
+  | ProviderDefinitionCreate
+  | ProviderDefinitionUpdate
+  | ProviderDefinitionMutation
+  | ProviderDefinitionDiscoverRequest
+  | ProviderDefinitionDiscoverResponse
+  | ProviderDefinitionTestRequest
+  | ProviderDefinitionTestResponse
   | OllamaBillingTier
   | PlatformAccounts
   | PlatformAccount
@@ -286,9 +286,10 @@ export type CpaOAuthProvider = "codex" | "anthropic" | "antigravity" | "kimi" | 
 export type CpaCliImportOutcome = "imported" | "alreadyImported" | "unconfirmed";
 export type CpaRuntimePhase = "idle" | "checking" | "downloading" | "installing" | "starting" | "failed";
 /**
- * Auth kind owned by a dynamic Provider. Independent of protocol.
+ * Auth kind owned by a Provider definition. Independent of protocol.
+ * Nullable on the wire because builtin rows leave the field empty.
  */
-export type DynamicProviderAuthKind = "bearer" | "x-api-key" | "none";
+export type ProviderDefinitionAuthKind = "bearer" | "x-api-key" | "none";
 export type PlatformKind = "new_api" | "sub2api";
 export type PlatformQuotaKind = "wallet" | "subscription" | "key_limit";
 
@@ -648,14 +649,29 @@ export interface ProviderCatalogEntry {
   creationAvailability: string;
   creationUnavailableReason: string | null;
   credentialKind: AccountCredentialKind;
+  /**
+   * Whether the dashboard may DELETE this entry. Same rules as `editable`.
+   */
+  deletable: boolean;
   displayFamily: string;
   displayName: string;
+  /**
+   * Whether the dashboard may PATCH this entry. Always `false` for
+   * `builtin` rows; `true` for `preset`/`custom`.
+   */
+  editable: boolean;
   formFields: ProviderCatalogFormField[];
   keyPrefix: string | null;
   managedRegistration: boolean;
   manualUsageCalibration: boolean;
   modelAliases: string[];
   modelSource: string;
+  /**
+   * Row provenance in the unified `providers` table. Wire values:
+   * `builtin` (sealed adapter), `preset` (preset-derived dynamic row),
+   * `custom` (manual dynamic row).
+   */
+  origin: "builtin" | "preset" | "custom";
   pricingAvailability: string;
   providerId: string;
   quotaScope: AccountQuotaScope;
@@ -1989,44 +2005,75 @@ export interface CpaRuntimeKeyCreated {
   revision: number;
   secret: string;
 }
-export interface DynamicProviderModel {
+export interface ProviderDefinitionModel {
   publicModel: string;
   upstreamModel: string;
-  upstreamOverride?: DynamicModelUpstreamOverride | null;
+  upstreamOverride?: ProviderModelUpstreamOverride | null;
 }
 /**
- * One public-to-upstream mapping owned by a dynamic Provider.
+ * One public-to-upstream mapping owned by a Provider definition.
  */
-export interface DynamicModelUpstreamOverride {
+export interface ProviderModelUpstreamOverride {
   endpointUrl: string;
   protocol: AccountUpstreamProtocol;
 }
 /**
- * Secret-free dynamic Provider definition.
+ * Secret-free Provider definition. Surfaces both builtin and dynamic rows
+ * through the same wire shape. `endpointUrl` / `upstreamProtocol` /
+ * `authKind` are nullable because builtin rows leave them empty (the sealed
+ * adapter drives those at call time).
  */
-export interface DynamicProvider {
-  authKind: DynamicProviderAuthKind;
+export interface ProviderDefinition {
+  /**
+   * Nullable: builtin rows leave the field empty.
+   */
+  authKind?: ProviderDefinitionAuthKind | null;
   createdAt: string;
-  endpointUrl: string;
+  /**
+   * Whether the dashboard may DELETE this row. Always `false` for builtin.
+   */
+  deletable: boolean;
+  /**
+   * Whether the dashboard may PATCH this row. Always `false` for builtin.
+   */
+  editable: boolean;
+  /**
+   * Nullable: builtin rows leave the field empty.
+   */
+  endpointUrl?: string | null;
   id: string;
-  models: DynamicProviderModel[];
+  /**
+   * Empty for builtin rows; builtin catalogs feed the contract projection.
+   */
+  models: ProviderDefinitionModel[];
   name: string;
+  /**
+   * Plan/api offering label persisted alongside the row.
+   */
+  offering: string;
+  /**
+   * Row provenance: `builtin` | `preset` | `custom`.
+   */
+  origin: "builtin" | "preset" | "custom";
   presetId?: string | null;
   processGeneration: number;
   revision: number;
   updatedAt: string;
-  upstreamProtocol: AccountUpstreamProtocol;
+  /**
+   * Nullable: builtin rows leave the field empty.
+   */
+  upstreamProtocol?: AccountUpstreamProtocol | null;
 }
 /**
  * POST `/providers` body. Creates the definition, mappings, and first account.
  */
-export interface DynamicProviderCreate {
+export interface ProviderDefinitionCreate {
   accountName?: string | null;
-  authKind: DynamicProviderAuthKind;
+  authKind: ProviderDefinitionAuthKind;
   endpointUrl: string;
   expectedRevision: number;
   key?: string | null;
-  models: DynamicProviderModel[];
+  models: ProviderDefinitionModel[];
   name: string;
   notes?: string | null;
   presetId?: string | null;
@@ -2036,12 +2083,12 @@ export interface DynamicProviderCreate {
 /**
  * PATCH `/providers/{providerId}` body. Full replacement of mutable config.
  */
-export interface DynamicProviderUpdate {
-  authKind: DynamicProviderAuthKind;
+export interface ProviderDefinitionUpdate {
+  authKind: ProviderDefinitionAuthKind;
   endpointUrl: string;
   expectedRevision: number;
   key?: string | null;
-  models: DynamicProviderModel[];
+  models: ProviderDefinitionModel[];
   name: string;
   /**
    * Omitted/null preserves provenance; an empty string clears it.
@@ -2051,18 +2098,18 @@ export interface DynamicProviderUpdate {
   upstreamProtocol: AccountUpstreamProtocol;
 }
 /**
- * Mutation result for a dynamic Provider write.
+ * Mutation result for a Provider definition write.
  */
-export interface DynamicProviderMutation {
+export interface ProviderDefinitionMutation {
   processGeneration: number;
-  provider: DynamicProvider;
+  provider: ProviderDefinition;
   revision: number;
 }
 /**
  * POST `/providers/models/discover` body. Operational probe; no CAS bump.
  */
-export interface DynamicProviderDiscoverRequest {
-  authKind: DynamicProviderAuthKind;
+export interface ProviderDefinitionDiscoverRequest {
+  authKind: ProviderDefinitionAuthKind;
   endpointUrl: string;
   key?: string | null;
   upstreamProtocol: AccountUpstreamProtocol;
@@ -2070,7 +2117,7 @@ export interface DynamicProviderDiscoverRequest {
 /**
  * Discovery result. Never includes the submitted Key.
  */
-export interface DynamicProviderDiscoverResponse {
+export interface ProviderDefinitionDiscoverResponse {
   models: string[];
   processGeneration: number;
   revision: number;
@@ -2079,8 +2126,8 @@ export interface DynamicProviderDiscoverResponse {
 /**
  * POST `/providers/test` body. Operational probe; no CAS bump.
  */
-export interface DynamicProviderTestRequest {
-  authKind: DynamicProviderAuthKind;
+export interface ProviderDefinitionTestRequest {
+  authKind: ProviderDefinitionAuthKind;
   endpointUrl: string;
   key?: string | null;
   publicModel: string;
@@ -2090,7 +2137,7 @@ export interface DynamicProviderTestRequest {
 /**
  * Model-test result. Never includes the submitted Key.
  */
-export interface DynamicProviderTestResponse {
+export interface ProviderDefinitionTestResponse {
   error: string | null;
   ok: boolean;
   processGeneration: number;

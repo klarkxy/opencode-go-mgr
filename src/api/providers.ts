@@ -3,10 +3,10 @@ import { useControlPlaneStore } from "../stores/controlPlane.ts";
 import type {
   AccountCredentialKind,
   AccountQuotaScope,
-  DynamicProvider as V3DynamicProvider,
-  DynamicProviderDiscoverResponse as V3DynamicProviderDiscoverResponse,
-  DynamicProviderMutation as V3DynamicProviderMutation,
-  DynamicProviderTestResponse as V3DynamicProviderTestResponse,
+  ProviderDefinition as V3ProviderDefinition,
+  ProviderDefinitionDiscoverResponse as V3ProviderDefinitionDiscoverResponse,
+  ProviderDefinitionMutation as V3ProviderDefinitionMutation,
+  ProviderDefinitionTestResponse as V3ProviderDefinitionTestResponse,
   ModelProtocolOverridesUpdate,
   ProviderCatalogEntry as V3ProviderCatalogEntry,
   ProviderContracts as V3ProviderContracts,
@@ -37,6 +37,12 @@ export interface ProviderCatalogFormField {
 
 export interface ProviderCatalogEntry {
   provider_id: string;
+  /** Row provenance in the unified `providers` table: `builtin` | `preset` | `custom`. */
+  origin: "builtin" | "preset" | "custom";
+  /** Whether the dashboard may PATCH this entry. Always `false` for builtin. */
+  editable: boolean;
+  /** Whether the dashboard may DELETE this entry. Always `false` for builtin. */
+  deletable: boolean;
   display_name: string;
   display_family: string;
   credential_kind: AccountCredentialKind;
@@ -60,9 +66,9 @@ export interface ProviderCatalogEntry {
   model_aliases: string[];
 }
 
-export type DynamicProviderAuthKind = "bearer" | "x-api-key" | "none";
+export type ProviderDefinitionAuthKind = "bearer" | "x-api-key" | "none";
 
-export interface DynamicProviderModelView {
+export interface ProviderDefinitionModelView {
   public_model: string;
   upstream_model: string;
   /** Explicit per-model upstream; null inherits the supplier endpoint/protocol. */
@@ -72,13 +78,24 @@ export interface DynamicProviderModelView {
   } | null;
 }
 
-export interface DynamicProviderView {
+export interface ProviderDefinitionView {
   id: string;
   name: string;
-  endpoint_url: string;
-  upstream_protocol: "chat_completions" | "responses" | "messages";
-  auth_kind: DynamicProviderAuthKind;
-  models: DynamicProviderModelView[];
+  /** Row provenance in the unified `providers` table: `builtin` | `preset` | `custom`. */
+  origin: "builtin" | "preset" | "custom";
+  /** Plan/api offering label persisted alongside the row. */
+  offering: "plan" | "api";
+  /** Whether the dashboard may PATCH this row. Always `false` for builtin. */
+  editable: boolean;
+  /** Whether the dashboard may DELETE this row. Always `false` for builtin. */
+  deletable: boolean;
+  /** Nullable: builtin rows leave the field empty. */
+  endpoint_url: string | null;
+  /** Nullable: builtin rows leave the field empty. */
+  upstream_protocol: "chat_completions" | "responses" | "messages" | null;
+  /** Nullable: builtin rows leave the field empty. */
+  auth_kind: ProviderDefinitionAuthKind | null;
+  models: ProviderDefinitionModelView[];
   /** Persisted source-template preset ID; null for manual providers. */
   preset_id: string | null;
   created_at: string;
@@ -336,9 +353,9 @@ function formFieldKind(value: string): ProviderCatalogFormField["kind"] {
   throw new Error(`unknown form field kind: ${value}`);
 }
 
-function presentDynamicMappingOverride(
-  model: V3DynamicProvider["models"][number],
-): DynamicProviderModelView["upstream_override"] {
+function presentProviderDefinitionMappingOverride(
+  model: V3ProviderDefinition["models"][number],
+): ProviderDefinitionModelView["upstream_override"] {
   const override = model.upstreamOverride;
   if (!override) return null;
   const protocol = override.protocol;
@@ -350,17 +367,21 @@ function presentDynamicMappingOverride(
   return { protocol, endpoint_url: endpointUrl };
 }
 
-function presentDynamicProvider(value: V3DynamicProvider): DynamicProviderView {
+function presentProviderDefinition(value: V3ProviderDefinition): ProviderDefinitionView {
   return {
     id: value.id,
     name: value.name,
-    endpoint_url: value.endpointUrl,
-    upstream_protocol: value.upstreamProtocol,
-    auth_kind: value.authKind,
+    origin: value.origin,
+    offering: value.offering === "plan" ? "plan" : "api",
+    editable: value.editable,
+    deletable: value.deletable,
+    endpoint_url: value.endpointUrl ?? null,
+    upstream_protocol: value.upstreamProtocol ?? null,
+    auth_kind: value.authKind ?? null,
     models: value.models.map((model) => ({
       public_model: model.publicModel,
       upstream_model: model.upstreamModel,
-      upstream_override: presentDynamicMappingOverride(model),
+      upstream_override: presentProviderDefinitionMappingOverride(model),
     })),
     preset_id: value.presetId ?? null,
     created_at: value.createdAt,
@@ -380,6 +401,9 @@ function assertNoSecret(value: object): void {
 function presentCatalogEntry(value: V3ProviderCatalogEntry): ProviderCatalogEntry {
   return {
     provider_id: value.providerId,
+    origin: value.origin,
+    editable: value.editable,
+    deletable: value.deletable,
     display_name: value.displayName,
     display_family: value.displayFamily,
     credential_kind: value.credentialKind,
@@ -697,65 +721,65 @@ export const providerApi = {
         protocols: input.protocols,
       }, expectation)));
   },
-  getDynamicProvider: async (providerId: string) => {
-    const value = await dashboardV3.getDynamicProvider(providerId);
+  getProviderDefinition: async (providerId: string) => {
+    const value = await dashboardV3.getProviderDefinition(providerId);
     assertNoSecret(value);
-    return presentDynamicProvider(value);
+    return presentProviderDefinition(value);
   },
-  createDynamicProvider: async (
-    input: WithoutExpectation<import("./generated/dashboard-v3.ts").DynamicProviderCreate>,
+  createProviderDefinition: async (
+    input: WithoutExpectation<import("./generated/dashboard-v3.ts").ProviderDefinitionCreate>,
   ) => {
     const control = useControlPlaneStore();
     if (!control.hasTokens()) await control.refresh();
     try {
-      const value: V3DynamicProviderMutation = await control.runMutation((expectation) =>
-        dashboardV3.createDynamicProvider(input, expectation));
+      const value: V3ProviderDefinitionMutation = await control.runMutation((expectation) =>
+        dashboardV3.createProviderDefinition(input, expectation));
       assertNoSecret(value);
       assertNoSecret(value.provider);
-      return presentDynamicProvider(value.provider);
+      return presentProviderDefinition(value.provider);
     } catch (cause) {
       if (isRevisionConflict(cause)) await dashboardV3.getProviders();
       throw cause;
     }
   },
-  updateDynamicProvider: async (
+  updateProviderDefinition: async (
     providerId: string,
-    input: WithoutExpectation<import("./generated/dashboard-v3.ts").DynamicProviderUpdate>,
+    input: WithoutExpectation<import("./generated/dashboard-v3.ts").ProviderDefinitionUpdate>,
   ) => {
     const control = useControlPlaneStore();
     if (!control.hasTokens()) await control.refresh();
     try {
-      const value: V3DynamicProviderMutation = await control.runMutation((expectation) =>
-        dashboardV3.updateDynamicProvider(providerId, input, expectation));
+      const value: V3ProviderDefinitionMutation = await control.runMutation((expectation) =>
+        dashboardV3.updateProviderDefinition(providerId, input, expectation));
       assertNoSecret(value);
       assertNoSecret(value.provider);
-      return presentDynamicProvider(value.provider);
+      return presentProviderDefinition(value.provider);
     } catch (cause) {
       if (isRevisionConflict(cause)) {
         await dashboardV3.getProviders();
-        await dashboardV3.getDynamicProvider(providerId);
+        await dashboardV3.getProviderDefinition(providerId);
       }
       throw cause;
     }
   },
-  deleteDynamicProvider: async (providerId: string) => {
+  deleteProviderDefinition: async (providerId: string) => {
     const control = useControlPlaneStore();
     if (!control.hasTokens()) await control.refresh();
     try {
       return await control.runMutation((expectation) =>
-        dashboardV3.deleteDynamicProvider(providerId, expectation));
+        dashboardV3.deleteProviderDefinition(providerId, expectation));
     } catch (cause) {
       if (isRevisionConflict(cause)) await dashboardV3.getProviders();
       throw cause;
     }
   },
-  discoverDynamicProviderModels: async (input: {
+  discoverProviderDefinitionModels: async (input: {
     endpoint_url: string;
     upstream_protocol: "chat_completions" | "responses" | "messages";
-    auth_kind: DynamicProviderAuthKind;
+    auth_kind: ProviderDefinitionAuthKind;
     key?: string;
   }) => {
-    const value: V3DynamicProviderDiscoverResponse = await dashboardV3.discoverDynamicProviderModels({
+    const value: V3ProviderDefinitionDiscoverResponse = await dashboardV3.discoverProviderDefinitionModels({
       endpointUrl: input.endpoint_url,
       upstreamProtocol: input.upstream_protocol,
       authKind: input.auth_kind,
@@ -764,15 +788,15 @@ export const providerApi = {
     assertNoSecret(value);
     return { models: value.models, truncated: value.truncated };
   },
-  testDynamicProvider: async (input: {
+  testProviderDefinition: async (input: {
     endpoint_url: string;
     upstream_protocol: "chat_completions" | "responses" | "messages";
-    auth_kind: DynamicProviderAuthKind;
+    auth_kind: ProviderDefinitionAuthKind;
     public_model: string;
     upstream_model: string;
     key?: string;
   }) => {
-    const value: V3DynamicProviderTestResponse = await dashboardV3.testDynamicProvider({
+    const value: V3ProviderDefinitionTestResponse = await dashboardV3.testProviderDefinition({
       endpointUrl: input.endpoint_url,
       upstreamProtocol: input.upstream_protocol,
       authKind: input.auth_kind,

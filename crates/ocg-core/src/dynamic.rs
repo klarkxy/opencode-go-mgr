@@ -9,7 +9,9 @@ use ocg_domain::dynamic::{
     DynamicAuthKind, DynamicModelMapping, DynamicModelUpstreamOverride, DynamicProviderDefinition,
     normalize_dynamic_mappings, normalize_dynamic_provider_name,
 };
-use ocg_domain::provider::{BUILTIN_PROVIDERS, ProviderAdapterKind, ProviderBindingError};
+use ocg_domain::provider::{
+    BUILTIN_PROVIDERS, ProviderAdapterKind, ProviderBindingError, ProviderOrigin,
+};
 use std::collections::HashMap;
 
 use crate::custom::validate_custom_endpoint_url;
@@ -43,7 +45,11 @@ pub fn effective_mapping_route(
     }
 }
 
-/// Frozen routing view of one dynamic Provider.
+/// Frozen routing view of one dynamic Provider. The runtime mirrors a single
+/// row in the unified `providers` table; builtin rows reuse the same shape with
+/// `origin = ProviderOrigin::Builtin` and `endpoint_url` / `upstream_protocol`
+/// / `auth_kind` / `mappings` left at their adapter-defined defaults (the
+/// sealed adapter drives those at call time).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DynamicProviderRuntime {
     pub preset_id: Option<String>,
@@ -55,6 +61,11 @@ pub struct DynamicProviderRuntime {
     pub mappings: Vec<DynamicModelMapping>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// Row provenance in the unified `providers` table.
+    pub origin: ProviderOrigin,
+    /// Plan/api offering label persisted alongside the row. Builtin rows
+    /// carry the catalog default; dynamic rows follow `preset_id`.
+    pub offering: String,
 }
 
 impl DynamicProviderRuntime {

@@ -1,5 +1,5 @@
 import type { Account } from "../api/dashboard.ts";
-import type { DynamicProviderView } from "../api/providers.ts";
+import type { ProviderDefinitionView } from "../api/providers.ts";
 import type { ProviderScopeView } from "./provider-contracts.ts";
 
 export interface ProviderAliasRow {
@@ -80,7 +80,7 @@ export function providerAliasRows(
 }
 
 export function dynamicProviderAliasRows(
-  providers: readonly DynamicProviderView[],
+  providers: readonly ProviderDefinitionView[],
 ): ProviderAliasRow[] {
   return providers.flatMap((provider) => provider.models.map((model) => ({
     provider_id: provider.id,
@@ -98,7 +98,7 @@ export function dynamicProviderAliasRows(
 export function mergeProviderAliasRows(
   scopes: readonly ProviderScopeView[],
   accounts: readonly Account[],
-  providers: readonly DynamicProviderView[],
+  providers: readonly ProviderDefinitionView[],
 ): ProviderAliasRow[] {
   return [...providerAliasRows(scopes, accounts), ...dynamicProviderAliasRows(providers)];
 }

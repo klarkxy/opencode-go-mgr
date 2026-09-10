@@ -38,7 +38,7 @@
           </div>
           <div class="connection-summary__row">
             <dt>{{ t("上游协议") }}</dt>
-            <dd>{{ protocolDisplayName(dynamicDetail.upstream_protocol) }}</dd>
+            <dd>{{ dynamicDetail.upstream_protocol ? protocolDisplayName(dynamicDetail.upstream_protocol) : t("内置") }}</dd>
           </div>
           <div class="connection-summary__row">
             <dt>{{ t("模型映射") }}</dt>
@@ -305,7 +305,7 @@ import {
   NSpace,
 } from "naive-ui";
 import { dashboardApi, type Account, type AccountInput, type AccountProtocol } from "../api/dashboard";
-import { providerApi, type DynamicProviderView } from "../api/providers.ts";
+import { providerApi, type ProviderDefinitionView } from "../api/providers.ts";
 import type { ProviderCatalogEntry, ProviderCatalogFormField } from "../api/providers.ts";
 import { t } from "../i18n/index.ts";
 import { localDateString } from "../domain/account-lifecycle.ts";
@@ -634,7 +634,7 @@ watch(() => form.value.upstreamProtocol, (protocol) => {
  * The generation guard keeps a slow or stale load from overwriting a newer
  * selection; the draft itself is untouched either way.
  */
-const dynamicDetail = ref<DynamicProviderView | null>(null);
+const dynamicDetail = ref<ProviderDefinitionView | null>(null);
 const dynamicDetailLoading = ref(false);
 let dynamicDetailGeneration = 0;
 watch(
@@ -645,7 +645,7 @@ watch(
     dynamicDetailLoading.value = false;
     if (!visible || !dynamic || !providerId) return;
     dynamicDetailLoading.value = true;
-    providerApi.getDynamicProvider(providerId)
+    providerApi.getProviderDefinition(providerId)
       .then((detail) => {
         if (generation === dynamicDetailGeneration) dynamicDetail.value = detail;
       })

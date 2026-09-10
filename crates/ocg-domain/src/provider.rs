@@ -13,6 +13,8 @@ use crate::ids::{
     KIMI_PROVIDER_ID, MINIMAX_PROVIDER_ID, OLLAMA_PROVIDER_ID, OPENCODE_PROVIDER_ID,
     OPENCODE_ZEN_FREE_PROVIDER_ID, ZEN_FREE_ACCOUNT_ID,
 };
+#[cfg(feature = "schemars")]
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -675,7 +677,9 @@ pub fn preset_offering(preset_id: &str) -> &'static str {
 /// additive in v42 and never feeds routing decisions: builtin adapters stay
 /// sealed, and dynamic rows keep their `ConfigurableHttp` adapter path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(JsonSchema))]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "schemars", schemars(rename_all = "snake_case"))]
 pub enum ProviderOrigin {
     Builtin,
     Preset,
@@ -712,6 +716,16 @@ impl TryFrom<&str> for ProviderOrigin {
                 other.to_string(),
             )),
         }
+    }
+}
+
+/// Resolve the persisted `origin` for a dynamic Provider. Preset-bearing rows
+/// are `preset`; manual rows are `custom`. Builtin rows are never constructed
+/// through this path.
+pub fn provider_origin_from_preset(preset_id: Option<&str>) -> ProviderOrigin {
+    match preset_id {
+        Some(value) if !value.trim().is_empty() => ProviderOrigin::Preset,
+        _ => ProviderOrigin::Custom,
     }
 }
 

@@ -56,14 +56,14 @@ import type {
   DailyTokensByModel,
   DashboardSummary,
   DesktopUpdate,
-  DynamicProvider,
-  DynamicProviderCreate,
-  DynamicProviderDiscoverRequest,
-  DynamicProviderDiscoverResponse,
-  DynamicProviderMutation,
-  DynamicProviderTestRequest,
-  DynamicProviderTestResponse,
-  DynamicProviderUpdate,
+  ProviderDefinition,
+  ProviderDefinitionCreate,
+  ProviderDefinitionDiscoverRequest,
+  ProviderDefinitionDiscoverResponse,
+  ProviderDefinitionMutation,
+  ProviderDefinitionTestRequest,
+  ProviderDefinitionTestResponse,
+  ProviderDefinitionUpdate,
   ForwardLogKeys,
   ForwardLogModels,
   ForwardLogQuery,
@@ -77,7 +77,6 @@ import type {
   MutationAck,
   MutationExpectation,
   PricingMultipliersUpdate,
-  PricingSnapshot,
   ProtocolProbeRequest,
   ProtocolProbeResponse,
   ProviderCatalog,
@@ -565,14 +564,6 @@ export const dashboardV3 = {
     method: "POST",
     body: withExpectation(refresh, expectation),
   }),
-  putPricingMultipliers: (
-    update: WithoutExpectation<PricingMultipliersUpdate>,
-    expectation: MutationExpectation,
-  ) =>
-    requestV3<PricingSnapshot>("/providers/opencode/pricing/multipliers", {
-      method: "PUT",
-      body: withExpectation(update, expectation),
-    }),
   putProviderPricingMultipliers: (
     providerId: string,
     update: WithoutExpectation<PricingMultipliersUpdate>,
@@ -707,35 +698,35 @@ export const dashboardV3 = {
 
   // --- providers ---
   getProviders: () => requestV3<ProviderCatalog>("/providers"),
-  getDynamicProvider: (providerId: string) =>
-    requestV3<DynamicProvider>(`/providers/${encode(providerId)}`),
-  createDynamicProvider: (
-    input: WithoutExpectation<DynamicProviderCreate>,
+  getProviderDefinition: (providerId: string) =>
+    requestV3<ProviderDefinition>(`/providers/${encode(providerId)}`),
+  createProviderDefinition: (
+    input: WithoutExpectation<ProviderDefinitionCreate>,
     expectation: MutationExpectation,
-  ) => requestV3<DynamicProviderMutation>("/providers", {
+  ) => requestV3<ProviderDefinitionMutation>("/providers", {
     method: "POST",
     body: withExpectation(input, expectation),
   }),
-  updateDynamicProvider: (
+  updateProviderDefinition: (
     providerId: string,
-    input: WithoutExpectation<DynamicProviderUpdate>,
+    input: WithoutExpectation<ProviderDefinitionUpdate>,
     expectation: MutationExpectation,
-  ) => requestV3<DynamicProviderMutation>(`/providers/${encode(providerId)}`, {
+  ) => requestV3<ProviderDefinitionMutation>(`/providers/${encode(providerId)}`, {
     method: "PATCH",
     body: withExpectation(input, expectation),
   }),
-  deleteDynamicProvider: (providerId: string, expectation: MutationExpectation) =>
+  deleteProviderDefinition: (providerId: string, expectation: MutationExpectation) =>
     requestV3<MutationAck>(`/providers/${encode(providerId)}`, {
       method: "DELETE",
       body: mutation(expectation),
     }),
-  discoverDynamicProviderModels: (input: DynamicProviderDiscoverRequest) =>
-    requestV3<DynamicProviderDiscoverResponse>("/providers/models/discover", {
+  discoverProviderDefinitionModels: (input: ProviderDefinitionDiscoverRequest) =>
+    requestV3<ProviderDefinitionDiscoverResponse>("/providers/models/discover", {
       method: "POST",
       body: json(input),
     }),
-  testDynamicProvider: (input: DynamicProviderTestRequest) =>
-    requestV3<DynamicProviderTestResponse>("/providers/test", {
+  testProviderDefinition: (input: ProviderDefinitionTestRequest) =>
+    requestV3<ProviderDefinitionTestResponse>("/providers/test", {
       method: "POST",
       body: json(input),
     }),

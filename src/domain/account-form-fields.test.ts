@@ -9,6 +9,9 @@ import { OPENCODE_GO_PLAN, type PlanDefinition } from "./plans.ts";
 function goCatalog(form_fields: ProviderCatalogEntry["form_fields"]): ProviderCatalogEntry {
   return {
     provider_id: "opencode",
+    origin: "builtin",
+    editable: false,
+    deletable: false,
     display_name: "OpenCode Go",
     display_family: "OpenCode",
     credential_kind: "api_key",

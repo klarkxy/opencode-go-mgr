@@ -8,7 +8,7 @@ use ocg_domain::dynamic::{
     DynamicAuthKind, DynamicModelMapping, DynamicProviderDefinition, normalize_dynamic_mappings,
     normalize_dynamic_provider_name,
 };
-use ocg_domain::provider::{ProviderRegistry, builtin_provider};
+use ocg_domain::provider::{ProviderOrigin, ProviderRegistry, builtin_provider};
 
 use crate::custom;
 use crate::custom::validate_custom_endpoint_url;
@@ -21,30 +21,30 @@ use crate::redaction::redact_known_secret;
 use crate::state::CoreState;
 
 use super::types::{
-    ControlRevision, DynamicProvider, DynamicProviderCreate, DynamicProviderDiscoverRequest,
-    DynamicProviderDiscoverResponse, DynamicProviderModel, DynamicProviderMutation,
-    DynamicProviderTestRequest, DynamicProviderTestResponse, DynamicProviderUpdate, MutationAck,
-    MutationExpectation,
+    ControlRevision, MutationAck, MutationExpectation, ProviderDefinition,
+    ProviderDefinitionCreate, ProviderDefinitionDiscoverRequest,
+    ProviderDefinitionDiscoverResponse, ProviderDefinitionModel, ProviderDefinitionMutation,
+    ProviderDefinitionTestRequest, ProviderDefinitionTestResponse, ProviderDefinitionUpdate,
 };
 use super::{V3ApiError, check_expectation, parse_json, parse_mutation_json};
 
 pub(super) async fn create_provider(
     State(state): State<CoreState>,
     body: Bytes,
-) -> Result<Json<DynamicProviderMutation>, V3ApiError> {
-    let input = parse_mutation_json::<DynamicProviderCreate>(&body)?;
+) -> Result<Json<ProviderDefinitionMutation>, V3ApiError> {
+    let input = parse_mutation_json::<ProviderDefinitionCreate>(&body)?;
     create_locked(&state, input).map(Json)
 }
 
 pub(super) async fn get_provider(
     State(state): State<CoreState>,
     Path(provider_id): Path<String>,
-) -> Result<Json<DynamicProvider>, V3ApiError> {
+) -> Result<Json<ProviderDefinition>, V3ApiError> {
     let captured = ControlRevision::from_state(&state);
     let runtime = state
         .db
         .lock()
-        .get_dynamic_provider(&provider_id)
+        .get_provider_definition(&provider_id)
         .map_err(V3ApiError::internal)?
         .ok_or_else(|| V3ApiError::not_found_at(&state, "provider not found"))?;
     Ok(Json(to_wire(
@@ -58,8 +58,8 @@ pub(super) async fn update_provider(
     State(state): State<CoreState>,
     Path(provider_id): Path<String>,
     body: Bytes,
-) -> Result<Json<DynamicProviderMutation>, V3ApiError> {
-    let input = parse_mutation_json::<DynamicProviderUpdate>(&body)?;
+) -> Result<Json<ProviderDefinitionMutation>, V3ApiError> {
+    let input = parse_mutation_json::<ProviderDefinitionUpdate>(&body)?;
     update_locked(&state, &provider_id, input).map(Json)
 }
 
@@ -75,8 +75,8 @@ pub(super) async fn delete_provider(
 pub(super) async fn discover_models(
     State(state): State<CoreState>,
     body: Bytes,
-) -> Result<Json<DynamicProviderDiscoverResponse>, V3ApiError> {
-    let input = parse_json::<DynamicProviderDiscoverRequest>(&body)?;
+) -> Result<Json<ProviderDefinitionDiscoverResponse>, V3ApiError> {
+    let input = parse_json::<ProviderDefinitionDiscoverRequest>(&body)?;
     let captured = ControlRevision::from_state(&state);
     let config = state.config();
     let endpoint = validate_custom_endpoint_url(&input.endpoint_url)
@@ -91,7 +91,7 @@ pub(super) async fn discover_models(
         custom::discover_models_with_auth(&config, &custom_config, auth_kind.upstream_auth(), &key)
             .await
             .map_err(|failure| map_probe_failure(&state, &key, failure.message))?;
-    Ok(Json(DynamicProviderDiscoverResponse {
+    Ok(Json(ProviderDefinitionDiscoverResponse {
         models: models_without_key(discovery.models, &key),
         truncated: discovery.truncated,
         revision: captured.revision,
@@ -102,8 +102,8 @@ pub(super) async fn discover_models(
 pub(super) async fn test_provider(
     State(state): State<CoreState>,
     body: Bytes,
-) -> Result<Json<DynamicProviderTestResponse>, V3ApiError> {
-    let input = parse_json::<DynamicProviderTestRequest>(&body)?;
+) -> Result<Json<ProviderDefinitionTestResponse>, V3ApiError> {
+    let input = parse_json::<ProviderDefinitionTestRequest>(&body)?;
     let captured = ControlRevision::from_state(&state);
     let config = state.config();
     let endpoint = validate_custom_endpoint_url(&input.endpoint_url)
@@ -141,7 +141,7 @@ pub(super) async fn test_provider(
         Ok(()) => (true, None),
         Err(failure) => (false, Some(redact_known_secret(&failure.message, &key))),
     };
-    Ok(Json(DynamicProviderTestResponse {
+    Ok(Json(ProviderDefinitionTestResponse {
         ok,
         error,
         revision: captured.revision,
@@ -151,8 +151,8 @@ pub(super) async fn test_provider(
 
 fn create_locked(
     state: &CoreState,
-    input: DynamicProviderCreate,
-) -> Result<DynamicProviderMutation, V3ApiError> {
+    input: ProviderDefinitionCreate,
+) -> Result<ProviderDefinitionMutation, V3ApiError> {
     let _settings_update = state.settings_update.lock();
     check_expectation(state, &input.expectation)?;
     let now = Utc::now();
@@ -228,8 +228,8 @@ fn create_locked(
 fn update_locked(
     state: &CoreState,
     provider_id: &str,
-    input: DynamicProviderUpdate,
-) -> Result<DynamicProviderMutation, V3ApiError> {
+    input: ProviderDefinitionUpdate,
+) -> Result<ProviderDefinitionMutation, V3ApiError> {
     let _settings_update = state.settings_update.lock();
     check_expectation(state, &input.expectation)?;
     reject_builtin_id(state, provider_id)?;
@@ -323,7 +323,7 @@ fn delete_locked(
 
 fn reject_builtin_id(state: &CoreState, provider_id: &str) -> Result<(), V3ApiError> {
     if ProviderRegistry::get(provider_id).is_some() || builtin_provider(provider_id).is_some() {
-        return Err(V3ApiError::invalid_request_at(
+        return Err(V3ApiError::builtin_provider_immutable(
             state,
             "built-in providers cannot be deleted or replaced through this route",
         ));
@@ -337,7 +337,7 @@ fn validate_wire_definition(
     endpoint_url: String,
     protocol: super::types::AccountUpstreamProtocol,
     auth_kind: DynamicAuthKind,
-    models: Vec<DynamicProviderModel>,
+    models: Vec<ProviderDefinitionModel>,
 ) -> Result<DynamicProviderDefinition, ocg_domain::provider::ProviderBindingError> {
     let endpoint_url = validate_custom_endpoint_url(&endpoint_url)?;
     let mappings = models
@@ -369,6 +369,10 @@ fn runtime_from_definition(
     created_at: chrono::DateTime<Utc>,
     updated_at: chrono::DateTime<Utc>,
 ) -> DynamicProviderRuntime {
+    let preset_for_origin = definition.preset_id.as_deref();
+    let origin = ocg_domain::provider::provider_origin_from_preset(preset_for_origin);
+    let offering =
+        ocg_domain::provider::preset_offering(preset_for_origin.unwrap_or("")).to_string();
     DynamicProviderRuntime {
         preset_id: definition.preset_id,
         id: definition.id,
@@ -379,6 +383,8 @@ fn runtime_from_definition(
         mappings: definition.mappings,
         created_at,
         updated_at,
+        origin,
+        offering,
     }
 }
 
@@ -441,8 +447,8 @@ fn provider_mutation(
     state: &CoreState,
     runtime: DynamicProviderRuntime,
     revision: u64,
-) -> DynamicProviderMutation {
-    DynamicProviderMutation {
+) -> ProviderDefinitionMutation {
+    ProviderDefinitionMutation {
         provider: to_wire(runtime, revision, state.process_generation()),
         revision,
         process_generation: state.process_generation(),
@@ -453,22 +459,39 @@ fn to_wire(
     runtime: DynamicProviderRuntime,
     revision: u64,
     process_generation: u64,
-) -> DynamicProvider {
-    DynamicProvider {
+) -> ProviderDefinition {
+    let is_builtin = matches!(runtime.origin, ProviderOrigin::Builtin);
+    ProviderDefinition {
+        origin: runtime.origin,
+        editable: !is_builtin,
+        deletable: !is_builtin,
+        offering: runtime.offering,
         preset_id: runtime.preset_id,
         id: runtime.id,
         name: runtime.name,
-        endpoint_url: runtime.endpoint_url,
-        upstream_protocol: runtime.upstream_protocol.into(),
-        auth_kind: runtime.auth_kind.into(),
+        endpoint_url: if is_builtin {
+            None
+        } else {
+            Some(runtime.endpoint_url)
+        },
+        upstream_protocol: if is_builtin {
+            None
+        } else {
+            Some(runtime.upstream_protocol.into())
+        },
+        auth_kind: if is_builtin {
+            None
+        } else {
+            Some(runtime.auth_kind.into())
+        },
         models: runtime
             .mappings
             .into_iter()
-            .map(|mapping| DynamicProviderModel {
+            .map(|mapping| ProviderDefinitionModel {
                 public_model: mapping.public_model,
                 upstream_model: mapping.upstream_model,
                 upstream_override: mapping.upstream_override.map(|value| {
-                    super::types::DynamicModelUpstreamOverride {
+                    super::types::ProviderModelUpstreamOverride {
                         protocol: value.protocol.into(),
                         endpoint_url: value.endpoint_url,
                     }

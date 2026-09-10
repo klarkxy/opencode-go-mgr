@@ -801,6 +801,9 @@ fn sample_catalog_entry() -> ProviderCatalogEntry {
     ProviderCatalogEntry {
         provider_id: "opencode".into(),
 
+        origin: ProviderOrigin::Builtin,
+        editable: false,
+        deletable: false,
         display_name: "OpenCode Go".into(),
         display_family: "OpenCode".into(),
         credential_kind: AccountCredentialKind::ApiKey,
@@ -1739,16 +1742,16 @@ const CPA_CATALOG_TYPES: &[&str] = &[
     "CpaRuntimeKeyCreated",
 ];
 const DYNAMIC_PROVIDER_CATALOG_TYPES: &[&str] = &[
-    "DynamicProviderAuthKind",
-    "DynamicProviderModel",
-    "DynamicProvider",
-    "DynamicProviderCreate",
-    "DynamicProviderUpdate",
-    "DynamicProviderMutation",
-    "DynamicProviderDiscoverRequest",
-    "DynamicProviderDiscoverResponse",
-    "DynamicProviderTestRequest",
-    "DynamicProviderTestResponse",
+    "ProviderDefinitionAuthKind",
+    "ProviderDefinitionModel",
+    "ProviderDefinition",
+    "ProviderDefinitionCreate",
+    "ProviderDefinitionUpdate",
+    "ProviderDefinitionMutation",
+    "ProviderDefinitionDiscoverRequest",
+    "ProviderDefinitionDiscoverResponse",
+    "ProviderDefinitionTestRequest",
+    "ProviderDefinitionTestResponse",
 ];
 const OLLAMA_USAGE_CATALOG_TYPES: &[&str] = &["OllamaBillingTier"];
 

@@ -23,7 +23,7 @@ import {
   type ProviderPreset,
 } from "./provider-presets.ts";
 import { PROVIDER_FAMILIES } from "./provider-families.ts";
-import { emptyDynamicProviderDraft, buildDynamicProviderCreateBody, buildDynamicProviderUpdateBody, validateDynamicProviderDraft, type DynamicProviderDraft } from "./dynamic-provider.ts";
+import { emptyProviderDefinitionDraft, buildProviderDefinitionCreateBody, buildProviderDefinitionUpdateBody, validateProviderDefinitionDraft, type ProviderDefinitionDraft } from "./dynamic-provider.ts";
 
 function samplePreset(extra: Partial<ProviderPreset> = {}): ProviderPreset {
   return {
@@ -114,8 +114,8 @@ test("shape issues flag bad rows and the parser skips them", () => {
 });
 
 test("applying a preset fills identity fields and clears Key, mappings, and account edits", () => {
-  const dirty: DynamicProviderDraft = {
-    ...emptyDynamicProviderDraft(),
+  const dirty: ProviderDefinitionDraft = {
+    ...emptyProviderDefinitionDraft(),
     name: "旧名字",
     endpoint_url: "https://old.example.com",
     upstream_protocol: "chat_completions",
@@ -148,7 +148,7 @@ test("a blank preset endpoint stays blank; the placeholder is never applied as a
     endpointUrl: "",
     endpointPlaceholder: "https://<your-resource>.openai.azure.com/...",
   });
-  const applied = applyProviderPresetToDraft(emptyDynamicProviderDraft(), azure);
+  const applied = applyProviderPresetToDraft(emptyProviderDefinitionDraft(), azure);
   assert.equal(applied.endpoint_url, "");
   assert.equal(providerPresetEndpointPlaceholder(azure), "https://<your-resource>.openai.azure.com/...");
   assert.notEqual(applied.endpoint_url, providerPresetEndpointPlaceholder(azure));
@@ -156,11 +156,11 @@ test("a blank preset endpoint stays blank; the placeholder is never applied as a
 });
 
 test("switching back to manual resets preset fields but still clears secrets and mappings", () => {
-  const applied = applyProviderPresetToDraft(emptyDynamicProviderDraft(), samplePreset());
+  const applied = applyProviderPresetToDraft(emptyProviderDefinitionDraft(), samplePreset());
   applied.key = "sk-typed-after-apply";
   applied.models = [{ public_model: "claude", upstream_model: "claude" }];
   const manual = applyProviderPresetToDraft(applied, null);
-  const empty = emptyDynamicProviderDraft();
+  const empty = emptyProviderDefinitionDraft();
   assert.equal(manual.name, "");
   assert.equal(manual.endpoint_url, "");
   assert.equal(manual.upstream_protocol, empty.upstream_protocol);
@@ -214,8 +214,8 @@ test("defaultModels validate as a non-empty array of trimmed unique IDs", () => 
 
 test("a seeded fixed preset replaces Key and old mappings with exact prefixed IDs", () => {
   const preset = samplePreset({ defaultModels: ["claude-opus-4-1", "claude-sonnet-4-5"] });
-  const dirty: DynamicProviderDraft = {
-    ...emptyDynamicProviderDraft(),
+  const dirty: ProviderDefinitionDraft = {
+    ...emptyProviderDefinitionDraft(),
     key: "sk-must-clear",
     models: [
       { public_model: "old", upstream_model: "old" },
@@ -238,7 +238,7 @@ test("a seeded fixed preset replaces Key and old mappings with exact prefixed ID
   assert.equal(applied.account_name, "Anthropic API");
   assert.equal(applied.notes, "保留备注");
   // The create body carries exact upstream IDs with null overrides.
-  const body = buildDynamicProviderCreateBody({ ...applied, key: "sk-new" });
+  const body = buildProviderDefinitionCreateBody({ ...applied, key: "sk-new" });
   assert.deepEqual(body.models, [
     { publicModel: "anthropic/claude-opus-4-1", upstreamModel: "claude-opus-4-1", upstreamOverride: null },
     { publicModel: "anthropic/claude-sonnet-4-5", upstreamModel: "claude-sonnet-4-5", upstreamOverride: null },
@@ -248,7 +248,7 @@ test("a seeded fixed preset replaces Key and old mappings with exact prefixed ID
 });
 
 test("auto-generated account names follow the new preset; typed names stick", () => {
-  const first = applyProviderPresetToDraft(emptyDynamicProviderDraft(), samplePreset());
+  const first = applyProviderPresetToDraft(emptyProviderDefinitionDraft(), samplePreset());
   assert.equal(first.account_name, "Anthropic API");
   // The auto-generated name is replaced on switch instead of carried over.
   const switched = applyProviderPresetToDraft(first, samplePreset({ id: "openai", name: "OpenAI API" }));
@@ -277,7 +277,7 @@ test("offering by persisted preset ID is metadata-only; unknown IDs are API", ()
 
 test("switching reseeds models and keeps typed account fields; manual clears seeds", () => {
   const first = applyProviderPresetToDraft(
-    emptyDynamicProviderDraft(),
+    emptyProviderDefinitionDraft(),
     samplePreset({ defaultModels: ["a"] }),
   );
   const typed = { ...first, account_name: "我的号", notes: "n" };
@@ -297,11 +297,11 @@ test("switching reseeds models and keeps typed account fields; manual clears see
 });
 
 test("an unseeded preset keeps the empty mapping row so model editing stays required", () => {
-  const applied = applyProviderPresetToDraft(emptyDynamicProviderDraft(), samplePreset());
+  const applied = applyProviderPresetToDraft(emptyProviderDefinitionDraft(), samplePreset());
   assert.deepEqual(applied.models, [{ public_model: "", upstream_model: "" }]);
   // Save validation still blocks a create without a complete mapping.
   assert.equal(
-    validateDynamicProviderDraft({ ...applied, key: "sk-x" }, { mode: "create" }),
+    validateProviderDefinitionDraft({ ...applied, key: "sk-x" }, { mode: "create" }),
     "missing_mappings",
   );
 });
@@ -419,7 +419,7 @@ test("edit-mode prefix evidence keeps import naming consistent only when unambig
 });
 
 test("a preset selection persists its exact ID and a manual switch clears it", () => {
-  const applied = applyProviderPresetToDraft(emptyDynamicProviderDraft(), samplePreset());
+  const applied = applyProviderPresetToDraft(emptyProviderDefinitionDraft(), samplePreset());
   assert.equal(applied.preset_id, "anthropic");
   const manual = applyProviderPresetToDraft(applied, null);
   assert.equal(manual.preset_id, "");
@@ -428,13 +428,13 @@ test("a preset selection persists its exact ID and a manual switch clears it", (
 test("an Azure draft roundtrip keeps the template ID while manual deployment mappings stay bare", () => {
   const azure = PROVIDER_PRESETS.find((preset) => preset.id === "azure-openai");
   assert.ok(azure);
-  const draft = applyProviderPresetToDraft(emptyDynamicProviderDraft(), azure!);
+  const draft = applyProviderPresetToDraft(emptyProviderDefinitionDraft(), azure!);
   // The user supplies the resource-specific URL and a bare deployment name.
   draft.endpoint_url = "https://my-resource.openai.azure.com/openai/v1/responses";
   draft.models = [{ public_model: "my-deployment", upstream_model: "my-deployment" }];
   draft.name = "Azure 主号";
   draft.key = "sk-azure";
-  const createBody = buildDynamicProviderCreateBody(draft);
+  const createBody = buildProviderDefinitionCreateBody(draft);
   assert.equal(createBody.presetId, "azure-openai");
   assert.deepEqual(createBody.models, [
     { publicModel: "my-deployment", upstreamModel: "my-deployment", upstreamOverride: null },
@@ -453,19 +453,19 @@ test("an Azure draft roundtrip keeps the template ID while manual deployment map
   assert.equal(edit.discoveryPreset?.id, "azure-openai");
   assert.equal(providerPresetModelDiscoveryEnabled(edit.discoveryPreset!), false);
   // The roundtripped update body carries the ID through unchanged.
-  const updateBody = buildDynamicProviderUpdateBody({ ...draft, preset_id: "azure-openai" }, "bearer");
+  const updateBody = buildProviderDefinitionUpdateBody({ ...draft, preset_id: "azure-openai" }, "bearer");
   assert.equal(updateBody.presetId, "azure-openai");
 });
 
 test("update provenance: omitted preserves, an explicit empty string clears", () => {
-  const base = applyProviderPresetToDraft(emptyDynamicProviderDraft(), samplePreset());
+  const base = applyProviderPresetToDraft(emptyProviderDefinitionDraft(), samplePreset());
   base.key = "sk-edit";
   base.models = [{ public_model: "claude-opus-4-1", upstream_model: "claude-opus-4-1" }];
-  const cleared = buildDynamicProviderUpdateBody({ ...base, preset_id: "" }, "x-api-key");
+  const cleared = buildProviderDefinitionUpdateBody({ ...base, preset_id: "" }, "x-api-key");
   assert.equal(cleared.presetId, "");
-  const preserved = buildDynamicProviderUpdateBody({ ...base, preset_id: undefined }, "x-api-key");
+  const preserved = buildProviderDefinitionUpdateBody({ ...base, preset_id: undefined }, "x-api-key");
   assert.ok(!("presetId" in preserved));
-  const manualCreate = buildDynamicProviderCreateBody({ ...base, preset_id: "" });
+  const manualCreate = buildProviderDefinitionCreateBody({ ...base, preset_id: "" });
   assert.ok(!("presetId" in manualCreate));
 });
 

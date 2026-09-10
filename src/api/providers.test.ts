@@ -29,7 +29,7 @@ test("dynamic Provider create omits Key from the presented response and does not
   });
 
   await assert.rejects(
-    () => providerApi.createDynamicProvider({
+    () => providerApi.createProviderDefinition({
       name: "Lab",
       endpointUrl: "http://127.0.0.1:9",
       upstreamProtocol: "chat_completions",
@@ -67,6 +67,10 @@ test("dynamic Provider update 409 refreshes catalog and provider without replayi
       return {
         id: "lab-id",
         name: "Lab",
+        origin: "custom",
+        offering: "api",
+        editable: true,
+        deletable: true,
         endpointUrl: "http://127.0.0.1:9",
         upstreamProtocol: "chat_completions",
         authKind: "bearer",
@@ -84,7 +88,7 @@ test("dynamic Provider update 409 refreshes catalog and provider without replayi
   });
 
   await assert.rejects(
-    () => providerApi.updateDynamicProvider("lab-id", {
+    () => providerApi.updateProviderDefinition("lab-id", {
       name: "Lab",
       endpointUrl: "http://127.0.0.1:9",
       upstreamProtocol: "chat_completions",
@@ -109,13 +113,13 @@ test("dynamic Provider discover and test never persist a Key in the presented re
     }
     throw new Error(`unexpected request ${url}`);
   });
-  const discovered = await providerApi.discoverDynamicProviderModels({
+  const discovered = await providerApi.discoverProviderDefinitionModels({
     endpoint_url: "http://127.0.0.1:9",
     upstream_protocol: "chat_completions",
     auth_kind: "bearer",
     key: "sk-probe",
   });
-  const tested = await providerApi.testDynamicProvider({
+  const tested = await providerApi.testProviderDefinition({
     endpoint_url: "http://127.0.0.1:9",
     upstream_protocol: "chat_completions",
     auth_kind: "bearer",

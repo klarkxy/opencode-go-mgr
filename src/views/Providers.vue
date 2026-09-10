@@ -118,9 +118,9 @@
             </n-space>
           </div>
           <dl class="dynamic-provider-facts">
-            <div><dt>{{ t("API 地址") }}</dt><dd><code>{{ selectedDynamic.endpoint_url }}</code></dd></div>
-            <div><dt>{{ t("上游协议") }}</dt><dd>{{ protocolDisplayName(selectedDynamic.upstream_protocol) }}</dd></div>
-            <div><dt>{{ t("鉴权方式") }}</dt><dd>{{ authDisplayName(selectedDynamic.auth_kind) }}</dd></div>
+            <div><dt>{{ t("API 地址") }}</dt><dd><code>{{ selectedDynamic.endpoint_url ?? t("内置") }}</code></dd></div>
+            <div><dt>{{ t("上游协议") }}</dt><dd>{{ selectedDynamic.upstream_protocol ? protocolDisplayName(selectedDynamic.upstream_protocol) : t("内置") }}</dd></div>
+            <div><dt>{{ t("鉴权方式") }}</dt><dd>{{ selectedDynamic.auth_kind ? authDisplayName(selectedDynamic.auth_kind) : t("内置") }}</dd></div>
           </dl>
           <div class="providers-alias-table-wrap">
             <table class="providers-alias-table">
@@ -312,7 +312,7 @@ import { DashboardRequestError } from "../api/dashboard";
 import { isRevisionConflict, providerApi } from "../api/providers.ts";
 import { useProvidersStore } from "../stores/providers.ts";
 import type {
-  DynamicProviderView,
+  ProviderDefinitionView,
   ModelProtocolOverrideUpdate,
   ProviderCatalogEntry,
   ProviderContractsResponse,
@@ -368,9 +368,9 @@ const message = useMessage();
 const providersStore = useProvidersStore();
 const contracts = ref<ProviderContractsResponse | null>(null);
 const catalog = ref<ProviderCatalogEntry[] | null>(null);
-const dynamicDetails = ref<DynamicProviderView[]>([]);
+const dynamicDetails = ref<ProviderDefinitionView[]>([]);
 const showDynamicModal = ref(false);
-const editingDynamic = ref<DynamicProviderView | null>(null);
+const editingDynamic = ref<ProviderDefinitionView | null>(null);
 const createPresetId = ref<string | null>(null);
 /** In-flight save/test/discovery inside the inline preset create form. */
 const inlineFormBusy = ref(false);
@@ -698,7 +698,7 @@ function applyProviderTabFromQuery(tab: string | null) {
   if (activeTab.value === PROVIDER_OTHER_TAB) activeTab.value = "catalog";
 }
 
-function selectDynamicProvider(providerId: string): boolean {
+function selectProviderDefinition(providerId: string): boolean {
   if (!dynamicEntries.value.some((entry) => entry.provider_id === providerId)) return false;
   selectedKey.value = `dynamic:${providerId}`;
   writeScopeToUrl("dynamic", providerId);
@@ -721,10 +721,10 @@ function togglePresetBrowsing(): void {
 }
 
 function applyScopeFromQuery(fellBackNotice = false, preferDynamicId?: string) {
-  if (preferDynamicId && selectDynamicProvider(preferDynamicId)) return;
+  if (preferDynamicId && selectProviderDefinition(preferDynamicId)) return;
   if (selectedKey.value?.startsWith("dynamic:")) {
     const id = selectedKey.value.slice("dynamic:".length);
-    if (selectDynamicProvider(id)) return;
+    if (selectProviderDefinition(id)) return;
   }
   // A preset selection is valid on its own and must survive reloads instead of
   // being treated as a stale builtin scope.
@@ -733,7 +733,7 @@ function applyScopeFromQuery(fellBackNotice = false, preferDynamicId?: string) {
     if (selectPresetScope(id)) return;
   }
   const query = readProviderScopeQuery(window.location.search);
-  if (query.scope_kind === "dynamic" && query.scope_id && selectDynamicProvider(query.scope_id)) {
+  if (query.scope_kind === "dynamic" && query.scope_id && selectProviderDefinition(query.scope_id)) {
     return;
   }
   if (query.scope_kind === "preset" && query.scope_id && selectPresetScope(query.scope_id)) {
@@ -771,7 +771,7 @@ function selectScopeKey(key: string | number) {
     return;
   }
   if (value.startsWith("dynamic:")) {
-    selectDynamicProvider(value.slice("dynamic:".length));
+    selectProviderDefinition(value.slice("dynamic:".length));
     return;
   }
   if (value.startsWith("family:")) {
@@ -818,7 +818,7 @@ async function loadContracts(options: { retain?: boolean; preferDynamicId?: stri
     if (catalogResult.status === "fulfilled") {
       catalog.value = catalogResult.value;
       const dynamicIds = catalogResult.value.filter(isDynamicCatalogEntry).map((entry) => entry.provider_id);
-      const loaded = await Promise.allSettled(dynamicIds.map((id) => providerApi.getDynamicProvider(id)));
+      const loaded = await Promise.allSettled(dynamicIds.map((id) => providerApi.getProviderDefinition(id)));
       dynamicDetails.value = loaded.flatMap((item) => item.status === "fulfilled" ? [item.value] : []);
     }
     if (contractsResult.status === "fulfilled") {
@@ -863,7 +863,7 @@ async function deleteSelectedDynamic(): Promise<void> {
   const current = selectedDynamic.value;
   if (!current) return;
   try {
-    await providerApi.deleteDynamicProvider(current.id);
+    await providerApi.deleteProviderDefinition(current.id);
     message.success(t("供应商已删除"));
     selectedKey.value = scopes.value[0]?.key ?? null;
     await loadContracts({ retain: true });

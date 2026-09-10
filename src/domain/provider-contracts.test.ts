@@ -33,6 +33,9 @@ const catalogEntry = (
   display_name: string,
 ): ProviderCatalogEntry => ({
   provider_id,
+  origin: "builtin",
+  editable: false,
+  deletable: false,
   display_name,
   display_family: provider_id,
   credential_kind: "api_key",

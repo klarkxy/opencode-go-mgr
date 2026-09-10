@@ -102,7 +102,7 @@ struct PortablePayload {
     exported_at: String,
     accounts: Vec<PortableAccount>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    dynamic_providers: Vec<PortableDynamicProvider>,
+    dynamic_providers: Vec<PortableProviderDefinition>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     node: Option<PortableNodeState>,
 }
@@ -211,7 +211,7 @@ struct PortableCustomConfig {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct PortableDynamicProvider {
+struct PortableProviderDefinition {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     preset_id: Option<String>,
     id: String,
@@ -219,21 +219,21 @@ struct PortableDynamicProvider {
     endpoint_url: String,
     upstream_protocol: String,
     auth_kind: String,
-    models: Vec<PortableDynamicModel>,
+    models: Vec<PortableProviderDefinitionModel>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct PortableDynamicModel {
+struct PortableProviderDefinitionModel {
     public_model: String,
     upstream_model: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    upstream_override: Option<PortableDynamicModelOverride>,
+    upstream_override: Option<PortableProviderDefinitionModelOverride>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct PortableDynamicModelOverride {
+struct PortableProviderDefinitionModelOverride {
     protocol: String,
     endpoint_url: String,
 }
@@ -367,7 +367,7 @@ impl Zeroize for PortableCustomConfig {
     }
 }
 
-impl Zeroize for PortableDynamicProvider {
+impl Zeroize for PortableProviderDefinition {
     fn zeroize(&mut self) {
         self.preset_id.zeroize();
         self.id.zeroize();
@@ -379,7 +379,7 @@ impl Zeroize for PortableDynamicProvider {
     }
 }
 
-impl Zeroize for PortableDynamicModel {
+impl Zeroize for PortableProviderDefinitionModel {
     fn zeroize(&mut self) {
         self.public_model.zeroize();
         self.upstream_model.zeroize();
@@ -986,7 +986,7 @@ fn export_payload(state: &CoreState) -> Result<(PortablePayload, u64, u64), Tran
     provider_contracts.sort_by(|left, right| left.provider_id.cmp(&right.provider_id));
     let mut portable_dynamics = dynamic_runtimes
         .into_iter()
-        .map(|runtime| PortableDynamicProvider {
+        .map(|runtime| PortableProviderDefinition {
             preset_id: runtime.preset_id,
             id: runtime.id,
             name: runtime.name,
@@ -996,11 +996,11 @@ fn export_payload(state: &CoreState) -> Result<(PortablePayload, u64, u64), Tran
             models: runtime
                 .mappings
                 .into_iter()
-                .map(|mapping| PortableDynamicModel {
+                .map(|mapping| PortableProviderDefinitionModel {
                     public_model: mapping.public_model,
                     upstream_model: mapping.upstream_model,
                     upstream_override: mapping.upstream_override.map(|value| {
-                        PortableDynamicModelOverride {
+                        PortableProviderDefinitionModelOverride {
                             protocol: value.protocol.as_str().to_string(),
                             endpoint_url: value.endpoint_url,
                         }
@@ -1582,7 +1582,7 @@ fn validate_payload(payload: PortablePayload) -> Result<ValidatedMigration, Tran
 }
 
 fn validate_portable_dynamic_providers(
-    providers: &[PortableDynamicProvider],
+    providers: &[PortableProviderDefinition],
 ) -> Result<Vec<DynamicProviderRuntime>, TransferError> {
     let now = Utc::now();
     let mut seen_ids = HashSet::new();
@@ -1654,6 +1654,10 @@ fn validate_portable_dynamic_providers(
             mappings,
         })
         .map_err(|error| TransferError::Invalid(format!("{} is invalid: {error}", prefix())))?;
+        let preset_for_origin = definition.preset_id.as_deref();
+        let origin = ocg_domain::provider::provider_origin_from_preset(preset_for_origin);
+        let offering =
+            ocg_domain::provider::preset_offering(preset_for_origin.unwrap_or("")).to_string();
         validated.push(DynamicProviderRuntime {
             preset_id: definition.preset_id,
             id: definition.id,
@@ -1664,6 +1668,8 @@ fn validate_portable_dynamic_providers(
             mappings: definition.mappings,
             created_at: now,
             updated_at: now,
+            origin,
+            offering,
         });
     }
     Ok(validated)
@@ -2254,15 +2260,15 @@ mod tests {
         assert!(message.contains(&PAYLOAD_VERSION.to_string()));
     }
 
-    fn sample_dynamic_provider(id: &str, name: &str) -> PortableDynamicProvider {
-        PortableDynamicProvider {
+    fn sample_dynamic_provider(id: &str, name: &str) -> PortableProviderDefinition {
+        PortableProviderDefinition {
             preset_id: None,
             id: id.to_string(),
             name: name.to_string(),
             endpoint_url: "http://127.0.0.1:9/v1".to_string(),
             upstream_protocol: "chat_completions".to_string(),
             auth_kind: "bearer".to_string(),
-            models: vec![PortableDynamicModel {
+            models: vec![PortableProviderDefinitionModel {
                 public_model: "lab-opus".to_string(),
                 upstream_model: "vendor/opus".to_string(),
                 upstream_override: None,
@@ -2277,12 +2283,12 @@ mod tests {
         provider.preset_id = Some("azure-openai".into());
         let encoded = serde_json::to_value(&provider).unwrap();
         assert_eq!(encoded["presetId"], "azure-openai");
-        let decoded: PortableDynamicProvider = serde_json::from_value(encoded.clone()).unwrap();
+        let decoded: PortableProviderDefinition = serde_json::from_value(encoded.clone()).unwrap();
         let validated = validate_portable_dynamic_providers(&[decoded]).unwrap();
         assert_eq!(validated[0].preset_id.as_deref(), Some("azure-openai"));
         let mut legacy = encoded;
         legacy.as_object_mut().unwrap().remove("presetId");
-        let decoded: PortableDynamicProvider = serde_json::from_value(legacy).unwrap();
+        let decoded: PortableProviderDefinition = serde_json::from_value(legacy).unwrap();
         assert_eq!(
             validate_portable_dynamic_providers(&[decoded]).unwrap()[0].preset_id,
             None
@@ -2294,7 +2300,7 @@ mod tests {
         let mut provider = sample_dynamic_provider("dc7f6bbf-18a1-458b-845b-54c219c19dba", "Lab");
         let legacy = serde_json::to_value(&provider).unwrap();
         assert!(legacy["models"][0].get("upstreamOverride").is_none());
-        provider.models[0].upstream_override = Some(PortableDynamicModelOverride {
+        provider.models[0].upstream_override = Some(PortableProviderDefinitionModelOverride {
             protocol: "messages".into(),
             endpoint_url: "https://example.test/anthropic/v1/messages".into(),
         });

@@ -614,6 +614,8 @@ mod tests {
             }],
             created_at: now,
             updated_at: now,
+            origin: ocg_domain::provider::ProviderOrigin::Custom,
+            offering: "api".to_string(),
         };
         let mut account = custom_pending(&state, "dyn-none");
         account.provider_id = provider_id.clone();

@@ -288,7 +288,7 @@ import {
   NSpace,
 } from "naive-ui";
 import { DownOutlined, RightOutlined } from "@vicons/antd";
-import { isRevisionConflict, providerApi, type DynamicProviderView } from "../api/providers.ts";
+import { isRevisionConflict, providerApi, type ProviderDefinitionView } from "../api/providers.ts";
 import { locale, t, type MessageKey } from "../i18n/index.ts";
 import { dashboardErrorDetail } from "../utils/errors.ts";
 import { protocolDisplayName } from "../domain/provider-contracts.ts";
@@ -308,26 +308,26 @@ import {
   DYNAMIC_PAID_TEST_WARNING_KEY,
   DYNAMIC_PROTOCOLS,
   DYNAMIC_PROVIDER_DRAFT_ERROR_KEYS,
-  buildDynamicProviderCreateBody,
-  buildDynamicProviderUpdateBody,
+  buildProviderDefinitionCreateBody,
+  buildProviderDefinitionUpdateBody,
   completeDynamicTestTargets,
   dynamicAuthRequiresKey,
   dynamicMappingOverrideError,
   dynamicProviderActionNeedsConfirm,
-  emptyDynamicProviderDraft,
+  emptyProviderDefinitionDraft,
   resolveDynamicMappingRoute,
-  sanitizeDynamicProviderDraft,
-  validateDynamicProviderDraft,
+  sanitizeProviderDefinitionDraft,
+  validateProviderDefinitionDraft,
   type DynamicAuthKind,
-  type DynamicProviderDraft,
-  type DynamicProviderMapping,
+  type ProviderDefinitionDraft,
+  type ProviderDefinitionMapping,
   type DynamicUpstreamProtocol,
 } from "../domain/dynamic-provider.ts";
 import FormSurface from "./FormSurface.vue";
 
 const props = defineProps<{
   show: boolean;
-  provider: DynamicProviderView | null;
+  provider: ProviderDefinitionView | null;
   /** Create mode only: preset applied on every open; null/unknown stays manual. */
   initialPresetId?: string | null;
   /** "account" titles the atomic create as adding an account, not a supplier. */
@@ -346,7 +346,7 @@ const emit = defineEmits<{
   (event: "busyChange", busy: boolean): void;
 }>();
 
-const draft = ref<DynamicProviderDraft>(emptyDynamicProviderDraft());
+const draft = ref<ProviderDefinitionDraft>(emptyProviderDefinitionDraft());
 const formError = ref("");
 const conflictNotice = ref("");
 const testSuccess = ref("");
@@ -490,7 +490,7 @@ const routeModeOptions = computed(() => [
   { value: "override", label: t("覆盖协议与地址") },
 ]);
 
-function setMappingRouteMode(row: DynamicProviderMapping, mode: string): void {
+function setMappingRouteMode(row: ProviderDefinitionMapping, mode: string): void {
   if (busy.value) return;
   if (mode === "override") {
     if (row.upstream_override) return;
@@ -526,9 +526,9 @@ watch(
     if (provider) {
       draft.value = {
         name: provider.name,
-        endpoint_url: provider.endpoint_url,
-        upstream_protocol: provider.upstream_protocol,
-        auth_kind: provider.auth_kind,
+        endpoint_url: provider.endpoint_url ?? "",
+        upstream_protocol: provider.upstream_protocol ?? "",
+        auth_kind: provider.auth_kind ?? "",
         // Edit roundtrip preserves each row's override exactly; absent/null
         // means the row inherits the supplier default.
         models: provider.models.map((model) => ({
@@ -546,7 +546,7 @@ watch(
     } else {
       // Every create open starts from a clean draft (no Key or models carry
       // over), then the explicit preset from the chooser is applied on top.
-      draft.value = emptyDynamicProviderDraft();
+      draft.value = emptyProviderDefinitionDraft();
       const preset = props.initialPresetId
         ? PROVIDER_PRESETS.find((entry) => entry.id === props.initialPresetId) ?? null
         : null;
@@ -627,7 +627,7 @@ async function discover(): Promise<void> {
   discovering.value = true;
   const generation = requestGeneration.value;
   try {
-    const result = await providerApi.discoverDynamicProviderModels({
+    const result = await providerApi.discoverProviderDefinitionModels({
       endpoint_url: draft.value.endpoint_url,
       upstream_protocol: draft.value.upstream_protocol as DynamicUpstreamProtocol,
       auth_kind: draft.value.auth_kind as DynamicAuthKind,
@@ -671,7 +671,7 @@ async function runTest(): Promise<void> {
   const route = resolveDynamicMappingRoute(draft.value, mapping);
   const usesOverride = Boolean(mapping.upstream_override);
   try {
-    const result = await providerApi.testDynamicProvider({
+    const result = await providerApi.testProviderDefinition({
       endpoint_url: route.endpoint_url,
       upstream_protocol: route.upstream_protocol as DynamicUpstreamProtocol,
       auth_kind: draft.value.auth_kind as DynamicAuthKind,
@@ -707,7 +707,7 @@ function onSurfaceUpdateShow(visible: boolean): void {
 async function save(): Promise<void> {
   // Re-entrant submits (Enter key, double click) must not duplicate the write.
   if (busy.value) return;
-  const error = validateDynamicProviderDraft(draft.value, {
+  const error = validateProviderDefinitionDraft(draft.value, {
     mode: isEdit.value ? "edit" : "create",
     previousAuthKind: props.provider?.auth_kind ?? "",
   });
@@ -720,12 +720,12 @@ async function save(): Promise<void> {
   conflictNotice.value = "";
   try {
     const saved = isEdit.value && props.provider
-      ? await providerApi.updateDynamicProvider(
+      ? await providerApi.updateProviderDefinition(
         props.provider.id,
-        buildDynamicProviderUpdateBody(draft.value, props.provider.auth_kind),
+        buildProviderDefinitionUpdateBody(draft.value, props.provider.auth_kind ?? ""),
       )
-      : await providerApi.createDynamicProvider(buildDynamicProviderCreateBody(draft.value));
-    draft.value = sanitizeDynamicProviderDraft(draft.value);
+      : await providerApi.createProviderDefinition(buildProviderDefinitionCreateBody(draft.value));
+    draft.value = sanitizeProviderDefinitionDraft(draft.value);
     emit("saved", saved.id);
     emit("update:show", false);
   } catch (cause) {

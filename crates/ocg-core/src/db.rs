@@ -2118,7 +2118,7 @@ fn dynamic_tx_fault(point: &'static str) -> Result<()> {
 
 fn list_dynamic_providers_on(conn: &Connection) -> Result<Vec<DynamicProviderRuntime>> {
     let mut stmt = conn.prepare(
-        "SELECT id, name, endpoint_url, upstream_protocol, auth_kind, created_at, updated_at, preset_id
+        "SELECT id, name, endpoint_url, upstream_protocol, auth_kind, created_at, updated_at, preset_id, origin, offering
          FROM providers
          WHERE origin IN ('preset', 'custom')
          ORDER BY created_at ASC, id ASC",
@@ -2133,11 +2133,24 @@ fn list_dynamic_providers_on(conn: &Connection) -> Result<Vec<DynamicProviderRun
             row.get::<_, String>(5)?,
             row.get::<_, String>(6)?,
             row.get::<_, Option<String>>(7)?,
+            row.get::<_, String>(8)?,
+            row.get::<_, String>(9)?,
         ))
     })?;
     let mut providers = Vec::new();
     for row in rows {
-        let (id, name, endpoint_url, protocol, auth_kind, created_at, updated_at, preset_id) = row?;
+        let (
+            id,
+            name,
+            endpoint_url,
+            protocol,
+            auth_kind,
+            created_at,
+            updated_at,
+            preset_id,
+            origin,
+            offering,
+        ) = row?;
         providers.push(load_dynamic_provider_runtime(
             conn,
             DynamicProviderRow {
@@ -2149,6 +2162,8 @@ fn list_dynamic_providers_on(conn: &Connection) -> Result<Vec<DynamicProviderRun
                 auth_kind,
                 created_at,
                 updated_at,
+                origin,
+                offering,
             },
         )?);
     }
@@ -2161,7 +2176,7 @@ fn get_dynamic_provider_on(
 ) -> Result<Option<DynamicProviderRuntime>> {
     let row = conn
         .query_row(
-            "SELECT id, name, endpoint_url, upstream_protocol, auth_kind, created_at, updated_at, preset_id
+            "SELECT id, name, endpoint_url, upstream_protocol, auth_kind, created_at, updated_at, preset_id, origin, offering
              FROM providers
              WHERE lower(id) = lower(?1) AND origin IN ('preset', 'custom')",
             [provider_id],
@@ -2174,13 +2189,25 @@ fn get_dynamic_provider_on(
                     row.get::<_, String>(4)?,
                     row.get::<_, String>(5)?,
                     row.get::<_, String>(6)?,
-            row.get::<_, Option<String>>(7)?,
+                    row.get::<_, Option<String>>(7)?,
+                    row.get::<_, String>(8)?,
+                    row.get::<_, String>(9)?,
                 ))
             },
         )
         .optional()?;
-    let Some((id, name, endpoint_url, protocol, auth_kind, created_at, updated_at, preset_id)) =
-        row
+    let Some((
+        id,
+        name,
+        endpoint_url,
+        protocol,
+        auth_kind,
+        created_at,
+        updated_at,
+        preset_id,
+        origin,
+        offering,
+    )) = row
     else {
         return Ok(None);
     };
@@ -2195,6 +2222,75 @@ fn get_dynamic_provider_on(
             auth_kind,
             created_at,
             updated_at,
+            origin,
+            offering,
+        },
+    )?))
+}
+
+/// Read a single row from the unified `providers` table without filtering on
+/// `origin`. Used by the public read path to surface builtin seeds alongside
+/// dynamic rows. Returns `None` when the id is unknown.
+fn get_provider_definition_on(
+    conn: &Connection,
+    provider_id: &str,
+) -> Result<Option<DynamicProviderRuntime>> {
+    let row = conn
+        .query_row(
+            "SELECT id, name, endpoint_url, upstream_protocol, auth_kind, created_at, updated_at, preset_id, origin, offering
+             FROM providers
+             WHERE lower(id) = lower(?1)",
+            [provider_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, Option<String>>(7)?,
+                    row.get::<_, String>(8)?,
+                    row.get::<_, String>(9)?,
+                ))
+            },
+        )
+        .optional()?;
+    let Some((
+        id,
+        name,
+        endpoint_url_opt,
+        protocol_opt,
+        auth_kind_opt,
+        created_at,
+        updated_at,
+        preset_id,
+        origin,
+        offering,
+    )) = row
+    else {
+        return Ok(None);
+    };
+    // Builtin rows leave endpoint_url/upstream_protocol/auth_kind as NULL;
+    // synthesize safe placeholders the loader can parse so the runtime shape
+    // stays uniform. The handler then maps to `Option<...>` on the wire.
+    let endpoint_url = endpoint_url_opt.unwrap_or_default();
+    let protocol = protocol_opt.unwrap_or_else(|| "chat_completions".to_string());
+    let auth_kind = auth_kind_opt.unwrap_or_else(|| "bearer".to_string());
+    Ok(Some(load_dynamic_provider_runtime(
+        conn,
+        DynamicProviderRow {
+            preset_id,
+            id,
+            name,
+            endpoint_url,
+            protocol,
+            auth_kind,
+            created_at,
+            updated_at,
+            origin,
+            offering,
         },
     )?))
 }
@@ -2208,6 +2304,8 @@ struct DynamicProviderRow {
     auth_kind: String,
     created_at: String,
     updated_at: String,
+    origin: String,
+    offering: String,
 }
 
 fn load_dynamic_provider_runtime(
@@ -2263,6 +2361,8 @@ fn load_dynamic_provider_runtime(
                 provider.id
             )
         })?;
+    let origin = ocg_domain::provider::ProviderOrigin::try_from(provider.origin.as_str())
+        .map_err(|error| anyhow::anyhow!(error.to_string()))?;
     Ok(DynamicProviderRuntime {
         preset_id: provider.preset_id,
         id: provider.id,
@@ -2273,17 +2373,14 @@ fn load_dynamic_provider_runtime(
         mappings,
         created_at,
         updated_at,
+        origin,
+        offering: provider.offering,
     })
 }
 
 fn insert_dynamic_provider_on(conn: &Connection, runtime: &DynamicProviderRuntime) -> Result<()> {
-    let origin = if runtime.preset_id.is_some() {
-        "preset"
-    } else {
-        "custom"
-    };
-    let offering =
-        ocg_domain::provider::preset_offering(runtime.preset_id.as_deref().unwrap_or(""));
+    let origin = runtime.origin.as_str();
+    let offering = runtime.offering.as_str();
     conn.execute(
         "INSERT INTO providers
          (id, origin, adapter_kind, name, endpoint_url, upstream_protocol,
@@ -2351,7 +2448,7 @@ fn upsert_imported_dynamic_provider_on(
                 runtime.updated_at.to_rfc3339(),
                 existing.id,
                 runtime.preset_id,
-                ocg_domain::provider::preset_offering(runtime.preset_id.as_deref().unwrap_or(""),),
+                runtime.offering.as_str(),
             ],
         )?;
         conn.execute(
@@ -5630,6 +5727,16 @@ impl Database {
         get_dynamic_provider_on(&self.conn, provider_id)
     }
 
+    /// Read any `providers` row (builtin preset/custom) by id. Used by the
+    /// public GET to surface the unified view; the handler still rejects
+    /// PATCH/DELETE on builtin rows.
+    pub fn get_provider_definition(
+        &self,
+        provider_id: &str,
+    ) -> Result<Option<DynamicProviderRuntime>> {
+        get_provider_definition_on(&self.conn, provider_id)
+    }
+
     pub fn count_accounts_for_provider(&self, provider_id: &str) -> Result<i64> {
         count_accounts_for_provider_on(&self.conn, provider_id)
     }
@@ -5682,7 +5789,7 @@ impl Database {
                 runtime.updated_at.to_rfc3339(),
                 existing.id,
                 runtime.preset_id,
-                ocg_domain::provider::preset_offering(runtime.preset_id.as_deref().unwrap_or(""),),
+                runtime.offering.as_str(),
             ],
         )?;
         tx.execute(

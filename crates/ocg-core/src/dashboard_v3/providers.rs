@@ -36,7 +36,8 @@ use crate::provider::{
     BUILTIN_PROVIDERS, BuiltinProvider, COMMAND_CODE_PROVIDER_ID, CUSTOM_PROVIDER_ID,
     ConnectionVerificationStatus, KIMI_CN_BASE_URL, KIMI_PROVIDER_ID, MINIMAX_CN_BASE_URL,
     MINIMAX_PROVIDER_ID, OLLAMA_PROVIDER_ID, OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID,
-    ProviderAdapterKind, ProviderRegistry, ZEN_FREE_ACCOUNT_ID, default_verification_status,
+    ProviderAdapterKind, ProviderOrigin, ProviderRegistry, ZEN_FREE_ACCOUNT_ID,
+    default_verification_status,
 };
 use crate::provider_contracts::{
     self, ContractScope, EffectiveContractSet, EffectiveModelContract as DomainModelContract,
@@ -1319,8 +1320,12 @@ fn dynamic_catalog_entry(runtime: &crate::dynamic::DynamicProviderRuntime) -> Pr
         Some(scheme) => vec![AccountAuthScheme::from(scheme)],
         None => Vec::new(),
     };
+    let editable = !matches!(runtime.origin, ProviderOrigin::Builtin);
     ProviderCatalogEntry {
         provider_id: runtime.id.clone(),
+        origin: runtime.origin,
+        editable,
+        deletable: editable,
         display_name: runtime.name.clone(),
         display_family: runtime.name.clone(),
         credential_kind: runtime.auth_kind.credential_kind().into(),
@@ -1401,6 +1406,9 @@ fn catalog_entry(
     ProviderCatalogEntry {
         provider_id: plan.provider_id.to_string(),
 
+        origin: ProviderOrigin::Builtin,
+        editable: false,
+        deletable: false,
         display_name: plan.display_name.to_string(),
         display_family: plan.display_family.to_string(),
         credential_kind: plan.credential_kind.into(),

@@ -314,13 +314,19 @@ export const dashboardApi = {
   updatePricingMultipliers: async (expectedPricingRevision: string, multipliers: PricingMultiplierUpdate[]) => {
     const controlPlane = useControlPlaneStore();
     if (!controlPlane.hasTokens()) await controlPlane.refresh();
-    return presentPricing(await controlPlane.runMutation((expectation) => dashboardV3.putPricingMultipliers({
-      expectedPricingRevision,
-      multipliers: multipliers.map((multiplier) => ({
-        modelId: multiplier.model_id,
-        multiplier: multiplier.multiplier,
-      })),
-    }, expectation)));
+    const result = await controlPlane.runMutation((expectation) => dashboardV3.putProviderPricingMultipliers(
+      "opencode",
+      {
+        expectedPricingRevision,
+        multipliers: multipliers.map((multiplier) => ({
+          modelId: multiplier.model_id,
+          multiplier: multiplier.multiplier,
+        })),
+      },
+      expectation,
+    ));
+    if (!result.snapshot) throw new Error("OpenCode Go pricing snapshot is not available");
+    return presentPricing(result.snapshot);
   },
 
   checkForUpdate: async () => presentUpdateCheck(await dashboardV3.checkForUpdate()),

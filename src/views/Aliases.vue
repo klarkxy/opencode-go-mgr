@@ -96,7 +96,7 @@ import { computed, onActivated, onMounted, ref } from "vue";
 import { NAlert, NButton, NEmpty, NInput, NSpin } from "naive-ui";
 import type { Account } from "../api/dashboard.ts";
 import type {
-  DynamicProviderView,
+  ProviderDefinitionView,
   ProviderCatalogEntry,
   ProviderContractsResponse,
 } from "../api/providers.ts";
@@ -114,7 +114,7 @@ const providersStore = useProvidersStore();
 const contracts = ref<ProviderContractsResponse | null>(null);
 const catalog = ref<ProviderCatalogEntry[] | null>(null);
 const accounts = ref<Account[]>([]);
-const dynamicProviders = ref<DynamicProviderView[]>([]);
+const dynamicProviders = ref<ProviderDefinitionView[]>([]);
 const loading = ref(false);
 const search = ref("");
 const loadError = ref("");
@@ -175,10 +175,10 @@ async function loadAliases(options: { retain?: boolean } = {}): Promise<void> {
         dynamicLoadError.value = "";
       } else {
         const details = await Promise.allSettled(
-          entries.map((entry) => providerApi.getDynamicProvider(entry.provider_id)),
+          entries.map((entry) => providerApi.getProviderDefinition(entry.provider_id)),
         );
         const previous = new Map(dynamicProviders.value.map((provider) => [provider.id, provider]));
-        const next: DynamicProviderView[] = [];
+        const next: ProviderDefinitionView[] = [];
         const failures: string[] = [];
         details.forEach((result, index) => {
           if (result.status === "fulfilled") {

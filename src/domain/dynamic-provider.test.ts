@@ -1,25 +1,28 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  buildDynamicProviderCreateBody,
-  buildDynamicProviderUpdateBody,
+  buildProviderDefinitionCreateBody,
+  buildProviderDefinitionUpdateBody,
   completeDynamicTestTargets,
   dynamicAuthRequiresKey,
   dynamicMappingOverrideError,
   dynamicProviderActionNeedsConfirm,
-  emptyDynamicProviderDraft,
+  emptyProviderDefinitionDraft,
   isDynamicCatalogEntry,
   normalizeDynamicMappings,
   resolveDynamicMappingRoute,
-  sanitizeDynamicProviderDraft,
-  validateDynamicProviderDraft,
-  type DynamicProviderMapping,
+  sanitizeProviderDefinitionDraft,
+  validateProviderDefinitionDraft,
+  type ProviderDefinitionMapping,
 } from "./dynamic-provider.ts";
 import type { ProviderCatalogEntry } from "../api/providers.ts";
 
 function entry(extra: Partial<ProviderCatalogEntry> = {}): ProviderCatalogEntry {
   return {
     provider_id: "opencode",
+    origin: "builtin",
+    editable: false,
+    deletable: false,
     display_name: "OpenCode Go",
     display_family: "OpenCode",
     credential_kind: "api_key",
@@ -70,66 +73,66 @@ test("mapping validation requires one unique public model and allows repeated up
 });
 
 test("create payload requires a Key only when auth is not none and never keeps blank mappings", () => {
-  const draft = emptyDynamicProviderDraft();
+  const draft = emptyProviderDefinitionDraft();
   draft.name = "Lab";
   draft.endpoint_url = "http://127.0.0.1:9";
   draft.models = [{ public_model: "lab-opus", upstream_model: "vendor/opus" }];
-  assert.equal(validateDynamicProviderDraft(draft, { mode: "create" }), "missing_key");
+  assert.equal(validateProviderDefinitionDraft(draft, { mode: "create" }), "missing_key");
   draft.key = "sk-lab";
-  const body = buildDynamicProviderCreateBody(draft);
+  const body = buildProviderDefinitionCreateBody(draft);
   assert.equal(body.key, "sk-lab");
   assert.equal(body.authKind, "bearer");
   draft.auth_kind = "none";
   draft.key = "should-not-send";
-  const noneBody = buildDynamicProviderCreateBody(draft);
+  const noneBody = buildProviderDefinitionCreateBody(draft);
   assert.equal(noneBody.key, undefined);
   assert.ok(dynamicAuthRequiresKey("bearer"));
   assert.equal(dynamicAuthRequiresKey("none"), false);
 });
 
 test("edit from none to keyed requires an explicit replacement Key", () => {
-  const draft = emptyDynamicProviderDraft();
+  const draft = emptyProviderDefinitionDraft();
   draft.name = "Lab";
   draft.endpoint_url = "http://127.0.0.1:9";
   draft.auth_kind = "bearer";
   draft.models = [{ public_model: "lab-opus", upstream_model: "vendor/opus" }];
   assert.equal(
-    validateDynamicProviderDraft(draft, { mode: "edit", previousAuthKind: "none" }),
+    validateProviderDefinitionDraft(draft, { mode: "edit", previousAuthKind: "none" }),
     "missing_replacement_key",
   );
   draft.key = "sk-now";
-  const body = buildDynamicProviderUpdateBody(draft, "none");
+  const body = buildProviderDefinitionUpdateBody(draft, "none");
   assert.equal(body.key, "sk-now");
 });
 
 test("ordinary keyed edit omits a discover/test Key while create still sends it", () => {
-  const draft = emptyDynamicProviderDraft();
+  const draft = emptyProviderDefinitionDraft();
   draft.name = "Lab";
   draft.endpoint_url = "http://127.0.0.1:9";
   draft.auth_kind = "bearer";
   draft.models = [{ public_model: "lab-opus", upstream_model: "vendor/opus" }];
   draft.key = "sk-probe";
-  const update = buildDynamicProviderUpdateBody(draft, "bearer");
+  const update = buildProviderDefinitionUpdateBody(draft, "bearer");
   assert.equal("key" in update, false);
   assert.equal(update.key, undefined);
-  const created = buildDynamicProviderCreateBody(draft);
+  const created = buildProviderDefinitionCreateBody(draft);
   assert.equal(created.key, "sk-probe");
 });
 
 test("sanitization drops the write-only Key from draft and response-shaped records", () => {
-  const draft = emptyDynamicProviderDraft();
+  const draft = emptyProviderDefinitionDraft();
   draft.key = "sk-secret";
-  assert.equal(sanitizeDynamicProviderDraft(draft).key, "");
+  assert.equal(sanitizeProviderDefinitionDraft(draft).key, "");
 });
 
 test("save does not require discovery or a prior model test", () => {
-  const draft = emptyDynamicProviderDraft();
+  const draft = emptyProviderDefinitionDraft();
   draft.name = "Lab";
   draft.endpoint_url = "http://127.0.0.1:9";
   draft.auth_kind = "none";
   draft.models = [{ public_model: "lab-opus", upstream_model: "vendor/opus" }];
-  assert.equal(validateDynamicProviderDraft(draft, { mode: "create" }), null);
-  const body = buildDynamicProviderCreateBody(draft);
+  assert.equal(validateProviderDefinitionDraft(draft, { mode: "create" }), null);
+  const body = buildProviderDefinitionCreateBody(draft);
   assert.equal(body.key, undefined);
   assert.equal(body.models.length, 1);
 });
@@ -203,7 +206,7 @@ test("the selected-row override gate rejects an empty explicit override before a
 });
 
 test("an override requires an explicit well-formed endpoint and never guesses siblings", () => {
-  const rows = (override: DynamicProviderMapping["upstream_override"]) => [
+  const rows = (override: ProviderDefinitionMapping["upstream_override"]) => [
     { public_model: "opus", upstream_model: "vendor/a", upstream_override: override },
   ];
   assert.equal(
@@ -233,7 +236,7 @@ test("an override requires an explicit well-formed endpoint and never guesses si
 });
 
 test("create and edit bodies roundtrip the override; null on edit clears it", () => {
-  const draft = emptyDynamicProviderDraft();
+  const draft = emptyProviderDefinitionDraft();
   draft.name = "Lab";
   draft.endpoint_url = "https://api.example.com/v1/responses";
   draft.upstream_protocol = "responses";
@@ -246,7 +249,7 @@ test("create and edit bodies roundtrip the override; null on edit clears it", ()
       upstream_override: { protocol: "messages", endpoint_url: "https://up.example.com/v1/messages" },
     },
   ];
-  const created = buildDynamicProviderCreateBody(draft);
+  const created = buildProviderDefinitionCreateBody(draft);
   assert.deepEqual(created.models, [
     { publicModel: "inherit-row", upstreamModel: "vendor/a", upstreamOverride: null },
     {
@@ -257,9 +260,9 @@ test("create and edit bodies roundtrip the override; null on edit clears it", ()
   ]);
   // Edit sends the same full model list: a preserved override rides through,
   // and null explicitly returns the row to the supplier default.
-  const updated = buildDynamicProviderUpdateBody(draft, "none");
+  const updated = buildProviderDefinitionUpdateBody(draft, "none");
   assert.deepEqual(updated.models, created.models);
-  const cleared = buildDynamicProviderUpdateBody({
+  const cleared = buildProviderDefinitionUpdateBody({
     ...draft,
     models: draft.models.map((model) => ({ ...model, upstream_override: null })),
   }, "none");
