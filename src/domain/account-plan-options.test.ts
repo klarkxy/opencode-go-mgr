@@ -14,6 +14,7 @@ function catalogEntry(
     origin: "preset",
     editable: true,
     deletable: true,
+    offering: "api",
     display_name: provider_id,
     display_family: provider_id,
     credential_kind: "api_key",

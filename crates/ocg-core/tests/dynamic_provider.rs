@@ -2005,6 +2005,13 @@ async fn catalog_entries_advertise_origin_and_mutability_flags_for_every_provide
         let origin = entry["origin"].as_str().expect("origin");
         let editable = entry["editable"].as_bool().expect("editable");
         let deletable = entry["deletable"].as_bool().expect("deletable");
+        let offering = entry["offering"]
+            .as_str()
+            .unwrap_or_else(|| panic!("offering missing from {entry}"));
+        assert!(
+            matches!(offering, "plan" | "api"),
+            "offering must be plan|api, got {offering} in {entry}"
+        );
         match origin {
             "builtin" => {
                 seen_builtin = true;
@@ -2021,6 +2028,109 @@ async fn catalog_entries_advertise_origin_and_mutability_flags_for_every_provide
     }
     assert!(seen_builtin, "no builtin entries found in {body}");
     assert!(seen_custom, "no custom entries found in {body}");
+    harness.stop();
+}
+
+#[tokio::test]
+async fn catalog_entries_advertise_offering_per_builtin_and_preset_origin() {
+    let harness = start_loopback("dyn-catalog-offering").await;
+    let (status, plan_row) = send_json(
+        &harness,
+        Method::POST,
+        "/providers",
+        &cas(
+            &harness,
+            json!({
+                "name": "Bailian Plan",
+                "presetId": "bailian-coding",
+                "endpointUrl": "https://example.com/v1",
+                "upstreamProtocol": "chat_completions",
+                "authKind": "bearer",
+                "key": "sk-bailian",
+                "models": [{"publicModel": "lab-opus", "upstreamModel": "vendor/opus"}]
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{plan_row}");
+    let plan_provider_id = plan_row["provider"]["id"].as_str().unwrap().to_string();
+
+    let (status, custom_row) = send_json(
+        &harness,
+        Method::POST,
+        "/providers",
+        &cas(
+            &harness,
+            json!({
+                "name": "Custom Lab",
+                "endpointUrl": "https://example.com/v1",
+                "upstreamProtocol": "chat_completions",
+                "authKind": "bearer",
+                "key": "sk-lab",
+                "models": [{"publicModel": "lab-opus", "upstreamModel": "vendor/opus"}]
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{custom_row}");
+    let custom_provider_id = custom_row["provider"]["id"].as_str().unwrap().to_string();
+
+    let (status, body) = send_json(&harness, Method::GET, "/providers", &Value::Null).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let entries = body["entries"].as_array().expect("entries array");
+
+    let by_id: HashMap<String, &Value> = entries
+        .iter()
+        .map(|entry| (entry["providerId"].as_str().unwrap().to_string(), entry))
+        .collect();
+
+    for (provider_id, expected_offering) in [
+        (OPENCODE_PROVIDER_ID, "plan"),
+        (COMMAND_CODE_PROVIDER_ID, "plan"),
+        (ocg_core::provider::MINIMAX_PROVIDER_ID, "plan"),
+        (ocg_core::provider::KIMI_PROVIDER_ID, "plan"),
+        (ocg_core::provider::OLLAMA_PROVIDER_ID, "plan"),
+        (ocg_core::provider::OPENCODE_ZEN_FREE_PROVIDER_ID, "api"),
+        (CUSTOM_PROVIDER_ID, "api"),
+    ] {
+        let entry = by_id
+            .get(provider_id)
+            .unwrap_or_else(|| panic!("missing catalog entry for {provider_id}"));
+        assert_eq!(
+            entry["offering"].as_str(),
+            Some(expected_offering),
+            "{provider_id} entry: {entry}"
+        );
+    }
+
+    let plan_entry = by_id
+        .get(&plan_provider_id)
+        .expect("plan preset catalog entry");
+    assert_eq!(
+        plan_entry["offering"].as_str(),
+        Some("plan"),
+        "{plan_entry}"
+    );
+    assert_eq!(
+        plan_entry["origin"].as_str(),
+        Some("preset"),
+        "{plan_entry}"
+    );
+
+    let custom_entry = by_id
+        .get(&custom_provider_id)
+        .expect("custom catalog entry");
+    assert_eq!(
+        custom_entry["offering"].as_str(),
+        Some("api"),
+        "{custom_entry}"
+    );
+    assert_eq!(
+        custom_entry["origin"].as_str(),
+        Some("custom"),
+        "{custom_entry}"
+    );
+
     harness.stop();
 }
 

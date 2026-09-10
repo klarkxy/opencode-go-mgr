@@ -5287,6 +5287,10 @@
         "modelSource": {
           "type": "string"
         },
+        "offering": {
+          "description": "Plan/api offering label carried by the catalog row. Builtin rows use\nthe sealed builtin map; dynamic rows mirror the persisted `offering`.",
+          "type": "string"
+        },
         "origin": {
           "$ref": "#/$defs/ProviderOrigin",
           "description": "Row provenance in the unified `providers` table. Wire values:\n`builtin` (sealed adapter), `preset` (preset-derived dynamic row),\n`custom` (manual dynamic row)."
@@ -5330,6 +5334,7 @@
         "origin",
         "editable",
         "deletable",
+        "offering",
         "displayName",
         "displayFamily",
         "credentialKind",

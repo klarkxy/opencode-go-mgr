@@ -63,6 +63,7 @@ function dynamicCatalog(
     origin: "preset",
     editable: true,
     deletable: true,
+    offering: "api",
     display_name: "Lab",
     display_family: "Lab",
     credential_kind: "api_key",

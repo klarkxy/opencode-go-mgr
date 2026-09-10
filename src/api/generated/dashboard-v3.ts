@@ -667,6 +667,11 @@ export interface ProviderCatalogEntry {
   modelAliases: string[];
   modelSource: string;
   /**
+   * Plan/api offering label carried by the catalog row. Builtin rows use
+   * the sealed builtin map; dynamic rows mirror the persisted `offering`.
+   */
+  offering: string;
+  /**
    * Row provenance in the unified `providers` table. Wire values:
    * `builtin` (sealed adapter), `preset` (preset-derived dynamic row),
    * `custom` (manual dynamic row).

@@ -12,6 +12,7 @@ function goCatalog(form_fields: ProviderCatalogEntry["form_fields"]): ProviderCa
     origin: "builtin",
     editable: false,
     deletable: false,
+    offering: "plan",
     display_name: "OpenCode Go",
     display_family: "OpenCode",
     credential_kind: "api_key",

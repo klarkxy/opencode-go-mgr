@@ -673,6 +673,19 @@ pub fn preset_offering(preset_id: &str) -> &'static str {
         .unwrap_or("api")
 }
 
+/// Sealed offering for builtin adapters: paid families are Plans, free and
+/// account-owned surfaces are API. Point-in-time mirror of the v42 seed.
+pub fn builtin_offering(provider_id: &str) -> &'static str {
+    match provider_id {
+        OPENCODE_PROVIDER_ID
+        | COMMAND_CODE_PROVIDER_ID
+        | MINIMAX_PROVIDER_ID
+        | KIMI_PROVIDER_ID
+        | OLLAMA_PROVIDER_ID => "plan",
+        _ => "api",
+    }
+}
+
 /// Provenance of a row in the unified `providers` table. The column is
 /// additive in v42 and never feeds routing decisions: builtin adapters stay
 /// sealed, and dynamic rows keep their `ConfigurableHttp` adapter path.

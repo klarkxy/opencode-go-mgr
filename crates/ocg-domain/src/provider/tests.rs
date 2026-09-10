@@ -800,3 +800,25 @@ fn preset_offering_resolves_plan_presets_and_falls_back_to_api() {
     assert_eq!(preset_offering("  "), "api");
     assert_eq!(preset_offering("definitely-not-a-real-preset"), "api");
 }
+
+#[test]
+fn builtin_offering_maps_paid_families_to_plan_and_the_rest_to_api() {
+    for plan_id in [
+        OPENCODE_PROVIDER_ID,
+        COMMAND_CODE_PROVIDER_ID,
+        MINIMAX_PROVIDER_ID,
+        KIMI_PROVIDER_ID,
+        OLLAMA_PROVIDER_ID,
+    ] {
+        assert_eq!(builtin_offering(plan_id), "plan", "{plan_id}");
+    }
+    for api_id in [
+        OPENCODE_ZEN_FREE_PROVIDER_ID,
+        CUSTOM_PROVIDER_ID,
+        CPA_PROVIDER_ID,
+    ] {
+        assert_eq!(builtin_offering(api_id), "api", "{api_id}");
+    }
+    assert_eq!(builtin_offering("not-a-builtin"), "api");
+    assert_eq!(builtin_offering(""), "api");
+}

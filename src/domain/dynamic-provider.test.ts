@@ -23,6 +23,7 @@ function entry(extra: Partial<ProviderCatalogEntry> = {}): ProviderCatalogEntry 
     origin: "builtin",
     editable: false,
     deletable: false,
+    offering: "plan",
     display_name: "OpenCode Go",
     display_family: "OpenCode",
     credential_kind: "api_key",

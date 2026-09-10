@@ -36,7 +36,7 @@ use crate::provider::{
     BUILTIN_PROVIDERS, BuiltinProvider, COMMAND_CODE_PROVIDER_ID, CUSTOM_PROVIDER_ID,
     ConnectionVerificationStatus, KIMI_CN_BASE_URL, KIMI_PROVIDER_ID, MINIMAX_CN_BASE_URL,
     MINIMAX_PROVIDER_ID, OLLAMA_PROVIDER_ID, OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID,
-    ProviderAdapterKind, ProviderOrigin, ProviderRegistry, ZEN_FREE_ACCOUNT_ID,
+    ProviderAdapterKind, ProviderOrigin, ProviderRegistry, ZEN_FREE_ACCOUNT_ID, builtin_offering,
     default_verification_status,
 };
 use crate::provider_contracts::{
@@ -1326,6 +1326,7 @@ fn dynamic_catalog_entry(runtime: &crate::dynamic::DynamicProviderRuntime) -> Pr
         origin: runtime.origin,
         editable,
         deletable: editable,
+        offering: runtime.offering.clone(),
         display_name: runtime.name.clone(),
         display_family: runtime.name.clone(),
         credential_kind: runtime.auth_kind.credential_kind().into(),
@@ -1409,6 +1410,7 @@ fn catalog_entry(
         origin: ProviderOrigin::Builtin,
         editable: false,
         deletable: false,
+        offering: builtin_offering(plan.provider_id).to_string(),
         display_name: plan.display_name.to_string(),
         display_family: plan.display_family.to_string(),
         credential_kind: plan.credential_kind.into(),

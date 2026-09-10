@@ -804,6 +804,7 @@ fn sample_catalog_entry() -> ProviderCatalogEntry {
         origin: ProviderOrigin::Builtin,
         editable: false,
         deletable: false,
+        offering: "plan".into(),
         display_name: "OpenCode Go".into(),
         display_family: "OpenCode".into(),
         credential_kind: AccountCredentialKind::ApiKey,

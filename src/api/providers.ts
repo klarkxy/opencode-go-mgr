@@ -43,6 +43,8 @@ export interface ProviderCatalogEntry {
   editable: boolean;
   /** Whether the dashboard may DELETE this entry. Always `false` for builtin. */
   deletable: boolean;
+  /** Plan/api offering label carried by the catalog row. */
+  offering: "plan" | "api";
   display_name: string;
   display_family: string;
   credential_kind: AccountCredentialKind;
@@ -404,6 +406,7 @@ function presentCatalogEntry(value: V3ProviderCatalogEntry): ProviderCatalogEntr
     origin: value.origin,
     editable: value.editable,
     deletable: value.deletable,
+    offering: value.offering === "plan" ? "plan" : "api",
     display_name: value.displayName,
     display_family: value.displayFamily,
     credential_kind: value.credentialKind,

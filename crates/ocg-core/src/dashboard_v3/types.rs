@@ -1343,6 +1343,9 @@ pub struct ProviderCatalogEntry {
     pub editable: bool,
     /// Whether the dashboard may DELETE this entry. Same rules as `editable`.
     pub deletable: bool,
+    /// Plan/api offering label carried by the catalog row. Builtin rows use
+    /// the sealed builtin map; dynamic rows mirror the persisted `offering`.
+    pub offering: String,
 
     pub display_name: String,
     pub display_family: String,

@@ -36,6 +36,7 @@ const catalogEntry = (
   origin: "builtin",
   editable: false,
   deletable: false,
+  offering: "plan",
   display_name,
   display_family: provider_id,
   credential_kind: "api_key",

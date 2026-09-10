@@ -39,7 +39,7 @@ pub use ocg_domain::provider::{
     ProviderDescriptor, ProviderOrigin, ProviderProductSurface, ProviderRegistry,
     QUOTA_WINDOW_FIVE_HOURS, QUOTA_WINDOW_FREE, QUOTA_WINDOW_MONTH, QUOTA_WINDOW_WEEK,
     StructuralProbeCeiling, UsageContractKind, UsageDescriptor, VerificationDescriptor,
-    VerificationPolicy, builtin_provider, command_code_goat_includes_model,
+    VerificationPolicy, builtin_offering, builtin_provider, command_code_goat_includes_model,
     default_credential_kind, default_provider_id, default_quota_scope, default_verification_status,
     ensure_enabled_provider_is_routable, ensure_provider_can_enable, is_command_code_goat,
     is_cpa_external_integration, is_custom_api, parse_command_code_models_catalog,
