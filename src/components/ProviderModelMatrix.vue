@@ -46,7 +46,10 @@
         <thead>
           <tr>
             <th class="matrix-cell matrix-cell--model-header">{{ t("模型") }}</th>
-            <th class="matrix-cell matrix-cell--protocol-header">{{ t("上游协议") }}</th>
+            <th class="matrix-cell matrix-cell--protocol-header">
+              {{ t("上游协议") }}
+              <span class="matrix-protocol-hint">{{ t("显示表示可通；蓝色为转换默认") }}</span>
+            </th>
             <th class="matrix-cell matrix-cell--state-header">{{ t("允许路由") }}</th>
             <th v-if="probeSupported" class="matrix-cell matrix-cell--actions-header">
               {{ t("操作") }}
@@ -63,27 +66,28 @@
               >{{ modelId }}</code>
             </td>
             <td class="matrix-cell matrix-cell--protocol">
-              <n-radio-group
-                v-if="isTwoProtocolScope && rowTarget(modelId)"
-                :value="rowTarget(modelId) ?? undefined"
-                size="small"
-                type="button"
-                :disabled="props.actionLocked || rowProbing(modelId) || rowSaving(modelId)"
-                :aria-label="`${modelId} ${t('协议选择')}`"
-                @update:value="(protocol: ProviderProtocol) => switchRowProtocol(modelId, protocol)"
+              <div
+                v-if="rowChips(modelId).length > 0"
+                class="matrix-chips"
+                role="group"
+                :aria-label="`${modelId} ${t('首选协议')}`"
               >
-                <n-radio-button
-                  v-for="choice in protocolChoices"
+                <button
+                  v-for="choice in rowChips(modelId)"
                   :key="choice"
-                  :value="choice"
+                  type="button"
+                  class="matrix-chip"
+                  :class="{
+                    'matrix-chip--on': rowProtocolOn(modelId, choice),
+                    'matrix-chip--preferred': rowPreferred(modelId) === choice,
+                  }"
+                  :disabled="props.actionLocked || rowProbing(modelId) || rowSaving(modelId)"
+                  :aria-pressed="rowProtocolOn(modelId, choice) && rowPreferred(modelId) === choice"
+                  @click="preferRowProtocol(modelId, choice)"
                 >
                   {{ protocolDisplayName(choice) }}
-                </n-radio-button>
-              </n-radio-group>
-              <span
-                v-else-if="rowTarget(modelId)"
-                class="matrix-protocol-label"
-              >{{ protocolDisplayName(rowTarget(modelId)!) }}</span>
+                </button>
+              </div>
               <span v-else class="matrix-protocol-label matrix-protocol-label--muted">
                 {{ t("无可用协议") }}
               </span>
@@ -138,8 +142,6 @@ import {
   NIcon,
   NInput,
   NPopconfirm,
-  NRadioButton,
-  NRadioGroup,
   NSwitch,
   NTag,
   NTooltip,
@@ -151,14 +153,14 @@ import type {
   ProviderProtocol,
 } from "../api/providers.ts";
 import {
-  buildModelProtocolSwitchOverrides,
+  buildPreferredProtocolOverrides,
   buildModelToggleOverrides,
+  modelAvailableProtocols,
   modelEffectiveOn,
   modelProtocolOverrideKey,
   modelTargetProtocol,
   protocolDisplayName,
   PROVIDER_PROTOCOLS,
-  scopeProtocolChoices,
   type ProviderScopeView,
 } from "../domain/provider-contracts.ts";
 import { CPA_PROVIDER_ID } from "../domain/account-providers.ts";
@@ -205,9 +207,6 @@ const matrixModels = computed(() => {
   });
 });
 
-const protocolChoices = computed<ProviderProtocol[]>(() => scopeProtocolChoices(props.scope));
-const isTwoProtocolScope = computed(() => protocolChoices.value.length === 2);
-
 // CPA is a separate static external integration: it never gets a scan/test
 // column here even if a backend card flag claims probe support.
 const probeSupported = computed(() => (
@@ -222,24 +221,29 @@ function modelAlias(modelId: string): string {
   return modelContract(modelId)?.alias?.trim() ?? "";
 }
 
-function rowTarget(modelId: string): ProviderProtocol | null {
+function rowChips(modelId: string): ProviderProtocol[] {
   const model = modelContract(modelId);
-  if (!model) return null;
-  return modelTargetProtocol(model, props.scope);
+  if (!model) return [];
+  return modelAvailableProtocols(model);
+}
+
+function rowPreferred(modelId: string): ProviderProtocol | null {
+  return modelContract(modelId)?.preferred_protocol ?? null;
+}
+
+function rowProtocolOn(modelId: string, protocol: ProviderProtocol): boolean {
+  const optimistic = props.optimisticOverrides?.get(cellKey(modelId, protocol));
+  if (optimistic !== undefined) return optimistic;
+  return modelContract(modelId)?.protocols[protocol]?.enabled === true;
 }
 
 function rowEnabled(modelId: string): boolean {
   const model = modelContract(modelId);
   if (!model) return false;
-  const target = modelTargetProtocol(model, props.scope);
-  if (target === null) return false;
-  // The Providers view stores the per-cell optimistic value keyed by
-  // (scope, model, protocol); a row's intended state lives at the target
-  // protocol's key, so read it first and only fall back to the live
-  // contract when no override is in flight.
-  const key = cellKey(modelId, target);
-  const optimistic = props.optimisticOverrides?.get(key);
-  if (optimistic !== undefined) return optimistic;
+  for (const protocol of PROVIDER_PROTOCOLS) {
+    const optimistic = props.optimisticOverrides?.get(cellKey(modelId, protocol));
+    if (optimistic === true) return true;
+  }
   return modelEffectiveOn(model, props.scope);
 }
 
@@ -299,8 +303,8 @@ function toggleRow(modelId: string, on: boolean): void {
   emitOverrides(buildModelToggleOverrides(props.scope, [modelId], on));
 }
 
-function switchRowProtocol(modelId: string, protocol: ProviderProtocol): void {
-  emitOverrides(buildModelProtocolSwitchOverrides(props.scope, modelId, protocol));
+function preferRowProtocol(modelId: string, protocol: ProviderProtocol): void {
+  emitOverrides(buildPreferredProtocolOverrides(props.scope, modelId, protocol));
 }
 
 function applyBatch(on: boolean): void {
@@ -388,6 +392,44 @@ function runRowProbe(modelId: string): void {
 }
 .matrix-cell--protocol {
   min-width: 200px;
+}
+.matrix-protocol-hint {
+  display: block;
+  margin-top: 2px;
+  font-weight: 400;
+  color: var(--ocg-muted);
+}
+.matrix-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.matrix-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--ocg-border);
+  border-radius: 6px;
+  background: var(--ocg-surface);
+  color: var(--ocg-muted);
+  font: inherit;
+  font-size: var(--ocg-font-xs);
+  cursor: pointer;
+}
+.matrix-chip--on {
+  border-color: var(--ocg-ink);
+  color: var(--ocg-ink);
+}
+.matrix-chip--on.matrix-chip--preferred {
+  background: var(--ocg-primary);
+  border-color: var(--ocg-primary);
+  color: var(--ocg-surface);
+}
+.matrix-chip:disabled {
+  cursor: default;
+  opacity: 0.45;
 }
 .matrix-protocol-label {
   color: var(--ocg-ink);

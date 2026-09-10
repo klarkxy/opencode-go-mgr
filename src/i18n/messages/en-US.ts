@@ -589,6 +589,8 @@ export const enUSMessages = {
   "全部关闭": "Turn all off",
   "本列全部": "This column",
   "协议选择": "Select protocol",
+  "首选协议": "Preferred protocol",
+  "显示表示可通；蓝色为转换默认": "A visible chip can connect; blue is the conversion default",
   "无可用协议": "No protocol available",
   "批量": "Batch",
   "协议覆盖已保存": "Protocol override saved",

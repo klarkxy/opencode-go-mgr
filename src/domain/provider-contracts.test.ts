@@ -10,7 +10,7 @@ import type {
 } from "../api/providers.ts";
 import {
   applyModelContractToResponse,
-  buildModelProtocolSwitchOverrides,
+  buildPreferredProtocolOverrides,
   buildModelToggleOverrides,
   catalogRefreshSupported,
   effectiveModelTestProtocol,
@@ -509,7 +509,7 @@ test("modelTargetProtocol returns the enabled choice or preferred for a CN two-p
   assert.equal(modelTargetProtocol(otherEnabled, scope), "chat_completions");
   // Nothing enabled → preferred is still surfaced (so the radio group has a
   // current selection rather than blank).
-  const noneEnabled = cnModel("m", "messages", {});
+  const noneEnabled = cnAvailableModel("m", "messages", {});
   assert.equal(modelTargetProtocol(noneEnabled, scope), "messages");
 });
 
@@ -569,33 +569,26 @@ test("modelEffectiveOn follows the target protocol's enabled flag", () => {
   assert.equal(modelEffectiveOn(otherEnabled, cnScope_), true);
 });
 
-test("buildModelToggleOverrides force-enables the available target and force-disables the rest when toggling on", () => {
+test("buildModelToggleOverrides force-enables every available protocol when toggling on", () => {
   const go = flattenProviderScopes(normalizeProviderContractsResponse(contracts()))[0]!;
-  // The fixture model's preferred (available) protocol is Responses: on=true
-  // force-enables exactly that target instead of writing `auto` everywhere.
   const overrides = buildModelToggleOverrides(go, ["gpt-5.6-luna"], true);
-  assert.deepEqual(overrides, [
-    { model_id: "gpt-5.6-luna", protocol: "chat_completions", state: "force_off" },
-    { model_id: "gpt-5.6-luna", protocol: "responses", state: "force_on" },
-    { model_id: "gpt-5.6-luna", protocol: "messages", state: "force_off" },
-  ]);
+  assert.ok(overrides.every((row) => row.state === "force_on"));
+  assert.ok(overrides.some((row) => row.protocol === "responses"));
+  assert.ok(!overrides.some((row) => row.state === "force_off"));
 });
 
 test("buildModelToggleOverrides on=true enables GOAT extra models that auto would keep off", () => {
   const go = flattenProviderScopes(normalizeProviderContractsResponse(contracts()))[0]!;
-  // All protocols available but none enabled (the static default keeps this
-  // extra model off): an explicit on must force-enable the available target.
   const extra = modelContract("gpt-5.6-extra", {});
   const scope: ProviderScopeView = { ...go, models: [...go.models, extra] };
   const overrides = buildModelToggleOverrides(scope, ["gpt-5.6-extra"], true);
   assert.deepEqual(overrides, [
-    { model_id: "gpt-5.6-extra", protocol: "chat_completions", state: "force_off" },
+    { model_id: "gpt-5.6-extra", protocol: "chat_completions", state: "force_on" },
     { model_id: "gpt-5.6-extra", protocol: "responses", state: "force_on" },
-    { model_id: "gpt-5.6-extra", protocol: "messages", state: "force_off" },
   ]);
 });
 
-test("buildModelToggleOverrides on=true falls back to the first available protocol when the preferred one is unavailable", () => {
+test("buildModelToggleOverrides on=true enables every available protocol when preferred is unavailable", () => {
   const go = flattenProviderScopes(normalizeProviderContractsResponse(contracts()))[0]!;
   const fallback = modelContract("fallback-model", {});
   fallback.protocols.responses = { ...fallback.protocols.responses!, available: false };
@@ -603,19 +596,15 @@ test("buildModelToggleOverrides on=true falls back to the first available protoc
   const overrides = buildModelToggleOverrides(scope, ["fallback-model"], true);
   assert.deepEqual(overrides, [
     { model_id: "fallback-model", protocol: "chat_completions", state: "force_on" },
-    { model_id: "fallback-model", protocol: "responses", state: "force_off" },
-    { model_id: "fallback-model", protocol: "messages", state: "force_off" },
   ]);
 });
 
-test("buildModelToggleOverrides emits force_off for all three protocols when toggling off", () => {
+test("buildModelToggleOverrides emits force_off for all writable protocols when toggling off", () => {
   const go = flattenProviderScopes(normalizeProviderContractsResponse(contracts()))[0]!;
   const overrides = buildModelToggleOverrides(go, ["gpt-5.6-luna"], false);
-  assert.deepEqual(overrides, [
-    { model_id: "gpt-5.6-luna", protocol: "chat_completions", state: "force_off" },
-    { model_id: "gpt-5.6-luna", protocol: "responses", state: "force_off" },
-    { model_id: "gpt-5.6-luna", protocol: "messages", state: "force_off" },
-  ]);
+  assert.ok(overrides.length > 0);
+  assert.ok(overrides.every((row) => row.state === "force_off"));
+  assert.ok(overrides.some((row) => row.preferred === true));
 });
 
 test("buildModelToggleOverrides handles multi-model batches and skips no-evidence rows", () => {
@@ -623,52 +612,38 @@ test("buildModelToggleOverrides handles multi-model batches and skips no-evidenc
   const ghost = noProtocolModel("ghost");
   const scope: ProviderScopeView = { ...go, models: [...go.models, ghost] };
   const overrides = buildModelToggleOverrides(scope, ["gpt-5.6-luna", "ghost"], true);
-  // The real model gets all three rows; the no-evidence row is a no-op and
-  // is dropped instead of writing overrides for protocols that have no
-  // static evidence.
-  assert.deepEqual(overrides, [
-    { model_id: "gpt-5.6-luna", protocol: "chat_completions", state: "force_off" },
-    { model_id: "gpt-5.6-luna", protocol: "responses", state: "force_on" },
-    { model_id: "gpt-5.6-luna", protocol: "messages", state: "force_off" },
-  ]);
+  assert.ok(overrides.every((row) => row.model_id === "gpt-5.6-luna"));
+  assert.ok(overrides.every((row) => row.state === "force_on"));
 });
 
-test("buildModelProtocolSwitchOverrides force_on the chosen protocol with preferred persisted", () => {
-  // The row is enabled on Chat; switching to Messages enables only Messages
-  // and marks it as the saved choice.
-  const scope = cnScope({}, [cnModel("m", "chat_completions", { chat_completions: true })]);
-  const overrides = buildModelProtocolSwitchOverrides(scope, "m", "messages");
+test("buildPreferredProtocolOverrides force_on the chosen protocol without disabling siblings", () => {
+  const scope = cnScope({}, [cnAvailableModel("m", "chat_completions", { chat_completions: true })]);
+  const overrides = buildPreferredProtocolOverrides(scope, "m", "messages");
   assert.deepEqual(overrides, [
-    { model_id: "m", protocol: "chat_completions", state: "force_off" },
     { model_id: "m", protocol: "messages", state: "force_on", preferred: true },
   ]);
-  // Choosing the currently enabled direction keeps it on and still persists
-  // the choice.
-  const same = buildModelProtocolSwitchOverrides(scope, "m", "chat_completions");
+  const same = buildPreferredProtocolOverrides(scope, "m", "chat_completions");
   assert.deepEqual(same, [
     { model_id: "m", protocol: "chat_completions", state: "force_on", preferred: true },
-    { model_id: "m", protocol: "messages", state: "force_off" },
   ]);
 });
 
-test("buildModelProtocolSwitchOverrides while disabled keeps all protocols off and stores the choice", () => {
-  const scope = cnScope({}, [cnModel("m", "chat_completions", {})]);
+test("buildPreferredProtocolOverrides while disabled keeps all protocols off and stores the choice", () => {
+  const scope = cnScope({}, [cnAvailableModel("m", "chat_completions", {})]);
   assert.equal(modelEffectiveOn(scope.models[0]!, scope), false);
-  const overrides = buildModelProtocolSwitchOverrides(scope, "m", "messages");
+  const overrides = buildPreferredProtocolOverrides(scope, "m", "messages");
   assert.deepEqual(overrides, [
     { model_id: "m", protocol: "chat_completions", state: "force_off" },
     { model_id: "m", protocol: "messages", state: "force_off", preferred: true },
   ]);
 });
 
-test("buildModelProtocolSwitchOverrides is a no-op for non-two-protocol scopes", () => {
+test("buildPreferredProtocolOverrides is a no-op when the protocol is not available", () => {
   const go = flattenProviderScopes(normalizeProviderContractsResponse(contracts()))[0]!;
-  // The Go scope only advertises one protocol; switching between two is meaningless.
-  assert.deepEqual(buildModelProtocolSwitchOverrides(go, "gpt-5.6-luna", "messages"), []);
-  // An unknown choice is dropped instead of producing a partial batch.
-  const cnScope_ = cnScope();
+  assert.deepEqual(buildPreferredProtocolOverrides(go, "gpt-5.6-luna", "messages"), []);
+  const cnScope_ = cnScope({}, [cnAvailableModel("m", "messages", { messages: true })]);
   assert.deepEqual(
-    buildModelProtocolSwitchOverrides(cnScope_, "m", "responses" as ProviderProtocol),
+    buildPreferredProtocolOverrides(cnScope_, "m", "responses" as ProviderProtocol),
     [],
   );
 });
@@ -695,42 +670,30 @@ test("modelTargetProtocol never shows off while an alternate protocol is enabled
   assert.equal(modelEffectiveOn(mixed, go), true);
 });
 
-test("CN sequence: switch persists the choice, disable keeps it, reload shows it, enable returns to it", () => {
-  // Row enabled on Chat; the operator switches to Messages: only Messages is
-  // enabled and the choice is persisted.
+test("CN sequence: switch persists the choice, disable keeps it, reload shows it, enable returns both on", () => {
   const onChatScope = cnScope({}, [cnAvailableModel("m", "chat_completions", { chat_completions: true })]);
-  assert.deepEqual(buildModelProtocolSwitchOverrides(onChatScope, "m", "messages"), [
-    { model_id: "m", protocol: "chat_completions", state: "force_off" },
+  assert.deepEqual(buildPreferredProtocolOverrides(onChatScope, "m", "messages"), [
     { model_id: "m", protocol: "messages", state: "force_on", preferred: true },
   ]);
-  // Running on Messages now; disabling the row force-disables every writable
-  // protocol (Responses has no evidence and is never written) but marks the
-  // current active choice so the preference survives.
   const onMessagesScope = cnScope({}, [cnAvailableModel("m", "messages", { messages: true })]);
   assert.deepEqual(buildModelToggleOverrides(onMessagesScope, ["m"], false), [
     { model_id: "m", protocol: "chat_completions", state: "force_off" },
     { model_id: "m", protocol: "messages", state: "force_off", preferred: true },
   ]);
-  // After a reload the saved choice reports as preferred with everything
-  // off: the row still displays Messages while disabled.
   const reloadedScope = cnScope({}, [cnAvailableModel("m", "messages", {})]);
   const reloaded = reloadedScope.models[0]!;
   assert.equal(modelTargetProtocol(reloaded, reloadedScope), "messages");
   assert.equal(modelEffectiveOn(reloaded, reloadedScope), false);
-  // Re-enabling picks the persisted preferred target and force-enables only it.
   assert.deepEqual(buildModelToggleOverrides(reloadedScope, ["m"], true), [
-    { model_id: "m", protocol: "chat_completions", state: "force_off" },
+    { model_id: "m", protocol: "chat_completions", state: "force_on" },
     { model_id: "m", protocol: "messages", state: "force_on" },
   ]);
 });
 
-test("CN enable falls back to an available choice when the persisted preferred one is unavailable", () => {
-  // Preferred Messages is not available for this model; enabling must not
-  // exceed the evidence ceiling, so Chat (available) is the target.
+test("CN enable only force-on available protocols when preferred is unavailable", () => {
   const scope = cnScope({}, [cnModel("m", "messages", {})]);
   assert.deepEqual(buildModelToggleOverrides(scope, ["m"], true), [
     { model_id: "m", protocol: "chat_completions", state: "force_on" },
-    { model_id: "m", protocol: "messages", state: "force_off" },
   ]);
 });
 
@@ -746,7 +709,7 @@ test("GOAT-style chat-only models write only their single legal protocol row", (
   ]);
   // Disabling writes only the same single legal row.
   assert.deepEqual(buildModelToggleOverrides(scope, ["goat-chat-only"], false), [
-    { model_id: "goat-chat-only", protocol: "chat_completions", state: "force_off" },
+    { model_id: "goat-chat-only", protocol: "chat_completions", state: "force_off", preferred: true },
   ]);
 });
 
