@@ -627,7 +627,6 @@ export const esESMessages = {
   "已选择过期范围，已回到第一个供应商": "Ese ámbito ya no existe; se muestra el primer proveedor",
   "选择供应商范围": "Seleccionar un ámbito de proveedor",
   "模型价格": "Precios de modelos",
-  "其他": "Otros",
   "全部开启": "Activar todo",
   "全部关闭": "Desactivar todo",
   "本列全部": "Toda esta columna",

@@ -6,7 +6,7 @@ Use this guide when you want Open Console Gateway to route to another upstream s
 
 | Goal | Path | Repository change |
 | --- | --- | --- |
-| Add a named Provider this node can reuse across accounts | **Providers** → **New Provider** (user-defined) | No |
+| Add a named Provider this node can reuse across accounts | **Providers** → **Add Provider** (user-defined) | No |
 | Connect one OpenAI- or Anthropic-compatible endpoint on a single account | Add a **Custom API** account | No |
 | Ship a named built-in Provider (the product's Provider/Plan identity) to every Open Console Gateway user | Add a sealed built-in Provider | Yes, reviewed code and tests |
 
@@ -18,8 +18,8 @@ Choose a [Plan or API preset](provider-presets.md) directly in **Providers** or 
 
 ## Create a user-defined Provider manually
 
-1. Open **Providers** and choose **New Provider**.
-   Keep manual configuration selected for the following steps.
+1. Open **Providers**, choose **Add Provider** in the rail footer, then pick
+   **Manual setup** in the preset browser.
 2. Enter a name, one API Endpoint, one upstream protocol (Chat Completions, Responses, or Messages), and one auth kind (Bearer, `x-api-key`, or none).
 3. Add at least one public-model → exact-upstream-ID mapping. **Fetch models** is optional and does not save.
 4. If auth requires a Key, enter the first account name and a write-only Key. A no-auth Provider creates one singleton account without a Key.

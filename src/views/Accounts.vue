@@ -319,7 +319,7 @@ import {
 import { isDynamicCatalogEntry } from "../domain/dynamic-provider.ts";
 import { t, type MessageKey } from "../i18n/index.ts";
 import { dashboardErrorDetail } from "../utils/errors.ts";
-import { applyAppViewSearchParams, PROVIDER_OTHER_TAB, readAccountAddDeepLink, readAccountDeepLink } from "./app-navigation.ts";
+import { applyAppViewSearchParams, readAccountAddDeepLink, readAccountDeepLink } from "./app-navigation.ts";
 import { mapWithConcurrency } from "../utils/async.ts";
 import { useLocalizedModalCloseLabel } from "../utils/modal-close-label.ts";
 import {
@@ -654,9 +654,8 @@ function openManagedWizard(accountId: string): void {
 function openInviteUrl(): void {
   showAddModal.value = false;
   const url = applyAppViewSearchParams(new URL(window.location.href), "providers", {
-    scope_kind: "provider",
-    scope_id: DEFAULT_PROVIDER_ID,
-    tab: PROVIDER_OTHER_TAB,
+    provider: DEFAULT_PROVIDER_ID,
+    tab: "settings",
   });
   url.searchParams.delete("session");
   url.hash = "";

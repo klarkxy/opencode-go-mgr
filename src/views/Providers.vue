@@ -2,9 +2,6 @@
   <div class="providers-page">
     <header class="providers-header">
       <h1>{{ t("供应商") }}</h1>
-      <n-button type="primary" :disabled="actionLocked" @click="openCreateDynamic">
-        {{ t("新建供应商") }}
-      </n-button>
     </header>
 
     <div
@@ -22,40 +19,39 @@
       type="error"
       :title="t('加载供应商失败: {error}', { error: loadError })"
     >
-      <n-button size="small" secondary :loading="loading" @click="loadContracts()">
+      <n-button size="small" secondary :loading="loading" @click="loadAll()">
         {{ t("重试") }}
       </n-button>
     </n-alert>
 
     <n-empty
-      v-else-if="!loading && scopes.length === 0 && dynamicEntries.length === 0 && !selectedPreset"
+      v-else-if="!loading && catalogEntries.length === 0"
       :description="t('暂无供应商范围')"
     />
 
-    <div v-else-if="activeScope || selectedDynamic || selectedPreset" class="providers-layout">
+    <div v-else class="providers-layout">
       <aside class="providers-rail">
         <div class="providers-rail-search">
           <n-input
-            v-model:value="presetQuery"
+            v-model:value="railQuery"
             size="small"
             clearable
-            :placeholder="browsingPresets ? t('搜索预设') : t('搜索供应商')"
-            :input-props="{ 'aria-label': browsingPresets ? t('搜索预设') : t('搜索供应商') }"
+            :placeholder="t('搜索供应商')"
+            :input-props="{ 'aria-label': t('搜索供应商') }"
           />
         </div>
         <div class="providers-rail-list">
-          <section v-for="pane in scopeMenuPanes" :key="pane.id" class="providers-rail-pane">
+          <section v-for="pane in railPanes" :key="pane.id" class="providers-rail-pane">
             <h3 class="providers-rail-pane__label">{{ pane.label }}</h3>
             <n-menu
-              :value="selectedKey"
+              :value="selectedProviderId"
               :options="pane.options"
-              :default-expanded-keys="railDefaultExpandedKeys"
               :aria-label="`${t('选择供应商范围')} · ${pane.label}`"
-              @update:value="selectScopeKey"
+              @update:value="selectProvider"
             />
           </section>
           <p v-if="railFilteredOut" class="providers-rail-empty">
-            {{ browsingPresets ? t("无匹配预设") : t("无匹配供应商") }}
+            {{ t("无匹配供应商") }}
           </p>
         </div>
         <div class="providers-rail-footer">
@@ -64,9 +60,9 @@
             size="small"
             block
             :disabled="inlineFormBusy"
-            @click="togglePresetBrowsing"
+            @click="openAddFlow"
           >
-            {{ browsingPresets ? t("已有连接") : t("添加新服务") }}
+            {{ t("添加供应商") }}
           </n-button>
         </div>
       </aside>
@@ -74,13 +70,13 @@
       <div class="providers-main">
         <div class="providers-mobile-nav">
           <n-select
-            :value="selectedKey"
-            :options="scopeSelectOptions"
+            :value="addStage ? ADD_SELECT_VALUE : selectedProviderId"
+            :options="mobileSelectOptions"
             filterable
             :aria-label="t('选择供应商范围')"
             :disabled="actionLocked || inlineFormBusy"
             :consistent-menu-width="false"
-            @update:value="selectScopeKey"
+            @update:value="onMobileSelect"
           />
         </div>
 
@@ -89,26 +85,71 @@
           type="warning"
           :title="t('加载供应商失败: {error}', { error: loadError })"
         >
-          <n-button size="small" secondary :loading="loading" @click="loadContracts({ retain: true })">
+          <n-button size="small" secondary :loading="loading" @click="loadAll({ retain: true })">
             {{ t("重试") }}
           </n-button>
         </n-alert>
 
-        <section v-if="selectedDynamic" class="providers-section" aria-labelledby="dynamic-provider-title">
+        <ProviderPresetBrowser
+          v-if="addStage?.stage === 'browse'"
+          :busy="inlineFormBusy"
+          @select="onPresetBrowserSelect"
+          @cancel="exitAddFlow"
+        />
+
+        <section v-else-if="addStage?.stage === 'form'" class="providers-section" aria-labelledby="add-provider-title">
           <div class="providers-catalog-head">
             <div class="providers-catalog-heading">
-              <h2 id="dynamic-provider-title">{{ selectedDynamic.name }}</h2>
+              <h2 id="add-provider-title">{{ addPreset ? addPreset.name : t("手动配置") }}</h2>
+              <div v-if="addPreset" class="providers-catalog-meta">
+                <n-tag size="small" :bordered="false">
+                  {{ providerPresetOffering(addPreset) === "plan" ? "Plan" : "API" }}
+                </n-tag>
+                <n-tag size="small" :bordered="false">{{ t("供应商预设") }}</n-tag>
+                <a :href="addPreset.docsUrl" target="_blank" rel="noopener noreferrer">{{ t("官方文档") }}</a>
+                <a :href="addPreset.websiteUrl" target="_blank" rel="noopener noreferrer">{{ t("控制台") }}</a>
+              </div>
+            </div>
+            <n-button secondary size="small" :disabled="inlineFormBusy" @click="exitAddFlow">
+              {{ t("返回") }}
+            </n-button>
+          </div>
+          <DynamicProviderModal
+            :key="addFormKey"
+            embedded
+            :show="true"
+            :provider="null"
+            :initial-preset-id="addStage.presetId"
+            :preset-selection-locked="Boolean(addStage.presetId)"
+            @saved="onDynamicSaved"
+            @conflict="onDynamicConflict"
+            @busy-change="inlineFormBusy = $event"
+          />
+        </section>
+
+        <section v-else-if="selectedEntry" class="providers-section" aria-labelledby="provider-detail-title">
+          <div class="providers-catalog-head">
+            <div class="providers-catalog-heading providers-detail-heading">
+              <ProviderBrandMark :family="selectedEntryFamily" :size="22" />
+              <h2 id="provider-detail-title">{{ selectedEntry.display_name }}</h2>
               <div class="providers-catalog-meta">
-                <n-tag size="small" :bordered="false">{{ t("用户定义") }}</n-tag>
-                <span>{{ t("该供应商没有价格或官方用量。") }}</span>
+                <n-tag size="small" :bordered="false">{{ originLabel(selectedEntry.origin) }}</n-tag>
               </div>
             </div>
             <n-space>
-              <n-button secondary :disabled="actionLocked" @click="openEditDynamic">{{ t("编辑供应商") }}</n-button>
+              <n-button
+                v-if="selectedEntry.editable"
+                secondary
+                :disabled="actionLocked || definitionLoading || !selectedDefinition"
+                @click="openEdit"
+              >
+                {{ t("编辑供应商") }}
+              </n-button>
               <n-popconfirm
+                v-if="selectedEntry.deletable"
                 :positive-text="t('删除')"
                 :negative-text="t('取消')"
-                @positive-click="deleteSelectedDynamic"
+                @positive-click="deleteSelected"
               >
                 <template #trigger>
                   <n-button type="error" secondary :disabled="actionLocked">{{ t("删除供应商") }}</n-button>
@@ -117,63 +158,22 @@
               </n-popconfirm>
             </n-space>
           </div>
-          <dl class="dynamic-provider-facts">
-            <div><dt>{{ t("API 地址") }}</dt><dd><code>{{ selectedDynamic.endpoint_url ?? t("内置") }}</code></dd></div>
-            <div><dt>{{ t("上游协议") }}</dt><dd>{{ selectedDynamic.upstream_protocol ? protocolDisplayName(selectedDynamic.upstream_protocol) : t("内置") }}</dd></div>
-            <div><dt>{{ t("鉴权方式") }}</dt><dd>{{ selectedDynamic.auth_kind ? authDisplayName(selectedDynamic.auth_kind) : t("内置") }}</dd></div>
-          </dl>
-          <div class="providers-alias-table-wrap">
-            <table class="providers-alias-table">
-              <thead>
-                <tr>
-                  <th>{{ t("对外模型名") }}</th>
-                  <th>{{ t("上游模型 ID") }}</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="model in selectedDynamic.models" :key="model.public_model">
-                  <td><code>{{ model.public_model }}</code></td>
-                  <td><code>{{ model.upstream_model }}</code></td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
 
-        <section v-else-if="selectedPreset" class="providers-section" aria-labelledby="preset-provider-title">
-          <div class="providers-catalog-head">
-            <div class="providers-catalog-heading">
-              <h2 id="preset-provider-title">{{ selectedPreset.name }}</h2>
-              <div class="providers-catalog-meta">
-                <n-tag size="small" :bordered="false">
-                  {{ providerPresetOffering(selectedPreset) === "plan" ? "Plan" : "API" }}
-                </n-tag>
-                <n-tag size="small" :bordered="false">{{ t("供应商预设") }}</n-tag>
-                <a :href="selectedPreset.docsUrl" target="_blank" rel="noopener noreferrer">{{ t("官方文档") }}</a>
-                <a :href="selectedPreset.websiteUrl" target="_blank" rel="noopener noreferrer">{{ t("控制台") }}</a>
-              </div>
-            </div>
-          </div>
-          <DynamicProviderModal
-            :key="`preset-form:${selectedPreset.id}`"
-            embedded
-            :show="true"
-            :provider="null"
-            :initial-preset-id="selectedPreset.id"
-            preset-selection-locked
-            @saved="onDynamicSaved"
-            @conflict="onDynamicConflict"
-            @busy-change="inlineFormBusy = $event"
-          />
-        </section>
+          <n-alert
+            v-if="definitionError"
+            type="error"
+            class="providers-definition-error"
+            :title="t('加载供应商失败: {error}', { error: definitionError })"
+          >
+            <n-button size="small" secondary :loading="definitionLoading" @click="retryDefinition">
+              {{ t("重试") }}
+            </n-button>
+          </n-alert>
 
-        <template v-else-if="activeScope">
           <n-tabs v-model:value="activeTab" class="providers-tabs" display-directive="if">
-          <n-tab-pane name="catalog" :tab="t('模型目录')">
-            <section class="providers-section" aria-labelledby="provider-catalog-title">
-              <div class="providers-catalog-head">
-                <div class="providers-catalog-heading">
-                  <h2 id="provider-catalog-title">{{ t("模型目录") }}</h2>
+            <n-tab-pane name="models" :tab="t('模型')">
+              <template v-if="activeScope">
+                <div class="providers-models-head">
                   <div class="providers-catalog-meta">
                     <span>{{ catalogSourceLabel(activeScope.catalog.source) }}</span>
                     <a
@@ -183,105 +183,136 @@
                       rel="noopener noreferrer"
                     >{{ t("官方来源") }}</a>
                     <span v-if="activeScope.catalog.refreshed_at">
-                      {{ t("刷新时间") }} · {{ formatTimestamp(activeScope.catalog.refreshed_at) }}
+                      {{ t("刷新时间") }} · {{ formatDateTime(activeScope.catalog.refreshed_at) }}
                     </span>
                     <span v-if="activeScope.static_protocol_snapshot_date">
                       {{ t("官方协议基线 {date}；未列出的协议默认关闭", { date: activeScope.static_protocol_snapshot_date }) }}
                     </span>
                   </div>
+                  <div class="providers-catalog-actions">
+                    <n-button
+                      v-if="catalogRefreshVisible"
+                      type="primary"
+                      size="small"
+                      :loading="catalogRefreshing"
+                      :disabled="actionLocked"
+                      @click="refreshCatalog"
+                    >
+                      {{ catalogRefreshing ? t("正在刷新模型目录…") : t("刷新模型目录") }}
+                    </n-button>
+                    <n-popconfirm
+                      v-if="staticProtocolResetVisible"
+                      @positive-click="resetStaticProtocols"
+                    >
+                      <template #trigger>
+                        <n-button
+                          secondary
+                          size="small"
+                          :loading="staticProtocolResetting"
+                          :disabled="actionLocked"
+                        >
+                          {{ t("恢复官方协议基线") }}
+                        </n-button>
+                      </template>
+                      {{ staticProtocolResetConfirmation }}
+                    </n-popconfirm>
+                  </div>
                 </div>
-                <div class="providers-catalog-actions">
-                  <n-button
-                    v-if="catalogRefreshVisible"
-                    type="primary"
-                    :loading="catalogRefreshing"
-                    :disabled="actionLocked"
-                    @click="refreshCatalog"
-                  >
-                    {{ catalogRefreshing ? t("正在刷新模型目录…") : t("刷新模型目录") }}
-                  </n-button>
-                  <n-popconfirm
-                    v-if="staticProtocolResetVisible"
-                    @positive-click="resetStaticProtocols"
-                  >
-                    <template #trigger>
-                      <n-button
-                        secondary
-                        :loading="staticProtocolResetting"
-                        :disabled="actionLocked"
-                      >
-                        {{ t("恢复官方协议基线") }}
-                      </n-button>
-                    </template>
-                    {{ staticProtocolResetConfirmation }}
-                  </n-popconfirm>
-                </div>
-              </div>
-              <n-alert
-                v-if="catalogRefreshError"
-                type="error"
-                :title="t('刷新模型目录失败: {error}', { error: catalogRefreshError })"
-              />
-              <n-alert
-                v-if="probeSummary"
-                :type="probeSummary.hasFailures ? 'warning' : 'success'"
-                :title="probeSummary.hasFailures ? t('连接测试失败') : t('连接测试成功')"
-                class="providers-probe-summary"
-              >
-                <div v-for="result in probeSummary.results" :key="result.protocol" class="providers-probe-result">
-                  <strong>{{ protocolDisplayName(result.protocol) }}</strong>
-                  <span>{{ probeResultStatus(result) }}</span>
-                  <span v-if="probeResultHttpStatus(result.error)">HTTP {{ probeResultHttpStatus(result.error) }}</span>
-                  <span v-if="probeResultMessage(result.error)">{{ probeResultMessage(result.error) }}</span>
-                  <a
-                    v-if="probeResultUrl(result.error)"
-                    :href="probeResultUrl(result.error)"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >{{ t("帮助链接") }}</a>
-                </div>
-              </n-alert>
-              <n-alert
-                v-if="matrixError"
-                type="error"
-                :title="t('保存协议覆盖失败: {error}', { error: matrixError })"
-              />
-              <n-alert
-                v-if="probeError"
-                type="error"
-                :title="t('连接测试失败: {error}', { error: probeError })"
-              />
-              <ProviderModelMatrix
-                :scope="activeScope"
-                :optimistic-overrides="optimisticOverrides"
-                :pending-override-keys="pendingOverrideKeys"
-                :probing-models="probingModels"
-                :action-locked="matrixActionLocked"
-                @update:overrides="updateOverrides"
-                @probe="runModelProbe"
-                @error="matrixError = $event"
-              />
-            </section>
-          </n-tab-pane>
+                <n-alert
+                  v-if="catalogRefreshError"
+                  type="error"
+                  :title="t('刷新模型目录失败: {error}', { error: catalogRefreshError })"
+                />
+                <n-alert
+                  v-if="probeSummary"
+                  :type="probeSummary.hasFailures ? 'warning' : 'success'"
+                  :title="probeSummary.hasFailures ? t('连接测试失败') : t('连接测试成功')"
+                  class="providers-probe-summary"
+                >
+                  <div v-for="result in probeSummary.results" :key="result.protocol" class="providers-probe-result">
+                    <strong>{{ protocolDisplayName(result.protocol) }}</strong>
+                    <span>{{ probeResultStatus(result) }}</span>
+                    <span v-if="probeResultHttpStatus(result.error)">HTTP {{ probeResultHttpStatus(result.error) }}</span>
+                    <span v-if="probeResultMessage(result.error)">{{ probeResultMessage(result.error) }}</span>
+                    <a
+                      v-if="probeResultUrl(result.error)"
+                      :href="probeResultUrl(result.error)"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >{{ t("帮助链接") }}</a>
+                  </div>
+                </n-alert>
+                <n-alert
+                  v-if="matrixError"
+                  type="error"
+                  :title="t('保存协议覆盖失败: {error}', { error: matrixError })"
+                />
+                <n-alert
+                  v-if="probeError"
+                  type="error"
+                  :title="t('连接测试失败: {error}', { error: probeError })"
+                />
+                <ProviderModelMatrix
+                  :scope="activeScope"
+                  :optimistic-overrides="optimisticOverrides"
+                  :pending-override-keys="pendingOverrideKeys"
+                  :probing-models="probingModels"
+                  :action-locked="matrixActionLocked"
+                  @update:overrides="updateOverrides"
+                  @probe="runModelProbe"
+                  @error="matrixError = $event"
+                />
+              </template>
 
-          <n-tab-pane name="pricing" :tab="t('模型价格')">
-            <section class="providers-section" aria-labelledby="provider-pricing-title">
-              <h2 id="provider-pricing-title" class="sr-only">{{ t("模型价格") }}</h2>
-              <PricingCatalog :provider-id="activeScope.provider_id" />
-            </section>
-          </n-tab-pane>
-          <n-tab-pane v-if="isOpenCodeGoScope" name="other" :tab="t('其他')">
-            <OpenCodeInviteUrlField />
-          </n-tab-pane>
+              <template v-else-if="selectedEntry.origin === 'builtin' && selectedEntry.provider_id === 'custom'">
+                <p class="providers-note">
+                  {{ t("模型与端点按账号配置；每个 Custom API 账号独立管理自己的连接与映射。") }}
+                </p>
+                <n-button secondary size="small" @click="openAccounts">
+                  {{ t("打开账号页") }}
+                </n-button>
+              </template>
+
+              <div v-else-if="selectedEntry.origin === 'builtin'" class="providers-state" role="status">
+                <n-spin size="small" />
+              </div>
+
+              <template v-else>
+                <div v-if="definitionLoading && !selectedDefinition" class="providers-state" role="status">
+                  <n-spin size="small" />
+                </div>
+                <ProviderModelMappings
+                  v-else-if="selectedDefinition"
+                  :models="selectedDefinition.models"
+                  :editable="selectedEntry.editable"
+                  @edit="openEdit"
+                />
+              </template>
+            </n-tab-pane>
+
+            <n-tab-pane v-if="pricingAvailable" name="pricing" :tab="t('模型价格')">
+              <PricingCatalog :provider-id="selectedEntry.provider_id" />
+            </n-tab-pane>
+
+            <n-tab-pane name="settings" :tab="t('设置')">
+              <ProviderSettingsPanel
+                :entry="selectedEntry"
+                :definition="selectedDefinition"
+                :definition-loading="selectedEntry.origin !== 'builtin' && definitionLoading"
+                :action-locked="actionLocked"
+                @edit="openEdit"
+                @delete="deleteSelected"
+                @open-accounts="openAccounts"
+              />
+            </n-tab-pane>
           </n-tabs>
-        </template>
+        </section>
       </div>
     </div>
 
     <DynamicProviderModal
-      v-model:show="showDynamicModal"
-      :provider="editingDynamic"
-      :initial-preset-id="createPresetId"
+      v-model:show="showEditModal"
+      :provider="editingDefinition"
       @saved="onDynamicSaved"
       @conflict="onDynamicConflict"
     />
@@ -291,7 +322,6 @@
 
 <script setup lang="ts">
 import { computed, h, onActivated, onMounted, onUnmounted, ref, watch } from "vue";
-import type { VNodeChild } from "vue";
 import {
   NAlert,
   NButton,
@@ -320,13 +350,21 @@ import type {
   ProtocolProbeResult,
 } from "../api/providers.ts";
 import ProviderModelMatrix from "../components/ProviderModelMatrix.vue";
+import ProviderModelMappings from "../components/ProviderModelMappings.vue";
+import ProviderPresetBrowser from "../components/ProviderPresetBrowser.vue";
+import ProviderSettingsPanel from "../components/ProviderSettingsPanel.vue";
 import PricingCatalog from "../components/PricingCatalog.vue";
 import DynamicProviderModal from "../components/DynamicProviderModal.vue";
-import OpenCodeInviteUrlField from "../components/OpenCodeInviteUrlField.vue";
 import ProviderBrandMark from "../components/ProviderBrandMark.vue";
-import { locale, t } from "../i18n/index.ts";
+import { t } from "../i18n/index.ts";
 import { dashboardErrorDetail } from "../utils/errors.ts";
-import { applyAppViewSearchParams, PROVIDER_OTHER_TAB, readProviderScopeQuery, resolveAppViewKey } from "./app-navigation.ts";
+import { formatDateTime } from "../utils/format.ts";
+import {
+  applyAppViewSearchParams,
+  readProviderPageQuery,
+  resolveAppViewKey,
+  type ProviderDetailTab,
+} from "./app-navigation.ts";
 import {
   applyModelContractToResponse,
   catalogRefreshSupported,
@@ -336,25 +374,19 @@ import {
   modelProtocolOverrideKey,
   normalizeProviderContractsResponse,
   protocolDisplayName,
-  selectProviderScope,
-  type ProviderScopeView,
 } from "../domain/provider-contracts.ts";
-import { DEFAULT_PROVIDER_ID } from "../domain/account-providers.ts";
-import { isDynamicCatalogEntry } from "../domain/dynamic-provider.ts";
+import {
+  catalogEntryFamily,
+  filterCatalogEntries,
+  groupCatalogEntriesByOffering,
+  providerAddStageFromQuery,
+  providerAddStageToQuery,
+  type ProviderAddStage,
+} from "../domain/provider-catalog.ts";
 import {
   PROVIDER_PRESETS,
-  filterProviderPresets,
-  groupProviderPresetsByOffering,
   providerPresetOffering,
-  providerPresetOfferingForId,
-  type ProviderPreset,
 } from "../domain/provider-presets.ts";
-import { providerScopeOffering } from "../domain/plans.ts";
-import {
-  familyOf,
-  groupPresetsByFamily,
-  type ProviderFamily,
-} from "../domain/provider-families.ts";
 import {
   CATALOG_SOURCE_CUSTOM_DISCOVERY,
   CATALOG_SOURCE_DECLARED,
@@ -368,23 +400,20 @@ const message = useMessage();
 const providersStore = useProvidersStore();
 const contracts = ref<ProviderContractsResponse | null>(null);
 const catalog = ref<ProviderCatalogEntry[] | null>(null);
-const dynamicDetails = ref<ProviderDefinitionView[]>([]);
-const showDynamicModal = ref(false);
-const editingDynamic = ref<ProviderDefinitionView | null>(null);
-const createPresetId = ref<string | null>(null);
-/** In-flight save/test/discovery inside the inline preset create form. */
+const showEditModal = ref(false);
+const editingDefinition = ref<ProviderDefinitionView | null>(null);
+/** In-flight save/test/discovery inside the embedded create form. */
 const inlineFormBusy = ref(false);
-/**
- * Rail mode: saved configured scopes (default) vs local preset browsing.
- * Browsing is a pure UI mode — preset entries never hit the backend and
- * never imply a configured Provider.
- */
-const browsingPresets = ref(false);
-const presetQuery = ref("");
+/** Add flow shown in the main pane; the rail selection is kept underneath. */
+const addStage = ref<ProviderAddStage | null>(null);
+const railQuery = ref("");
 const loading = ref(false);
 const loadError = ref("");
-const selectedKey = ref<string | null>(null);
-const activeTab = ref("catalog");
+const selectedProviderId = ref<string | null>(null);
+const activeTab = ref<ProviderDetailTab>("models");
+const definitions = ref<Map<string, ProviderDefinitionView>>(new Map());
+const definitionLoading = ref(false);
+const definitionError = ref("");
 const catalogRefreshing = ref(false);
 const staticProtocolResetting = ref(false);
 const catalogRefreshError = ref("");
@@ -398,47 +427,46 @@ const actionLive = ref("");
 let activatedOnce = false;
 let overrideSequence = 0;
 let overrideQueue: Promise<void> = Promise.resolve();
+let definitionGeneration = 0;
 const latestOverrideSequence = new Map<string, number>();
 
+const RAIL_BRAND_SIZE = 18;
+const ADD_SELECT_VALUE = "__add__";
+
+const catalogEntries = computed(() => catalog.value ?? []);
 const scopes = computed(() => (
   contracts.value
     ? flattenProviderScopes(contracts.value, catalog.value)
       .filter((scope) => scope.scope_kind === "provider")
     : []
 ));
-const dynamicEntries = computed(() => (catalog.value ?? []).filter(isDynamicCatalogEntry));
-const selectedDynamic = computed(() => {
-  if (!selectedKey.value?.startsWith("dynamic:")) return null;
-  const id = selectedKey.value.slice("dynamic:".length);
-  return dynamicDetails.value.find((item) => item.id === id) ?? null;
-});
-// Preset entries are a local UI scope only (scope_kind=preset): they never hit
-// the backend and never imply a configured Provider. Matching is the single
-// filterProviderPresets pass (family label, name, id, variant, endpoint host).
-const presetGroups = computed(() => (
-  groupProviderPresetsByOffering(filterProviderPresets(PROVIDER_PRESETS, presetQuery.value))
+const selectedEntry = computed(() => (
+  catalogEntries.value.find((entry) => entry.provider_id === selectedProviderId.value) ?? null
 ));
-const railFilteredOut = computed(() => {
-  if (!presetQuery.value.trim()) return false;
-  if (browsingPresets.value) {
-    return presetGroups.value.plan.length === 0 && presetGroups.value.api.length === 0;
-  }
-  return scopeMenuPanes.value.every((pane) => pane.options.length === 0);
+const selectedEntryFamily = computed(() => (
+  selectedEntry.value
+    ? catalogEntryFamily(selectedEntry.value)
+    : catalogEntryFamily({ provider_id: "", display_family: "", display_name: "" })
+));
+const selectedDefinition = computed(() => (
+  selectedProviderId.value ? definitions.value.get(selectedProviderId.value) ?? null : null
+));
+const activeScope = computed(() => {
+  const entry = selectedEntry.value;
+  if (!entry || entry.origin !== "builtin" || entry.provider_id === "custom") return null;
+  return scopes.value.find((scope) => scope.provider_id === entry.provider_id) ?? null;
 });
-const selectedPreset = computed(() => {
-  if (!selectedKey.value?.startsWith("preset:")) return null;
-  const id = selectedKey.value.slice("preset:".length);
-  return PROVIDER_PRESETS.find((preset) => preset.id === id) ?? null;
+const pricingAvailable = computed(() => selectedEntry.value?.pricing_availability === "available");
+const addPreset = computed(() => {
+  const stage = addStage.value;
+  if (!stage || stage.stage !== "form" || !stage.presetId) return null;
+  return PROVIDER_PRESETS.find((preset) => preset.id === stage.presetId) ?? null;
 });
-const activeSelection = computed(() => {
-  const query = selectedKey.value?.split(":") ?? [];
-  const scopeKind = query[0] ?? null;
-  const scopeId = query.length > 1 ? query.slice(1).join(":") : null;
-  return selectProviderScope(scopes.value, scopeKind, scopeId);
+const addFormKey = computed(() => {
+  const stage = addStage.value;
+  return stage?.stage === "form" ? `add-form:${stage.presetId ?? "manual"}` : "add-form:none";
 });
-const activeScope = computed(() => activeSelection.value.scope);
-const isOpenCodeGoScope = computed(() => activeScope.value?.provider_id === DEFAULT_PROVIDER_ID);
-const initialLoading = computed(() => loading.value && !contracts.value);
+const initialLoading = computed(() => loading.value && !contracts.value && !catalog.value);
 const actionLocked = computed(() => (
   catalogRefreshing.value
   || staticProtocolResetting.value
@@ -450,179 +478,47 @@ const matrixActionLocked = computed(() => (
   || staticProtocolResetting.value
   || probingModels.value.size > 0
 ));
-/**
- * Rail key for the account-owned Custom API action. It is a navigation entry,
- * never a scope: Custom API accounts are created on the Accounts view and no
- * Provider row exists for them here.
- */
-const CUSTOM_API_MENU_KEY = "custom-api";
 
-function scopeOffering(scope: ProviderScopeView): "plan" | "api" {
-  // Only the explicit built-in paid families are Plan; Zen Free, Custom, and
-  // unknown providers are API.
-  return providerScopeOffering(scope.provider_id);
+function originLabel(origin: ProviderCatalogEntry["origin"]): string {
+  if (origin === "builtin") return t("内置");
+  if (origin === "preset") return t("官方预设");
+  return t("自定义");
 }
 
-/**
- * Offering of a saved user-defined Provider from its persisted preset ID
- * (already loaded in dynamicDetails); unknown or manual rows are API.
- */
-function dynamicOffering(providerId: string): "plan" | "api" {
-  const detail = dynamicDetails.value.find((item) => item.id === providerId);
-  return providerPresetOfferingForId(detail?.preset_id);
-}
-
-const dynamicPlanEntries = computed(() => (
-  dynamicEntries.value.filter((entry) => dynamicOffering(entry.provider_id) === "plan")
-));
-const dynamicApiEntries = computed(() => (
-  dynamicEntries.value.filter((entry) => dynamicOffering(entry.provider_id) === "api")
-));
-const planScopes = computed(() => scopes.value.filter((scope) => scopeOffering(scope) === "plan"));
-const apiScopes = computed(() => scopes.value.filter((scope) => scopeOffering(scope) === "api"));
-
-const RAIL_BRAND_SIZE = 18;
-
-function presetVariantHost(preset: ProviderPreset): string {
-  const raw = preset.endpointUrl || preset.endpointPlaceholder || "";
-  if (!raw) return "";
-  try {
-    return new URL(raw).host;
-  } catch {
-    return raw;
-  }
-}
-
-function brandIcon(family: ProviderFamily): () => VNodeChild {
-  return () => h(ProviderBrandMark, { family, size: RAIL_BRAND_SIZE });
-}
-
-/**
- * Brand for a saved user-defined Provider, resolved only from its persisted
- * preset id (already loaded in dynamicDetails). A manual Provider or an
- * unknown preset id gets no brand — identity is never inferred from the
- * display name or a custom endpoint URL.
- */
-function dynamicBrandIcon(providerId: string): (() => VNodeChild) | undefined {
-  const detail = dynamicDetails.value.find((item) => item.id === providerId);
-  const preset = detail?.preset_id
-    ? PROVIDER_PRESETS.find((entry) => entry.id === detail.preset_id) ?? null
-    : null;
-  return preset ? brandIcon(familyOf(preset)) : undefined;
-}
-
-function presetFamilyMenuOptions(
-  presets: readonly ProviderPreset[],
-  offering: "plan" | "api",
-): MenuOption[] {
-  return groupPresetsByFamily(presets).map(({ family, presets: familyPresets }) => {
-    if (familyPresets.length === 1) {
-      const preset = familyPresets[0]!;
-      return {
-        key: `preset:${preset.id}`,
-        label: family.label,
-        icon: brandIcon(family),
-      };
-    }
-    return {
-      // Family ids carry the offering so the same vendor can appear once per
-      // group without a key collision.
-      key: `family:${offering}:${family.id}`,
-      label: family.label,
-      icon: brandIcon(family),
-      extra: String(familyPresets.length),
-      children: familyPresets.map((preset) => ({
-        key: `preset:${preset.id}`,
-        label: () => h("span", { class: "providers-rail-preset" }, [
-          h("span", { class: "providers-rail-preset__variant" }, preset.variant ?? preset.name),
-          presetVariantHost(preset)
-            ? h("span", { class: "providers-rail-preset__host mono" }, presetVariantHost(preset))
-            : null,
-        ]),
-        icon: brandIcon(family),
-      })),
-    };
-  });
-}
-
-const scopeMenuPanes = computed<Array<{ id: "plan" | "api"; label: "Plan" | "API"; options: MenuOption[] }>>(() => {
-  const query = presetQuery.value.trim().toLocaleLowerCase();
-  const matches = (label: string) => !query || label.toLocaleLowerCase().includes(query);
+const railPanes = computed<Array<{ id: "plan" | "api"; label: "Plan" | "API"; options: MenuOption[] }>>(() => {
+  const filtered = filterCatalogEntries(catalogEntries.value, railQuery.value);
+  const groups = groupCatalogEntriesByOffering(filtered);
+  const toOptions = (list: readonly ProviderCatalogEntry[]): MenuOption[] => (
+    list.map((entry) => ({
+      key: entry.provider_id,
+      label: entry.display_name,
+      icon: () => h(ProviderBrandMark, { family: catalogEntryFamily(entry), size: RAIL_BRAND_SIZE }),
+    }))
+  );
   const panes: Array<{ id: "plan" | "api"; label: "Plan" | "API"; options: MenuOption[] }> = [];
-  if (browsingPresets.value) {
-    const planOptions = presetFamilyMenuOptions(presetGroups.value.plan, "plan");
-    const apiOptions = presetFamilyMenuOptions(presetGroups.value.api, "api");
-    if (planOptions.length) panes.push({ id: "plan", label: "Plan", options: planOptions });
-    panes.push({ id: "api", label: "API", options: apiOptions });
-    return panes;
-  }
-  // Default rail: built-in and saved configured scopes only. Preset browsing
-  // is a deliberate local mode entered from the rail footer.
-  const scopeItems = (list: readonly ProviderScopeView[]) => (
-    list
-      .filter((scope) => matches(scope.label))
-      .map((scope) => ({ key: scope.key, label: `${scope.label}` }))
-  );
-  const dynamicItems = (list: readonly ProviderCatalogEntry[]) => (
-    list
-      .filter((entry) => matches(entry.display_name))
-      .map((entry) => ({
-        key: `dynamic:${entry.provider_id}`,
-        label: entry.display_name,
-        icon: dynamicBrandIcon(entry.provider_id),
-      }))
-  );
-  const planOptions: MenuOption[] = [
-    ...scopeItems(planScopes.value),
-    ...dynamicItems(dynamicPlanEntries.value),
-  ];
-  const apiOptions: MenuOption[] = [
-    ...(matches("custom api") ? [{ key: CUSTOM_API_MENU_KEY, label: "Custom API" }] : []),
-    ...scopeItems(apiScopes.value),
-    ...dynamicItems(dynamicApiEntries.value),
-  ];
+  const planOptions = toOptions(groups.plan);
   if (planOptions.length) panes.push({ id: "plan", label: "Plan", options: planOptions });
-  panes.push({ id: "api", label: "API", options: apiOptions });
+  panes.push({ id: "api", label: "API", options: toOptions(groups.api) });
   return panes;
 });
-
-/**
- * Pre-expand every multi-variant family so the variant picker rows are
- * visible without an extra click. Single-variant families stay flat and
- * need no expansion. The rail menu is uncontrolled after the first render;
- * once the user collapses a family it stays collapsed across navigations.
- */
-const railDefaultExpandedKeys = computed<string[]>(() => (
-  scopeMenuPanes.value.flatMap((pane) => (
-    pane.options.flatMap((option) => (
-      option.children && option.key ? [String(option.key)] : []
-    ))
-  ))
+const railFilteredOut = computed(() => (
+  Boolean(railQuery.value.trim())
+  && railPanes.value.every((pane) => pane.options.length === 0)
 ));
-const scopeSelectOptions = computed<SelectOption[]>(() => {
+const mobileSelectOptions = computed<SelectOption[]>(() => {
   // The mobile selector has its own built-in filter; the rail search query
   // must not shrink these options when the rail itself is hidden.
-  const allPresetGroups = groupProviderPresetsByOffering(PROVIDER_PRESETS);
+  const groups = groupCatalogEntriesByOffering(catalogEntries.value);
   return [
-    ...planScopes.value.map((scope) => ({ value: scope.key, label: `${scope.label} · Plan` })),
-    ...dynamicPlanEntries.value.map((entry) => ({
-      value: `dynamic:${entry.provider_id}`,
+    ...groups.plan.map((entry) => ({
+      value: entry.provider_id,
       label: `${entry.display_name} · Plan`,
     })),
-    ...allPresetGroups.plan.map((preset) => ({
-      value: `preset:${preset.id}`,
-      label: `${preset.name} · Plan`,
-    })),
-    { value: CUSTOM_API_MENU_KEY, label: "Custom API · API" },
-    ...apiScopes.value.map((scope) => ({ value: scope.key, label: `${scope.label} · API` })),
-    ...dynamicApiEntries.value.map((entry) => ({
-      value: `dynamic:${entry.provider_id}`,
+    ...groups.api.map((entry) => ({
+      value: entry.provider_id,
       label: `${entry.display_name} · API`,
     })),
-    ...allPresetGroups.api.map((preset) => ({
-      value: `preset:${preset.id}`,
-      label: `${preset.name} · API`,
-    })),
+    { value: ADD_SELECT_VALUE, label: t("添加供应商") },
   ];
 });
 const catalogRefreshVisible = computed(() => {
@@ -630,8 +526,7 @@ const catalogRefreshVisible = computed(() => {
   return Boolean(scope && catalogRefreshSupported(scope));
 });
 const staticProtocolResetVisible = computed(() => (
-  activeScope.value?.scope_kind === "provider"
-  && Boolean(activeScope.value.static_protocol_snapshot_date)
+  Boolean(activeScope.value?.static_protocol_snapshot_date)
 ));
 const staticProtocolResetConfirmation = computed(() => {
   const scope = activeScope.value;
@@ -654,21 +549,9 @@ function catalogSourceLabel(source: string): string {
   return source;
 }
 
-function formatTimestamp(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat(locale.value, {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
-}
-
 /**
  * This view stays mounted under KeepAlive after the user leaves it; only
- * touch scope state or the URL when the current URL actually targets it.
+ * touch selection state or the URL when the current URL actually targets it.
  * Legacy "pricing" resolves to providers, so bookmarks keep working.
  */
 function currentUrlIsProvidersView(): boolean {
@@ -676,125 +559,83 @@ function currentUrlIsProvidersView(): boolean {
   return resolveAppViewKey(view) === "providers";
 }
 
-function writeScopeToUrl(scopeKind: string, scopeId: string) {
+function writeUrl() {
   // An in-flight load finishing after navigation must not rewrite the URL
   // (e.g. strip the one-shot Accounts `add` deep link) for another view.
   if (!currentUrlIsProvidersView()) return;
+  const stage = addStage.value;
   const url = applyAppViewSearchParams(new URL(window.location.href), "providers", {
-    scope_kind: scopeKind,
-    scope_id: scopeId,
-    ...(isOpenCodeGoScope.value && activeTab.value === PROVIDER_OTHER_TAB
-      ? { tab: PROVIDER_OTHER_TAB }
-      : {}),
+    ...(selectedProviderId.value ? { provider: selectedProviderId.value } : {}),
+    ...(stage
+      ? providerAddStageToQuery(stage)
+      : activeTab.value !== "models" ? { tab: activeTab.value } : {}),
   });
   window.history.replaceState(null, "", url);
 }
 
-function applyProviderTabFromQuery(tab: string | null) {
-  if (isOpenCodeGoScope.value && tab === PROVIDER_OTHER_TAB) {
-    activeTab.value = PROVIDER_OTHER_TAB;
+function applyFromQuery(fellBackNotice = false, preferProviderId?: string) {
+  const query = readProviderPageQuery(window.location.search);
+  addStage.value = providerAddStageFromQuery(query.add, query.preset);
+  const entries = catalogEntries.value;
+  if (entries.length === 0) {
+    selectedProviderId.value = null;
     return;
   }
-  if (activeTab.value === PROVIDER_OTHER_TAB) activeTab.value = "catalog";
-}
-
-function selectProviderDefinition(providerId: string): boolean {
-  if (!dynamicEntries.value.some((entry) => entry.provider_id === providerId)) return false;
-  selectedKey.value = `dynamic:${providerId}`;
-  writeScopeToUrl("dynamic", providerId);
-  return true;
-}
-
-function selectPresetScope(presetId: string): boolean {
-  if (!PROVIDER_PRESETS.some((preset) => preset.id === presetId)) return false;
-  // A preset selection only exists inside the local browsing mode.
-  browsingPresets.value = true;
-  selectedKey.value = `preset:${presetId}`;
-  writeScopeToUrl("preset", presetId);
-  return true;
-}
-
-function togglePresetBrowsing(): void {
-  // A preset form with in-flight save/test/discovery must not be swapped out.
-  if (inlineFormBusy.value) return;
-  browsingPresets.value = !browsingPresets.value;
-}
-
-function applyScopeFromQuery(fellBackNotice = false, preferDynamicId?: string) {
-  if (preferDynamicId && selectProviderDefinition(preferDynamicId)) return;
-  if (selectedKey.value?.startsWith("dynamic:")) {
-    const id = selectedKey.value.slice("dynamic:".length);
-    if (selectProviderDefinition(id)) return;
-  }
-  // A preset selection is valid on its own and must survive reloads instead of
-  // being treated as a stale builtin scope.
-  if (selectedKey.value?.startsWith("preset:")) {
-    const id = selectedKey.value.slice("preset:".length);
-    if (selectPresetScope(id)) return;
-  }
-  const query = readProviderScopeQuery(window.location.search);
-  if (query.scope_kind === "dynamic" && query.scope_id && selectProviderDefinition(query.scope_id)) {
-    return;
-  }
-  if (query.scope_kind === "preset" && query.scope_id && selectPresetScope(query.scope_id)) {
-    return;
-  }
-  const selected = selectProviderScope(scopes.value, query.scope_kind, query.scope_id);
-  if (!selected.scope) {
-    // No saved provider scope: keep the rail usable through preset choices.
-    const firstPreset = PROVIDER_PRESETS[0];
-    if (firstPreset && selectPresetScope(firstPreset.id)) return;
-    selectedKey.value = null;
-    return;
-  }
-  selectedKey.value = selected.scope.key;
-  applyProviderTabFromQuery(query.tab);
-  writeScopeToUrl(selected.scope.scope_kind, selected.scope.scope_id);
-  if (fellBackNotice && selected.fellBack) {
+  const wanted = preferProviderId ?? query.provider ?? selectedProviderId.value;
+  const entry = entries.find((item) => item.provider_id === wanted) ?? entries[0]!;
+  if (fellBackNotice && wanted && entry.provider_id !== wanted) {
     actionLive.value = t("已选择过期范围，已回到第一个供应商");
   }
+  selectedProviderId.value = entry.provider_id;
+  const candidate = query.tab ?? activeTab.value;
+  activeTab.value = candidate === "pricing" && entry.pricing_availability !== "available"
+    ? "models"
+    : candidate;
+  writeUrl();
 }
 
-function selectScopeKey(key: string | number) {
-  // A preset form with in-flight save/test/discovery must not be swapped out;
-  // its stale-generation guards only cover responses, not dismissal.
+function selectProvider(key: string | number) {
+  // An embedded form with in-flight save/test/discovery must not be swapped
+  // out; its stale-generation guards only cover responses, not dismissal.
   if (inlineFormBusy.value) return;
-  const value = String(key);
-  if (value === CUSTOM_API_MENU_KEY) {
-    // Custom API accounts are account-owned: deep-link straight into Add
-    // Account with custom-endpoint preselected. Accounts consumes and
-    // deletes the one-shot `add` parameter when it opens the modal.
-    const url = applyAppViewSearchParams(new URL(window.location.href), "accounts");
-    url.searchParams.set("add", "custom-endpoint");
-    window.history.pushState(null, "", url);
-    window.dispatchEvent(new PopStateEvent("popstate"));
-    return;
-  }
-  if (value.startsWith("dynamic:")) {
-    selectProviderDefinition(value.slice("dynamic:".length));
-    return;
-  }
-  if (value.startsWith("family:")) {
-    // Family rows are submenu parents: their native click toggles expansion,
-    // they do not select. Treat any stray selection event as a no-op so the
-    // rail never blanks the active scope on a parent click.
-    return;
-  }
-  if (value.startsWith("preset:")) {
-    selectPresetScope(value.slice("preset:".length));
-    return;
-  }
-  const scope = scopes.value.find((item) => item.key === value);
-  if (!scope) return;
-  selectedKey.value = value;
-  writeScopeToUrl(scope.scope_kind, scope.scope_id);
+  const providerId = String(key);
+  if (!catalogEntries.value.some((entry) => entry.provider_id === providerId)) return;
+  addStage.value = null;
+  selectedProviderId.value = providerId;
+  writeUrl();
 }
 
-function authDisplayName(kind: string): string {
-  if (kind === "none") return t("无鉴权");
-  if (kind === "bearer") return "Bearer";
-  if (kind === "x-api-key") return "x-api-key";
-  return kind;
+function onMobileSelect(key: string | number) {
+  const value = String(key);
+  if (value === ADD_SELECT_VALUE) {
+    openAddFlow();
+    return;
+  }
+  selectProvider(value);
+}
+
+function openAddFlow() {
+  if (inlineFormBusy.value) return;
+  addStage.value = { stage: "browse" };
+  writeUrl();
+}
+
+function onPresetBrowserSelect(presetId: string | null) {
+  if (inlineFormBusy.value) return;
+  addStage.value = { stage: "form", presetId };
+  writeUrl();
+}
+
+function exitAddFlow() {
+  if (inlineFormBusy.value) return;
+  addStage.value = null;
+  writeUrl();
+}
+
+function openAccounts() {
+  const url = applyAppViewSearchParams(new URL(window.location.href), "accounts");
+  window.history.pushState(null, "", url);
+  window.dispatchEvent(new PopStateEvent("popstate"));
 }
 
 function resetScopeActions() {
@@ -804,7 +645,32 @@ function resetScopeActions() {
   probeSummary.value = null;
 }
 
-async function loadContracts(options: { retain?: boolean; preferDynamicId?: string } = {}): Promise<{ ok: boolean; error: string }> {
+async function ensureDefinition(providerId: string) {
+  if (definitions.value.has(providerId)) return;
+  const generation = ++definitionGeneration;
+  definitionLoading.value = true;
+  definitionError.value = "";
+  try {
+    const definition = await providerApi.getProviderDefinition(providerId);
+    if (generation !== definitionGeneration) return;
+    const next = new Map(definitions.value);
+    next.set(providerId, definition);
+    definitions.value = next;
+  } catch (error) {
+    if (generation !== definitionGeneration) return;
+    definitionError.value = dashboardErrorDetail(error);
+  } finally {
+    if (generation === definitionGeneration) definitionLoading.value = false;
+  }
+}
+
+function retryDefinition() {
+  const entry = selectedEntry.value;
+  if (!entry || entry.origin === "builtin") return;
+  void ensureDefinition(entry.provider_id);
+}
+
+async function loadAll(options: { retain?: boolean; preferProviderId?: string } = {}): Promise<{ ok: boolean; error: string }> {
   if (loading.value) {
     return { ok: false, error: loadError.value };
   }
@@ -817,17 +683,14 @@ async function loadContracts(options: { retain?: boolean; preferDynamicId?: stri
     ]);
     if (catalogResult.status === "fulfilled") {
       catalog.value = catalogResult.value;
-      const dynamicIds = catalogResult.value.filter(isDynamicCatalogEntry).map((entry) => entry.provider_id);
-      const loaded = await Promise.allSettled(dynamicIds.map((id) => providerApi.getProviderDefinition(id)));
-      dynamicDetails.value = loaded.flatMap((item) => item.status === "fulfilled" ? [item.value] : []);
     }
     if (contractsResult.status === "fulfilled") {
       contracts.value = normalizeProviderContractsResponse(contractsResult.value);
       loadError.value = "";
-      applyScopeFromQuery(true, options.preferDynamicId);
+      applyFromQuery(true, options.preferProviderId);
       return { ok: true, error: "" };
     }
-    applyScopeFromQuery(true, options.preferDynamicId);
+    applyFromQuery(true, options.preferProviderId);
     const error = dashboardErrorDetail(contractsResult.reason);
     loadError.value = error;
     return { ok: false, error };
@@ -836,40 +699,41 @@ async function loadContracts(options: { retain?: boolean; preferDynamicId?: stri
   }
 }
 
-function openCreateDynamic(): void {
-  editingDynamic.value = null;
-  createPresetId.value = null;
-  showDynamicModal.value = true;
-}
-
-function openEditDynamic(): void {
-  if (!selectedDynamic.value) return;
-  editingDynamic.value = selectedDynamic.value;
-  createPresetId.value = null;
-  showDynamicModal.value = true;
+function openEdit(): void {
+  const definition = selectedDefinition.value;
+  if (!definition || !selectedEntry.value?.editable) return;
+  editingDefinition.value = definition;
+  showEditModal.value = true;
 }
 
 async function onDynamicSaved(providerId: string): Promise<void> {
-  const created = !editingDynamic.value;
-  await loadContracts({ retain: true, preferDynamicId: providerId });
+  const created = !editingDefinition.value;
+  addStage.value = null;
+  const next = new Map(definitions.value);
+  next.delete(providerId);
+  definitions.value = next;
+  await loadAll({ retain: true, preferProviderId: providerId });
   message.success(created ? t("供应商已创建") : t("供应商已更新"));
 }
 
 async function onDynamicConflict(): Promise<void> {
-  await loadContracts({ retain: true });
+  await loadAll({ retain: true });
 }
 
-async function deleteSelectedDynamic(): Promise<void> {
-  const current = selectedDynamic.value;
-  if (!current) return;
+async function deleteSelected(): Promise<void> {
+  const entry = selectedEntry.value;
+  if (!entry || !entry.deletable) return;
   try {
-    await providerApi.deleteProviderDefinition(current.id);
+    await providerApi.deleteProviderDefinition(entry.provider_id);
     message.success(t("供应商已删除"));
-    selectedKey.value = scopes.value[0]?.key ?? null;
-    await loadContracts({ retain: true });
+    const next = new Map(definitions.value);
+    next.delete(entry.provider_id);
+    definitions.value = next;
+    selectedProviderId.value = catalogEntries.value.find((item) => item.provider_id !== entry.provider_id)?.provider_id ?? null;
+    await loadAll({ retain: true });
   } catch (error) {
     if (isRevisionConflict(error) || (error instanceof DashboardRequestError && error.status === 409)) {
-      await loadContracts({ retain: true });
+      await loadAll({ retain: true });
       message.warning(t("数据已更新，请检查后重新保存。不会自动重试。"));
       return;
     }
@@ -885,7 +749,7 @@ async function refreshCatalog() {
   try {
     const refreshed = await providersStore.refreshContractCatalog(scope.scope_kind, scope.scope_id);
     contracts.value = normalizeProviderContractsResponse(refreshed);
-    applyScopeFromQuery();
+    applyFromQuery();
     actionLive.value = t("已刷新模型目录");
     message.success(t("已刷新模型目录"));
   } catch (error) {
@@ -905,7 +769,7 @@ async function resetStaticProtocols() {
   try {
     const response = await providersStore.resetStaticModelProtocols(scope.scope_id);
     contracts.value = normalizeProviderContractsResponse(response);
-    applyScopeFromQuery();
+    applyFromQuery();
     actionLive.value = t("已恢复官方协议基线");
     message.success(t("已恢复官方协议基线"));
   } catch (error) {
@@ -980,7 +844,7 @@ async function persistOverrides(payload: OverridePayload, sequence: number) {
     actionLive.value = t("协议覆盖已保存");
   } catch (error) {
     if (error instanceof DashboardRequestError && error.status === 409) {
-      await loadContracts({ retain: true });
+      await loadAll({ retain: true });
       actionLive.value = t("供应商设置已在其他位置更新，已重新加载，请重试");
       message.warning(t("供应商设置已在其他位置更新，已重新加载，请重试"));
     } else {
@@ -1018,7 +882,7 @@ async function runModelProbe(payload: { modelId: string }) {
         scope_id: scope.scope_id,
       }, response.contract);
     }
-    const loaded = await loadContracts({ retain: true });
+    const loaded = await loadAll({ retain: true });
     if (!loaded.ok) {
       probeError.value = loaded.error;
       message.error(t("连接测试失败: {error}", { error: probeError.value }));
@@ -1109,36 +973,35 @@ function onPopState() {
   // KeepAlive keeps this view mounted; a popstate for another view (e.g. the
   // Accounts add deep link) is not ours to apply.
   if (!currentUrlIsProvidersView()) return;
-  applyScopeFromQuery();
+  applyFromQuery();
 }
 
-watch(selectedKey, () => {
-  // The inline preset form unmounts on selection change; its busy flags die
-  // with it, so the navigation lock must not outlive the form.
+watch(selectedProviderId, () => {
+  // The embedded form unmounts on selection change; its busy flags die with
+  // it, so the navigation lock must not outlive the form.
   inlineFormBusy.value = false;
 });
 
-watch(activeScope, (scope, previous) => {
-  if (scope?.key !== previous?.key) {
-    resetScopeActions();
-    if (scope?.provider_id !== DEFAULT_PROVIDER_ID && activeTab.value === PROVIDER_OTHER_TAB) {
-      activeTab.value = "catalog";
-    }
+watch(selectedEntry, (entry, previous) => {
+  if (entry?.provider_id === previous?.provider_id) return;
+  resetScopeActions();
+  definitionError.value = "";
+  if (entry && entry.origin !== "builtin") void ensureDefinition(entry.provider_id);
+  if (entry && activeTab.value === "pricing" && entry.pricing_availability !== "available") {
+    activeTab.value = "models";
   }
 });
 
-watch(activeTab, () => {
-  const scope = activeScope.value;
-  if (!scope) return;
-  writeScopeToUrl(scope.scope_kind, scope.scope_id);
+watch([selectedProviderId, activeTab, addStage], () => {
+  writeUrl();
 });
 
 onMounted(() => {
   window.addEventListener("popstate", onPopState);
-  void loadContracts();
+  void loadAll();
 });
 onActivated(() => {
-  if (activatedOnce) void loadContracts({ retain: true });
+  if (activatedOnce) void loadAll({ retain: true });
   else activatedOnce = true;
 });
 onUnmounted(() => {
@@ -1151,7 +1014,6 @@ onUnmounted(() => {
   min-width: 0;
   max-width: 1440px;
   margin: 0 auto;
-  overflow-x: hidden;
 }
 .providers-header {
   display: flex;
@@ -1165,56 +1027,10 @@ onUnmounted(() => {
   color: var(--ocg-ink);
   font: 700 var(--ocg-font-xl)/1.3 "Bahnschrift", "Segoe UI Variable Display", sans-serif;
 }
-.dynamic-provider-facts {
-  display: grid;
-  gap: 8px 16px;
-  margin: 0 0 16px;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-}
-.dynamic-provider-facts dt {
-  color: var(--ocg-muted);
-  font-size: var(--ocg-font-xs);
-}
-.dynamic-provider-facts dd {
-  margin: 0;
-}
-.dynamic-provider-facts dd code {
-  overflow-wrap: anywhere;
-}
-
-.providers-alias-hint {
-  margin: 4px 0 0;
+.providers-note {
+  margin: 0 0 12px;
   color: var(--ocg-muted);
   font-size: var(--ocg-font-sm);
-}
-
-.providers-alias-table-wrap {
-  overflow-x: auto;
-}
-
-.providers-alias-table {
-  width: 100%;
-  min-width: 760px;
-  border-collapse: collapse;
-  font-size: var(--ocg-font-sm);
-}
-
-.providers-alias-table th,
-.providers-alias-table td {
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--ocg-border);
-  text-align: left;
-  vertical-align: middle;
-}
-
-.providers-alias-table th {
-  color: var(--ocg-muted);
-  font-size: var(--ocg-font-xs);
-  font-weight: 600;
-}
-
-.providers-alias-table .providers-alias-name {
-  vertical-align: top;
 }
 .providers-state {
   min-height: 160px;
@@ -1301,6 +1117,7 @@ onUnmounted(() => {
   grid-template-columns: minmax(0, 1fr);
   gap: 16px;
   min-width: 0;
+  align-content: start;
 }
 .providers-tabs {
   min-width: 0;
@@ -1334,6 +1151,12 @@ onUnmounted(() => {
 .providers-catalog-heading {
   min-width: 0;
 }
+.providers-detail-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+}
 .providers-catalog-meta {
   display: flex;
   flex-wrap: wrap;
@@ -1342,36 +1165,21 @@ onUnmounted(() => {
   color: var(--ocg-subtle);
   font-size: var(--ocg-font-sm);
 }
-
-/* Vendor family row label (parent) and variant row label (child). The
-   family label keeps the same single-line look as the flat preset row did
-   so single-variant families blend in. The child variant stacks a short
-   label and a muted monospaced endpoint host, matching the Accounts dialog
-   variant picker. */
-.providers-rail-preset {
+.providers-detail-heading .providers-catalog-meta {
+  margin-top: 0;
+}
+.providers-models-head {
   display: flex;
-  flex-direction: column;
   align-items: flex-start;
-  gap: 2px;
-  min-width: 0;
-  line-height: 1.25;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
 }
-.providers-rail-preset__variant {
-  color: var(--ocg-ink);
-  font-size: var(--ocg-font-sm);
-  font-weight: 500;
+.providers-models-head .providers-catalog-meta {
+  margin-top: 0;
 }
-.providers-rail-preset__host {
-  color: var(--ocg-muted);
-  font-size: var(--ocg-font-xs);
-  font-family: "Cascadia Mono", Consolas, monospace;
-  font-variant-numeric: tabular-nums;
-  word-break: break-all;
-}
-/* n-menu's own item content sets an inherited color; the deep selector
-   wins over the n-menu color when both apply so the host stays muted. */
-.providers-rail-list :deep(.n-menu-item-content .providers-rail-preset__host) {
-  color: var(--ocg-muted);
+.providers-definition-error {
+  margin-bottom: 12px;
 }
 
 @media (max-width: 720px) {
@@ -1385,6 +1193,10 @@ onUnmounted(() => {
     display: block;
   }
   .providers-catalog-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .providers-models-head {
     align-items: stretch;
     flex-direction: column;
   }

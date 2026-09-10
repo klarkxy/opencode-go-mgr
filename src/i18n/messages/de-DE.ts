@@ -627,7 +627,6 @@ export const deDEMessages = {
   "已选择过期范围，已回到第一个供应商": "Dieser Bereich ist nicht mehr vorhanden; der erste Anbieter wird angezeigt",
   "选择供应商范围": "Anbieterbereich auswählen",
   "模型价格": "Modellpreise",
-  "其他": "Sonstiges",
   "全部开启": "Alle aktivieren",
   "全部关闭": "Alle deaktivieren",
   "本列全部": "Ganze Spalte",

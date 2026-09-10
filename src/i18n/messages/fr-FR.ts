@@ -628,7 +628,6 @@ export const frFRMessages = {
   "已选择过期范围，已回到第一个供应商": "Ce périmètre n’existe plus ; affichage du premier fournisseur",
   "选择供应商范围": "Choisir un périmètre fournisseur",
   "模型价格": "Tarifs des modèles",
-  "其他": "Autres",
   "全部开启": "Tout activer",
   "全部关闭": "Tout désactiver",
   "本列全部": "Toute cette colonne",

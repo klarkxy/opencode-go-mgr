@@ -177,7 +177,7 @@ from the OpenCode Go provider; fresh installs may ship a demo default). Edit it
 in place: it must be an HTTPS URL no longer than 2,048 characters, contain no
 username or password, and use exactly `opencode.ai` or `console.opencode.ai` as
 its host. If it differs from the saved value, it is written back to
-**Providers → OpenCode Go → Other**. Changes affect later invite-page opens
+**Providers → OpenCode Go → Settings**. Changes affect later invite-page opens
 only; they do not rewrite completed accounts. Replace the demo default with your
 own invite link before a real signup, or referral credit goes to the link owner.
 

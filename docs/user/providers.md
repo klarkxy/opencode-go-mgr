@@ -2,7 +2,7 @@
 
 # Providers
 
-The default rail manages built-in and saved connections. **New Provider** opens the preset/manual creation flow, keeping available templates separate from configured Providers; existing preset bookmarks remain supported. Saved connections retain their preset brand where provenance is known, without certifying an edited address as official. The model catalog has its own model search and enabled-state filter; searching the Provider list does not search models. Mapping tables keep both public and upstream names accessible on narrow screens.
+The rail lists every connected Provider — built-in seeds and saved user-defined Providers together, grouped by Plan/API. **Add Provider** in the rail footer opens the preset browser in the main pane, keeping available templates separate from configured Providers; existing preset bookmarks open the same embedded creation form. Saved connections retain their preset brand where provenance is known, without certifying an edited address as official. The model catalog has its own model search and enabled-state filter; searching the Provider list does not search models. Mapping tables keep both public and upstream names accessible on narrow screens.
 
 Enabling a model explicitly enables its selected supported protocol; it does not merely restore `auto`. MiniMax CN and Kimi Code CN remember the selected protocol independently of enablement. Changing that choice while disabled keeps the model disabled; disabling, reopening and enabling retains the choice. The preference is saved atomically with overrides and travels in node migration packages. Restoring the official baseline clears it. Model and connection tests never enable a model or change its protocol choice.
 
@@ -26,9 +26,9 @@ Want to connect another upstream or contribute a built-in integration? Start wit
 bookmark still ends in `?view=pricing`.
 
 The Adapter Registry stays static and sealed. Built-in Providers and
-user-defined Providers share this page, labelled **Built-in** or
-**User-defined**. Custom API is a Configurable HTTP adapter used as an
-account-owned path. Scopes are split like this:
+user-defined Providers share this page, labelled **Built-in**, **Official
+preset**, or **Custom** by origin. Custom API is a Configurable HTTP adapter
+used as an account-owned path. Scopes are split like this:
 
 - `Provider(contract_scope_id)` for one exact built-in Provider contract.
   Existing scope IDs keep their historical Provider-shaped values.
@@ -37,14 +37,19 @@ account-owned path. Scopes are split like this:
 - `CustomEndpoint(account_id)` scopes keep Custom mappings account-owned.
   Edit those mappings on **Accounts**.
 
-The left rail lists built-in contract scopes and user-defined Providers. Built-in
-main panes keep two tabs: **Model catalog** and **Pricing**. The **OpenCode Go**
-scope adds a third **Other** tab after Pricing for the managed-signup **invite
-URL**. It is a user-owned `opencode.ai` / `console.opencode.ai` HTTPS link (not
-a sealed origin). Fresh installs may ship a demo default; replace it with your
-own link before a real signup. Creating a managed draft can also edit and write
-this value back. User-defined panes show configuration, mappings, and
-edit/delete. User-defined Providers are unpriced.
+Every Provider opens the same detail shell with up to three tabs. **Models**
+is the default: built-in scopes show the model catalog (source line, refresh,
+official protocol baseline, and the protocol matrix), while user-defined
+Providers show their read-only model mappings with an edit entry. **Pricing**
+appears only when the Provider has pricing. **Settings** shows the connection
+facts; built-in rows are read-only (provided by the official adapter),
+user-defined rows offer edit/delete, and the **OpenCode Go** scope keeps the
+managed-signup **invite URL** here. It is a user-owned `opencode.ai` /
+`console.opencode.ai` HTTPS link (not a sealed origin). Fresh installs may
+ship a demo default; replace it with your own link before a real signup.
+Creating a managed draft can also edit and write this value back. The
+built-in **Custom API** row explains that models and endpoints are configured
+per account and links to **Accounts**. User-defined Providers are unpriced.
 
 **Aliases** is a separate core page because its read-only table spans every
 Provider contract, user-defined Provider mapping, and Custom account instead of
