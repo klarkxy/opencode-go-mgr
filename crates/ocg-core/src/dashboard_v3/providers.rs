@@ -827,13 +827,19 @@ fn commit_model_protocol_overrides(
     for item in overrides {
         let protocol = crate::provider::UpstreamProtocolKind::from(item.protocol);
         if item.preferred == Some(true) {
+            let on_model = state
+                .provider_contracts()
+                .scope(scope)
+                .and_then(|contract| contract.model(&item.model_id))
+                .is_some_and(|model| model.protocols.contains_key(protocol.as_str()));
             if scope.kind_str() != "provider"
                 || !provider_contracts::selectable_model_protocol(scope.id(), protocol)
+                || !on_model
                 || !preferred_models.insert(item.model_id.trim().to_ascii_lowercase())
             {
                 return Err(V3ApiError::invalid_request_at(
                     state,
-                    "one supported CN protocol preference per model is allowed",
+                    "one preferred protocol per model is allowed",
                 ));
             }
             preferences.push((item.model_id.trim().to_ascii_lowercase(), protocol));

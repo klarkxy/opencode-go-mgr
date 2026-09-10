@@ -43,7 +43,7 @@ use crate::kernel::ids::normalize_model_name;
 use crate::kernel::protocol::ApiFormat;
 use crate::models::{Account, AppConfig, UpstreamChannel};
 use crate::provider::ProviderAdapterKind;
-use crate::provider_contracts::{ContractScope, EffectiveContractSet, protocol_to_api};
+use crate::provider_contracts::{ContractScope, EffectiveContractSet};
 use axum::http::StatusCode;
 use bytes::Bytes;
 
@@ -549,6 +549,13 @@ fn materialize_dynamic_account_plan(
             ))
         })?;
     let route = runtime.effective_route(selected);
+    let upstream = crate::provider_contracts::select_enabled_upstream(
+        parsed.client,
+        route.protocol,
+        std::slice::from_ref(&route.protocol),
+        std::slice::from_ref(&route.protocol),
+    )
+    .map_err(|error| ProtocolError::new(error.message))?;
     materialize_channel_plan(
         config,
         parsed,
@@ -560,7 +567,7 @@ fn materialize_dynamic_account_plan(
         UpstreamChannel::Go,
         None,
         false,
-        Some(protocol_to_api(route.protocol)),
+        Some(upstream),
         Some(CustomRouteSpec {
             endpoint_url: route.endpoint_url,
         }),

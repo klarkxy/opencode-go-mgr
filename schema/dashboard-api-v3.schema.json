@@ -4018,7 +4018,7 @@
           "type": "string"
         },
         "preferred": {
-          "description": "Remember this CN protocol for the model, even while disabled.\nOmitted or false preserves the saved choice; static reset clears it.",
+          "description": "Remember this conversion-default protocol, even while disabled.\nOmitted or false preserves the saved choice; static reset clears it.",
           "type": "boolean"
         },
         "protocol": {

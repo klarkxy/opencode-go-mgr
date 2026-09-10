@@ -344,7 +344,7 @@ fn mixed_case_go_alias_preserves_requested_casing() {
     let set = routes_for("MiniMax-M3", &[go_account("go-1")], &config, true);
     assert_eq!(set.routes[0].plan.model, "MiniMax-M3");
     assert_eq!(set.routes[0].plan.client_model, "MiniMax-M3");
-    assert_eq!(set.routes[0].plan.upstream, ApiFormat::Messages);
+    assert_eq!(set.routes[0].plan.upstream, ApiFormat::ChatCompletions);
     let identity = native_log_identity(&set.routes[0].plan);
     assert_eq!(identity.requested_model, "MiniMax-M3");
     assert_eq!(identity.resolved_alias.as_deref(), Some("minimax-m3"));
@@ -1132,6 +1132,16 @@ fn model_preference_survives_legacy_probe_evidence() {
     )
     .unwrap();
     assert_eq!(after.routes.len(), 1);
-    assert_eq!(after.routes[0].plan.upstream, ApiFormat::Responses);
+    assert_eq!(after.routes[0].plan.upstream, ApiFormat::ChatCompletions);
+    assert_eq!(
+        contracts
+            .providers
+            .get(OPENCODE_PROVIDER_ID)
+            .unwrap()
+            .model("grok-4.5")
+            .unwrap()
+            .preferred_protocol,
+        UpstreamProtocolKind::Responses
+    );
     assert_eq!(after.routes[0].routing.account.id, "go-probe");
 }

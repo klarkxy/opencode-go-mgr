@@ -17,9 +17,12 @@ confirm or add support only within that adapter ceiling; failures are recorded
 but never remove static capability. If the client protocol is supported and
 effectively enabled, request and response pass through. Otherwise the gateway
 converts the **request body** to the preferred upstream protocol and the
-**response body** — or SSE stream — back to the client protocol. Custom API
+**response body** — or SSE stream — back to the client protocol. This rule
+applies to every Providers-catalog supplier, including user-defined
+Configurable HTTP mappings (one protocol per mapping). Custom API
 does the same to the account's declared upstream protocol, then honors that
-endpoint's contract and per-model overrides. Conversion covers text, system
+endpoint's contract and per-model overrides. CPA is unchanged and is not
+part of this conversion-default control. Conversion covers text, system
 instructions, images, tool calls and results, reasoning content, completion
 status, errors, and usage fields. `grok-4.6`, `grok-4.5`, and
 `gpt-5.6-luna` are Responses-only; `glm-5.3` and `glm-5.2` are Chat-only.
@@ -32,7 +35,8 @@ upstream protocol trial.
 | OpenAI Responses | `grok-4.6`, `grok-4.5`, `gpt-5.6-luna`, `muse-spark-1.2`, `muse-spark-1.2-contributor`, `muse-spark-1.2-contributor-free`, `muse-spark-1.3-contributor-free` |
 | Anthropic Messages | `minimax-m3`, `minimax-m2.7`, `minimax-m2.7-highspeed`, `minimax-m2.5`, `minimax-m2.5-highspeed`, `qwen3.8-max`, `qwen3.8-flash`, `qwen3.7-max`, `qwen3.7-plus`, `qwen3.6-plus`, `qwen3.5-plus` |
 
-Passthrough matrix (checked-in official baseline, 2026-09-06). ✓ = the client
+Passthrough matrix (checked-in official baseline, 2026-09-06 preferred
+endpoints, plus 2026-08-27 Go `live_supported` extra paths). ✓ = the client
 protocol is forwarded as-is; empty = the baseline has no direct-passthrough
 evidence for that protocol. Provider catalogs and effective contracts still
 decide whether the model is routeable; a known but inadmissible model is
@@ -59,13 +63,13 @@ map `max` → `xhigh` (upstream rejects `max`). Other models pass
 | `muse-spark-1.2-contributor` | Responses | | ✓ | |
 | `muse-spark-1.2-contributor-free` | Responses | | ✓ | |
 | `muse-spark-1.3-contributor-free` | Responses | | ✓ | |
-| `kimi-k3` | Chat | ✓ | | |
+| `kimi-k3` | Chat | ✓ | | ✓ |
 | `kimi-k2.7-code` | Chat | ✓ | | |
 | `kimi-k2.6` | Chat | ✓ | | |
 | `kimi-k2.5` | Chat | ✓ | | |
-| `deepseek-v4-pro` | Chat | ✓ | | |
-| `deepseek-v4-flash` | Chat | ✓ | | |
-| `deepseek-v4-flash-vision-exp` | Chat | ✓ | | |
+| `deepseek-v4-pro` | Chat | ✓ | ✓ | ✓ |
+| `deepseek-v4-flash` | Chat | ✓ | ✓ | ✓ |
+| `deepseek-v4-flash-vision-exp` | Chat | ✓ | ✓ | ✓ |
 | `mimo-v2.5` | Chat | ✓ | | |
 | `mimo-v2.5-pro` | Chat | ✓ | | |
 | `hy3` | Chat | ✓ | | |
@@ -77,17 +81,17 @@ map `max` → `xhigh` (upstream rejects `max`). Other models pass
 | `nemotron-3.5-lightning-free` | Chat | ✓ | | |
 | `ling-3.0-flash-fin-free` | Chat | ✓ | | |
 | `hy4-preview` | Chat | ✓ | | |
-| `minimax-m3` | Messages | | | ✓ |
+| `minimax-m3` | Messages | ✓ | | ✓ |
 | `minimax-m2.7` | Messages | | | ✓ |
 | `minimax-m2.7-highspeed` | Messages | | | |
-| `minimax-m2.5` | Messages | | | ✓ |
+| `minimax-m2.5` | Messages | ✓ | | ✓ |
 | `minimax-m2.5-highspeed` | Messages | | | |
-| `qwen3.8-max` | Messages | | | ✓ |
+| `qwen3.8-max` | Messages | ✓ | | ✓ |
 | `qwen3.8-flash` | Messages | | | ✓ |
-| `qwen3.7-max` | Messages | | | ✓ |
-| `qwen3.7-plus` | Messages | | | ✓ |
-| `qwen3.6-plus` | Messages | | | ✓ |
-| `qwen3.5-plus` | Messages | | | ✓ |
+| `qwen3.7-max` | Messages | ✓ | | ✓ |
+| `qwen3.7-plus` | Messages | ✓ | | ✓ |
+| `qwen3.6-plus` | Messages | ✓ | | ✓ |
+| `qwen3.5-plus` | Messages | ✓ | | ✓ |
 
 Unknown model names return `400` on every supported client format — Chat
 Completions, Responses, Messages, and Gemini `generateContent` /

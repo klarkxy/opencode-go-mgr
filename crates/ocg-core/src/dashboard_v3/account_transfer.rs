@@ -39,7 +39,7 @@ use crate::provider::{
 use crate::provider_contracts::{
     ContractEvidenceSource, ContractScope, ContractScopeKind, PersistedContracts,
     PersistedModelProtocol, PersistedModelProtocolOverride, PersistedScopeRow, ProbeResultKind,
-    ProtocolOverrideState,
+    ProtocolOverrideState, build_effective_contracts, exclusive_available_force_off_repairs,
 };
 use crate::state::CoreState;
 
@@ -1888,7 +1888,24 @@ fn persisted_contracts_from_portable(
         }
         persisted.preferences.insert(scope, preference_rows);
     }
+    apply_exclusive_available_override_repair(&mut persisted);
     Ok(persisted)
+}
+
+fn apply_exclusive_available_override_repair(persisted: &mut PersistedContracts) {
+    let set = build_effective_contracts(
+        &crate::kernel::zen::ZenFreeModelCatalog::default(),
+        &[],
+        persisted.clone(),
+    );
+    let repairs = exclusive_available_force_off_repairs(&set, persisted);
+    for (scope, model_id, protocol) in repairs {
+        if let Some(rows) = persisted.overrides.get_mut(&scope) {
+            rows.retain(|row| {
+                !(row.model_id.eq_ignore_ascii_case(&model_id) && row.protocol == protocol)
+            });
+        }
+    }
 }
 
 fn preview_against_current(

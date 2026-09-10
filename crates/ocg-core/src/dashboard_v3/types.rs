@@ -1642,7 +1642,7 @@ pub struct ModelProtocolOverride {
     pub model_id: String,
     pub protocol: AccountUpstreamProtocol,
     pub state: ProtocolOverrideState,
-    /// Remember this CN protocol for the model, even while disabled.
+    /// Remember this conversion-default protocol, even while disabled.
     /// Omitted or false preserves the saved choice; static reset clears it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "bool")]
@@ -3061,7 +3061,10 @@ pub struct ProviderDefinition {
     pub process_generation: u64,
 }
 
-/// POST `/providers` body. Creates the definition, mappings, and first account.
+/// POST `/providers` body. Creates the definition and mappings.
+/// A Key on keyed auth creates the first account in the same write (Accounts add).
+/// Keyed auth may omit `key` to save the definition only; add Keys on Accounts.
+/// No-auth always creates the singleton account.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename_all = "camelCase", deny_unknown_fields)]

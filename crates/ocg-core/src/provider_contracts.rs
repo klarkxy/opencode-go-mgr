@@ -7,8 +7,8 @@
 use crate::alias::ProviderMapping;
 use crate::custom::CustomAccountRuntime;
 use crate::kernel::ids::{
-    COMMAND_CODE_PROVIDER_ID, CUSTOM_PROVIDER_ID, KIMI_PROVIDER_ID, MINIMAX_PROVIDER_ID,
-    OLLAMA_PROVIDER_ID, OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID,
+    COMMAND_CODE_PROVIDER_ID, CPA_PROVIDER_ID, CUSTOM_PROVIDER_ID, KIMI_PROVIDER_ID,
+    MINIMAX_PROVIDER_ID, OLLAMA_PROVIDER_ID, OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID,
     custom_model_id_matches, normalize_model_name,
 };
 use crate::kernel::protocol::{ApiFormat, is_known_model, supported_model_protocol_profiles};
@@ -353,16 +353,85 @@ pub struct PersistedContracts {
     pub scopes: HashMap<ContractScope, PersistedScopeRow>,
     pub evidence: HashMap<ContractScope, Vec<PersistedModelProtocol>>,
     pub overrides: HashMap<ContractScope, Vec<PersistedModelProtocolOverride>>,
-    /// Selected CN protocol, independent of whether the model is enabled.
+    /// Selected conversion-default protocol, independent of enablement.
     pub preferences: HashMap<ContractScope, Vec<(String, UpstreamProtocolKind)>>,
 }
 
+/// True when a persisted preferred protocol may be stored for this provider.
+/// CPA is excluded. Custom endpoint scopes are rejected by the writer
+/// (`scope.kind == provider`), not here.
 pub fn selectable_model_protocol(provider_id: &str, protocol: UpstreamProtocolKind) -> bool {
-    matches!(provider_id, MINIMAX_PROVIDER_ID | KIMI_PROVIDER_ID)
+    let id = provider_id.trim();
+    !id.is_empty()
+        && id != CPA_PROVIDER_ID
         && matches!(
             protocol,
-            UpstreamProtocolKind::ChatCompletions | UpstreamProtocolKind::Messages
+            UpstreamProtocolKind::ChatCompletions
+                | UpstreamProtocolKind::Responses
+                | UpstreamProtocolKind::Messages
         )
+}
+
+/// `force_off` rows that a mutually exclusive radio wrote on *available*
+/// sibling protocols. Deleting them restores Auto so passthrough can use
+/// every available protocol. Unavailable siblings stay `force_off`.
+pub fn exclusive_available_force_off_repairs(
+    set: &EffectiveContractSet,
+    persisted: &PersistedContracts,
+) -> Vec<(ContractScope, String, UpstreamProtocolKind)> {
+    let mut repairs = Vec::new();
+    for (scope, rows) in &persisted.overrides {
+        let Some(contract) = set.scope(scope) else {
+            continue;
+        };
+        if contract.adapter_kind == ProviderAdapterKind::Cpa {
+            continue;
+        }
+        let mut by_model: HashMap<String, Vec<&PersistedModelProtocolOverride>> = HashMap::new();
+        for row in rows {
+            by_model
+                .entry(row.model_id.trim().to_ascii_lowercase())
+                .or_default()
+                .push(row);
+        }
+        for (model_key, model_rows) in by_model {
+            let Some(model) = contract
+                .models
+                .values()
+                .find(|model| custom_or_case_match(&model.model_id, &model_key))
+            else {
+                continue;
+            };
+            let available: Vec<UpstreamProtocolKind> = model
+                .protocols
+                .values()
+                .filter(|row| row.available)
+                .map(|row| row.protocol)
+                .collect();
+            if available.len() < 2 {
+                continue;
+            }
+            let mut force_on = Vec::new();
+            let mut force_off = Vec::new();
+            for protocol in &available {
+                match model_rows
+                    .iter()
+                    .find(|row| row.protocol == *protocol)
+                    .map(|row| row.state)
+                {
+                    Some(ProtocolOverrideState::ForceOn) => force_on.push(*protocol),
+                    Some(ProtocolOverrideState::ForceOff) => force_off.push(*protocol),
+                    Some(ProtocolOverrideState::Auto) | None => {}
+                }
+            }
+            if force_on.len() == 1 && force_off.len() == available.len() - 1 {
+                for protocol in force_off {
+                    repairs.push((scope.clone(), model.model_id.clone(), protocol));
+                }
+            }
+        }
+    }
+    repairs
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -541,6 +610,37 @@ impl fmt::Display for ProtocolSelectError {
 
 impl std::error::Error for ProtocolSelectError {}
 
+/// Pick the upstream protocol for one request.
+///
+/// 1. Client protocol is enabled → passthrough.
+/// 2. Else preferred is enabled → convert to preferred.
+/// 3. Else the first enabled protocol in `fallback_priority`.
+/// Gemini is client-only and never matches step 1.
+pub fn select_enabled_upstream(
+    client: ApiFormat,
+    preferred: UpstreamProtocolKind,
+    enabled: &[UpstreamProtocolKind],
+    fallback_priority: &[UpstreamProtocolKind],
+) -> Result<ApiFormat, ProtocolSelectError> {
+    if enabled.is_empty() {
+        return Err(ProtocolSelectError::new(NO_ENABLED_UPSTREAM_PROTOCOL));
+    }
+    if let Some(client_protocol) = protocol_from_api(client)
+        && enabled.contains(&client_protocol)
+    {
+        return Ok(protocol_to_api(client_protocol));
+    }
+    if enabled.contains(&preferred) {
+        return Ok(protocol_to_api(preferred));
+    }
+    for protocol in fallback_priority {
+        if enabled.contains(protocol) {
+            return Ok(protocol_to_api(*protocol));
+        }
+    }
+    Err(ProtocolSelectError::new(NO_ENABLED_UPSTREAM_PROTOCOL))
+}
+
 pub fn select_upstream_protocol(
     contract: &EffectiveScopeContract,
     client: ApiFormat,
@@ -556,23 +656,15 @@ pub fn select_upstream_protocol(
         return Err(ProtocolSelectError::new(NO_ENABLED_UPSTREAM_PROTOCOL));
     }
     let preferred = model.preferred_protocol;
-    // CPA owns its internal upstream selection. Preserve supported client wire
-    // formats; Gemini remains client-only and uses the configured fallback.
+    // CPA keeps its existing branch: matching Chat/Responses/Messages pass
+    // through; Gemini falls through to preferred / adapter fallback.
     if contract.adapter_kind == ProviderAdapterKind::Cpa
         && let Some(client_protocol) = protocol_from_api(client)
         && available.contains(&client_protocol)
     {
         return Ok(protocol_to_api(client_protocol));
     }
-    if available.contains(&preferred) {
-        return Ok(protocol_to_api(preferred));
-    }
-    for protocol in contract.fallback_priority {
-        if available.contains(protocol) {
-            return Ok(protocol_to_api(*protocol));
-        }
-    }
-    Err(ProtocolSelectError::new(NO_ENABLED_UPSTREAM_PROTOCOL))
+    select_enabled_upstream(client, preferred, &available, contract.fallback_priority)
 }
 
 pub fn safety_ceiling_protocols(

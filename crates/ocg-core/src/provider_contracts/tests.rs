@@ -2,7 +2,7 @@ use super::*;
 use crate::custom::CustomAccountRuntime;
 use crate::kernel::ids::{
     COMMAND_CODE_GOAT_DEEPSEEK_V4_FLASH_UPSTREAM, KIMI_PROVIDER_ID, MINIMAX_PROVIDER_ID,
-    OPENCODE_ZEN_FREE_PROVIDER_ID,
+    OPENCODE_PROVIDER_ID, OPENCODE_ZEN_FREE_PROVIDER_ID,
 };
 use crate::models::{AccountCustomConfig, AccountModelCapability};
 use crate::provider::ConnectionVerificationStatus;
@@ -575,7 +575,7 @@ fn protocol_fallback_uses_adapter_priority_independent_of_client() {
     glm.routable = true;
 
     let selected = select_upstream_protocol(&go, ApiFormat::Messages, "glm-5.2").unwrap();
-    assert_eq!(selected, ApiFormat::Responses);
+    assert_eq!(selected, ApiFormat::Messages);
 
     let selected = select_upstream_protocol(&go, ApiFormat::Gemini, "glm-5.2").unwrap();
     assert_eq!(selected, ApiFormat::Responses);
@@ -800,7 +800,18 @@ fn official_protocol_baselines_cover_every_builtin_provider_shape() {
     );
     assert_eq!(
         static_verified_protocols(ProviderAdapterKind::OpenCodeGo, "deepseek-v4-flash", &[],),
-        vec![UpstreamProtocolKind::ChatCompletions]
+        vec![
+            UpstreamProtocolKind::ChatCompletions,
+            UpstreamProtocolKind::Responses,
+            UpstreamProtocolKind::Messages,
+        ]
+    );
+    assert_eq!(
+        static_verified_protocols(ProviderAdapterKind::OpenCodeGo, "kimi-k3", &[]),
+        vec![
+            UpstreamProtocolKind::ChatCompletions,
+            UpstreamProtocolKind::Messages,
+        ]
     );
     assert_eq!(
         static_verified_protocols(ProviderAdapterKind::OpenCodeGo, "grok-4.6", &[]),
@@ -878,6 +889,10 @@ fn minimax_recommended_default_wins_over_client_and_respects_manual_disable() {
     );
     assert_eq!(
         select_upstream_protocol(minimax, ApiFormat::ChatCompletions, model_id).unwrap(),
+        ApiFormat::ChatCompletions
+    );
+    assert_eq!(
+        select_upstream_protocol(minimax, ApiFormat::Messages, model_id).unwrap(),
         ApiFormat::Messages
     );
     let mut persisted = empty_persisted();
@@ -894,6 +909,10 @@ fn minimax_recommended_default_wins_over_client_and_respects_manual_disable() {
     );
     let set = build_effective_contracts(&zen_seed(), &[], persisted);
     let minimax = set.providers.get(MINIMAX_PROVIDER_ID).unwrap();
+    assert_eq!(
+        select_upstream_protocol(minimax, ApiFormat::ChatCompletions, model_id).unwrap(),
+        ApiFormat::ChatCompletions
+    );
     assert_eq!(
         select_upstream_protocol(minimax, ApiFormat::Responses, model_id).unwrap(),
         ApiFormat::ChatCompletions
@@ -927,5 +946,75 @@ fn cpa_preserves_all_supported_client_protocols_and_converts_gemini_to_chat() {
     assert_eq!(
         minimax.model("MiniMax-M3").unwrap().preferred_protocol,
         UpstreamProtocolKind::Messages
+    );
+}
+
+#[test]
+fn exclusive_available_force_off_repairs_cn_radio_and_skips_unavailable_siblings() {
+    let mut persisted = empty_persisted();
+    let scope = ContractScope::provider(MINIMAX_PROVIDER_ID);
+    persisted.overrides.insert(
+        scope.clone(),
+        vec![
+            PersistedModelProtocolOverride {
+                scope: scope.clone(),
+                model_id: "MiniMax-M3".into(),
+                protocol: UpstreamProtocolKind::ChatCompletions,
+                state: ProtocolOverrideState::ForceOn,
+                updated_at: Utc::now(),
+            },
+            PersistedModelProtocolOverride {
+                scope: scope.clone(),
+                model_id: "MiniMax-M3".into(),
+                protocol: UpstreamProtocolKind::Messages,
+                state: ProtocolOverrideState::ForceOff,
+                updated_at: Utc::now(),
+            },
+        ],
+    );
+    let go_scope = ContractScope::provider(OPENCODE_PROVIDER_ID);
+    persisted.overrides.insert(
+        go_scope.clone(),
+        vec![
+            PersistedModelProtocolOverride {
+                scope: go_scope.clone(),
+                model_id: "glm-5.2".into(),
+                protocol: UpstreamProtocolKind::ChatCompletions,
+                state: ProtocolOverrideState::ForceOn,
+                updated_at: Utc::now(),
+            },
+            PersistedModelProtocolOverride {
+                scope: go_scope,
+                model_id: "glm-5.2".into(),
+                protocol: UpstreamProtocolKind::Responses,
+                state: ProtocolOverrideState::ForceOff,
+                updated_at: Utc::now(),
+            },
+        ],
+    );
+    let set = build_effective_contracts(&zen_seed(), &[], persisted.clone());
+    let repairs = exclusive_available_force_off_repairs(&set, &persisted);
+    assert_eq!(repairs.len(), 1);
+    assert_eq!(repairs[0].0, scope);
+    assert_eq!(repairs[0].1, "MiniMax-M3");
+    assert_eq!(repairs[0].2, UpstreamProtocolKind::Messages);
+}
+
+#[test]
+fn select_enabled_upstream_passthroughs_a_one_protocol_mapping() {
+    let protocol = UpstreamProtocolKind::ChatCompletions;
+    assert_eq!(
+        select_enabled_upstream(
+            ApiFormat::ChatCompletions,
+            protocol,
+            &[protocol],
+            &[protocol],
+        )
+        .unwrap(),
+        ApiFormat::ChatCompletions
+    );
+    assert_eq!(
+        select_enabled_upstream(ApiFormat::Messages, protocol, &[protocol], &[protocol]).unwrap(),
+        ApiFormat::ChatCompletions
     );
 }

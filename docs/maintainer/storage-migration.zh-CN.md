@@ -33,7 +33,7 @@ GUI 或 CLI 启动时会原地执行 SQLite 迁移。打开新版二进制前：
 
 ## Schema v27 与 pre-v3 快照
 
-`CURRENT_SCHEMA_VERSION = 42`（`crates/ocg-core/src/db.rs`）。打开历史库会先规范迁移到 v26，再由 v27 重写把主 Key 与全部 `sub_gateway_keys` 行复制进一张 `access_keys` 表（主 Key 固定 id `00000000-0000-0000-0000-000000000001`），删除 `sub_gateway_keys`，并删除 `accounts` 上遗留的五列 `usage_sync_*`（用量同步元数据在 `provider_usage_sync_state`）。v33 新增 Custom 精确上游模型身份；v34 新增 CPA 单例配置表，但不会导入或导出 CPA 状态。v35 把 Provider/Plan 身份收成只有 `provider_id`：先预检每一个已知的 v34 provider/offering 对，未知对与会丢数据的复合键冲突在写入前失败，再重建受影响的表，使 offering 列不存在。v36 增量创建过 `ollama_cloud_usage_state`（未发布的 Cookie 用量抓取）。v37 删除该表且不动账号 Key 与日志，并创建 `ollama_cloud_billing`。v42 把类型化用户定义 Provider 表与密封 Adapter 种子目录统一：把 `dynamic_providers` / `dynamic_provider_models` 重命名为 `providers` / `provider_models`，新增 `origin`（`builtin` | `preset` | `custom`）、`adapter_kind`、`offering`（`plan` | `api`）与 `endpoint_per_account` 列，把七个密封 builtin 适配器（OpenCode Go、Zen Free、Command Code GOAT、MiniMax CN、Kimi CN、Ollama Cloud、Custom API——但不含静态外部接入 CPA）以 `builtin` 行种入表中，这些行的属性列只是展示镜像，并在 dynamic 读路径上加 `origin` 过滤。v41 的 `provider_model_protocol_preferences` 表上 `provider_id` CHECK 已被去掉（`protocol ∈ ('chat_completions', 'messages')` 的 CHECK 保留）。账号 `key_cipher` / `password_cipher` 用 Host cipher 就地校验，**不会重新加密**。
+`CURRENT_SCHEMA_VERSION = 43`（`crates/ocg-core/src/db.rs`）。打开历史库会先规范迁移到 v26，再由 v27 重写把主 Key 与全部 `sub_gateway_keys` 行复制进一张 `access_keys` 表（主 Key 固定 id `00000000-0000-0000-0000-000000000001`），删除 `sub_gateway_keys`，并删除 `accounts` 上遗留的五列 `usage_sync_*`（用量同步元数据在 `provider_usage_sync_state`）。v33 新增 Custom 精确上游模型身份；v34 新增 CPA 单例配置表，但不会导入或导出 CPA 状态。v35 把 Provider/Plan 身份收成只有 `provider_id`：先预检每一个已知的 v34 provider/offering 对，未知对与会丢数据的复合键冲突在写入前失败，再重建受影响的表，使 offering 列不存在。v36 增量创建过 `ollama_cloud_usage_state`（未发布的 Cookie 用量抓取）。v37 删除该表且不动账号 Key 与日志，并创建 `ollama_cloud_billing`。v42 把类型化用户定义 Provider 表与密封 Adapter 种子目录统一：把 `dynamic_providers` / `dynamic_provider_models` 重命名为 `providers` / `provider_models`，新增 `origin`（`builtin` | `preset` | `custom`）、`adapter_kind`、`offering`（`plan` | `api`）与 `endpoint_per_account` 列，把七个密封 builtin 适配器（OpenCode Go、Zen Free、Command Code GOAT、MiniMax CN、Kimi CN、Ollama Cloud、Custom API——但不含静态外部接入 CPA）以 `builtin` 行种入表中，这些行的属性列只是展示镜像，并在 dynamic 读路径上加 `origin` 过滤。v41 的 `provider_model_protocol_preferences` 表上 `provider_id` CHECK 已被去掉（`protocol ∈ ('chat_completions', 'messages')` 的 CHECK 保留）。账号 `key_cipher` / `password_cipher` 用 Host cipher 就地校验，**不会重新加密**。
 
 ## Schema v42 — 统一的供应商表
 
@@ -44,7 +44,11 @@ v42 把 `dynamic_providers` / `dynamic_provider_models` 重命名为 `providers`
 - `offering` —— `plan` | `api`。builtin 行从 `ocg_domain::provider::builtin_offering(provider_id)` 取；dynamic 行通过 `ocg_domain::provider::preset_offering(preset_id)` 从 `preset_id` 推导（仅 custom 的行默认为 `api`）。
 - `endpoint_per_account` —— builtin 行除 Custom API（值为 `1`）外都为 `0`；dynamic 行一律 `0`。
 
-v41 的 `provider_model_protocol_preferences` 表被重建，去掉了它原本的 `provider_id` CHECK（现在 `origin` 可查，row 可以属于 builtin 或 dynamic id）；`protocol ∈ ('chat_completions', 'messages')` 的 CHECK 保留。该 CHECK 是 v41 schema 中唯一引用 origin 概念的 provider_id 约束，因此不需要改其他表。
+v41 的 `provider_model_protocol_preferences` 表被重建，去掉了它原本的 `provider_id` CHECK（现在 `origin` 可查，row 可以属于 builtin 或 dynamic id）；`protocol ∈ ('chat_completions', 'messages')` 的 CHECK 保留到 v43。该 CHECK 是 v41 schema 中唯一引用 origin 概念的 provider_id 约束，因此不需要改其他表。
+
+## Schema v43 — 首选协议 CHECK 与互斥单选修复
+
+v43 重建 `provider_model_protocol_preferences`，使 `protocol` 可以是 `chat_completions`、`responses` 或 `messages`。随后删除 MiniMax/Kimi 上与另一条 Chat/Messages `force_on` 成对的 `force_off` 覆盖，恢复 Auto，以便两条 available 协议都能透传。Go 上对 unavailable 兄弟协议的 `force_off` 保留。V5 导入在内存中做同样的 exclusive-available 修复。不另写快照文件。回滚需恢复升级前的整个数据目录。
 
 v42 **不**改 v35 的 Provider 单一身份契约：builtin 适配器路由、CPA 接入、Custom API 与 dynamic Configurable HTTP 绑定行为都保持原样。dynamic 读路径都加 `origin IN ('preset', 'custom')`，使 builtin 种子不会进入路由。V5 节点迁移负载仍只携带 dynamic 定义；builtin 行从注册表推导，导入时从 `preset_id` 推导 `origin` / `offering`，以保持跨版本兼容。
 

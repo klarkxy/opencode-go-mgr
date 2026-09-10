@@ -122,8 +122,8 @@ fn official_model_defaults_convert_non_native_client_formats() {
             "store": false
         })),
     )
-    .expect("Responses converts to the official Chat endpoint");
-    assert_eq!(flash_responses.upstream, ApiFormat::ChatCompletions);
+    .expect("2026-08-27 live_supported Responses passthroughs");
+    assert_eq!(flash_responses.upstream, ApiFormat::Responses);
 
     let flash_messages = prepare_request(
         ApiFormat::Messages,
@@ -134,7 +134,7 @@ fn official_model_defaults_convert_non_native_client_formats() {
         })),
     )
     .unwrap();
-    assert_eq!(flash_messages.upstream, ApiFormat::ChatCompletions);
+    assert_eq!(flash_messages.upstream, ApiFormat::Messages);
 
     let minimax_chat = prepare_request(
         ApiFormat::ChatCompletions,
@@ -144,7 +144,7 @@ fn official_model_defaults_convert_non_native_client_formats() {
         })),
     )
     .unwrap();
-    assert_eq!(minimax_chat.upstream, ApiFormat::Messages);
+    assert_eq!(minimax_chat.upstream, ApiFormat::ChatCompletions);
 
     let minimax_messages = prepare_request(
         ApiFormat::Messages,
@@ -215,7 +215,7 @@ fn grok_converts_chat_and_messages_to_official_responses() {
 }
 
 #[test]
-fn kimi_k3_uses_the_official_chat_endpoint_for_both_clients() {
+fn kimi_k3_passthroughs_chat_and_messages() {
     let chat = prepare_request(
         ApiFormat::ChatCompletions,
         bytes(json!({
@@ -235,7 +235,7 @@ fn kimi_k3_uses_the_official_chat_endpoint_for_both_clients() {
         })),
     )
     .unwrap();
-    assert_eq!(messages.upstream, ApiFormat::ChatCompletions);
+    assert_eq!(messages.upstream, ApiFormat::Messages);
 }
 
 #[test]
@@ -256,7 +256,7 @@ fn minimax_highspeed_models_route_as_messages_and_preserve_priority_tier() {
 
 #[test]
 fn service_tier_preserves_string_values_and_ignores_non_string_values() {
-    // MiniMax's official OpenCode route is Messages; other clients convert to it.
+    // MiniMax-M3 preferred is Messages; Responses is not live_supported so it converts.
     let plan = prepare_request(
         ApiFormat::Responses,
         bytes(json!({
@@ -294,8 +294,8 @@ fn service_tier_preserves_string_values_and_ignores_non_string_values() {
             "service_tier": "priority"
         })),
     )
-    .expect("Chat request should convert to Messages");
-    assert_eq!(chat.upstream, ApiFormat::Messages);
+    .expect("Chat request passthroughs the 2026-08-27 live_supported Chat path");
+    assert_eq!(chat.upstream, ApiFormat::ChatCompletions);
     let chat_body: Value = serde_json::from_slice(&chat.body).expect("body is JSON");
     assert_eq!(chat_body["service_tier"], "priority");
     assert!(chat_body.get("stream_options").is_none());
@@ -1319,7 +1319,7 @@ fn mixed_case_minimax_routes_to_messages_native_protocol() {
         })),
     )
     .expect("MiniMax-M3 should be routable");
-    assert_eq!(plan.upstream, ApiFormat::Messages);
+    assert_eq!(plan.upstream, ApiFormat::ChatCompletions);
     assert_eq!(plan.model, "MiniMax-M3");
 
     let plan = prepare_request(

@@ -202,7 +202,7 @@ pub const PRE_V35_BACKUP_FILE_PREFIX: &str = "data.sqlite.pre-v35.";
 /// database is rewritten to the unified providers/provider_models tables.
 pub const PRE_V42_BACKUP_FILE_PREFIX: &str = "data.sqlite.pre-v42.";
 /// Highest schema this binary can open or migrate. Newer databases fail closed.
-pub const CURRENT_SCHEMA_VERSION: i32 = 42;
+pub const CURRENT_SCHEMA_VERSION: i32 = 43;
 /// Canonical source schema for the v35 provider-identity rewrite.
 pub const V34_SCHEMA_VERSION: i32 = 34;
 /// Historical v34 offering IDs. Used only by v1–v34 SQL and the v35 preflight
@@ -618,6 +618,25 @@ fn load_scope_on(conn: &Connection, scope: &ContractScope) -> Result<Option<Pers
     .map_err(Into::into)
 }
 
+fn preference_protocol_allowed(
+    scope: &ContractScope,
+    model_id: &str,
+    protocol: UpstreamProtocolKind,
+) -> bool {
+    if scope.kind_str() != "provider"
+        || !crate::provider_contracts::selectable_model_protocol(scope.id(), protocol)
+    {
+        return false;
+    }
+    let Some(descriptor) = crate::provider_contracts::provider_scope_descriptor(scope.id()) else {
+        return true;
+    };
+    crate::provider_contracts::static_verified_protocols(descriptor.kind, model_id, &[])
+        .contains(&protocol)
+        || crate::provider_contracts::safety_ceiling_protocols(descriptor.protocol_probe, model_id)
+            .contains(&protocol)
+}
+
 fn set_model_protocol_preferences_on(
     conn: &Connection,
     scope: &ContractScope,
@@ -627,8 +646,7 @@ fn set_model_protocol_preferences_on(
     for (model_id, protocol) in preferences {
         let model_key = model_id.trim().to_ascii_lowercase();
         anyhow::ensure!(
-            scope.kind_str() == "provider"
-                && crate::provider_contracts::selectable_model_protocol(scope.id(), *protocol)
+            preference_protocol_allowed(scope, model_id, *protocol)
                 && !model_key.is_empty()
                 && seen.insert(model_key.clone()),
             "invalid or duplicate model protocol preference"
@@ -2544,7 +2562,7 @@ fn migrate_to_v40(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-/// Model enablement and the selected CN protocol have independent lifetimes.
+/// Model enablement and the selected preferred protocol have independent lifetimes.
 fn migrate_to_v41(conn: &Connection) -> Result<()> {
     if schema_version_on(conn)? >= 41 {
         return Ok(());
@@ -2607,6 +2625,60 @@ fn migrate_to_v42(conn: &Connection, db_path: &Path, is_fresh: bool) -> Result<(
         tx.commit()?;
         Ok(())
     })
+}
+
+/// v43: allow Responses as a stored preferred protocol, and restore Auto on
+/// available CN sibling protocols that the exclusive radio force_off'd.
+fn migrate_to_v43(conn: &Connection) -> Result<()> {
+    if schema_version_on(conn)? >= 43 {
+        return Ok(());
+    }
+    let tx = Transaction::new_unchecked(conn, TransactionBehavior::Immediate)?;
+    let version = schema_version_on(&tx)?;
+    if version >= 43 {
+        return Ok(());
+    }
+    anyhow::ensure!(version == 42, "v43 requires schema v42");
+    if table_exists(&tx, "provider_model_protocol_preferences")? {
+        tx.execute_batch(
+            "CREATE TABLE provider_model_protocol_preferences_v43 AS
+                 SELECT provider_id, model_id, protocol
+                   FROM provider_model_protocol_preferences;
+             DROP TABLE provider_model_protocol_preferences;
+             CREATE TABLE provider_model_protocol_preferences (
+                provider_id TEXT NOT NULL,
+                model_id TEXT NOT NULL,
+                protocol TEXT NOT NULL CHECK(protocol IN ('chat_completions', 'responses', 'messages')),
+                PRIMARY KEY(provider_id, model_id)
+             );
+             INSERT INTO provider_model_protocol_preferences (provider_id, model_id, protocol)
+             SELECT provider_id, model_id, protocol FROM provider_model_protocol_preferences_v43;
+             DROP TABLE provider_model_protocol_preferences_v43;",
+        )?;
+    }
+    if table_exists(&tx, "provider_contract_model_protocol_overrides")? {
+        tx.execute(
+            "DELETE FROM provider_contract_model_protocol_overrides
+             WHERE state = 'force_off'
+               AND scope_kind = 'provider'
+               AND scope_id IN (?1, ?2)
+               AND protocol IN ('chat_completions', 'messages')
+               AND EXISTS (
+                 SELECT 1
+                 FROM provider_contract_model_protocol_overrides AS sibling
+                 WHERE sibling.scope_kind = provider_contract_model_protocol_overrides.scope_kind
+                   AND sibling.scope_id = provider_contract_model_protocol_overrides.scope_id
+                   AND sibling.model_id = provider_contract_model_protocol_overrides.model_id
+                   AND sibling.state = 'force_on'
+                   AND sibling.protocol IN ('chat_completions', 'messages')
+                   AND sibling.protocol != provider_contract_model_protocol_overrides.protocol
+               )",
+            params![MINIMAX_PROVIDER_ID, KIMI_PROVIDER_ID],
+        )?;
+    }
+    tx.execute_batch("INSERT OR REPLACE INTO schema_version(version) VALUES (43);")?;
+    tx.commit()?;
+    Ok(())
 }
 
 fn migrate_v42_body(tx: &Transaction<'_>) -> Result<()> {
@@ -3824,6 +3896,7 @@ impl Database {
         migrate_to_v40(&db.conn)?;
         migrate_to_v41(&db.conn)?;
         migrate_to_v42(&db.conn, &db_path, is_fresh)?;
+        migrate_to_v43(&db.conn)?;
         Ok(db)
     }
 
@@ -5361,7 +5434,7 @@ impl Database {
         self.set_model_protocol_settings(scope, rows, &[], now)
     }
 
-    /// `preferences` is merged into the saved CN protocol choices; an empty
+    /// `preferences` is merged into the saved preferred protocol choices; an empty
     /// slice leaves existing preferences untouched. Only
     /// `reset_provider_static_model_protocols` clears them.
     pub fn set_model_protocol_settings(
@@ -5761,6 +5834,19 @@ impl Database {
             ConnectionVerificationStatus::NotRequired,
         )?;
         dynamic_tx_fault("after_account_insert")?;
+        let snapshot = list_dynamic_providers_on(&tx)?;
+        tx.commit()?;
+        Ok(snapshot)
+    }
+
+    /// Persist a user-defined Provider with no first account.
+    /// Keyed definitions use this when the Key will be added later on Accounts.
+    pub fn create_dynamic_provider_definition(
+        &self,
+        runtime: &DynamicProviderRuntime,
+    ) -> Result<Vec<DynamicProviderRuntime>> {
+        let tx = self.conn.unchecked_transaction()?;
+        insert_dynamic_provider_on(&tx, runtime)?;
         let snapshot = list_dynamic_providers_on(&tx)?;
         tx.commit()?;
         Ok(snapshot)

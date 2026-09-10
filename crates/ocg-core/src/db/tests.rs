@@ -59,7 +59,7 @@ fn v41_model_preferences_migrate_and_survive_reopen_without_enabling_models() {
     db.conn.execute_batch("DROP TABLE provider_model_protocol_preferences; DELETE FROM schema_version; INSERT INTO schema_version (version) VALUES (38);").unwrap();
     drop(db);
     let db = Database::open(dir.clone()).unwrap();
-    assert_eq!(schema_version_on(&db.conn).unwrap(), 42);
+    assert_eq!(schema_version_on(&db.conn).unwrap(), CURRENT_SCHEMA_VERSION);
     let before = db.load_persisted_contracts().unwrap();
     assert!(before.preferences.is_empty());
     assert_eq!(
@@ -141,7 +141,7 @@ fn v42_concurrent_migration_rechecks_version_under_the_writer_lock() {
 fn v42_fresh_database_includes_seven_sealed_builtin_rows() {
     let dir = temp_data_dir("v42-fresh-seeds");
     let db = open_with_host_cipher(dir.clone()).unwrap();
-    assert_eq!(schema_version_on(&db.conn).unwrap(), 42);
+    assert_eq!(schema_version_on(&db.conn).unwrap(), CURRENT_SCHEMA_VERSION);
     let count: i64 = db
         .conn
         .query_row(
@@ -282,7 +282,7 @@ fn v42_unifies_existing_dynamic_providers_and_preserves_models_and_preferences()
     drop(db);
 
     let db = open_with_host_cipher(dir.clone()).unwrap();
-    assert_eq!(schema_version_on(&db.conn).unwrap(), 42);
+    assert_eq!(schema_version_on(&db.conn).unwrap(), CURRENT_SCHEMA_VERSION);
     assert!(!table_exists(&db.conn, "dynamic_providers").unwrap());
     assert!(!table_exists(&db.conn, "dynamic_provider_models").unwrap());
     assert!(table_exists(&db.conn, "providers").unwrap());
@@ -363,6 +363,58 @@ fn v42_unifies_existing_dynamic_providers_and_preserves_models_and_preferences()
         )
         .unwrap();
 
+    drop(db);
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn v43_restores_auto_on_exclusive_cn_available_siblings() {
+    let dir = temp_data_dir("v43-cn-exclusive");
+    let db = open_with_host_cipher(dir.clone()).unwrap();
+    db.conn
+        .execute_batch(
+            "INSERT INTO provider_contract_model_protocol_overrides
+                (scope_kind, scope_id, model_id, protocol, state, updated_at)
+             VALUES
+                ('provider', 'minimax', 'MiniMax-M3', 'chat_completions', 'force_on', '2026-09-10T00:00:00Z'),
+                ('provider', 'minimax', 'MiniMax-M3', 'messages', 'force_off', '2026-09-10T00:00:00Z'),
+                ('provider', 'opencode', 'glm-5.2', 'chat_completions', 'force_on', '2026-09-10T00:00:00Z'),
+                ('provider', 'opencode', 'glm-5.2', 'responses', 'force_off', '2026-09-10T00:00:00Z');
+             DELETE FROM schema_version;
+             INSERT INTO schema_version(version) VALUES (42);",
+        )
+        .unwrap();
+    drop(db);
+
+    let db = open_with_host_cipher(dir.clone()).unwrap();
+    assert_eq!(schema_version_on(&db.conn).unwrap(), CURRENT_SCHEMA_VERSION);
+    let cn_messages_off: i64 = db
+        .conn
+        .query_row(
+            "SELECT COUNT(*) FROM provider_contract_model_protocol_overrides
+             WHERE scope_id = 'minimax' AND model_id = 'MiniMax-M3' AND protocol = 'messages'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(cn_messages_off, 0);
+    let go_responses_off: i64 = db
+        .conn
+        .query_row(
+            "SELECT COUNT(*) FROM provider_contract_model_protocol_overrides
+             WHERE scope_id = 'opencode' AND model_id = 'glm-5.2' AND protocol = 'responses'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(go_responses_off, 1);
+    db.conn
+        .execute(
+            "INSERT INTO provider_model_protocol_preferences (provider_id, model_id, protocol)
+             VALUES ('opencode', 'grok-4.6', 'responses')",
+            [],
+        )
+        .unwrap();
     drop(db);
     fs::remove_dir_all(dir).unwrap();
 }
@@ -626,7 +678,7 @@ fn pre_v42_backup_paths(dir: &Path) -> Vec<PathBuf> {
 fn v42_fresh_database_skips_pre_v42_snapshot() {
     let dir = temp_data_dir("v42-fresh-no-backup");
     let db = open_with_host_cipher(dir.clone()).unwrap();
-    assert_eq!(schema_version_on(&db.conn).unwrap(), 42);
+    assert_eq!(schema_version_on(&db.conn).unwrap(), CURRENT_SCHEMA_VERSION);
     assert!(pre_v42_backup_paths(&dir).is_empty());
     drop(db);
     fs::remove_dir_all(dir).unwrap();
@@ -8506,6 +8558,38 @@ fn v35_dynamic_provider_tables_round_trip_and_reject_duplicate_public_models() {
         [&provider_id],
     );
     assert!(duplicate.is_err());
+    drop(db);
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn create_dynamic_provider_definition_persists_without_an_account() {
+    let dir = temp_data_dir("dyn-definition-only");
+    let db = open_with_host_cipher(dir.clone()).unwrap();
+    let now = Utc::now();
+    let provider_id = uuid::Uuid::new_v4().to_string();
+    let runtime = crate::dynamic::DynamicProviderRuntime {
+        preset_id: Some("tencent-token-global".into()),
+        id: provider_id.clone(),
+        name: "Tencent Token Plan".into(),
+        endpoint_url: "http://127.0.0.1:9".into(),
+        upstream_protocol: crate::provider::UpstreamProtocolKind::ChatCompletions,
+        auth_kind: ocg_domain::dynamic::DynamicAuthKind::Bearer,
+        mappings: vec![ocg_domain::dynamic::DynamicModelMapping {
+            public_model: "tencent-model".into(),
+            upstream_model: "tencent/upstream".into(),
+            upstream_override: None,
+        }],
+        created_at: now,
+        updated_at: now,
+        origin: ocg_domain::provider::ProviderOrigin::Preset,
+        offering: "plan".to_string(),
+    };
+    db.create_dynamic_provider_definition(&runtime).unwrap();
+    let loaded = db.get_dynamic_provider(&provider_id).unwrap().unwrap();
+    assert_eq!(loaded.name, "Tencent Token Plan");
+    assert_eq!(loaded.preset_id.as_deref(), Some("tencent-token-global"));
+    assert_eq!(db.count_accounts_for_provider(&provider_id).unwrap(), 0);
     drop(db);
     fs::remove_dir_all(dir).unwrap();
 }

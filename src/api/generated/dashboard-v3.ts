@@ -889,7 +889,7 @@ export interface ModelProtocolOverridesUpdate {
 export interface ModelProtocolOverride {
   modelId: string;
   /**
-   * Remember this CN protocol for the model, even while disabled.
+   * Remember this conversion-default protocol, even while disabled.
    * Omitted or false preserves the saved choice; static reset clears it.
    */
   preferred?: boolean;
