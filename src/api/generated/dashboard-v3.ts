@@ -2070,7 +2070,10 @@ export interface ProviderDefinition {
   upstreamProtocol?: AccountUpstreamProtocol | null;
 }
 /**
- * POST `/providers` body. Creates the definition, mappings, and first account.
+ * POST `/providers` body. Creates the definition and mappings.
+ * A Key on keyed auth creates the first account in the same write (Accounts add).
+ * Keyed auth may omit `key` to save the definition only; add Keys on Accounts.
+ * No-auth always creates the singleton account.
  */
 export interface ProviderDefinitionCreate {
   accountName?: string | null;

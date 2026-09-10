@@ -5615,7 +5615,7 @@
     },
     "ProviderDefinitionCreate": {
       "additionalProperties": false,
-      "description": "POST `/providers` body. Creates the definition, mappings, and first account.",
+      "description": "POST `/providers` body. Creates the definition and mappings.\nA Key on keyed auth creates the first account in the same write (Accounts add).\nKeyed auth may omit `key` to save the definition only; add Keys on Accounts.\nNo-auth always creates the singleton account.",
       "properties": {
         "accountName": {
           "type": [

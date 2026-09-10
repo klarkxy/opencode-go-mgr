@@ -1456,6 +1456,52 @@ async fn custom_api_still_creates_account_owned_endpoint() {
     harness.stop();
 }
 
+#[tokio::test]
+async fn keyed_create_without_a_key_saves_the_definition_only() {
+    let harness = start_loopback("dyn-create-no-key").await;
+    let (status, created) = send_json(
+        &harness,
+        Method::POST,
+        "/providers",
+        &cas(
+            &harness,
+            create_body(
+                "Tencent Lab",
+                "http://127.0.0.1:9",
+                "chat_completions",
+                "bearer",
+                None,
+            ),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    let provider_id = created["provider"]["id"].as_str().unwrap().to_string();
+    assert_eq!(created["provider"]["name"], "Tencent Lab");
+    assert!(created["provider"].get("key").is_none());
+    let accounts = harness.state.db.lock().list_accounts().unwrap();
+    assert!(
+        accounts
+            .iter()
+            .all(|account| account.provider_id != provider_id),
+        "keyed create without a Key must not insert an account: {accounts:?}"
+    );
+    let (status, second) = send_json(
+        &harness,
+        Method::POST,
+        "/accounts",
+        &cas(
+            &harness,
+            json!({"providerId": provider_id, "name": "First Key", "key": "sk-later"}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{second}");
+    assert_eq!(second["account"]["providerId"], provider_id);
+    assert_eq!(second["account"]["name"], "First Key");
+    harness.stop();
+}
+
 async fn account_id_for_provider(harness: &V3Harness, provider_id: &str) -> String {
     harness
         .state

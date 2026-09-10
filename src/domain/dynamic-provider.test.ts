@@ -73,16 +73,22 @@ test("mapping validation requires one unique public model and allows repeated up
   );
 });
 
-test("create payload requires a Key only when auth is not none and never keeps blank mappings", () => {
+test("create payload omits a Key unless one is supplied and never keeps blank mappings", () => {
   const draft = emptyProviderDefinitionDraft();
   draft.name = "Lab";
   draft.endpoint_url = "http://127.0.0.1:9";
   draft.models = [{ public_model: "lab-opus", upstream_model: "vendor/opus" }];
-  assert.equal(validateProviderDefinitionDraft(draft, { mode: "create" }), "missing_key");
-  draft.key = "sk-lab";
+  assert.equal(validateProviderDefinitionDraft(draft, { mode: "create" }), null);
+  assert.equal(
+    validateProviderDefinitionDraft(draft, { mode: "create", requireKey: true }),
+    "missing_key",
+  );
   const body = buildProviderDefinitionCreateBody(draft);
-  assert.equal(body.key, "sk-lab");
+  assert.equal(body.key, undefined);
   assert.equal(body.authKind, "bearer");
+  draft.key = "sk-lab";
+  assert.equal(buildProviderDefinitionCreateBody(draft).key, "sk-lab");
+  assert.equal(validateProviderDefinitionDraft(draft, { mode: "create", requireKey: true }), null);
   draft.auth_kind = "none";
   draft.key = "should-not-send";
   const noneBody = buildProviderDefinitionCreateBody(draft);

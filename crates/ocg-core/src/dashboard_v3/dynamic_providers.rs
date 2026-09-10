@@ -175,51 +175,66 @@ fn create_locked(
             "generated provider id collided; retry",
         ));
     }
-    let key_cipher = first_account_key(state, auth_kind, input.key.as_deref())?;
-    let account_name = input
-        .account_name
+    let supplied_key = input
+        .key
         .as_deref()
         .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or(definition.name.as_str())
-        .to_string();
-    let notes = match input.notes.as_deref() {
-        Some(value) => normalize_account_notes(value)
-            .map_err(|error| V3ApiError::invalid_request_at(state, error.to_string()))?,
-        None => None,
-    };
-    let account = ModelAccount {
-        id: uuid::Uuid::new_v4().to_string(),
-        provider_id: definition.id.clone(),
-        credential_kind: auth_kind.credential_kind(),
-        quota_scope: auth_kind.quota_scope(),
-        name: account_name,
-        username: None,
-        password_cipher: None,
-        key_cipher,
-        enabled: true,
-        account_type: AccountType::Key,
-        setup_step: crate::models::AccountSetupStep::Ready,
-        referral_code: None,
-        purchase_date: String::new(),
-        expires_on: String::new(),
-        cooldown_until: None,
-        cooldown_generic_until: None,
-        cooldown_5h_until: None,
-        cooldown_week_until: None,
-        cooldown_month_until: None,
-        cooldown_free_until: None,
-        last_error: None,
-        auth_error: None,
-        notes,
-        created_at: now,
-        updated_at: now,
-    };
+        .filter(|value| !value.is_empty());
+    // Keyed auth without a Key saves the definition only. Accounts add the Key.
+    // No-auth still creates the singleton account because that row is the connection.
+    let create_first_account = !auth_kind.requires_key() || supplied_key.is_some();
     let runtime = runtime_from_definition(definition, now, now);
+    let first_account = if create_first_account {
+        let key_cipher = first_account_key(state, auth_kind, input.key.as_deref())?;
+        let account_name = input
+            .account_name
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or(runtime.name.as_str())
+            .to_string();
+        let notes = match input.notes.as_deref() {
+            Some(value) => normalize_account_notes(value)
+                .map_err(|error| V3ApiError::invalid_request_at(state, error.to_string()))?,
+            None => None,
+        };
+        Some(ModelAccount {
+            id: uuid::Uuid::new_v4().to_string(),
+            provider_id: runtime.id.clone(),
+            credential_kind: auth_kind.credential_kind(),
+            quota_scope: auth_kind.quota_scope(),
+            name: account_name,
+            username: None,
+            password_cipher: None,
+            key_cipher,
+            enabled: true,
+            account_type: AccountType::Key,
+            setup_step: crate::models::AccountSetupStep::Ready,
+            referral_code: None,
+            purchase_date: String::new(),
+            expires_on: String::new(),
+            cooldown_until: None,
+            cooldown_generic_until: None,
+            cooldown_5h_until: None,
+            cooldown_week_until: None,
+            cooldown_month_until: None,
+            cooldown_free_until: None,
+            last_error: None,
+            auth_error: None,
+            notes,
+            created_at: now,
+            updated_at: now,
+        })
+    } else {
+        None
+    };
     let snapshot = {
         let db = state.db.lock();
-        db.create_dynamic_provider(&runtime, &account)
-            .map_err(|error| V3ApiError::invalid_request_at(state, error.to_string()))?
+        match first_account.as_ref() {
+            Some(account) => db.create_dynamic_provider(&runtime, account),
+            None => db.create_dynamic_provider_definition(&runtime),
+        }
+        .map_err(|error| V3ApiError::invalid_request_at(state, error.to_string()))?
     };
     state.install_dynamic_providers_snapshot(snapshot);
     Ok(provider_mutation(state, runtime, state.settings_revision()))

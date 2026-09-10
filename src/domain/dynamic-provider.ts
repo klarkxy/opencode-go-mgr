@@ -231,7 +231,11 @@ export function dynamicMappingOverrideError(
 
 export function validateProviderDefinitionDraft(
   draft: ProviderDefinitionDraft,
-  options: { mode: "create" | "edit"; previousAuthKind?: DynamicAuthKind | "" } = { mode: "create" },
+  options: {
+    mode: "create" | "edit";
+    previousAuthKind?: DynamicAuthKind | "";
+    requireKey?: boolean;
+  } = { mode: "create" },
 ): ProviderDefinitionDraftError | null {
   if (!draft.name.trim()) return "missing_name";
   if (!draft.endpoint_url.trim()) return "missing_endpoint_url";
@@ -249,7 +253,7 @@ export function validateProviderDefinitionDraft(
   }
   const mappings = normalizeDynamicMappings(draft.models);
   if (typeof mappings === "string") return mappings;
-  if (options.mode === "create" && dynamicAuthRequiresKey(draft.auth_kind) && !draft.key.trim()) {
+  if (options.requireKey && dynamicAuthRequiresKey(draft.auth_kind) && !draft.key.trim()) {
     return "missing_key";
   }
   if (
@@ -300,7 +304,8 @@ export function buildProviderDefinitionCreateBody(draft: ProviderDefinitionDraft
   if (accountName) body.accountName = accountName;
   const notes = draft.notes.trim();
   if (notes) body.notes = notes;
-  if (dynamicAuthRequiresKey(draft.auth_kind)) body.key = draft.key.trim();
+  const key = draft.key.trim();
+  if (dynamicAuthRequiresKey(draft.auth_kind) && key) body.key = key;
   // Create omits provenance when manual; only a concrete preset ID is sent.
   if (draft.preset_id) body.presetId = draft.preset_id;
   return body;
